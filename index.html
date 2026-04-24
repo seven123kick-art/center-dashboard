@@ -3830,7 +3830,7 @@ const CLOUD = {
         await fetch(`${url}/storage/v1/bucket`, {
           method: 'POST',
           headers: {
-            'Authorization': \`Bearer \${key}\`, 'apikey': key,
+            'Authorization': `Bearer ${key}`, 'apikey': key,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ id: bucket, name: bucket, public: false }),
