@@ -856,6 +856,7 @@ select:focus,input[type=text]:focus{outline:none;border-color:var(--blue)}
             <div style="display:flex;gap:8px;align-items:center">
               <button class="btn btn-primary" onclick="CLOUD.saveConfig()" style="font-size:12px">再接続テスト</button>
               <button class="btn" onclick="CLOUD.restoreFromCloud()" style="font-size:12px">今すぐ同期</button>
+              <button class="btn" onclick="CLOUD_DEBUG.run()" style="font-size:12px;background:#f59e0b;color:#fff;border-color:#f59e0b">🔍 接続診断</button>
               <span id="cloud-test-msg" style="font-size:11px;color:var(--text2)"></span>
             </div>
             <details style="margin-top:16px">
@@ -6158,5 +6159,109 @@ const PUBLISH = {
       // バケット作成失敗でもアップロードを試みる
     }
   },
+};
+</script>
+<script>
+'use strict';
+/* ── 接続診断モジュール ── */
+const CLOUD_DEBUG = {
+  async run() {
+    const lines = [];
+    const add = (icon, msg) => { lines.push(`${icon} ${msg}`); };
+
+    add('🔍', 'Supabase接続診断を開始します...\n');
+
+    // 1. CONFIG確認
+    const url = CONFIG.SUPABASE_URL || '';
+    const key = CONFIG.SUPABASE_KEY || '';
+    add('📋', `URL: ${url || '（未設定）'}`);
+    add('🔑', `KEY: ${key ? key.slice(0,20)+'...' : '（未設定）'}`);
+    add('📦', `バケット: ${CONFIG.SUPABASE_BUCKET || 'center-data'}`);
+    add('🏢', `センター: ${CENTER.current.name} (${CENTER.pathPrefix})\n`);
+
+    if (!url || !key) {
+      add('❌', 'URLまたはKeyが設定されていません');
+      alert(lines.join('\n'));
+      return;
+    }
+
+    // 2. Supabase REST API疎通確認
+    try {
+      add('⏳', 'REST API接続テスト中...');
+      const r = await fetch(`${url}/rest/v1/`, {
+        headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
+      });
+      add(r.ok || r.status===404 ? '✅' : '❌', `REST API: HTTP ${r.status}`);
+    } catch(e) {
+      add('❌', `REST API接続失敗: ${e.message}`);
+    }
+
+    // 3. Storage バケット一覧
+    try {
+      add('⏳', 'Storage バケット確認中...');
+      const r = await fetch(`${url}/storage/v1/bucket`, {
+        headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
+      });
+      const body = await r.text();
+      if (r.ok) {
+        const buckets = JSON.parse(body);
+        add('✅', `Storage接続OK: バケット=${Array.isArray(buckets)?buckets.map(b=>b.name).join(', '):'(取得不可)'}`);
+      } else {
+        add('⚠️', `Storage: HTTP ${r.status} → ${body.slice(0,100)}`);
+      }
+    } catch(e) {
+      add('❌', `Storage接続失敗: ${e.message}`);
+    }
+
+    // 4. センター用バケット内ファイル確認
+    try {
+      const bucket = CONFIG.SUPABASE_BUCKET || 'center-data';
+      const prefix = CENTER.pathPrefix + '/';
+      add('⏳', `バケット「${bucket}」内 ${prefix} を確認中...`);
+      const r = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
+        method: 'POST',
+        headers: { 'apikey': key, 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefix, limit: 10 })
+      });
+      const body = await r.text();
+      if (r.ok) {
+        const files = JSON.parse(body);
+        add('✅', `ファイル一覧取得OK: ${files.length}件`);
+        if (files.length > 0) files.slice(0,3).forEach(f => add('  📄', f.name));
+      } else {
+        add('⚠️', `ファイル一覧: HTTP ${r.status} → ${body.slice(0,120)}`);
+        if (r.status === 400 || r.status === 404) {
+          add('💡', `バケット「${bucket}」が存在しないか、アクセス権がありません`);
+          add('💡', 'Supabaseダッシュボード → Storage → バケット作成が必要かもしれません');
+        }
+        if (r.status === 403) {
+          add('💡', 'Supabaseのキー（anon key）の権限が不足しています');
+          add('💡', 'Project Settings → API → anon public の eyJ...で始まるキーを確認してください');
+        }
+      }
+    } catch(e) {
+      add('❌', `ファイル確認失敗: ${e.message}`);
+    }
+
+    // 5. 結果表示
+    add('\n📊', `STATE: データ${STATE.datasets.length}件, 現在月: ${STATE.currentYM||'なし'}`);
+    add('💾', `IndexedDB: ${(await DB.getAll('skdl').catch(()=>[])).length}件`);
+
+    // ダイアログで表示
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `
+      <div style="background:#1a1a2e;color:#0f0;font-family:monospace;font-size:12px;padding:24px;border-radius:10px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+        <div style="font-size:14px;font-weight:700;color:#4d9fea;margin-bottom:12px">🔍 Supabase 接続診断結果</div>
+        <pre style="white-space:pre-wrap;line-height:1.8">${lines.join('\n')}</pre>
+        <div style="margin-top:16px;display:flex;gap:8px">
+          <button onclick="this.closest('div[style*=fixed]').remove()"
+            style="flex:1;padding:8px;background:#1a4d7c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">閉じる</button>
+          <button onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent).catch(()=>{});this.textContent='コピー済✓'"
+            style="padding:8px 16px;background:#333;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">コピー</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
 };
 </script>
