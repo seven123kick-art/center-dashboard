@@ -5014,21 +5014,161 @@ UI.printCurrentView = function() {
    BOOT — 起動時処理（統合版）
    DOMContentLoaded は このブロック1か所だけ
 ═══════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════
+   SIMPLE_STORE — シンプルな永続化（確実に動く版）
+   IndexedDB の複雑なパッチに依存せず直接操作
+═══════════════════════════════════════════════════════════ */
+const SIMPLE_STORE = {
+  DB_NAME: 'EslineCenter_v2',
+  _db: null,
+
+  async open() {
+    if (this._db) return this._db;
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(this.DB_NAME, 1);
+      r.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('data')) {
+          db.createObjectStore('data', { keyPath: 'id' });
+        }
+      };
+      r.onsuccess = e => { this._db = e.target.result; res(this._db); };
+      r.onerror   = e => rej(e.target.error);
+    });
+  },
+
+  async save(id, value) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('data', 'readwrite');
+      tx.objectStore('data').put({ id, value, ts: Date.now() });
+      tx.oncomplete = res;
+      tx.onerror = e => rej(e.target.error);
+    });
+  },
+
+  async load(id) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const r = db.transaction('data', 'readonly').objectStore('data').get(id);
+      r.onsuccess = e => res(e.target.result?.value ?? null);
+      r.onerror   = e => rej(e.target.error);
+    });
+  },
+
+  async del(id) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('data', 'readwrite');
+      tx.objectStore('data').delete(id);
+      tx.oncomplete = res;
+      tx.onerror = e => rej(e.target.error);
+    });
+  },
+
+  // センターIDをキーにした保存・復元
+  centerKey(type) {
+    return `${CENTER.current.id}_${type}`;
+  },
+
+  // 全データを保存
+  async saveAll() {
+    try {
+      const cid = CENTER.current.id;
+      // SKDL収支データ（月ごと）
+      for (const ds of STATE.datasets) {
+        const rows = DB.trimRows ? DB.trimRows(ds.rows, DB.SKDL_COLS) : ds.rows;
+        await this.save(`${cid}_skdl_${ds.ym}_${ds.type}`, {
+          file: ds.file, type: ds.type, ym: ds.ym, rows
+        });
+      }
+      await this.save(`${cid}_skdl_meta`, { currentYM: STATE.currentYM });
+
+      // 現場明細
+      for (const ds of FIELD_STATE.datasets) {
+        const key = `${cid}_field_${ds.ym}_${ds.type}`;
+        if (ds.type === 'csv') {
+          const rows = DB.trimRows ? DB.trimRows(ds.rows, DB.FIELD_COLS) : ds.rows;
+          await this.save(key, { file: ds.file, type: 'csv', ym: ds.ym, rows });
+        } else {
+          await this.save(key, { file: ds.file, type: 'pdf', ym: ds.ym, areas: ds.areas });
+        }
+      }
+      await this.save(`${cid}_field_meta`, { currentYM: FIELD_STATE.currentYM });
+
+      // 保存時刻を表示
+      const msgEl = document.getElementById('session-msg');
+      if (msgEl) {
+        msgEl.innerHTML = `💾 自動保存 ${new Date().toLocaleTimeString('ja-JP')}<br><span style="color:#4d6a88;font-size:10px">SKDL:${STATE.datasets.length}件 / 現場:${FIELD_STATE.datasets.length}件</span>`;
+      }
+      const dot = document.getElementById('autosave-dot');
+      if (dot) dot.style.background = '#16a34a';
+
+    } catch(e) {
+      console.error('SIMPLE_STORE.saveAll error:', e);
+    }
+  },
+
+  // 全データを復元
+  async restoreAll() {
+    try {
+      const cid = CENTER.current.id;
+      const db = await this.open();
+
+      // 全キーを取得
+      const keys = await new Promise((res, rej) => {
+        const r = db.transaction('data','readonly').objectStore('data').getAllKeys();
+        r.onsuccess = e => res(e.target.result);
+        r.onerror   = e => rej(e.target.error);
+      });
+
+      // SKDL
+      const skdlKeys = keys.filter(k => k.startsWith(`${cid}_skdl_`) && !k.endsWith('_meta'));
+      const skdlRecs = (await Promise.all(skdlKeys.map(k => this.load(k)))).filter(Boolean);
+      const skdlMeta = await this.load(`${cid}_skdl_meta`);
+
+      if (skdlRecs.length > 0) {
+        STATE.datasets = skdlRecs.map(r => ({ file:r.file, type:r.type, ym:r.ym, rows:r.rows }));
+        STATE.currentYM = skdlMeta?.currentYM || STATE.monthList().slice(-1)[0] || null;
+      }
+
+      // 現場
+      const fieldKeys = keys.filter(k => k.startsWith(`${cid}_field_`) && !k.endsWith('_meta'));
+      const fieldRecs = (await Promise.all(fieldKeys.map(k => this.load(k)))).filter(Boolean);
+      const fieldMeta = await this.load(`${cid}_field_meta`);
+
+      if (fieldRecs.length > 0) {
+        FIELD_STATE.datasets = fieldRecs.map(r =>
+          r.type === 'csv'
+            ? { file:r.file, type:'csv', ym:r.ym, rows:r.rows }
+            : { file:r.file, type:'pdf', ym:r.ym, areas:r.areas||[] }
+        );
+        FIELD_STATE.currentYM = fieldMeta?.currentYM || FIELD_STATE.ymList().slice(-1)[0] || null;
+      }
+
+      return skdlRecs.length + fieldRecs.length;
+    } catch(e) {
+      console.error('SIMPLE_STORE.restoreAll error:', e);
+      return 0;
+    }
+  },
+};
+
 document.addEventListener('DOMContentLoaded', async () => {
 
-  // ① イベント初期化（ファイル入力・ドロップゾーン）
+  // ① イベント初期化
   EVENTS.init();
 
-  // ② センター切替UIを描画
+  // ② センター切替UI
   CENTER.renderSwitcher();
   CENTER._updateHeaderColor(CENTER.current);
 
   // ③ 計画・メモを復元
-  await PLAN._loadFromStorage();
-  await MEMO._loadFromStorage();
+  await PLAN._loadFromStorage().catch(()=>{});
+  await MEMO._loadFromStorage().catch(()=>{});
   PLAN.initYearSel();
 
-  // ④ 印刷ボタンをサイドバーに追加
+  // ④ 印刷ボタン
   const sidebarBottom = document.querySelector('.sidebar-bottom');
   if (sidebarBottom) {
     const printBtn = document.createElement('button');
@@ -5039,41 +5179,84 @@ document.addEventListener('DOMContentLoaded', async () => {
     sidebarBottom.insertBefore(printBtn, sidebarBottom.firstChild);
   }
 
-  // ⑤ クラウド設定があればクラウドから、なければIndexedDBからデータを復元
-  //    どちらもセンター別キーで復元する
   setTimeout(async () => {
+    let restored = 0;
+
+    // ⑤ SIMPLE_STORE（IndexedDB）から復元（最優先・確実）
+    try {
+      restored = await SIMPLE_STORE.restoreAll();
+    } catch(e) { console.warn('SIMPLE_STORE restore failed:', e); }
+
+    // ⑥ クラウド同期（設定済みの場合、バックグラウンドで）
     if (CLOUD.isConfigured()) {
-      // クラウドから復元（失敗時はIndexedDBにフォールバック）
-      const result = await CLOUD.restoreFromCloud().catch(() => null);
-      if (!result) await CENTER._restoreFromIndexedDB();
-    } else {
-      // IndexedDBから復元
-      await CENTER._restoreFromIndexedDB();
+      CLOUD._updateBadge(true);
+      CLOUD.restoreFromCloud().catch(e => console.warn('Cloud sync failed:', e));
     }
 
-    // ⑥ UI更新
+    // ⑦ UI更新
     UI.renderDataList();
     UI.updateTopbar();
     FIELD_UI.updatePeriodBadge();
     FIELD_UI.renderDataList();
-    await DB.showStorageInfo();
+    DB.showStorageInfo().catch(()=>{});
 
-    // ⑦ アラートバッジ更新
-    if (STATE.datasets.length > 0) {
-      setTimeout(() => UI.renderAlerts(), 500);
+    const msgEl = document.getElementById('session-msg');
+    if (restored > 0) {
+      if (msgEl) msgEl.innerHTML = `✅ ${restored}件復元済み<br><span style="font-size:10px;color:#4d9fea">前回のデータを自動読込しました</span>`;
+      const dot = document.getElementById('autosave-dot');
+      if (dot) { dot.style.background = '#16a34a'; }
+      const lbl = document.getElementById('autosave-label');
+      if (lbl) lbl.textContent = '自動保存 有効';
+    } else {
+      if (msgEl) msgEl.textContent = 'データなし（CSVを読み込んでください）';
     }
 
-    // ⑧ ダッシュボードを表示（データがあれば）
+    // アラートバッジ
+    if (STATE.datasets.length > 0) setTimeout(() => UI.renderAlerts(), 500);
+
+    // ダッシュボードへ
     if (STATE.currentYM) {
       const btn = document.querySelector('.nav-item[data-view="dashboard"]');
       if (btn) setTimeout(() => NAV.go(btn), 100);
     }
-
-    // クラウドバッジを設定
-    if (CLOUD.isConfigured()) CLOUD._updateBadge(true);
-
-  }, 150);
+  }, 200);
 });
+
+// CSV読み込み後に SIMPLE_STORE.saveAll() を自動実行するパッチ
+(function patchSimpleSave() {
+  const _orig = EVENTS._processFilesWithYM;
+  if (!_orig) return;
+  EVENTS._processFilesWithYM = async function(files, ym) {
+    await _orig.call(this, files, ym);
+    await SIMPLE_STORE.saveAll().catch(e => console.warn('SimpleSave SKDL:', e));
+  };
+})();
+
+// 現場明細読み込み後にも保存
+(function patchSimpleFieldSave() {
+  const _orig = FIELD_EVENTS._processFiles;
+  if (!_orig) return;
+  FIELD_EVENTS._processFiles = async function(files, ym) {
+    await _orig.call(this, files, ym);
+    await SIMPLE_STORE.saveAll().catch(e => console.warn('SimpleSave Field:', e));
+  };
+})();
+
+// センター切替後にも復元
+(function patchSimpleCenterSwitch() {
+  const _orig = CENTER.switchTo.bind(CENTER);
+  CENTER.switchTo = async function(centerId) {
+    await _orig(centerId);
+    const restored = await SIMPLE_STORE.restoreAll().catch(() => 0);
+    UI.renderDataList();
+    UI.updateTopbar();
+    FIELD_UI.updatePeriodBadge();
+    if (restored > 0 && STATE.currentYM) {
+      const btn = document.querySelector('.nav-item[data-view="dashboard"]');
+      if (btn) setTimeout(() => NAV.go(btn), 100);
+    }
+  };
+})();
 </script>
 </body>
 </html>
