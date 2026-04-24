@@ -907,6 +907,7 @@ window.onunhandledrejection = function(e) {
         <div class="card-header">
           <span class="card-title">ストレージ管理</span>
           <button onclick="DB.showStorageInfo()" class="btn" style="font-size:11px;padding:3px 10px">更新</button>
+          <button onclick="SIMPLE_STORE.debug()" class="btn" style="font-size:11px;padding:3px 10px;background:#f59e0b;color:#fff;border-color:#f59e0b">🗄 DB確認</button>
         </div>
         <div class="card-body">
           <div id="storage-info" style="font-size:12px;color:var(--text2);margin-bottom:12px">読み込み中...</div>
@@ -5113,6 +5114,7 @@ const SIMPLE_STORE = {
   async restoreAll() {
     try {
       const cid = CENTER.current.id;
+      console.log('[RESTORE] start, center:', cid);
       const db = await this.open();
 
       // 全キーを取得
@@ -5121,11 +5123,14 @@ const SIMPLE_STORE = {
         r.onsuccess = e => res(e.target.result);
         r.onerror   = e => rej(e.target.error);
       });
+      console.log('[RESTORE] all keys:', keys);
 
       // SKDL
       const skdlKeys = keys.filter(k => k.startsWith(`${cid}_skdl_`) && !k.endsWith('_meta'));
+      console.log('[RESTORE] skdlKeys:', skdlKeys);
       const skdlRecs = (await Promise.all(skdlKeys.map(k => this.load(k)))).filter(Boolean);
       const skdlMeta = await this.load(`${cid}_skdl_meta`);
+      console.log('[RESTORE] skdlRecs:', skdlRecs.length, 'meta:', skdlMeta);
 
       if (skdlRecs.length > 0) {
         STATE.datasets = skdlRecs.map(r => ({ file:r.file, type:r.type, ym:r.ym, rows:r.rows }));
@@ -5146,11 +5151,27 @@ const SIMPLE_STORE = {
         FIELD_STATE.currentYM = fieldMeta?.currentYM || FIELD_STATE.ymList().slice(-1)[0] || null;
       }
 
-      return skdlRecs.length + fieldRecs.length;
+      const total = skdlRecs.length + fieldRecs.length;
+      console.log('[RESTORE] done, total:', total);
+      return total;
     } catch(e) {
-      console.error('SIMPLE_STORE.restoreAll error:', e);
+      console.error('[RESTORE] error:', e);
       return 0;
     }
+  },
+
+  // デバッグ: IndexedDB の全内容を表示
+  async debug() {
+    const db = await this.open();
+    const keys = await new Promise((res, rej) => {
+      const r = db.transaction('data','readonly').objectStore('data').getAllKeys();
+      r.onsuccess = e => res(e.target.result); r.onerror = e => rej(e.target.error);
+    });
+    const cid = CENTER.current.id;
+    const msg = `IndexedDB「${this.DB_NAME}」\n全キー数: ${keys.length}\n\n` +
+      keys.map(k => `  ${k.startsWith(cid) ? '★' : '　'} ${k}`).join('\n') +
+      `\n\n★ = 現在のセンター(${cid})のデータ`;
+    alert(msg);
   },
 };
 
@@ -5220,6 +5241,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (btn) setTimeout(() => NAV.go(btn), 100);
     }
   }, 200);
+});
+
+// ページ離脱前に確実に保存
+window.addEventListener('beforeunload', () => {
+  if (STATE.datasets.length > 0 || FIELD_STATE.datasets.length > 0) {
+    // 同期保存は難しいので、最低限のメタ情報だけlocalStorageに保存
+    try {
+      localStorage.setItem('_last_center', CENTER.current.id);
+      localStorage.setItem('_last_ym', STATE.currentYM || '');
+      localStorage.setItem('_has_data', '1');
+    } catch(e) {}
+  }
 });
 
 // CSV読み込み後に SIMPLE_STORE.saveAll() を自動実行するパッチ
