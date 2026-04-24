@@ -224,6 +224,25 @@ select:focus,input[type=text]:focus{outline:none;border-color:var(--blue)}
 </style>
 </head>
 <body>
+<div id="js-error-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:10px 16px;font-size:12px;font-family:monospace;max-height:40vh;overflow-y:auto"></div>
+<script>
+// グローバルエラーキャッチャー（デバッグ用）
+window.onerror = function(msg, src, line, col, err) {
+  var b = document.getElementById('js-error-banner');
+  if (b) {
+    b.style.display = 'block';
+    b.innerHTML += '<div>❌ ' + msg + '<br><small>' + (src||'').split('/').pop() + ':' + line + ':' + col + '</small></div>';
+  }
+  return false;
+};
+window.onunhandledrejection = function(e) {
+  var b = document.getElementById('js-error-banner');
+  if (b) {
+    b.style.display = 'block';
+    b.innerHTML += '<div>❌ Promise: ' + (e.reason||e) + '</div>';
+  }
+};
+</script>
 
 <!-- ════════ SIDEBAR ════════ -->
 <div id="sidebar">
