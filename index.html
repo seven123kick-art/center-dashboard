@@ -7281,7 +7281,7 @@ if (!months.length) {
   return;
 }
 
-      const tbody = document.getElementById('pl-tbody');
+
 if (STATE.currentYM && !months.includes(STATE.currentYM) && (!tbody || tbody.children.length === 0)) {
         this.show('info', 'この月の収支データはありません', `${this.fmtYM(STATE.currentYM)} の収支データは未取込です。データがある月を選ぶか、データ取込からCSVを読み込んでください。`);
         return;
