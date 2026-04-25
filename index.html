@@ -6842,3 +6842,149 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 </script>
 
 </html>
+
+<!-- ════════════════════════════════════════════════════════
+     【パッチ】年次サマリー 会計年度ベース修正
+     「選択会計年度 × 4月〜選択月までの累計」に修正
+════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+(function fixRenderAnnual() {
+
+  /* 会計年度+SKKSマップ+HISTORY統合でデータ取得 */
+  function getMapForYMAll(ym) {
+    const skksMap = STATE.mapByYM()[ym];
+    if (skksMap && Object.keys(skksMap).length > 0) return skksMap;
+    if (typeof HISTORY !== 'undefined') {
+      const hm = HISTORY.getMonthMap(ym);
+      if (hm) return hm;
+    }
+    return null;
+  }
+
+  UI.renderAnnual = function() {
+    const curYM = STATE.currentYM;
+    if (!curYM) return;
+
+    const curFY = typeof getFiscalYear !== 'undefined'
+      ? getFiscalYear(curYM)
+      : (parseInt(curYM.slice(4)) >= CONFIG.FISCAL_START_MONTH
+          ? curYM.slice(0,4)
+          : String(parseInt(curYM.slice(0,4)) - 1));
+
+    const fmtK = this.fmtK.bind(this);
+    const fmtYM = this.fmtYM.bind(this);
+
+    // 会計年度の12ヶ月（4月〜3月順）
+    const FISCAL_MONTHS = ['04','05','06','07','08','09','10','11','12','01','02','03'];
+    const fyAllMonths = FISCAL_MONTHS.map(mo => {
+      const calYear = parseInt(mo) >= CONFIG.FISCAL_START_MONTH
+        ? curFY : String(parseInt(curFY) + 1);
+      return calYear + mo;
+    });
+
+    // 全データ月リスト（SKKS + HISTORY）
+    const allMl = STATE.monthList();
+
+    // 選択月のインデックス（会計年度内）
+    const curIdx = fyAllMonths.indexOf(curYM);
+
+    // 累計対象: 4月〜選択月（データある月のみ）
+    const cumMonths = fyAllMonths
+      .slice(0, curIdx >= 0 ? curIdx + 1 : fyAllMonths.length)
+      .filter(ym => allMl.includes(ym));
+
+    // グラフ表示対象: 会計年度の全月（データあれば値、なければスキップ）
+    const chartMonths = fyAllMonths.filter(ym => allMl.includes(ym));
+
+    // ── 累計KPI ──
+    let totInc = 0, totExp = 0, totCnt = 0;
+    cumMonths.forEach(ym => {
+      const map = getMapForYMAll(ym);
+      if (!map) return;
+      totInc += CALC.income(map);
+      totExp += CALC.expense(map);
+      const ds = STATE.dsForYM(ym);
+      if (ds) totCnt += CALC.count(ds.rows);
+    });
+    const totPrf = totInc - totExp;
+    const cumLen = cumMonths.length;
+    const endMo  = cumLen > 0 ? parseInt(curYM.slice(4)) : null;
+    const kpiLabel = endMo
+      ? `${curFY}年度 4月〜${endMo}月（${cumLen}ヶ月累計）`
+      : `${curFY}年度`;
+
+    document.getElementById('annual-kpi').innerHTML = `
+      <div class="kpi-card accent-navy">
+        <div class="kpi-label">${kpiLabel}</div>
+        <div class="kpi-value navy">${fmtK(totInc)}<span style="font-size:13px;color:var(--text2)">千円</span></div>
+        <div class="kpi-sub">月平均 ${cumLen > 0 ? fmtK(Math.round(totInc/cumLen)) : '--'}千円</div>
+      </div>
+      <div class="kpi-card ${totPrf >= 0 ? 'accent-green' : 'accent-red'}">
+        <div class="kpi-label">期間累計利益</div>
+        <div class="kpi-value ${totPrf >= 0 ? 'green' : 'red'}">${fmtK(totPrf)}<span style="font-size:13px">千円</span></div>
+        <div class="kpi-sub">平均利益率 ${CALC.pct(totPrf, totInc)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">期間累計件数</div>
+        <div class="kpi-value">${totCnt.toLocaleString()}<span style="font-size:13px;color:var(--text2)">件</span></div>
+        <div class="kpi-sub">月平均 ${cumLen > 0 ? Math.round(totCnt/cumLen).toLocaleString() : '--'}件</div>
+      </div>`;
+
+    // ── 推移グラフ（会計年度の月のみ、4月〜）──
+    const chartLabels = chartMonths.map(ym => `${parseInt(ym.slice(4))}月`);
+    const byYM = {};
+    chartMonths.forEach(ym => { byYM[ym] = getMapForYMAll(ym) || {}; });
+
+    CHARTS.trend('c-annual-trend', chartLabels,
+      chartMonths.map(ym => CALC.toK(CALC.income(byYM[ym]))),
+      chartMonths.map(ym => CALC.toK(CALC.expense(byYM[ym]))),
+      chartMonths.map(ym => CALC.toK(CALC.profit(byYM[ym])))
+    );
+
+    // タイトル更新
+    const titleEl = document.getElementById('annual-chart-title');
+    if (titleEl) titleEl.textContent = `${curFY}年度 月次収支推移`;
+
+    // ── テーブル（会計年度の月、データある月のみ）──
+    let html = '';
+    chartMonths.forEach((ym, i) => {
+      const map = getMapForYMAll(ym);
+      if (!map) return;
+      const inc = CALC.income(map), exp = CALC.expense(map), prf = CALC.profit(map);
+      const ds  = STATE.dsForYM(ym);
+      const cnt = ds ? CALC.count(ds.rows) : 0;
+
+      // 前月比（会計年度内の直前月）
+      const prevYM = i > 0 ? chartMonths[i-1] : null;
+      const prevMap = prevYM ? getMapForYMAll(prevYM) : null;
+      const mm = CALC.ratio(inc, prevMap ? CALC.income(prevMap) : null);
+
+      // 前年比（同会計年度の前年同月）
+      const prevYrYM = STATE.prevYearYM ? STATE.prevYearYM(ym) : null;
+      const prevYrMap = prevYrYM ? getMapForYMAll(prevYrYM) : null;
+      const yy = CALC.ratio(inc, prevYrMap ? CALC.income(prevYrMap) : null);
+
+      const isCur = ym === curYM ? ' class="row-current"' : '';
+      const isHistory = !ds && typeof HISTORY !== 'undefined' && HISTORY.getMonthMap(ym)
+        ? '<span style="font-size:10px;color:var(--text3);margin-left:4px">過去実績</span>' : '';
+
+      html += `<tr${isCur}>
+        <td><strong>${fmtYM(ym)}</strong>${isHistory}</td>
+        <td class="r">${fmtK(inc)}</td>
+        <td class="r">${fmtK(exp)}</td>
+        <td class="r ${prf>=0?'cell-up':'cell-down'}">${fmtK(prf)}</td>
+        <td class="r">${CALC.pct(prf,inc)}</td>
+        <td class="r">${cnt > 0 ? cnt.toLocaleString() : '--'}</td>
+        <td class="r ${mm.cls}">${mm.txt}</td>
+        <td class="r ${yy.cls}">${yy.txt}</td>
+      </tr>`;
+    });
+    document.getElementById('annual-tbody').innerHTML =
+      html || '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--text3)">データがありません</td></tr>';
+  };
+
+  console.log('[FIX] renderAnnual: 会計年度ベースに修正済み');
+})();
+</script>
+</html>
