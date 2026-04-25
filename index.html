@@ -7155,8 +7155,28 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
     },
 
     skdlMonths(){
-      try { return (window.STATE && typeof STATE.monthList === 'function') ? STATE.monthList() : []; }
-      catch(e){ return []; }
+      try {
+        const stateMonths = (window.STATE && typeof STATE.monthList === 'function') ? STATE.monthList() : [];
+        const historyMonths = (window.HISTORY && typeof HISTORY.monthList === 'function') ? HISTORY.monthList() : [];
+        return [...new Set([...(stateMonths || []), ...(historyMonths || [])])].sort();
+      } catch(e){ return []; }
+    },
+
+    hasRevenueData(){
+      try {
+        const ym = window.STATE ? STATE.currentYM : null;
+        if (ym) {
+          if (window.STATE && typeof STATE.activeDS === 'function' && STATE.activeDS()) return true;
+          if (window.HISTORY && typeof HISTORY.getMonthMap === 'function' && HISTORY.getMonthMap(ym)) return true;
+        }
+
+        const tbody = document.getElementById('pl-tbody');
+        if (tbody) {
+          const txt = (tbody.textContent || '').trim();
+          if (tbody.querySelector('tr') && txt && !txt.includes('データがありません')) return true;
+        }
+      } catch(e) {}
+      return false;
     },
 
     fieldMonths(){
@@ -7184,6 +7204,11 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
           this.show('info', 'この月の現場明細データはありません', `${this.fmtYM(ym)} の現場明細データは未取込です。データがある月を選ぶか、右上の <b>「+ データ取込」</b> から読み込んでください。`);
           return;
         }
+        this.hide();
+        return;
+      }
+
+      if (this.hasRevenueData()) {
         this.hide();
         return;
       }
