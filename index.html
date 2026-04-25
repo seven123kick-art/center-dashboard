@@ -1270,6 +1270,7 @@ const CHARTS = {
   _inst:{},
   destroy(id){if(this._inst[id]){this._inst[id].destroy();delete this._inst[id];}},
   make(id,cfg){this.destroy(id);this._inst[id]=new Chart(document.getElementById(id),cfg);},
+  destroyAll(){Object.keys(this._inst).forEach(id=>this.destroy(id));},
   gridColor:'rgba(0,0,0,0.05)',
   tickFont:{size:10},
 
@@ -1384,7 +1385,14 @@ const UI = {
     const kpiEl = document.getElementById('kpi-area');
     if (!kpiEl) return; // DOM未準備
     const ds=STATE.activeDS();
-    if(!ds){kpiEl.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">データを読み込んでください</div>';return;}
+    if(!ds){
+      // データなし: グラフも全破棄
+      CHARTS.destroyAll();
+      kpiEl.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">データを読み込んでください</div>';
+      const expEl=document.getElementById('exp-bars-area'); if(expEl) expEl.innerHTML='';
+      const shipEl=document.getElementById('shipper-bars-area'); if(shipEl) shipEl.innerHTML='';
+      return;
+    }
     const m=CALC.buildMap(ds.rows);
     const inc=CALC.income(m),exp=CALC.expense(m),prf=CALC.profit(m);
     const cnt=CALC.count(ds.rows);
@@ -5283,9 +5291,20 @@ window.addEventListener('beforeunload', () => {
   CENTER.switchTo = async function(centerId) {
     if (this._current?.id === centerId) return;
 
-    // ① 即座にSTATEをクリア
+    // ① 即座にSTATEをクリア + グラフ・DOM初期化
     STATE.datasets = []; STATE.currentYM = null;
     FIELD_STATE.datasets = []; FIELD_STATE.currentYM = null;
+    // Chart.jsのインスタンスを全破棄（前センターのグラフを消す）
+    CHARTS.destroyAll();
+    // KPI・グラフエリアのDOMをクリア
+    const kpiEl = document.getElementById('kpi-area');
+    if (kpiEl) kpiEl.innerHTML = '';
+    const expEl = document.getElementById('exp-bars-area');
+    if (expEl) expEl.innerHTML = '';
+    const shipEl = document.getElementById('shipper-bars-area');
+    if (shipEl) shipEl.innerHTML = '';
+    const lgEl = document.getElementById('inc-donut-legend');
+    if (lgEl) lgEl.innerHTML = '';
 
     // ② センター変更
     this._current = CONFIG.CENTERS.find(c => c.id === centerId) || CONFIG.CENTERS[0];
