@@ -5651,9 +5651,9 @@ const _origRenderPLOrig = UI.renderPL.bind(UI);
 // （すでに上でラップ済み）
 
 // ── topbar の現在月バッジにHISTORY表示
-const _origUpdateTopbar2 = UI.updateTopbar.bind(UI);
+const _origUpdateTopbar22 = UI.updateTopbar.bind(UI);
 UI.updateTopbar = function() {
-  _origUpdateTopbar2();
+  _origUpdateTopbar22();
   // 現在月がHISTORYの場合、バッジを「過去実績」に
   if (STATE.currentYM && HISTORY.getSource(STATE.currentYM) === 'history') {
     const right = document.getElementById('topbar-right');
@@ -6058,10 +6058,10 @@ const DISPLAY = {
 /* ─── 全レンダリング関数をリセット付きに上書き ─── */
 
 // ── ダッシュボード
-const _origRenderDashboard = UI.renderDashboard.bind(UI);
+const _origRenderDashboard2 = UI.renderDashboard.bind(UI);
 UI.renderDashboard = function() {
   DISPLAY.clearAll();
-  _origRenderDashboard();
+  _origRenderDashboard2();
 };
 
 // ── 月次収支表
