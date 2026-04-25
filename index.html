@@ -7053,6 +7053,7 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 FIELD_UI.changeFieldMonth = function(ym) {
   FIELD_STATE.currentYM = ym;
   this.updatePeriodBadge();
+
   // データなし月はメッセージ表示
   const ymList = FIELD_STATE.ymList();
   if (!ymList.includes(ym)) {
@@ -7060,11 +7061,14 @@ FIELD_UI.changeFieldMonth = function(ym) {
       const el = document.getElementById(id);
       if (el && el.classList.contains('active')) {
         const first = el.querySelector('.card-body, .kpi-row');
-        if (first) first.innerHTML = '';<div style="padding:30px;text-align:center;color:var(--text3)">この月のデータがありません</div>';
+        if (first) {
+          first.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text3)">この月のデータがありません</div>';
+        }
       }
     });
     return;
   }
+
   this.renderTab(this._tab);
 };
 
