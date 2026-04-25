@@ -7208,12 +7208,18 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
         return;
       }
 
-      if (this.hasRevenueData()) {
-        this.hide();
-        return;
-      }
+     if (this.hasRevenueData()) {
+  this.hide();
+  return;
+}
 
-      const months = this.skdlMonths();
+setTimeout(() => {
+  if (STATUS.hasRevenueData()) {
+    STATUS.hide();
+  }
+}, 300);
+
+const months = this.skdlMonths();
       if (!months.length) {
         this.show('warn', '収支データが未取込です', 'この画面は壊れていません。左メニューの <b>「データ取込」</b> からSKDL形式のCSVを読み込んでください。');
         return;
