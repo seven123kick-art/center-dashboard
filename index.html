@@ -4726,33 +4726,38 @@ const PLAN = {
     }
   },
 
+    _updateBadge() {
+    // ここは既存のまま
+  },
+
   // データ取込画面の年度セレクトを初期化
   initYearSel() {
     const sel = document.getElementById('plan-year-sel');
-     if (sel) {
-  sel.onchange = function(){
-    const ta = document.getElementById('plan-paste-area');
-    const msg = document.getElementById('plan-import-msg');
-
-    if (ta) ta.value = '';
-    if (msg) msg.textContent = '';
-  };
-}
     if (!sel) return;
-    const now = new Date().getFullYear();
+
+    const today = new Date();
+    const now = today.getMonth() + 1 >= (CONFIG.FISCAL_START_MONTH || 4)
+      ? today.getFullYear()
+      : today.getFullYear() - 1;
+
     sel.innerHTML = '';
+
     for (let y = now - 2; y <= now + 3; y++) {
       const opt = document.createElement('option');
       opt.value = String(y);
-      opt.textContent = `${y}年度（${y}年4月〜${y+1}年3月）`;
+      opt.textContent = `${y}年度（${y}年4月〜${y + 1}年3月）`;
       if (y === now) opt.selected = true;
       sel.appendChild(opt);
     }
-if (y === now) opt.selected = true;
-sel.appendChild(opt);
-}
 
-},
+    sel.onchange = function(){
+      const ta = document.getElementById('plan-paste-area');
+      const msg = document.getElementById('plan-import-msg');
+
+      if (ta) ta.value = '';
+      if (msg) msg.textContent = '';
+    };
+  },
 };
 
 /* ═══════════════════════════════════════════════════════════
