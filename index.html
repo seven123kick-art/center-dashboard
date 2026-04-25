@@ -838,7 +838,10 @@ window.onunhandledrejection = function(e) {
         </div>
       </div>
       <div class="card" style="margin-bottom:14px">
-        <div class="card-header"><span class="card-title">読み込み済みデータ</span></div>
+        <div class="card-header" style="cursor:pointer" onclick="document.getElementById('data-list').style.display=document.getElementById('data-list').style.display==='none'?'':'none';this.querySelector('.fold-icon').textContent=document.getElementById('data-list').style.display==='none'?'▶':'▼'">
+          <span class="card-title">読み込み済みデータ</span>
+          <span class="fold-icon" style="font-size:11px;color:var(--text3)">▼</span>
+        </div>
         <div id="data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
       </div>
       <!-- 計画・過去実績データ取込（統合UI） -->
@@ -5110,16 +5113,8 @@ UI.printCurrentView = function() {
 
 
 // センター切替後に計画・メモも再ロード
-(function patchCenterSwitch() {
-  const origSwitch = CENTER.switchTo.bind(CENTER);
-  CENTER.switchTo = async function(centerId) {
-    await origSwitch(centerId);
-    await PLAN._loadFromStorage();
-    await MEMO._loadFromStorage();
-    PLAN._updateBadge();
-    PLAN.initYearSel();
-  };
-})();
+
+
 
 // printボタンをサイドバー下部に追加
 
@@ -5393,75 +5388,8 @@ window.addEventListener('beforeunload', () => {
 })();
 
 // センター切替後にも復元
-(function patchSimpleCenterSwitch() {
-  CENTER.switchTo = async function(centerId) {
-    if (this._current?.id === centerId) return;
 
-    // ① 即座にSTATEをクリア + グラフ・DOM初期化
-    STATE.datasets = []; STATE.currentYM = null;
-    FIELD_STATE.datasets = []; FIELD_STATE.currentYM = null;
-    // Chart.jsのインスタンスを全破棄（前センターのグラフを消す）
-    CHARTS.destroyAll();
-    // KPI・グラフエリアのDOMをクリア
-    const kpiEl = document.getElementById('kpi-area');
-    if (kpiEl) kpiEl.innerHTML = '';
-    const expEl = document.getElementById('exp-bars-area');
-    if (expEl) expEl.innerHTML = '';
-    const shipEl = document.getElementById('shipper-bars-area');
-    if (shipEl) shipEl.innerHTML = '';
-    const lgEl = document.getElementById('inc-donut-legend');
-    if (lgEl) lgEl.innerHTML = '';
 
-    // ② センター変更
-    this._current = CONFIG.CENTERS.find(c => c.id === centerId) || CONFIG.CENTERS[0];
-    localStorage.setItem('active_center', centerId);
-    CENTER.renderSwitcher();
-    CENTER._updateHeaderColor(CENTER.current);
-
-    // ③ 空の状態でUIを即更新（前センターのデータを消す）
-    UI.renderDataList();
-    UI.updateTopbar();
-    UI.renderDashboard();   // ← ダッシュボードを「データなし」状態に
-    FIELD_UI.updatePeriodBadge();
-    FIELD_UI.renderDataList();
-
-    const msgEl = document.getElementById('session-msg');
-    if (msgEl) msgEl.textContent = `${CENTER.current.name} のデータを読み込み中...`;
-
-    // ④ 新センターのデータを復元
-    const restored = await SIMPLE_STORE.restoreAll().catch(() => 0);
-
-    // ⑤ 復元後にUIを再更新
-    UI.renderDataList();
-    UI.updateTopbar();
-    FIELD_UI.updatePeriodBadge();
-    FIELD_UI.renderDataList();
-    PLAN._loadFromStorage().catch(()=>{});
-    MEMO._loadFromStorage().catch(()=>{});
-
-    if (msgEl) {
-      msgEl.innerHTML = restored > 0
-        ? `✅ ${CENTER.current.name}: ${restored}件復元済み`
-        : `${CENTER.current.name}: データなし<br><span style="font-size:10px;color:#4d6a88">CSVを読み込んでください</span>`;
-    }
-
-    if (restored > 0 && STATE.currentYM) {
-      const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-      if (btn) setTimeout(() => NAV.go(btn), 100);
-    } else {
-      // データなしの場合はダッシュボードを空表示
-      const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-      if (btn) {
-        document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
-        document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
-        document.getElementById('view-dashboard').classList.add('active');
-        btn.classList.add('active');
-        document.getElementById('page-title').textContent = 'ダッシュボード';
-        UI.renderDashboard();
-      }
-    }
-  };
-})();
 </script>
 
 <script>
@@ -6520,14 +6448,5 @@ PLAN.initYearSel = function() {
   TSV_IMPORT.initYearSel();
 };
 
-// センター切替後にHISTORYも再ロード
-(function patchHistoryCenterSwitch() {
-  const origSwitch = CENTER.switchTo.bind(CENTER);
-  CENTER.switchTo = async function(centerId) {
-    await origSwitch(centerId);
-    await HISTORY._load();
-    HISTORY._updateBadge();
-    TSV_IMPORT.initYearSel();
-  };
-})();
+// patchHistoryCenterSwitch removed (integrated into CENTER.switchTo)
 </script>
