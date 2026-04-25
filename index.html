@@ -6165,20 +6165,29 @@ UI.updateTopbar = function() {
     return;
   }
 
-  // データなし
+  // データなし時もナビは表示（月はグレーアウト）
+  // ※ return しない → 年度・月ボタンを描画し続ける
   if (ml.length === 0) {
-    right.innerHTML = '<span style="font-size:11px;color:var(--text3)">データ取込からCSVを読み込んでください</span>';
     sub.textContent = '読み込みデータなし';
-    return;
+    // STATE.currentYM がなければ今年度の4月をダミーセット（表示用）
+    if (!STATE.currentYM) {
+      const now2 = new Date();
+      const fy2  = now2.getMonth() >= CONFIG.FISCAL_START_MONTH - 1
+        ? now2.getFullYear() : now2.getFullYear() - 1;
+      STATE.currentYM = `${fy2}04`;
+    }
   }
 
-  // ── 会計年度リスト（全データ範囲）
-  const fiscalYears = [...new Set(
-    ml.map(ym => getFiscalYear(ym)).filter(Boolean)
-  )].sort();
+  // ── 会計年度リスト（データあり年度 ＋ 直近4年は常に表示）
+  const now = new Date();
+  const thisFY = now.getMonth() >= CONFIG.FISCAL_START_MONTH - 1
+    ? now.getFullYear() : now.getFullYear() - 1;
+  const defaultFYs = [thisFY-3, thisFY-2, thisFY-1, thisFY].map(String);
+  const dataFYs    = ml.map(ym => getFiscalYear(ym)).filter(Boolean);
+  const fiscalYears = [...new Set([...defaultFYs, ...dataFYs])].sort();
 
   // ── 現在の会計年度
-  const curFY = getFiscalYear(STATE.currentYM) || fiscalYears[fiscalYears.length - 1];
+  const curFY = getFiscalYear(STATE.currentYM) || String(thisFY);
 
   // ── 会計年度の月 → YM変換（1〜3月は翌カレンダー年）
   const fiscalMonths = ['04','05','06','07','08','09','10','11','12','01','02','03'];
