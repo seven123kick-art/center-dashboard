@@ -5706,7 +5706,7 @@ const CLOUD_DEBUG = {
           html += `<div style="display:flex;gap:2px;margin-right:6px">`;
           allFYs.forEach(fy => {
             const active = fy === curFY;
-            html += `<button onclick="FIELD_UI._selectFY(${fy})"
+           html += `<button onclick="FIELD_UI.selectFY(${fy})"
               style="font-size:10px;padding:2px 7px;border-radius:4px;cursor:pointer;font-family:inherit;
                      border:1px solid ${active?'var(--navy)':'var(--border2)'};
                      background:${active?'var(--navy)':'#fff'};
@@ -7073,13 +7073,20 @@ FIELD_UI.changeFieldMonth = function(ym) {
 };
 
 FIELD_UI._selectFY = function(fy) {
+ FIELD_UI.selectFY = function(fy) {
   const ymList = FIELD_STATE.ymList();
   const fyOf = y => {
     const mo = parseInt(y.slice(4)), yr = parseInt(y.slice(0,4));
     return mo >= (CONFIG.FISCAL_START_MONTH||4) ? yr : yr-1;
   };
   const fyMonths = ymList.filter(y => fyOf(y) === fy);
-  if (fyMonths.length > 0) FIELD_STATE.currentYM = fyMonths[fyMonths.length-1];
+
+  if (fyMonths.length === 0) {
+    alert(fy + '年度の現場明細データはありません。データ取込からCSVまたはPDFを読み込んでください。');
+    return;
+  }
+
+  FIELD_STATE.currentYM = fyMonths[fyMonths.length-1];
   this.updatePeriodBadge();
   this.renderTab(this._tab);
 };
