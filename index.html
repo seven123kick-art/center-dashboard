@@ -5402,8 +5402,8 @@ window.addEventListener('beforeunload', () => {
   };
 })();
 </script>
-</body>
-</html>
+
+<!-- AUTO-FIX: appended patch scripts moved before body close; duplicate standalone closing tags removed. -->
 <script>
 'use strict';
 /* ═══════════════════════════════════════════════════════════
@@ -5668,59 +5668,18 @@ const CLOUD_DEBUG = {
     el.style.color = 'var(--navy)';
     el.style.fontWeight = '600';
 
-    // 月切り替えボタン（会計年度ベース）
-    if (btnEl) {
-      if (ymList.length === 0) {
-        btnEl.innerHTML = '';
-      } else {
-        // 会計年度ごとにグループ化
-        const fyOf = y => {
-          const mo = parseInt(y.slice(4));
-          const yr = parseInt(y.slice(0,4));
-          return mo >= (CONFIG.FISCAL_START_MONTH||4) ? yr : yr-1;
-        };
-        const curFY = fyOf(ym);
-        const allFYs = [...new Set(ymList.map(fyOf))].sort();
-
-        // 年度ボタン（複数年度ある場合）
-        let html = '';
-        if (allFYs.length > 1) {
-          html += `<div style="display:flex;gap:2px;margin-right:6px">`;
-          allFYs.forEach(fy => {
-            const active = fy === curFY;
-            html += `<button onclick="FIELD_UI._selectFY(${fy})"
-              style="font-size:10px;padding:2px 7px;border-radius:4px;cursor:pointer;font-family:inherit;
-                     border:1px solid ${active?'var(--navy)':'var(--border2)'};
-                     background:${active?'var(--navy)':'#fff'};
-                     color:${active?'#fff':'var(--text2)'};
-                     font-weight:${active?700:400}">${fy}年度</button>`;
-          });
-          html += `</div>`;
-        }
-
-        // 選択中の年度の月ボタン（4月〜3月順）
-        const fiscalOrder = ['04','05','06','07','08','09','10','11','12','01','02','03'];
-        html += `<div style="display:flex;gap:2px">`;
-        fiscalOrder.forEach(mo => {
-          const calYear = parseInt(mo) >= (CONFIG.FISCAL_START_MONTH||4)
-            ? curFY : curFY+1;
-          const y = `${calYear}${mo}`;
-          const has = ymList.includes(y);
-          const isCur = y === ym;
-          html += `<button onclick="FIELD_UI.changeFieldMonth('${y}')"
-            title="${has ? UI.fmtYM(y) : 'データなし'}"
-            style="font-size:11px;padding:3px 8px;border-radius:4px;font-family:inherit;
-                   border:1px solid ${isCur?'var(--blue)':has?'var(--border2)':'#eee'};
-                   background:${isCur?'var(--blue)':has?'#fff':'#f5f5f5'};
-                   color:${isCur?'#fff':has?'var(--text2)':'#ccc'};
-                   cursor:pointer;font-weight:${isCur?700:400}">
-            ${parseInt(mo)}月</button>`;
-        });
-        html += `</div>`;
-        btnEl.innerHTML = html;
-      }
-    }
-    if (false) {  // dummy else
+    // 月切り替えボタン
+    if (btnEl && ymList.length > 1) {
+      btnEl.innerHTML = ymList.map(y =>
+        `<button onclick="FIELD_UI.changeFieldMonth('${y}')"
+          style="font-size:11px;padding:3px 8px;border-radius:4px;
+                 border:1px solid ${y===ym?'var(--navy)':'var(--border2)'};
+                 background:${y===ym?'var(--navy)':'#fff'};
+                 color:${y===ym?'#fff':'var(--text2)'};
+                 cursor:pointer;font-family:inherit;font-weight:${y===ym?700:400}">
+          ${parseInt(y.slice(4))}月
+        </button>`).join('');
+    } else if (btnEl) {
       btnEl.innerHTML = '';
     }
   };
@@ -6882,7 +6841,6 @@ UI._renderPLFromHistory = function(m) {
 console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 </script>
 
-</html>
 
 <!-- ════════════════════════════════════════════════════════
      【パッチ】年次サマリー 会計年度ベース修正
@@ -7028,37 +6986,5 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
   console.log('[FIX] renderAnnual: 会計年度ベースに修正済み');
 })();
 </script>
-
-
-/* フィールドビュー年度選択 */
-FIELD_UI.changeFieldMonth = function(ym) {
-  FIELD_STATE.currentYM = ym;
-  this.updatePeriodBadge();
-  // データなし月はメッセージ表示
-  const ymList = FIELD_STATE.ymList();
-  if (!ymList.includes(ym)) {
-    ['fpane-worker','fpane-content','fpane-product','fpane-map'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el && el.classList.contains('active')) {
-        const first = el.querySelector('.card-body, .kpi-row');
-        if (first) first.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text3)">この月のデータがありません</div>';
-      }
-    });
-    return;
-  }
-  this.renderTab(this._tab);
-};
-
-FIELD_UI._selectFY = function(fy) {
-  const ymList = FIELD_STATE.ymList();
-  const fyOf = y => {
-    const mo = parseInt(y.slice(4)), yr = parseInt(y.slice(0,4));
-    return mo >= (CONFIG.FISCAL_START_MONTH||4) ? yr : yr-1;
-  };
-  const fyMonths = ymList.filter(y => fyOf(y) === fy);
-  if (fyMonths.length > 0) FIELD_STATE.currentYM = fyMonths[fyMonths.length-1];
-  this.updatePeriodBadge();
-  this.renderTab(this._tab);
-};
-
+</body>
 </html>
