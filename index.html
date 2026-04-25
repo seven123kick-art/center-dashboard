@@ -7150,3 +7150,299 @@ UI._renderPLFromHistory = function(m) {
 
 console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 </script>
+<!-- ════════════════════════════════════════════════════════
+     【追加パッチ5】会計年度ボタン修正 + 前月比・前年比にHISTORY対応
+     fix_patch4 の後ろに追記（</html>直前）
+════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+/* ══════════════════════════════════════════════════════
+   共通ヘルパー: 年月から会計年度を取得
+   202601 → '2025'（1月は前年度）
+   202504 → '2025'（4月は当年度）
+══════════════════════════════════════════════════════ */
+function getFiscalYear(ym) {
+  if (!ym) return null;
+  const y  = parseInt(ym.slice(0, 4));
+  const mo = parseInt(ym.slice(4));
+  return mo >= (CONFIG.FISCAL_START_MONTH || 4) ? String(y) : String(y - 1);
+}
+
+/* ══════════════════════════════════════════════════════
+   共通ヘルパー: 月のデータを SKKS → HISTORY の順で取得
+   renderPL の前月比・前年比計算に使う
+══════════════════════════════════════════════════════ */
+function getMapForYM(ym) {
+  if (!ym) return null;
+  const ds = STATE.dsForYM(ym);
+  if (ds) return CALC.buildMap(ds.rows);
+  if (typeof HISTORY !== 'undefined') {
+    const hm = HISTORY.getMonthMap(ym);
+    if (hm) return hm;
+  }
+  return null;
+}
+
+/* ══════════════════════════════════════════════════════
+   Fix1: updateTopbar を会計年度ベースに修正
+   1月(202601)を押しても「2025年度」が選択状態を維持
+══════════════════════════════════════════════════════ */
+UI.updateTopbar = function() {
+  const ds  = STATE.activeDS();
+  const ml  = STATE.monthList();
+  const right = document.getElementById('topbar-right');
+  const sub   = document.getElementById('page-sub');
+  if (!right || !sub) return;
+
+  const activeView = document.querySelector('.view.active')?.id;
+  if (activeView === 'view-field') {
+    right.innerHTML = '';
+    sub.textContent = STATE.currentYM
+      ? `${STATE.fiscalYear(STATE.currentYM)} ／ ${ml.length}ヶ月分データ読込済`
+      : '読み込みデータなし';
+    return;
+  }
+
+  if (ml.length === 0) {
+    right.innerHTML = '<span style="font-size:11px;color:var(--text3)">データ取込からCSVを読み込んでください</span>';
+    sub.textContent = '読み込みデータなし';
+    return;
+  }
+
+  let sel = '';
+  if (ml.length > 1) {
+    // ★ 会計年度リストを生成（カレンダー年ではなく会計年度）
+    const fiscalYears = [...new Set(ml.map(ym => getFiscalYear(ym)))].sort();
+
+    // ★ 現在月の会計年度
+    const curFY = getFiscalYear(STATE.currentYM) || fiscalYears[fiscalYears.length - 1];
+
+    const fiscalMonths = ['04','05','06','07','08','09','10','11','12','01','02','03'];
+
+    // ★ 会計年度の月 → YM文字列（1-3月は翌カレンダー年）
+    const ymForMonth = mo => {
+      const calYear = parseInt(mo) >= (CONFIG.FISCAL_START_MONTH || 4)
+        ? curFY
+        : String(parseInt(curFY) + 1);
+      return calYear + mo;
+    };
+
+    sel = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+      ${fiscalYears.length > 1 ? `<div style="display:flex;gap:3px;align-items:center">
+        <span style="font-size:10px;color:var(--text3);margin-right:2px">年度:</span>
+        ${fiscalYears.map(fy => `<button onclick="UI._selectYear('${fy}')"
+          style="font-size:11px;padding:3px 9px;border-radius:4px;
+                 border:1px solid ${fy===curFY?'var(--navy)':'var(--border2)'};
+                 background:${fy===curFY?'var(--navy)':'#fff'};
+                 color:${fy===curFY?'#fff':'var(--text2)'};
+                 cursor:pointer;font-family:inherit;font-weight:${fy===curFY?700:400}">
+          ${fy}年度
+        </button>`).join('')}
+      </div>` : ''}
+      <div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">
+        ${fiscalMonths.map(mo => {
+          const ym      = ymForMonth(mo);
+          const hasData = ml.includes(ym);
+          const isCur   = ym === STATE.currentYM;
+          return `<button onclick="${hasData ? `UI.changeMonth('${ym}')` : 'void(0)'}"
+            title="${hasData ? UI.fmtYM(ym) : 'データなし'}"
+            style="font-size:11px;padding:3px 9px;border-radius:4px;
+                   border:1px solid ${isCur?'var(--blue)':hasData?'var(--border2)':'#eee'};
+                   background:${isCur?'var(--blue)':hasData?'#fff':'#f5f5f5'};
+                   color:${isCur?'#fff':hasData?'var(--text2)':'#ccc'};
+                   cursor:${hasData?'pointer':'default'};font-family:inherit;
+                   font-weight:${isCur?700:400}">
+            ${parseInt(mo)}月
+          </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  // HISTORY月のバッジ
+  let bdg = ds
+    ? (ds.type === 'confirmed'
+        ? '<span class="badge badge-ok">確定値 (SKKS0003)</span>'
+        : '<span class="badge badge-warn">速報値 (SKKS0001・日報)</span>')
+    : '';
+  if (!ds && typeof HISTORY !== 'undefined' && STATE.currentYM &&
+      HISTORY.getSource && HISTORY.getSource(STATE.currentYM) === 'history') {
+    bdg = '<span class="badge badge-info">過去実績（集計値）</span>';
+  }
+
+  right.innerHTML  = `${sel}<span style="font-size:12px;font-weight:700;color:var(--navy)">${UI.fmtYM(STATE.currentYM)}</span>${bdg}`;
+  sub.textContent  = `${STATE.fiscalYear(STATE.currentYM)} ／ ${ml.length}ヶ月分データ読込済`;
+};
+
+/* ══════════════════════════════════════════════════════
+   Fix2: _selectYear を会計年度ベースに修正
+   '2025' → 202504〜202603 の範囲の月を対象にする
+══════════════════════════════════════════════════════ */
+UI._selectYear = function(fiscalYear) {
+  const ml = STATE.monthList();
+
+  // 会計年度に属する月を取得
+  const fyMonths = ml.filter(ym => getFiscalYear(ym) === String(fiscalYear));
+
+  if (fyMonths.length > 0) {
+    const cur = STATE.currentYM;
+    // SKDLデータがある月を優先
+    const skdlMonths = fyMonths.filter(ym => !!STATE.dsForYM(ym));
+    const candidates = skdlMonths.length > 0 ? skdlMonths : fyMonths;
+    if (!cur || !candidates.includes(cur)) {
+      STATE.currentYM = candidates[0];
+    }
+  }
+
+  this.updateTopbar();
+  this.renderCurrentView();
+};
+
+/* ══════════════════════════════════════════════════════
+   Fix3: renderPL の前月比・前年比に HISTORY データを使用
+   SKKSデータがなくてもHISTORYデータで比較列を表示
+══════════════════════════════════════════════════════ */
+(function repatchRenderPLWithHistory() {
+  UI.renderPL = function() {
+    const plEl = document.getElementById('pl-tbody');
+    if (plEl) plEl.innerHTML = '';
+
+    const ds = STATE.activeDS();
+    const hm = STATE.currentYM ? HISTORY.getMonthMap(STATE.currentYM) : null;
+
+    if (!ds && !hm) {
+      if (plEl) plEl.innerHTML =
+        '<tr><td colspan="12" style="padding:20px;color:var(--text3);text-align:center">データがありません</td></tr>';
+      return;
+    }
+
+    if (!ds && hm) {
+      UI._renderPLFromHistory(hm);
+      return;
+    }
+
+    // ── SKKS データあり → 通常描画
+    const ym  = STATE.currentYM;
+    const mm  = CALC.buildMap(ds.rows);
+    const inc = CALC.income(mm), exp = CALC.expense(mm);
+    const pm  = (typeof PLAN !== 'undefined') ? PLAN.getMonthMap(ym) : null;
+
+    const prevYM   = STATE.prevYM(ym);
+    const prevYrYM = STATE.prevYearYM(ym);
+
+    // ★ SKKS → HISTORY の順でフォールバック
+    const prevM   = getMapForYM(prevYM);
+    const prevYrM = getMapForYM(prevYrYM);
+
+    document.getElementById('pl-card-title').textContent =
+      `月次収支表 — ${UI.fmtYM(ym)}`;
+
+    const getPlan = (keys) => {
+      if (!pm) return null;
+      return [].concat(keys).reduce((s, k) => s + (pm[k]||0), 0) || null;
+    };
+
+    const planCells = (actual, planVal) => {
+      if (planVal == null)
+        return `<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>
+                <td class="r" style="background:#fffdf0;color:var(--text3)">--</td>
+                <td class="r" style="background:#fffdf0;color:var(--text3)">--</td>`;
+      const pk  = CALC.toK(planVal).toLocaleString();
+      const diff = CALC.toK(actual) - CALC.toK(planVal);
+      const dStr = diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString();
+      const dCls = diff > 0 ? 'cell-up' : diff < 0 ? 'cell-down' : 'cell-flat';
+      const ach  = planVal !== 0 ? (actual/planVal*100).toFixed(1)+'%' : '--';
+      const achCls = planVal !== 0 && actual/planVal >= 1 ? 'cell-up' : 'cell-down';
+      return `<td class="r" style="background:#fffdf0">${pk}</td>
+              <td class="r ${dCls}" style="background:#fffdf0">${dStr}</td>
+              <td class="r ${achCls}" style="background:#fffdf0">${ach}</td>`;
+    };
+
+    const pK = (mmap, keys) => mmap ? CALC.sum(mmap, [].concat(keys)) : null;
+
+    const row = (label, val, refVal, prevVal, prevYrVal, planVal, cls='', indent=0) => {
+      const k    = CALC.toK(val).toLocaleString();
+      const p    = CALC.pct(val, refVal);
+      const pvk  = prevVal   != null ? CALC.toK(prevVal).toLocaleString()   : '--';
+      const pyVk = prevYrVal != null ? CALC.toK(prevYrVal).toLocaleString() : '--';
+      const df1  = prevVal   != null ? CALC.diff(val,prevVal)  : {txt:'--',cls:'cell-flat'};
+      const rt1  = prevVal   != null ? CALC.ratio(val,prevVal) : {txt:'--',cls:'cell-flat'};
+      const df2  = prevYrVal != null ? CALC.diff(val,prevYrVal)  : {txt:'--',cls:'cell-flat'};
+      const rt2  = prevYrVal != null ? CALC.ratio(val,prevYrVal) : {txt:'--',cls:'cell-flat'};
+      const iStyle = indent > 0
+        ? `style="padding-left:${indent*14+8}px;font-size:11px;color:var(--text2)"` : '';
+      return `<tr class="${cls}">
+        <td ${iStyle}>${label}</td>
+        <td class="r">${k}</td><td class="r">${p}</td>
+        ${planCells(val, planVal)}
+        <td class="r vs-col">${pvk}</td>
+        <td class="r vs-col ${df1.cls}">${df1.txt}</td>
+        <td class="r vs-col ${rt1.cls}">${rt1.txt}</td>
+        <td class="r vs-col">${pyVk}</td>
+        <td class="r vs-col ${df2.cls}">${df2.txt}</td>
+        <td class="r vs-col ${rt2.cls}">${rt2.txt}</td>
+      </tr>`;
+    };
+
+    const header = (label) =>
+      `<tr class="row-h"><td colspan="12">${label}</td></tr>`;
+
+    // ★ 前月・前年の収入合計（SKKS + HISTORY フォールバック）
+    const prevInc  = prevM  ? CALC.income(prevM)  : null;
+    const prevYrInc= prevYrM? CALC.income(prevYrM): null;
+
+    let html = '';
+    CONFIG.PL_DEF.forEach(def => {
+      if (def.t === 'h') { html += header(def.l); return; }
+      if (def.t === 'i') {
+        const v    = CALC.sum(mm, def.k);
+        const pv   = pK(prevM,  def.k);
+        const pyv  = pK(prevYrM,def.k);
+        const planV = getPlan(def.k);
+        const dim  = v===0 && (!pv||pv===0) && (!pyv||pyv===0) && !planV;
+        if (!dim || planV) html += row(def.l, v, inc, pv, pyv, planV, dim?'dim':'', 0);
+        return;
+      }
+      if (def.t === 'st') {
+        const v   = def.k==='inc' ? inc : exp;
+        const pv  = prevM  ? (def.k==='inc' ? CALC.income(prevM)  : CALC.expense(prevM))  : null;
+        const pyv = prevYrM? (def.k==='inc' ? CALC.income(prevYrM): CALC.expense(prevYrM)): null;
+        const planV = def.k==='inc' ? getPlan(['営業収益','営業収益計']) : getPlan(['売上原価']);
+        html += row(def.l, v, inc, pv, pyv, planV, 'row-sub');
+        return;
+      }
+      if (def.t === 'g') {
+        const gv  = CALC.sum(mm, def.k);
+        const pgv = pK(prevM,  def.k);
+        const pygv= pK(prevYrM,def.k);
+        if (def.s) def.s.forEach(s => {
+          const sv  = CALC.sum(mm, s.k); if (!sv) return;
+          const psv  = pK(prevM,  s.k);
+          const pysv = pK(prevYrM,s.k);
+          html += row(s.l, sv, inc, psv, pysv, getPlan(s.k), '', 1);
+        });
+        html += row(def.l, gv, inc, pgv, pygv, getPlan(def.k), 'row-sub');
+        return;
+      }
+      if (def.t === 'tot') {
+        const pv  = prevM  ? CALC.expense(prevM)  : null;
+        const pyv = prevYrM? CALC.expense(prevYrM): null;
+        html += row(def.l, exp, inc, pv, pyv, getPlan(['売上原価']), 'row-total');
+        return;
+      }
+      if (def.t === 'prf') {
+        const prf   = inc - exp;
+        const pprf  = prevM  ? CALC.profit(prevM)  : null;
+        const pyprf = prevYrM? CALC.profit(prevYrM): null;
+        const planV = pm ? (pm['粗利益']||pm['センター利益']||pm['営業利益']||null) : null;
+        html += row(def.l, prf, inc, pprf, pyprf, planV,
+                    prf>=0?'row-profit':'row-loss');
+      }
+    });
+    document.getElementById('pl-tbody').innerHTML = html;
+  };
+})();
+
+console.log('[PATCH5] 会計年度ボタン修正 + 前月比・前年比HISTORY対応済み');
+</script>
