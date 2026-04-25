@@ -7057,6 +7057,8 @@ FIELD_UI.changeFieldMonth = function(ym) {
   // データなし月はメッセージ表示
   const ymList = FIELD_STATE.ymList();
   if (!ymList.includes(ym)) {
+    alert('この月の現場明細データはありません。データ取込からCSVまたはPDFを読み込んでください。');
+
     ['fpane-worker','fpane-content','fpane-product','fpane-map'].forEach(id => {
       const el = document.getElementById(id);
       if (el && el.classList.contains('active')) {
