@@ -645,6 +645,20 @@ window.onunhandledrejection = function(e) {
 
     <!-- ▼ 現場明細 -->
     <div class="view" id="view-field">
+      <!-- データソース案内バー -->
+      <div style="background:#f0f4f8;border:1px solid var(--border);border-radius:6px;padding:8px 14px;margin-bottom:10px;font-size:11px;color:var(--text2);line-height:1.9">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px">
+          <div>
+            <span style="font-weight:700;color:var(--navy)">作業者別・作業内容別・商品カテゴリ</span><br>
+            SKKS → SS → 売上帳票出力 → <strong>荷主作業者別売上明細表</strong>（CSV）
+          </div>
+          <div>
+            <span style="font-weight:700;color:var(--navy)">エリア地図</span><br>
+            SKKS → SS → 売上帳票出力 → <strong>荷主別配送エリア別物量</strong>（PDF保存）
+          </div>
+        </div>
+      </div>
+
       <!-- サブタブ -->
       <div class="field-tabs">
         <button class="field-tab active" data-ftab="worker"   onclick="FIELD_UI.switchTab(this)">作業者別</button>
@@ -654,7 +668,8 @@ window.onunhandledrejection = function(e) {
         <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
           <span id="field-period-badge" style="font-size:11px;color:var(--text3)">データ未読込</span>
           <div id="field-month-btns" style="display:flex;gap:3px;align-items:center"></div>
-          <button class="btn" onclick="FIELD_UI.openImport()" style="font-size:11px;padding:4px 12px">+ データ取込</button>
+          <button class="btn" onclick="FIELD_UI.openImport()" style="font-size:11px;padding:4px 12px"
+            title="作業者別: CSV / エリア地図: PDF">+ データ取込</button>
         </div>
       </div>
 
@@ -781,9 +796,17 @@ window.onunhandledrejection = function(e) {
             <div class="upload-zone no-print" id="field-upload-zone">
               <input type="file" id="field-file-input" accept=".csv,.pdf" multiple style="display:none">
               <div style="font-size:30px;color:#94a3b8;margin-bottom:10px">⬆</div>
-              <div style="font-size:14px;font-weight:700;margin-bottom:6px">CSVまたはPDFをクリック / ドロップ</div>
-              <div style="font-size:12px;color:var(--text2);margin-bottom:4px">作業者別売上伝票明細表（CSV）</div>
-              <div style="font-size:11px;color:var(--text3)">またはエリア別物量（PDF）— 両方まとめて選択できます</div>
+              <div style="font-size:14px;font-weight:700;margin-bottom:8px">クリックまたはファイルをドロップ</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left;max-width:500px;margin:0 auto">
+                <div style="background:#eff6ff;border-radius:6px;padding:8px 10px;border:1px solid #bfdbfe">
+                  <div style="font-size:11px;font-weight:700;color:#1e40af;margin-bottom:3px">📄 CSV（作業者別）</div>
+                  <div style="font-size:10px;color:#3b82f6">荷主作業者別売上明細表<br>SKKS → SS → 売上帳票出力</div>
+                </div>
+                <div style="background:#f0fdf4;border-radius:6px;padding:8px 10px;border:1px solid #bbf7d0">
+                  <div style="font-size:11px;font-weight:700;color:#166534;margin-bottom:3px">📊 PDF（エリア地図）</div>
+                  <div style="font-size:10px;color:#16a34a">荷主別配送エリア別物量<br>SKKS → SS → 売上帳票出力</div>
+                </div>
+              </div>
             </div>
             <div id="field-upload-msg"></div>
           </div>
@@ -5938,10 +5961,21 @@ const CLOUD_DEBUG = {
     // 月切り替えボタン
     if (btnEl && ymList.length > 1) {
       // 年選択 + 4月～3月の全ボタン常時表示
-      const fieldYears=[...new Set(ymList.map(y=>y.slice(0,4)))].sort();
-      const fieldCurYear=ym?ym.slice(0,4):fieldYears[fieldYears.length-1];
+      // 年度を計算（4月始まり: 2025/04〜2026/03 = 2025年度）
+      const toFY = y => {
+        const yr = parseInt(y.slice(0,4)), mo = parseInt(y.slice(4));
+        return mo >= 4 ? String(yr) : String(yr - 1);
+      };
+      const fieldYears=[...new Set(ymList.map(toFY))].sort();
+      const fieldCurFY = ym ? toFY(ym) : fieldYears[fieldYears.length-1];
+      const fieldCurYear = fieldCurFY;  // 年度の開始年
       const fiscalMos=['04','05','06','07','08','09','10','11','12','01','02','03'];
-      const fymFor=mo=>{const y=parseInt(mo)>=4?fieldCurYear:String(parseInt(fieldCurYear)+1);return y+mo;};
+      // 年度ボタンの「2025年度」= 2025/4〜2026/3
+      // fieldCurYear は年度の開始年（4月が属する年）
+      const fymFor=mo=>{
+        const y=parseInt(mo)>=4?fieldCurYear:String(parseInt(fieldCurYear)+1);
+        return y+mo;
+      };
       btnEl.innerHTML=`
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-end">
           ${fieldYears.length>1?`<div style="display:flex;gap:3px">
@@ -5951,7 +5985,7 @@ const CLOUD_DEBUG = {
                      background:${yr===fieldCurYear?'var(--navy)':'#fff'};
                      color:${yr===fieldCurYear?'#fff':'var(--text2)'};
                      cursor:pointer;font-family:inherit;font-weight:${yr===fieldCurYear?700:400}">
-              ${yr}年度
+              ${yr}年度（${yr}/4〜${parseInt(yr)+1}/3）
             </button>`).join('')}
           </div>`:''}
           <div style="display:flex;gap:2px;flex-wrap:wrap">
@@ -5986,14 +6020,25 @@ const CLOUD_DEBUG = {
   // 現場明細: 年ボタン押下 → その年の最初の月に切り替え
   FIELD_UI._selectFieldYear = function(year) {
     const ymList = FIELD_STATE.ymList();
-    const monthsInYear = ymList.filter(y => y.startsWith(year));
-    if (monthsInYear.length > 0) {
+    // 年度表示: year年度 = year/4 〜 (year+1)/3
+    // ボタンに表示している年度は4月始まりなので、
+    // 「2026年度」= 2026/04〜2027/03 のYMを持つデータ
+    // ただし実際にある year で始まるYMを優先
+    const inYear = ymList.filter(y => y.startsWith(year));
+    const inFiscal = ymList.filter(y => {
+      const y4 = parseInt(y.slice(0,4)), mo = parseInt(y.slice(4));
+      const fy = mo >= 4 ? y4 : y4 - 1;
+      return String(fy) === String(year);  // year = 年度開始年
+    });
+    const candidates = inYear.length > 0 ? inYear : inFiscal;
+    if (candidates.length > 0) {
       const cur = FIELD_STATE.currentYM;
-      if (!cur || !cur.startsWith(year)) {
-        FIELD_STATE.currentYM = monthsInYear[0];
+      if (!cur || !candidates.includes(cur)) {
+        FIELD_STATE.currentYM = candidates[0];
       }
     }
-    this.updatePeriodBadge(); // 月ボタンを再描画
+    this.updatePeriodBadge();
+    this.renderTab(this._tab);  // ← 年切替時にすぐ描画
   };
 })();
 </script>
