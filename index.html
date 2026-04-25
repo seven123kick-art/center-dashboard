@@ -7213,6 +7213,14 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
   return;
 }
 
+const titleEl = document.querySelector('h1, .page-title, .view-title');
+const titleText = titleEl ? titleEl.textContent : '';
+
+if (titleText.includes('月次収支表')) {
+  this.hide();
+  return;
+}
+
 if (this.hasRevenueData()) {
   this.hide();
   return;
