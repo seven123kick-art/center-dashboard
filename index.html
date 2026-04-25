@@ -1358,16 +1358,34 @@ const UI = {
     }
     let sel='';
     if(ml.length>1){
-      sel='<div style="display:flex;gap:3px;align-items:center;flex-wrap:wrap">' +
-        ml.map(ym=>{
-          const yr=ym.slice(2,4); const mo=parseInt(ym.slice(4));
-          // 年が複数混在する場合は年も表示
-          const years=new Set(ml.map(y=>y.slice(0,4)));
-          const label = years.size>1 ? `${yr}/${mo}月` : `${mo}月`;
-          return `<button onclick="UI.changeMonth('${ym}')"
-            style="font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid ${ym===STATE.currentYM?'var(--navy)':'var(--border2)'};background:${ym===STATE.currentYM?'var(--navy)':'#fff'};color:${ym===STATE.currentYM?'#fff':'var(--text2)'};cursor:pointer;font-family:inherit;font-weight:${ym===STATE.currentYM?700:400}">${label}</button>`;
-        }).join('')
-        +'</div>';
+      // 年→月の2段階選択UI
+      const years=[...new Set(ml.map(y=>y.slice(0,4)))].sort();
+      const curYear=STATE.currentYM?STATE.currentYM.slice(0,4):years[years.length-1];
+      const monthsInYear=ml.filter(y=>y.startsWith(curYear));
+      sel=`<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+        <div style="display:flex;gap:3px;align-items:center">
+          <span style="font-size:10px;color:var(--text3);margin-right:2px">年度:</span>
+          ${years.map(yr=>`<button onclick="UI._selectYear('${yr}')"
+            style="font-size:11px;padding:3px 9px;border-radius:4px;
+                   border:1px solid ${yr===curYear?'var(--navy)':'var(--border2)'};
+                   background:${yr===curYear?'var(--navy)':'#fff'};
+                   color:${yr===curYear?'#fff':'var(--text2)'};
+                   cursor:pointer;font-family:inherit;font-weight:${yr===curYear?700:400}">
+            ${yr}年
+          </button>`).join('')}
+        </div>
+        <div style="display:flex;gap:3px;align-items:center">
+          <span style="font-size:10px;color:var(--text3);margin-right:2px">月:</span>
+          ${monthsInYear.map(ym=>`<button onclick="UI.changeMonth('${ym}')"
+            style="font-size:11px;padding:3px 9px;border-radius:4px;
+                   border:1px solid ${ym===STATE.currentYM?'var(--blue)':'var(--border2)'};
+                   background:${ym===STATE.currentYM?'var(--blue)':'#fff'};
+                   color:${ym===STATE.currentYM?'#fff':'var(--text2)'};
+                   cursor:pointer;font-family:inherit;font-weight:${ym===STATE.currentYM?700:400}">
+            ${parseInt(ym.slice(4))}月
+          </button>`).join('')}
+        </div>
+      </div>`;
     }
     const bdg=ds.type==='confirmed'?'<span class="badge badge-ok">確定値 (SKDL0003)</span>':'<span class="badge badge-warn">速報値 (SKDL0001・日報)</span>';
     right.innerHTML=`${sel}<span style="font-size:12px;font-weight:700;color:var(--navy)">${this.fmtYM(STATE.currentYM)}</span>${bdg}`;
@@ -1378,6 +1396,18 @@ const UI = {
     STATE.currentYM=ym;
     this.updateTopbar();
     this.renderCurrentView();
+  },
+
+  // 年ボタン押下: その年の最初の月に切り替えてtopbarを更新
+  _selectYear(year){
+    const ml=STATE.monthList();
+    const monthsInYear=ml.filter(y=>y.startsWith(year));
+    if(monthsInYear.length>0){
+      // 現在の月がその年にあればそのまま、なければ最初の月へ
+      const cur=STATE.currentYM;
+      if(!cur||!cur.startsWith(year)) STATE.currentYM=monthsInYear[0];
+    }
+    this.updateTopbar(); // 月ボタンを再描画（年選択反映）
   },
 
   renderCurrentView(){
@@ -5650,19 +5680,33 @@ const CLOUD_DEBUG = {
 
     // 月切り替えボタン
     if (btnEl && ymList.length > 1) {
-      const fieldYears = new Set(ymList.map(y=>y.slice(0,4)));
-      btnEl.innerHTML = ymList.map(y => {
-        const yr = y.slice(2,4); const mo = parseInt(y.slice(4));
-        const label = fieldYears.size > 1 ? `${yr}/${mo}月` : `${mo}月`;
-        return `<button onclick="FIELD_UI.changeFieldMonth('${y}')"
-          style="font-size:11px;padding:3px 8px;border-radius:4px;
-                 border:1px solid ${y===ym?'var(--navy)':'var(--border2)'};
-                 background:${y===ym?'var(--navy)':'#fff'};
-                 color:${y===ym?'#fff':'var(--text2)'};
-                 cursor:pointer;font-family:inherit;font-weight:${y===ym?700:400}">
-          ${label}
-        </button>`;
-      }).join('');
+      // 年→月の2段階選択
+      const fieldYears=[...new Set(ymList.map(y=>y.slice(0,4)))].sort();
+      const fieldCurYear=ym?ym.slice(0,4):fieldYears[fieldYears.length-1];
+      const fieldMonths=ymList.filter(y=>y.startsWith(fieldCurYear));
+      btnEl.innerHTML=`
+        <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-end">
+          ${fieldYears.length>1?`<div style="display:flex;gap:3px">
+            ${fieldYears.map(yr=>`<button onclick="FIELD_UI._selectFieldYear('${yr}')"
+              style="font-size:10px;padding:2px 7px;border-radius:3px;
+                     border:1px solid ${yr===fieldCurYear?'var(--navy)':'var(--border2)'};
+                     background:${yr===fieldCurYear?'var(--navy)':'#fff'};
+                     color:${yr===fieldCurYear?'#fff':'var(--text2)'};
+                     cursor:pointer;font-family:inherit;font-weight:${yr===fieldCurYear?700:400}">
+              ${yr}年
+            </button>`).join('')}
+          </div>`:''}
+          <div style="display:flex;gap:3px">
+            ${fieldMonths.map(y=>`<button onclick="FIELD_UI.changeFieldMonth('${y}')"
+              style="font-size:10px;padding:2px 7px;border-radius:3px;
+                     border:1px solid ${y===ym?'var(--blue)':'var(--border2)'};
+                     background:${y===ym?'var(--blue)':'#fff'};
+                     color:${y===ym?'#fff':'var(--text2)'};
+                     cursor:pointer;font-family:inherit;font-weight:${y===ym?700:400}">
+              ${parseInt(y.slice(4))}月
+            </button>`).join('')}
+          </div>
+        </div>`;
     } else if (btnEl) {
       btnEl.innerHTML = '';
     }
@@ -5673,6 +5717,19 @@ const CLOUD_DEBUG = {
     FIELD_STATE.currentYM = ym;
     this.updatePeriodBadge();
     this.renderTab(this._tab);
+  };
+
+  // 現場明細: 年ボタン押下 → その年の最初の月に切り替え
+  FIELD_UI._selectFieldYear = function(year) {
+    const ymList = FIELD_STATE.ymList();
+    const monthsInYear = ymList.filter(y => y.startsWith(year));
+    if (monthsInYear.length > 0) {
+      const cur = FIELD_STATE.currentYM;
+      if (!cur || !cur.startsWith(year)) {
+        FIELD_STATE.currentYM = monthsInYear[0];
+      }
+    }
+    this.updatePeriodBadge(); // 月ボタンを再描画
   };
 })();
 </script>
