@@ -7074,21 +7074,23 @@ FIELD_UI.changeFieldMonth = function(ym) {
    
  
     FIELD_UI.selectFY = function(fy) {
-     const ymList = FIELD_STATE.ymList();
-     const fyOf = y => {
-       const mo = parseInt(y.slice(4)), yr = parseInt(y.slice(0,4));
-       return mo >= (CONFIG.FISCAL_START_MONTH||4) ? yr : yr-1;
-     };
-     const fyMonths = ymList.filter(y => fyOf(y) === fy);
-   
-     if (fyMonths.length === 0) {
-       alert(fy + '年度の現場明細データはありません。データ取込からCSVまたはPDFを読み込んでください。');
-       return;
-     }
+  const ymList = FIELD_STATE.ymList();
+  const fyOf = y => {
+    const mo = parseInt(y.slice(4)), yr = parseInt(y.slice(0,4));
+    return mo >= (CONFIG.FISCAL_START_MONTH||4) ? yr : yr-1;
+  };
+  const fyMonths = ymList.filter(y => fyOf(y) === fy);
+
+  if (fyMonths.length === 0) {
+    alert(fy + '年度の現場明細データはありません。データ取込からCSVまたはPDFを読み込んでください。');
+    return;
+  }
 
   FIELD_STATE.currentYM = fyMonths[fyMonths.length-1];
   this.updatePeriodBadge();
   this.renderTab(this._tab);
 };
+
+FIELD_UI._selectFY = FIELD_UI.selectFY;
 </body>
 </html>
