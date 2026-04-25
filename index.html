@@ -1359,8 +1359,14 @@ const UI = {
     let sel='';
     if(ml.length>1){
       sel='<div style="display:flex;gap:3px;align-items:center;flex-wrap:wrap">' +
-        ml.map(ym=>`<button onclick="UI.changeMonth('${ym}')"
-          style="font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid ${ym===STATE.currentYM?'var(--navy)':'var(--border2)'};background:${ym===STATE.currentYM?'var(--navy)':'#fff'};color:${ym===STATE.currentYM?'#fff':'var(--text2)'};cursor:pointer;font-family:inherit;font-weight:${ym===STATE.currentYM?700:400}">${parseInt(ym.slice(4))}月</button>`).join('')
+        ml.map(ym=>{
+          const yr=ym.slice(2,4); const mo=parseInt(ym.slice(4));
+          // 年が複数混在する場合は年も表示
+          const years=new Set(ml.map(y=>y.slice(0,4)));
+          const label = years.size>1 ? `${yr}/${mo}月` : `${mo}月`;
+          return `<button onclick="UI.changeMonth('${ym}')"
+            style="font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid ${ym===STATE.currentYM?'var(--navy)':'var(--border2)'};background:${ym===STATE.currentYM?'var(--navy)':'#fff'};color:${ym===STATE.currentYM?'#fff':'var(--text2)'};cursor:pointer;font-family:inherit;font-weight:${ym===STATE.currentYM?700:400}">${label}</button>`;
+        }).join('')
         +'</div>';
     }
     const bdg=ds.type==='confirmed'?'<span class="badge badge-ok">確定値 (SKDL0003)</span>':'<span class="badge badge-warn">速報値 (SKDL0001・日報)</span>';
@@ -2411,7 +2417,12 @@ const FIELD_UI = {
     const el = document.getElementById('field-period-badge');
     if (!ym) { el.textContent='データ未読込'; return; }
     const ymList = FIELD_STATE.ymList();
-    el.textContent = `${UI.fmtYM(ym)} / ${ymList.length}ヶ月分`;
+    // 年度が混在する場合はすべての期間を表示
+    const minYM = ymList[0], maxYM = ymList[ymList.length-1];
+    const rangeText = ymList.length > 1 && minYM.slice(0,4) !== maxYM.slice(0,4)
+      ? `${UI.fmtYM(minYM)}〜${UI.fmtYM(maxYM)}`
+      : `${UI.fmtYM(ym)}`;
+    el.textContent = `${rangeText} / ${ymList.length}ヶ月分`;
     el.style.color = 'var(--navy)';
     el.style.fontWeight = '600';
   },
@@ -5639,15 +5650,19 @@ const CLOUD_DEBUG = {
 
     // 月切り替えボタン
     if (btnEl && ymList.length > 1) {
-      btnEl.innerHTML = ymList.map(y =>
-        `<button onclick="FIELD_UI.changeFieldMonth('${y}')"
+      const fieldYears = new Set(ymList.map(y=>y.slice(0,4)));
+      btnEl.innerHTML = ymList.map(y => {
+        const yr = y.slice(2,4); const mo = parseInt(y.slice(4));
+        const label = fieldYears.size > 1 ? `${yr}/${mo}月` : `${mo}月`;
+        return `<button onclick="FIELD_UI.changeFieldMonth('${y}')"
           style="font-size:11px;padding:3px 8px;border-radius:4px;
                  border:1px solid ${y===ym?'var(--navy)':'var(--border2)'};
                  background:${y===ym?'var(--navy)':'#fff'};
                  color:${y===ym?'#fff':'var(--text2)'};
                  cursor:pointer;font-family:inherit;font-weight:${y===ym?700:400}">
-          ${parseInt(y.slice(4))}月
-        </button>`).join('');
+          ${label}
+        </button>`;
+      }).join('');
     } else if (btnEl) {
       btnEl.innerHTML = '';
     }
