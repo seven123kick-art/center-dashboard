@@ -6018,7 +6018,7 @@ const HISTORY = {
     const skksMonths = _origMonthList();
     const histMonths = HISTORY.monthList();
     // 重複排除してソート
-    return [...new Set([...skksMonths, ...histMonths])].sort();
+    return [...new Set([...skksMonths, ...histMonths])].filter(ym => ym && /^\d{6}$/.test(ym)).sort();
   };
   // dsForYM は SKKS のみでOK（元のまま）
   console.log('[PATCH0] STATE.monthList HISTORY対応済み');
@@ -6747,9 +6747,10 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
    202504 → '2025'（4月は当年度）
 ══════════════════════════════════════════════════════ */
 function getFiscalYear(ym) {
-  if (!ym) return null;
+  if (!ym || typeof ym !== 'string' || ym.length < 6) return null;
   const y  = parseInt(ym.slice(0, 4));
-  const mo = parseInt(ym.slice(4));
+  const mo = parseInt(ym.slice(4, 6));
+  if (isNaN(y) || isNaN(mo)) return null;
   return mo >= (CONFIG.FISCAL_START_MONTH || 4) ? String(y) : String(y - 1);
 }
 
@@ -6797,7 +6798,7 @@ UI.updateTopbar = function() {
   let sel = '';
   if (ml.length > 1) {
     // ★ 会計年度リストを生成（カレンダー年ではなく会計年度）
-    const fiscalYears = [...new Set(ml.map(ym => getFiscalYear(ym)))].sort();
+    const fiscalYears = [...new Set(ml.filter(ym=>/^\d{6}$/.test(ym)).map(ym => getFiscalYear(ym)).filter(Boolean))].sort();
 
     // ★ 現在月の会計年度
     const curFY = getFiscalYear(STATE.currentYM) || fiscalYears[fiscalYears.length - 1];
