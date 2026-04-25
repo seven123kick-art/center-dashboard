@@ -4730,13 +4730,9 @@ const PLAN = {
   initYearSel() {
     const sel = document.getElementById('plan-year-sel');
     if (!sel) return;
-    const today = new Date();
-const now = today.getMonth() + 1 >= (CONFIG.FISCAL_START_MONTH || 4)
-  ? today.getFullYear()
-  : today.getFullYear() - 1;
-
-sel.innerHTML = '';
-for (let y = now - 2; y <= now + 3; y++) {
+    const now = new Date().getFullYear();
+    sel.innerHTML = '';
+    for (let y = now - 2; y <= now + 3; y++) {
       const opt = document.createElement('option');
       opt.value = String(y);
       opt.textContent = `${y}年度（${y}年4月〜${y+1}年3月）`;
@@ -7098,5 +7094,248 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
   console.log('[FIX] renderAnnual: 会計年度ベースに修正済み');
 })();
 </script>
+
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════
+   STATUS — データなし / 未取込 / 同期失敗の見える化
+   目的：壊れているのか、データがないだけなのかを画面で判別できるようにする
+═══════════════════════════════════════════════════════════ */
+(function(){
+  if (window.STATUS && window.STATUS.__installed) return;
+
+  const STATUS = {
+    __installed: true,
+
+    ensureStyle(){
+      if (document.getElementById('status-style')) return;
+      const st = document.createElement('style');
+      st.id = 'status-style';
+      st.textContent = `
+        #app-status-panel{display:none;margin:0 0 14px 0;border-radius:8px;padding:12px 14px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;font-size:12px;line-height:1.7;box-shadow:var(--shadow)}
+        #app-status-panel.status-info{display:block;background:#eff6ff;border-color:#93c5fd;color:#1e3a8a}
+        #app-status-panel.status-warn{display:block;background:#fffbeb;border-color:#fcd34d;color:#78350f}
+        #app-status-panel.status-ng{display:block;background:#fee2e2;border-color:#fca5a5;color:#7f1d1d}
+        #app-status-panel .status-title{font-size:13px;font-weight:700;margin-bottom:3px}
+        #app-status-panel .status-body{font-size:12px;color:inherit}
+        .inline-empty-message{padding:28px 12px;text-align:center;color:var(--text3);font-size:13px;line-height:1.8;background:#fafafa;border:1px dashed #d1d5db;border-radius:8px;margin:10px}
+        .inline-empty-message strong{display:block;color:#78350f;font-size:14px;margin-bottom:4px}
+      `;
+      document.head.appendChild(st);
+    },
+
+    panel(){
+      this.ensureStyle();
+      let p = document.getElementById('app-status-panel');
+      if (!p) {
+        p = document.createElement('div');
+        p.id = 'app-status-panel';
+        p.innerHTML = '<div class="status-title"></div><div class="status-body"></div>';
+        const content = document.getElementById('content');
+        if (content) content.insertBefore(p, content.firstChild);
+      }
+      return p;
+    },
+
+    show(type, title, body){
+      const p = this.panel();
+      p.className = 'status-' + (type || 'info');
+      p.querySelector('.status-title').textContent = title || '';
+      p.querySelector('.status-body').innerHTML = body || '';
+    },
+
+    hide(){
+      const p = document.getElementById('app-status-panel');
+      if (p) { p.className = ''; p.style.display = 'none'; }
+    },
+
+    currentView(){
+      const active = document.querySelector('.view.active');
+      return active ? active.id.replace('view-', '') : 'dashboard';
+    },
+
+    skdlMonths(){
+      try { return (window.STATE && typeof STATE.monthList === 'function') ? STATE.monthList() : []; }
+      catch(e){ return []; }
+    },
+
+    fieldMonths(){
+      try { return (window.FIELD_STATE && typeof FIELD_STATE.ymList === 'function') ? FIELD_STATE.ymList() : []; }
+      catch(e){ return []; }
+    },
+
+    fmtYM(ym){
+      if (window.UI && typeof UI.fmtYM === 'function') return UI.fmtYM(ym);
+      return ym || '';
+    },
+
+    evaluate(){
+      const view = this.currentView();
+      if (view === 'import') { this.hide(); return; }
+
+      if (view === 'field') {
+        const months = this.fieldMonths();
+        if (!months.length) {
+          this.show('warn', '現場明細データが未取込です', 'この画面は壊れていません。右上の <b>「+ データ取込」</b> から作業者別CSVまたはエリア別PDFを読み込んでください。');
+          return;
+        }
+        const ym = FIELD_STATE.currentYM;
+        if (ym && !months.includes(ym)) {
+          this.show('info', 'この月の現場明細データはありません', `${this.fmtYM(ym)} の現場明細データは未取込です。データがある月を選ぶか、右上の <b>「+ データ取込」</b> から読み込んでください。`);
+          return;
+        }
+        this.hide();
+        return;
+      }
+
+      const months = this.skdlMonths();
+      if (!months.length) {
+        this.show('warn', '収支データが未取込です', 'この画面は壊れていません。左メニューの <b>「データ取込」</b> からSKDL形式のCSVを読み込んでください。');
+        return;
+      }
+
+      if (STATE.currentYM && !months.includes(STATE.currentYM)) {
+        this.show('info', 'この月の収支データはありません', `${this.fmtYM(STATE.currentYM)} の収支データは未取込です。データがある月を選ぶか、データ取込からCSVを読み込んでください。`);
+        return;
+      }
+
+      this.hide();
+    },
+
+    showCloudError(message){
+      const msg = message || 'クラウド同期に失敗しました。ローカルに保存済みのデータがあれば表示は継続できます。';
+      this.show('ng', 'クラウド同期エラー', msg + '<br>通信環境、Supabase設定、公開URLの反映状況を確認してください。');
+      const session = document.getElementById('session-msg');
+      if (session) session.innerHTML = '<span style="color:#fca5a5">クラウド同期に失敗しました</span>';
+      const label = document.getElementById('cloud-label');
+      const dot = document.getElementById('cloud-dot');
+      if (label) label.textContent = 'クラウド: 同期失敗';
+      if (dot) dot.style.background = '#dc2626';
+    }
+  };
+
+  window.STATUS = STATUS;
+
+  function renderFieldNoData(ym){
+    const label = STATUS.fmtYM(ym);
+    const html = `<div class="inline-empty-message"><strong>この月の現場明細データはありません</strong>${label} の作業者別CSVまたはPDFが未取込です。右上の「+ データ取込」から読み込んでください。</div>`;
+
+    const pane = document.querySelector('#view-field .field-pane.active');
+    if (pane) {
+      const first = pane.querySelector('.kpi-row, .card-body, .scroll-x');
+      if (first) first.innerHTML = html;
+    }
+
+    ['f-worker-tbody','f-content-tbody','f-product-tbody','f-city-tbody'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = `<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--text3)">この月のデータがありません</td></tr>`;
+    });
+  }
+
+  // 画面切替後に状態表示を更新
+  if (window.NAV && typeof NAV.go === 'function') {
+    const _navGo = NAV.go.bind(NAV);
+    NAV.go = function(btn){
+      const result = _navGo(btn);
+      setTimeout(() => STATUS.evaluate(), 0);
+      return result;
+    };
+  }
+
+  // 収支月切替：データなし月を選んでも「壊れ」ではなく未取込として表示
+  if (window.UI && typeof UI.changeMonth === 'function') {
+    const _changeMonth = UI.changeMonth.bind(UI);
+    UI.changeMonth = function(ym){
+      const months = STATUS.skdlMonths();
+      if (!months.includes(ym)) {
+        STATE.currentYM = ym;
+        if (typeof UI.updateTopbar === 'function') UI.updateTopbar();
+        STATUS.evaluate();
+        return;
+      }
+      const result = _changeMonth(ym);
+      setTimeout(() => STATUS.evaluate(), 0);
+      return result;
+    };
+  }
+
+  // 現場明細月切替：ポップではなく画面上に明示
+  if (window.FIELD_UI && window.FIELD_STATE) {
+    FIELD_UI.changeFieldMonth = function(ym) {
+      FIELD_STATE.currentYM = ym;
+      this.updatePeriodBadge();
+
+      const ymList = STATUS.fieldMonths();
+      if (!ymList.includes(ym)) {
+        renderFieldNoData(ym);
+        STATUS.evaluate();
+        return;
+      }
+
+      this.renderTab(this._tab);
+      setTimeout(() => STATUS.evaluate(), 0);
+    };
+
+    FIELD_UI.selectFY = function(fy) {
+      fy = parseInt(fy, 10);
+      const ymList = STATUS.fieldMonths();
+      const startMo = (window.CONFIG && CONFIG.FISCAL_START_MONTH) || 4;
+      const fyOfYM = y => {
+        const mo = parseInt(String(y).slice(4), 10);
+        const yr = parseInt(String(y).slice(0, 4), 10);
+        return mo >= startMo ? yr : yr - 1;
+      };
+      const ymFromFYMonth = (fy, mo) => {
+        mo = String(mo).padStart(2, '0');
+        const year = parseInt(mo, 10) >= startMo ? fy : fy + 1;
+        return `${year}${mo}`;
+      };
+      const fyMonths = ymList.filter(y => fyOfYM(y) === fy);
+
+      if (!fyMonths.length) {
+        FIELD_STATE.currentYM = ymFromFYMonth(fy, startMo);
+        this.updatePeriodBadge();
+        renderFieldNoData(FIELD_STATE.currentYM);
+        STATUS.evaluate();
+        return;
+      }
+
+      FIELD_STATE.currentYM = fyMonths[fyMonths.length - 1];
+      this.updatePeriodBadge();
+      this.renderTab(this._tab);
+      setTimeout(() => STATUS.evaluate(), 0);
+    };
+
+    FIELD_UI._selectFY = FIELD_UI.selectFY;
+  }
+
+  // クラウド同期失敗を赤帯で見える化
+  if (window.CLOUD && typeof CLOUD.restoreFromCloud === 'function') {
+    const _restoreFromCloud = CLOUD.restoreFromCloud.bind(CLOUD);
+    CLOUD.restoreFromCloud = async function(){
+      try {
+        const result = await _restoreFromCloud.apply(CLOUD, arguments);
+        if (result === 0 && CLOUD.isConfigured && CLOUD.isConfigured()) {
+          const session = document.getElementById('session-msg');
+          if (session) session.innerHTML = '<span style="color:#facc15">クラウド同期: 取得データなし</span>';
+        }
+        setTimeout(() => STATUS.evaluate(), 0);
+        return result;
+      } catch(e) {
+        console.warn('[STATUS] cloud restore failed:', e);
+        STATUS.showCloudError(e && e.message ? e.message : String(e));
+        return 0;
+      }
+    };
+  }
+
+  // 起動後・データ取込後の状態更新
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => STATUS.evaluate(), 300);
+    setTimeout(() => STATUS.evaluate(), 1500);
+  });
+})();
+</script>
+
 </body>
 </html>
