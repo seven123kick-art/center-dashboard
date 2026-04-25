@@ -4725,11 +4725,6 @@ const PLAN = {
       badge.className = 'badge badge-warn';
     }
   },
-
-    _updateBadge() {
-    // ここは既存のまま
-  },
-
   // データ取込画面の年度セレクトを初期化
   initYearSel() {
     const sel = document.getElementById('plan-year-sel');
@@ -4741,7 +4736,6 @@ const PLAN = {
       : today.getFullYear() - 1;
 
     sel.innerHTML = '';
-
     for (let y = now - 2; y <= now + 3; y++) {
       const opt = document.createElement('option');
       opt.value = String(y);
@@ -4753,11 +4747,11 @@ const PLAN = {
     sel.onchange = function(){
       const ta = document.getElementById('plan-paste-area');
       const msg = document.getElementById('plan-import-msg');
-
       if (ta) ta.value = '';
       if (msg) msg.textContent = '';
     };
   },
+
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -7251,43 +7245,9 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
         return;
       }
 
-     if (view === 'pl') {
-  this.hide();
-  return;
-}
-
-const titleEl = document.querySelector('h1, .page-title, .view-title');
-const titleText = titleEl ? titleEl.textContent : '';
-
-if (titleText.includes('月次収支表')) {
-  this.hide();
-  return;
-}
-
-if (this.hasRevenueData()) {
-  this.hide();
-  return;
-}
-
-const months = this.skdlMonths();
-     const tbody = document.getElementById('pl-tbody');
-if (tbody && tbody.children.length > 0) {
-  this.hide();
-  return;
-}
-
-if (!months.length) {
-  this.show('warn', '収支データが未取込です', '...');
-  return;
-}
-
-
-if (STATE.currentYM && !months.includes(STATE.currentYM) && (!tbody || tbody.children.length === 0)) {
-        this.show('info', 'この月の収支データはありません', `${this.fmtYM(STATE.currentYM)} の収支データは未取込です。データがある月を選ぶか、データ取込からCSVを読み込んでください。`);
-        return;
-      }
-
+      // 収支系画面は表の描画状態を優先するため、STATUSの未取込帯は出さない
       this.hide();
+      return;
     },
 
     showCloudError(message){
