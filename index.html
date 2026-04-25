@@ -7270,12 +7270,19 @@ if (this.hasRevenueData()) {
 }
 
 const months = this.skdlMonths();
-      if (!months.length) {
-        this.show('warn', '収支データが未取込です', 'この画面は壊れていません。左メニューの <b>「データ取込」</b> からSKDL形式のCSVを読み込んでください。');
-        return;
-      }
+     const tbody = document.getElementById('pl-tbody');
+if (tbody && tbody.children.length > 0) {
+  this.hide();
+  return;
+}
 
-      if (STATE.currentYM && !months.includes(STATE.currentYM)) {
+if (!months.length) {
+  this.show('warn', '収支データが未取込です', '...');
+  return;
+}
+
+      const tbody = document.getElementById('pl-tbody');
+if (STATE.currentYM && !months.includes(STATE.currentYM) && (!tbody || tbody.children.length === 0)) {
         this.show('info', 'この月の収支データはありません', `${this.fmtYM(STATE.currentYM)} の収支データは未取込です。データがある月を選ぶか、データ取込からCSVを読み込んでください。`);
         return;
       }
