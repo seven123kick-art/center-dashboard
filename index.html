@@ -6885,3 +6885,114 @@ UI._renderPLFromHistory = function(m) {
 
 console.log('[PATCH2] _renderPLFromHistory 全科目表示に修正済み');
 </script>
+<!-- ════════════════════════════════════════════════════════
+     【追加パッチ3】クラウド同期が強制的にページを切り替える問題を修正
+     fix_patch2 の後ろに追記（</html>直前）
+════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+/* ══════════════════════════════════════════════════════
+   クラウド同期バックグラウンドが
+   ユーザーの現在の画面・月選択を上書きしないよう修正
+
+   原因: CLOUD.restoreFromCloud() 完了時に
+     ① STATE.currentYM をクラウドの値で上書き
+     ② setTimeout(NAV.go(dashboard), 200) で強制画面遷移
+   していた
+
+   修正: ユーザーがすでに月を選択・画面表示中なら
+     ① YMを上書きしない
+     ② 強制遷移しない（topbarだけ更新）
+══════════════════════════════════════════════════════ */
+(function fixCloudSyncForcedNav() {
+  const _origRestore = CLOUD.restoreFromCloud.bind(CLOUD);
+
+  CLOUD.restoreFromCloud = async function() {
+    // 同期開始時のユーザー状態を記憶
+    const userYM      = STATE.currentYM;
+    const activeView  = document.querySelector('.nav-item.active')?.dataset?.view;
+    const userIsOnPage = !!userYM; // すでにデータを見ているか
+
+    // NAV.go を一時的に差し替えて強制遷移をブロック
+    const _realNavGo = NAV.go;
+    if (userIsOnPage) {
+      NAV.go = function(btn) {
+        // クラウド同期からの強制遷移はスキップ
+        // topbar だけ更新
+        UI.updateTopbar();
+        console.log('[PATCH3] クラウド同期の強制遷移をブロックしました');
+      };
+    }
+
+    let result;
+    try {
+      result = await _origRestore.call(this);
+    } finally {
+      // setTimeout(200) が発火した後（350ms後）に元に戻す
+      setTimeout(() => {
+        NAV.go = _realNavGo; // NAV.go を元に戻す
+
+        if (userIsOnPage && userYM) {
+          // ユーザーの月選択を復元（クラウドの値で上書きしない）
+          STATE.currentYM = userYM;
+          UI.updateTopbar();
+          // ユーザーが見ていたページに留まる
+          if (activeView && activeView !== 'dashboard') {
+            const btn = document.querySelector(`.nav-item[data-view="${activeView}"]`);
+            if (btn) _realNavGo.call(NAV, btn);
+          }
+          console.log('[PATCH3] ユーザーの選択を復元:', userYM, activeView);
+        }
+      }, 350);
+    }
+
+    return result;
+  };
+
+  console.log('[PATCH3] クラウド同期強制遷移ブロック適用済み');
+})();
+
+/* ══════════════════════════════════════════════════════
+   起動時の復元順序も修正
+   SIMPLE_STOREで復元したデータをクラウド同期が上書きしないように
+   doRestore内でクラウド同期後にSIMPLE_STOREの値を優先させる
+══════════════════════════════════════════════════════ */
+(function fixBootRestoreOrder() {
+  // DOMContentLoaded 後の最初の doRestore が終わった後に
+  // クラウドが後から来ても SIMPLE_STORE の値を守るフラグ
+  let _simpleRestoreDone = false;
+  let _simpleRestoredYM  = null;
+
+  // SIMPLE_STORE.restoreAll をラップして復元後の値を記録
+  const _origSimpleRestore = SIMPLE_STORE.restoreAll.bind(SIMPLE_STORE);
+  SIMPLE_STORE.restoreAll = async function() {
+    const result = await _origSimpleRestore.call(this);
+    if (result > 0) {
+      _simpleRestoreDone = true;
+      _simpleRestoredYM  = STATE.currentYM;
+      console.log('[PATCH3] SIMPLE_STORE復元完了, YM:', _simpleRestoredYM);
+    }
+    return result;
+  };
+
+  // CLOUD.restoreFromCloud をさらにラップ:
+  // SIMPLE_STOREで復元済みなら currentYM を上書きしない
+  const _prevCloudRestore = CLOUD.restoreFromCloud.bind(CLOUD);
+  CLOUD.restoreFromCloud = async function() {
+    const result = await _prevCloudRestore.call(this);
+
+    // SIMPLE_STOREで復元済みなのにクラウドがYMを変えていたら戻す
+    if (_simpleRestoreDone && _simpleRestoredYM &&
+        STATE.currentYM !== _simpleRestoredYM) {
+      console.log('[PATCH3] クラウドによるYM上書きを戻す:',
+        STATE.currentYM, '→', _simpleRestoredYM);
+      STATE.currentYM = _simpleRestoredYM;
+      UI.updateTopbar();
+    }
+
+    return result;
+  };
+
+  console.log('[PATCH3] 起動時復元順序修正適用済み');
+})();
+</script>
