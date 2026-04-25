@@ -818,36 +818,50 @@ window.onunhandledrejection = function(e) {
         <div class="card-header"><span class="card-title">読み込み済みデータ</span></div>
         <div id="data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
       </div>
-      <!-- 計画データ取込 -->
+      <!-- 計画・過去実績データ取込（統合UI） -->
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
-          <span class="card-title">📋 計画データ取込（予算管理）</span>
-          <span id="plan-badge" class="badge badge-warn">未登録</span>
+          <span class="card-title">📋 計画・過去実績データ取込</span>
+          <div style="display:flex;gap:6px">
+            <span id="plan-badge" class="badge badge-warn">計画:未登録</span>
+            <span id="history-badge" class="badge badge-warn">実績:未登録</span>
+          </div>
         </div>
         <div class="card-body">
-          <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8">
-            月次収支表の「計画」値をコピペで取込みます。<br>
-            Excelの計画表を開き、<strong>科目名〜月次データ部分を全選択してコピー（Ctrl+C）</strong>し、下にペーストしてください。
+          <div style="display:flex;gap:0;margin-bottom:14px;border-radius:6px;overflow:hidden;border:1px solid var(--border2);width:fit-content">
+            <button id="tsv-type-plan" onclick="TSV_IMPORT.setType('plan')"
+              style="padding:8px 20px;font-size:12px;font-weight:700;border:none;cursor:pointer;font-family:inherit;background:#1a4d7c;color:#fff">
+              📋 計画データ
+            </button>
+            <button id="tsv-type-history" onclick="TSV_IMPORT.setType('history')"
+              style="padding:8px 20px;font-size:12px;font-weight:700;border:none;cursor:pointer;font-family:inherit;background:#f8fafc;color:var(--text2)">
+              📊 過去実績（確定値）
+            </button>
+          </div>
+          <div id="tsv-desc-plan" style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8;padding:10px;background:#eff6ff;border-radius:6px;border-left:3px solid #1a4d7c">
+            <strong>計画データ</strong>：月次収支の予算値です。取込むと月次収支表に「計画・差異・達成率」列が追加されます。
+          </div>
+          <div id="tsv-desc-history" style="display:none;font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8;padding:10px;background:#f0fdf4;border-radius:6px;border-left:3px solid #16a34a">
+            <strong>過去実績（確定値）</strong>：詳細CSVがない月の補完データです。収支推移・KPI・月次収支表に反映されます。<br>
+            <span style="color:#065f46">※ 荷主別・作業者別の詳細は表示されません</span>
           </div>
           <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
             <label style="font-size:11px;font-weight:600;color:var(--text2)">対象年度：</label>
-            <select id="plan-year-sel" style="font-size:12px;padding:4px 8px">
-            </select>
-            <span style="font-size:11px;color:var(--text2)">年度</span>
-            <span style="font-size:11px;color:var(--text3)">（4月始まり）</span>
+            <select id="tsv-year-sel" style="font-size:12px;padding:4px 8px"></select>
+            <span style="font-size:11px;color:var(--text2)">年度（4月始まり）</span>
           </div>
-          <textarea id="plan-paste-area"
-            placeholder="Excelの計画データをここにペースト（Ctrl+V）&#10;&#10;例:&#10;営業収益&#9;357,277&#9;31,400&#9;29,475&#9;...&#10;人件費&#9;82,554&#9;7,370&#9;6,435&#9;..."
-            style="width:100%;height:140px;font-size:11px;font-family:monospace;padding:8px;border:1px solid var(--border2);border-radius:6px;resize:vertical;color:var(--text)"></textarea>
-          <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
-            <button class="btn btn-primary" onclick="PLAN.importFromPaste()" style="font-size:12px">取込む</button>
-            <button class="btn" onclick="PLAN.clear()" style="font-size:12px;color:var(--red)">計画データをクリア</button>
-            <span id="plan-import-msg" style="font-size:11px;color:var(--text2)"></span>
+          <textarea id="tsv-paste-area"
+            placeholder="Excelからコピー（Ctrl+C）してここにペースト（Ctrl+V）&#10;列順: 科目名 | 年計 | 4月 | 5月 | ... | 3月"
+            style="width:100%;height:130px;font-size:11px;font-family:monospace;padding:8px;border:1px solid var(--border2);border-radius:6px;resize:vertical;color:var(--text)"></textarea>
+          <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+            <button class="btn btn-primary" onclick="TSV_IMPORT.doImport()" style="font-size:12px">取込む</button>
+            <button class="btn" onclick="TSV_IMPORT.doClear()" style="font-size:12px;color:var(--red)">クリア</button>
+            <span id="tsv-import-msg" style="font-size:11px;color:var(--text2)"></span>
           </div>
         </div>
       </div>
 
-      <!-- クラウド同期設定 -->
+            <!-- クラウド同期設定 -->
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
           <span class="card-title">☁ クラウド同期設定（Supabase）</span>
@@ -5426,6 +5440,235 @@ window.addEventListener('beforeunload', () => {
   };
 })();
 </script>
+
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════
+   HISTORY_PATCH — 過去実績データをSKDLと統合して表示
+   優先順位: SKDL確定値 > SKDL日報 > 過去実績（集計値）
+═══════════════════════════════════════════════════════════ */
+
+// ── 統合月リスト（SKDL + HISTORY）
+const _origMonthList = STATE.monthList.bind(STATE);
+STATE.monthList = function() {
+  const skdl = _origMonthList();
+  if (!HISTORY.hasData()) return skdl;
+  return HISTORY.allMonthList();
+};
+
+// ── 統合mapByYM（月→科目別金額マップ）
+const _origMapByYM = STATE.mapByYM.bind(STATE);
+STATE.mapByYM = function() {
+  const result = {};
+  const allYMs = this.monthList();
+  allYMs.forEach(ym => {
+    const ds = this.dsForYM(ym);
+    if (ds) {
+      // SKDLデータあり → 通常通り
+      result[ym] = CALC.buildMap(ds.rows);
+    } else {
+      // SKDLなし → HISTORYから科目マップを生成
+      const hm = HISTORY.getMonthMap(ym);
+      if (hm) {
+        // HISTORYのデータは {科目名: 金額(円)} の形式
+        // CALC.buildMap と同じ形式に変換
+        result[ym] = hm;
+      }
+    }
+  });
+  return result;
+};
+
+// ── CALC.income/expense/profit をHISTORY対応に
+// HISTORYデータは科目名→金額の直接マップなので CALC.sum はそのまま使える
+// ただし「営業収益」「売上原価」などのサマリー行もあるので、
+// 詳細科目が0の場合はサマリー行から取得するフォールバックを追加
+
+const _origIncome = CALC.income.bind(CALC);
+CALC.income = function(m) {
+  const detail = _origIncome(m);
+  if (detail > 0) return detail;
+  // 詳細科目がなければサマリー行から取得
+  return m['営業収益'] || m['営業収益計'] || 0;
+};
+
+const _origExpense = CALC.expense.bind(CALC);
+CALC.expense = function(m) {
+  const detail = _origExpense(m);
+  if (detail > 0) return detail;
+  return m['売上原価'] || 0;
+};
+
+// ── CALC.count はHISTORYでは0になるので注意（詳細行がないため）
+// → 月次収支表などでは「--」と表示される
+
+// ── topbarの月ボタン: HISTORY月はバッジ表示を変える
+const _origUpdateTopbar = UI.updateTopbar.bind(UI);
+UI.updateTopbar = function() {
+  _origUpdateTopbar();
+  // HISTORY月ボタンに「集計」バッジを追加
+  // (topbar-rightを再走査してdata属性で判定)
+  // → ボタンのtitleに "(過去実績)" を付与する形で対応
+  const ml = STATE.monthList();
+  ml.forEach(ym => {
+    const src = HISTORY.getSource(ym);
+    if (src === 'history') {
+      // ボタンを探してスタイル変更
+      const btns = document.querySelectorAll('#topbar-right button');
+      btns.forEach(btn => {
+        if (btn.onclick && btn.onclick.toString().includes(ym)) {
+          btn.style.borderStyle = 'dashed';
+          btn.title = `${UI.fmtYM(ym)} (過去実績・集計値)`;
+        }
+      });
+    }
+  });
+};
+
+// ── activeDS がnullでもHISTORYデータがあればレンダリングを続行
+const _origRenderDashboard = UI.renderDashboard.bind(UI);
+UI.renderDashboard = function() {
+  const ds = STATE.activeDS();
+  const hasHistory = HISTORY.hasData() && HISTORY.getMonthMap(STATE.currentYM);
+  if (!ds && !hasHistory) {
+    DISPLAY.clearAll();
+    const kpiEl = document.getElementById('kpi-area');
+    if (kpiEl) kpiEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:16px 0">データを読み込んでください</div>';
+    return;
+  }
+  // currentYMのデータソースを確認
+  if (!ds && hasHistory && STATE.currentYM) {
+    // HISTORYのみ → renderDashboard_Historyを使用
+    this._renderDashboardFromHistory();
+    return;
+  }
+  _origRenderDashboard();
+};
+
+// ── HISTORYデータでダッシュボードを描画
+UI._renderDashboardFromHistory = function() {
+  DISPLAY.clearAll();
+  const ym = STATE.currentYM;
+  const m = HISTORY.getMonthMap(ym);
+  if (!m) return;
+
+  const inc = CALC.income(m), exp = CALC.expense(m), prf = inc - exp;
+  const fmtK = this.fmtK.bind(this);
+
+  // KPI
+  document.getElementById('kpi-area').innerHTML = `
+    <div class="kpi-card accent-navy">
+      <div class="kpi-label">売上（収入合計）<span style="font-size:9px;color:#94a3b8;margin-left:4px">過去実績</span></div>
+      <div class="kpi-value navy">${fmtK(inc)}<span style="font-size:13px;color:var(--text2)">千円</span></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">費用合計</div>
+      <div class="kpi-value">${fmtK(exp)}<span style="font-size:13px;color:var(--text2)">千円</span></div>
+      <div class="kpi-sub">収支率 ${CALC.pct(exp,inc)}</div>
+    </div>
+    <div class="kpi-card ${prf>=0?'accent-green':'accent-red'}">
+      <div class="kpi-label">センター利益</div>
+      <div class="kpi-value ${prf>=0?'green':'red'}">${fmtK(prf)}<span style="font-size:13px">千円</span></div>
+      <div class="kpi-sub">利益率 ${CALC.pct(prf,inc)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">月間件数</div>
+      <div class="kpi-value" style="font-size:16px;color:var(--text3)">--</div>
+      <div class="kpi-sub">過去実績は件数非対応</div>
+    </div>`;
+
+  // 推移グラフ（全月）
+  const ml = STATE.monthList();
+  const byYM = STATE.mapByYM();
+  const labels = ml.map(y => `${y.slice(4)}月`);
+  CHARTS.trend('c-main-trend', labels,
+    ml.map(y => CALC.toK(CALC.income(byYM[y]||{}))),
+    ml.map(y => CALC.toK(CALC.expense(byYM[y]||{}))),
+    ml.map(y => CALC.toK(CALC.profit(byYM[y]||{})))
+  );
+};
+
+// ── renderTrend もHISTORY対応（mapByYMが統合済みなので自動対応）
+// ── renderPL はHISTORYからマップを使えるようにする
+const _origRenderPLPatch = UI.renderPL.bind(UI);
+UI.renderPL = function() {
+  const ds = STATE.activeDS();
+  const hm = STATE.currentYM ? HISTORY.getMonthMap(STATE.currentYM) : null;
+
+  if (!ds && !hm) {
+    document.getElementById('pl-tbody').innerHTML =
+      '<tr><td colspan="12" style="padding:20px;color:var(--text3);text-align:center">データがありません</td></tr>';
+    return;
+  }
+
+  if (!ds && hm) {
+    // HISTORYのみ：簡易収支表を表示
+    this._renderPLFromHistory(hm);
+    return;
+  }
+  _origRenderPLPatch();
+};
+
+UI._renderPLFromHistory = function(m) {
+  document.getElementById('pl-card-title').textContent =
+    `月次収支表 — ${this.fmtYM(STATE.currentYM)} （過去実績・集計値）`;
+  const inc = CALC.income(m), exp = CALC.expense(m);
+
+  const row = (label, val, cls='') => {
+    const k = CALC.toK(val).toLocaleString();
+    const p = CALC.pct(val, inc);
+    return `<tr class="${cls}">
+      <td>${label}</td>
+      <td class="r">${k}</td>
+      <td class="r">${p}</td>
+      <td class="r vs-col" colspan="9" style="color:var(--text3);font-size:11px">詳細データなし（過去実績は集計値のみ）</td>
+    </tr>`;
+  };
+
+  const groups = [
+    { l:'営業収益', keys:CONFIG.INCOME_KEYS, cls:'row-sub' },
+    { l:'　家電収入', keys:['家電収入'] },
+    { l:'　委託収入', keys:['委託収入'] },
+    { l:'　その他収入', keys:['その他収入'] },
+    { l:'人件費', keys:['給与手当','人材派遣料','その他人件費'], cls:'row-sub' },
+    { l:'傭車費', keys:['集配傭車','路線備車','路線傭車','委託費'], cls:'row-sub' },
+    { l:'その他費用', keys:CONFIG.EXPENSE_KEYS.filter(k=>!['給与手当','人材派遣料','その他人件費','集配傭車','路線備車','路線傭車','委託費'].includes(k)), cls:'row-sub' },
+    { l:'費用合計', keys:null, val:exp, cls:'row-total' },
+    { l:'センター利益', keys:null, val:inc-exp, cls:inc-exp>=0?'row-profit':'row-loss' },
+  ];
+
+  let html = '<tr class="row-h"><td colspan="12">営業収益の部</td></tr>';
+  groups.forEach(g => {
+    const val = g.val !== undefined ? g.val : CALC.sum(m, g.keys);
+    if (val === 0 && !g.cls?.includes('row-')) return;
+    html += row(g.l, val, g.cls || '');
+  });
+  document.getElementById('pl-tbody').innerHTML = html;
+};
+
+// ── 月次収支表のソースバッジを更新
+const _origRenderPLOrig = UI.renderPL.bind(UI);
+// （すでに上でラップ済み）
+
+// ── topbar の現在月バッジにHISTORY表示
+const _origUpdateTopbar2 = UI.updateTopbar.bind(UI);
+UI.updateTopbar = function() {
+  _origUpdateTopbar2();
+  // 現在月がHISTORYの場合、バッジを「過去実績」に
+  if (STATE.currentYM && HISTORY.getSource(STATE.currentYM) === 'history') {
+    const right = document.getElementById('topbar-right');
+    if (right) {
+      // 既存のバッジを探して差し替え
+      const badges = right.querySelectorAll('.badge');
+      badges.forEach(b => {
+        b.className = 'badge badge-info';
+        b.textContent = '過去実績（集計値）';
+      });
+    }
+  }
+};
+</script>
+
 </body>
 </html>
 <script>
@@ -5958,4 +6201,249 @@ CENTER.switchTo = async function(centerId) {
     DISPLAY.showEmpty(`${CENTER.current.name} にデータがありません。CSVを読み込んでください。`);
   }
 };
+</script>
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════
+   TSV_IMPORT — 計画・過去実績データ統合取込モジュール
+   種別を選んでからペースト → 間違いを防ぐ
+═══════════════════════════════════════════════════════════ */
+const TSV_IMPORT = {
+  _type: 'plan',  // 'plan' or 'history'
+
+  // 種別切り替え
+  setType(type) {
+    this._type = type;
+    const planBtn    = document.getElementById('tsv-type-plan');
+    const histBtn    = document.getElementById('tsv-type-history');
+    const planDesc   = document.getElementById('tsv-desc-plan');
+    const histDesc   = document.getElementById('tsv-desc-history');
+    if (type === 'plan') {
+      planBtn.style.background = '#1a4d7c'; planBtn.style.color = '#fff';
+      histBtn.style.background = '#f8fafc'; histBtn.style.color = 'var(--text2)';
+      planDesc.style.display = ''; histDesc.style.display = 'none';
+    } else {
+      histBtn.style.background = '#16a34a'; histBtn.style.color = '#fff';
+      planBtn.style.background = '#f8fafc'; planBtn.style.color = 'var(--text2)';
+      histDesc.style.display = ''; planDesc.style.display = 'none';
+    }
+    // ペーストエリアをクリア
+    const ta = document.getElementById('tsv-paste-area');
+    if (ta) ta.value = '';
+    const msg = document.getElementById('tsv-import-msg');
+    if (msg) msg.textContent = '';
+  },
+
+  // TSVをパース（計画・実績共通）
+  parseTSV(raw, fy) {
+    const lines = raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(l=>l.trim());
+    const monthMap = {};
+    const months = ['04','05','06','07','08','09','10','11','12','01','02','03'];
+    // YM文字列を生成（1-3月は翌年）
+    const ymFor = mo => {
+      const y = parseInt(mo) >= 4 ? String(fy) : String(fy + 1);
+      return y + mo;
+    };
+    let parsed = 0;
+    for (const line of lines) {
+      const cells = line.split('\t').map(c => c.trim());
+      if (cells.length < 3) continue;
+      const subject = cells[0];
+      if (!subject) continue;
+      // 小計・合計・率・差引き行はスキップ
+      if (/率％$|合計$|原価$|外収入$|外費用$|計$/.test(subject) && !/^(人件費計|傭車費計|燃料費計|修繕費計|施設計|保険料計|租税公課計|道路計|営業費計)$/.test(subject)) continue;
+      months.forEach((mo, i) => {
+        const colIdx = CONFIG.PLAN_MONTH_COLS[mo];
+        if (colIdx === undefined || colIdx >= cells.length) return;
+        const raw = (cells[colIdx] || '0').replace(/,/g,'').replace(/[－−]/g,'0');
+        const val = (parseInt(raw) || 0) * 1000; // 千円→円
+        const ym = ymFor(mo);
+        if (!monthMap[ym]) monthMap[ym] = {};
+        monthMap[ym][subject] = val;
+      });
+      parsed++;
+    }
+    return { monthMap, parsed };
+  },
+
+  // 取込み実行
+  doImport() {
+    const raw    = document.getElementById('tsv-paste-area')?.value?.trim() || '';
+    const yearEl = document.getElementById('tsv-year-sel');
+    const msgEl  = document.getElementById('tsv-import-msg');
+    const fy     = parseInt(yearEl?.value || new Date().getFullYear());
+    if (!raw) { if(msgEl) msgEl.textContent = '❌ データが空です'; return; }
+
+    const { monthMap, parsed } = this.parseTSV(raw, fy);
+    if (parsed === 0) { if(msgEl) msgEl.textContent = '❌ 解析できる行がありません'; return; }
+
+    if (this._type === 'plan') {
+      // 計画データとして保存
+      PLAN._data[PLAN.fyKey(fy)] = monthMap;
+      PLAN._saveToStorage();
+      PLAN._updateBadge();
+      if(msgEl) { msgEl.textContent = `✅ 計画データ取込完了（${fy}年度 / ${parsed}科目）`; msgEl.style.color='var(--green)'; }
+      // 計画バッジ更新
+      const pb = document.getElementById('plan-badge');
+      if(pb) { pb.textContent=`計画:${fy}年度`; pb.className='badge badge-ok'; }
+    } else {
+      // 過去実績として保存
+      HISTORY.saveData(fy, monthMap);
+      if(msgEl) { msgEl.textContent = `✅ 過去実績取込完了（${fy}年度 / ${parsed}科目）`; msgEl.style.color='var(--green)'; }
+      const hb = document.getElementById('history-badge');
+      if(hb) { hb.textContent=`実績:${fy}年度`; hb.className='badge badge-ok'; }
+    }
+
+    setTimeout(() => { if(msgEl) msgEl.style.color='var(--text2)'; }, 5000);
+    // 月次収支表を再描画
+    if (STATE.activeDS() || HISTORY.hasData()) UI.renderPL();
+  },
+
+  // クリア
+  doClear() {
+    if (!confirm(`${this._type === 'plan' ? '計画' : '過去実績'}データをクリアしますか？`)) return;
+    if (this._type === 'plan') {
+      PLAN._data = {}; PLAN._saveToStorage(); PLAN._updateBadge();
+      const pb = document.getElementById('plan-badge');
+      if(pb) { pb.textContent='計画:未登録'; pb.className='badge badge-warn'; }
+    } else {
+      HISTORY.clearAll();
+      const hb = document.getElementById('history-badge');
+      if(hb) { hb.textContent='実績:未登録'; hb.className='badge badge-warn'; }
+    }
+    const msgEl = document.getElementById('tsv-import-msg');
+    if(msgEl) msgEl.textContent = 'クリアしました';
+  },
+
+  // 年度セレクトを初期化（PLAN.initYearSel と同じ）
+  initYearSel() {
+    const sel = document.getElementById('tsv-year-sel');
+    if (!sel) return;
+    const now = new Date().getFullYear();
+    sel.innerHTML = '';
+    for (let y = now - 2; y <= now + 3; y++) {
+      const opt = document.createElement('option');
+      opt.value = String(y);
+      opt.textContent = `${y}年度（${y}/4〜${y+1}/3）`;
+      if (y === now) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  },
+};
+
+/* ═══════════════════════════════════════════════════════════
+   HISTORY — 過去実績データ管理
+═══════════════════════════════════════════════════════════ */
+const HISTORY = {
+  _data: {},  // { 'fy2025': { '202504': { '営業収益': 31400000, ... }, ... } }
+
+  fyKey(year) { return `fy${year}`; },
+
+  saveData(fy, monthMap) {
+    this._data[this.fyKey(fy)] = monthMap;
+    this._persist();
+  },
+
+  clearAll() {
+    this._data = {};
+    this._persist();
+  },
+
+  hasData() { return Object.keys(this._data).length > 0; },
+
+  // YM月のデータを取得（SKDLがあればSKDLを優先）
+  getMonthMap(ym) {
+    const year = parseInt(ym.slice(0,4));
+    const mo   = parseInt(ym.slice(4));
+    const fy   = mo >= CONFIG.FISCAL_START_MONTH ? year : year - 1;
+    const fyData = this._data[this.fyKey(fy)];
+    return fyData ? (fyData[ym] || null) : null;
+  },
+
+  // SKDL + HISTORY を統合した「全月リスト」を返す
+  allMonthList() {
+    const skdlYMs = new Set(STATE.monthList());
+    const histYMs = new Set();
+    for (const fyData of Object.values(this._data)) {
+      Object.keys(fyData).forEach(ym => histYMs.add(ym));
+    }
+    return [...new Set([...skdlYMs, ...histYMs])].sort();
+  },
+
+  // 月のデータソースを返す（SKDL優先）
+  getSource(ym) {
+    const hasSKDL = !!STATE.dsForYM(ym);
+    const hasHist = !!this.getMonthMap(ym);
+    if (hasSKDL) return 'skdl';
+    if (hasHist)  return 'history';
+    return null;
+  },
+
+  // 科目別金額を取得（過去実績から）
+  sumKeys(ym, keys) {
+    const m = this.getMonthMap(ym);
+    if (!m) return 0;
+    return [].concat(keys).reduce((s, k) => s + (m[k] || 0), 0);
+  },
+
+  _persist() {
+    try {
+      const key = `history_${CENTER.current.id}`;
+      localStorage.setItem(key, JSON.stringify(this._data));
+      DB.put('meta', { key, value: JSON.stringify(this._data) }).catch(()=>{});
+    } catch(e) {}
+  },
+
+  async _load() {
+    try {
+      const key = `history_${CENTER.current.id}`;
+      const s = localStorage.getItem(key);
+      if (s) { this._data = JSON.parse(s); return; }
+      const rec = await DB.getAll('meta').then(rs => rs.find(r => r.key === key));
+      if (rec?.value) this._data = JSON.parse(rec.value);
+    } catch(e) {}
+    this._updateBadge();
+  },
+
+  _updateBadge() {
+    const hb = document.getElementById('history-badge');
+    if (!hb) return;
+    const fys = Object.keys(this._data);
+    if (fys.length > 0) {
+      hb.textContent = `実績:${fys.map(k=>k.replace('fy','')).join('/')}年度`;
+      hb.className = 'badge badge-ok';
+    } else {
+      hb.textContent = '実績:未登録';
+      hb.className = 'badge badge-warn';
+    }
+  },
+};
+
+/* ─── 起動時に HISTORY と TSV_IMPORT を初期化 ─── */
+(function patchBootForTSV() {
+  const origBoot = document.addEventListener;
+  // TSV_IMPORT の年度セレクトを初期化するタイミングを確保
+  document.addEventListener('DOMContentLoaded', async () => {
+    await HISTORY._load();
+    HISTORY._updateBadge();
+    TSV_IMPORT.initYearSel();
+  });
+})();
+
+// PLAN.initYearSel → TSV_IMPORT.initYearSel に統合
+const _origPlanInitYear = PLAN.initYearSel?.bind(PLAN);
+PLAN.initYearSel = function() {
+  TSV_IMPORT.initYearSel();
+};
+
+// センター切替後にHISTORYも再ロード
+(function patchHistoryCenterSwitch() {
+  const origSwitch = CENTER.switchTo.bind(CENTER);
+  CENTER.switchTo = async function(centerId) {
+    await origSwitch(centerId);
+    await HISTORY._load();
+    HISTORY._updateBadge();
+    TSV_IMPORT.initYearSel();
+  };
+})();
 </script>
