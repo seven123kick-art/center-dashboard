@@ -5868,6 +5868,245 @@ CENTER.switchTo = async function(centerId) {
 </script>
 
 <!-- ════════════════════════════════════════════════════════
+     【パッチ0】HISTORYモジュール + TSV_IMPORT追加
+     ※ fix_patch.html より前に貼る（全パッチの先頭）
+════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+/* ══════════════════════════════════════════════════════
+   HISTORY — 過去実績補完データ管理
+   月次収支照会のペーストデータを保存・参照する
+   PLAN と同じ構造で実績値を保持
+══════════════════════════════════════════════════════ */
+const HISTORY = {
+  _data: {},  // { '202504': { '営業収益': 26366000, '人件費': 5595000, ... } }
+
+  /* 月のデータマップを返す（なければ null） */
+  getMonthMap(ym) {
+    return this._data[ym] || null;
+  },
+
+  /* データソース判定 */
+  getSource(ym) {
+    return this._data[ym] ? 'history' : null;
+  },
+
+  /* 登録済みYM一覧 */
+  monthList() {
+    return Object.keys(this._data).sort();
+  },
+
+  /* 保存 */
+  _saveToStorage() {
+    try {
+      const key = `history_${CENTER.pathPrefix}`;
+      localStorage.setItem(key, JSON.stringify(this._data));
+      // SIMPLE_STORE にも保存
+      SIMPLE_STORE.save(`history_${CENTER.pathPrefix}`, JSON.stringify(this._data))
+        .catch(() => {});
+    } catch(e) { console.warn('HISTORY保存エラー:', e); }
+  },
+
+  /* 復元 */
+  async _loadFromStorage() {
+    try {
+      const key = `history_${CENTER.pathPrefix}`;
+      // localStorage 優先
+      const s = localStorage.getItem(key);
+      if (s) { this._data = JSON.parse(s); this._updateBadge(); return; }
+      // SIMPLE_STORE fallback
+      const rec = await SIMPLE_STORE.get(key);
+      if (rec) { this._data = JSON.parse(rec); this._updateBadge(); }
+    } catch(e) { console.warn('HISTORY読込エラー:', e); }
+  },
+
+  _updateBadge() {
+    const badge = document.getElementById('history-badge');
+    if (!badge) return;
+    const count = Object.keys(this._data).length;
+    if (count > 0) {
+      badge.textContent = `${count}ヶ月分登録済`;
+      badge.className = 'badge badge-ok';
+    } else {
+      badge.textContent = '未登録';
+      badge.className = 'badge badge-warn';
+    }
+  },
+
+  /* 月次収支照会ペーストから取込み */
+  importFromPaste(raw, fy) {
+    if (!raw) return { ok: false, msg: '❌ データが空です' };
+
+    const lines = raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n')
+      .split('\n').filter(l => l.trim());
+
+    // 月のYM一覧（会計年度ベース）
+    const months = ['04','05','06','07','08','09','10','11','12','01','02','03']
+      .map(mo => {
+        const y = (parseInt(mo) >= (CONFIG.FISCAL_START_MONTH || 4)) ? fy : fy + 1;
+        return `${y}${mo}`;
+      });
+
+    // 月次収支照会の列インデックス（PLAN_MONTH_COLSと同じ）
+    const colMap = CONFIG.PLAN_MONTH_COLS || {
+      '04':2,'05':3,'06':4,'07':5,'08':6,'09':9,'10':10,'11':11,'12':12,'01':13,'02':14,'03':15
+    };
+
+    let parsed = 0;
+    const newData = {};
+    months.forEach(ym => { newData[ym] = {}; });
+
+    for (const line of lines) {
+      const cells = line.split('\t').map(c => c.trim());
+      if (cells.length < 3) continue;
+      const subject = cells[0];
+      if (!subject || /率％$/.test(subject)) continue;
+
+      for (const [mo, colIdx] of Object.entries(colMap)) {
+        const y  = (parseInt(mo) >= (CONFIG.FISCAL_START_MONTH || 4)) ? fy : fy + 1;
+        const ym = `${y}${mo}`;
+        const rawVal = (cells[colIdx] || '0').replace(/,/g,'').replace(/－/g,'0').replace(/−/g,'0');
+        const val = parseInt(rawVal) || 0;
+        if (!newData[ym]) newData[ym] = {};
+        newData[ym][subject] = val * 1000;  // 千円→円
+      }
+      parsed++;
+    }
+
+    if (parsed === 0) return { ok: false, msg: '❌ 解析できる行がありません' };
+
+    // 既存データにマージ（上書き）
+    Object.assign(this._data, newData);
+    this._saveToStorage();
+    this._updateBadge();
+
+    // STATE.monthListに追加
+    months.forEach(ym => {
+      if (!STATE._historyMonths) STATE._historyMonths = [];
+      if (!STATE._historyMonths.includes(ym)) STATE._historyMonths.push(ym);
+    });
+    if (typeof UI !== 'undefined') UI.updateTopbar();
+
+    return { ok: true, msg: `✅ ${fy}年度の過去実績を取込みました（${parsed}科目 × 12ヶ月）` };
+  },
+
+  clear(fy) {
+    if (fy) {
+      // 特定年度だけ削除
+      const months = ['04','05','06','07','08','09','10','11','12','01','02','03']
+        .map(mo => {
+          const y = (parseInt(mo) >= (CONFIG.FISCAL_START_MONTH || 4)) ? fy : fy + 1;
+          return `${y}${mo}`;
+        });
+      months.forEach(ym => delete this._data[ym]);
+    } else {
+      this._data = {};
+    }
+    this._saveToStorage();
+    this._updateBadge();
+  }
+};
+
+/* ══════════════════════════════════════════════════════
+   STATE.monthList() を HISTORY データも含むよう拡張
+   元の monthList は SKKS データのみ → HISTORY月も加える
+══════════════════════════════════════════════════════ */
+(function extendStateMonthList() {
+  const _origMonthList = STATE.monthList.bind(STATE);
+  STATE.monthList = function() {
+    const skksMonths = _origMonthList();
+    const histMonths = HISTORY.monthList();
+    // 重複排除してソート
+    return [...new Set([...skksMonths, ...histMonths])].sort();
+  };
+  // dsForYM は SKKS のみでOK（元のまま）
+  console.log('[PATCH0] STATE.monthList HISTORY対応済み');
+})();
+
+/* ══════════════════════════════════════════════════════
+   TSV_IMPORT — 統合インポートモジュール
+   PLAN（予算）と HISTORY（過去実績）の両方を扱う
+══════════════════════════════════════════════════════ */
+const TSV_IMPORT = {
+  _type: 'plan',  // 'plan' | 'history'
+
+  doImport() {
+    // 計画データ取込（既存のPLAN.importFromPasteを呼ぶ）
+    if (typeof PLAN !== 'undefined' && PLAN.importFromPaste) {
+      PLAN.importFromPaste();
+    }
+  },
+
+  doImportHistory() {
+    const raw    = document.getElementById('tsv-paste-area-history')?.value?.trim();
+    const yearEl = document.getElementById('tsv-year-sel-history');
+    const msgEl  = document.getElementById('tsv-import-msg-history');
+    const fy     = parseInt(yearEl?.value || new Date().getFullYear());
+    if (!raw) { if(msgEl) msgEl.textContent = '❌ データが空です'; return; }
+
+    const result = HISTORY.importFromPaste(raw, fy);
+    if (msgEl) {
+      msgEl.textContent = result.msg;
+      msgEl.style.color = result.ok ? 'var(--green)' : 'var(--red)';
+      if (result.ok) setTimeout(() => { msgEl.style.color = ''; }, 4000);
+    }
+    if (result.ok) {
+      // 画面更新
+      if (typeof UI !== 'undefined') {
+        UI.updateTopbar();
+        UI.renderCurrentView();
+      }
+    }
+  },
+
+  doClear() {
+    if (typeof PLAN !== 'undefined' && PLAN.clear) PLAN.clear();
+  },
+
+  doClearHistory() {
+    const yearEl = document.getElementById('tsv-year-sel-history');
+    const fy     = yearEl ? parseInt(yearEl.value) : null;
+    if (!confirm(`${fy ? fy + '年度の' : '全'}過去実績データを削除しますか？`)) return;
+    HISTORY.clear(fy);
+    const msgEl = document.getElementById('tsv-import-msg-history');
+    if (msgEl) msgEl.textContent = '削除しました';
+  }
+};
+
+/* ══════════════════════════════════════════════════════
+   HISTORY の初期化（ページ読込時に自動復元）
+══════════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', () => {
+  // SIMPLE_STOREの準備ができた後にHISTORYを復元
+  setTimeout(async () => {
+    try {
+      await HISTORY._loadFromStorage();
+      console.log('[PATCH0] HISTORY復元完了:', Object.keys(HISTORY._data).length, 'ヶ月');
+
+      // 過去実績インポートUIの年度セレクトを初期化
+      const selH = document.getElementById('tsv-year-sel-history');
+      const selP = document.getElementById('tsv-year-sel');
+      const now = new Date();
+      const curFY = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+      [selH, selP].forEach(sel => {
+        if (!sel || sel.options.length > 0) return;
+        for (let y = curFY - 3; y <= curFY + 1; y++) {
+          const opt = document.createElement('option');
+          opt.value = y;
+          opt.textContent = `${y}年度（${y}/4〜${y+1}/3）`;
+          if (y === curFY) opt.selected = true;
+          sel.appendChild(opt);
+        }
+      });
+    } catch(e) { console.warn('[PATCH0] HISTORY初期化エラー:', e); }
+  }, 500);
+});
+
+console.log('[PATCH0] HISTORY / TSV_IMPORT モジュール追加完了');
+</script>
+
+<!-- ════════════════════════════════════════════════════════
      【貼り付け場所】このコードを、HTMLファイルの一番最後の
      </html> の直前に追加してください
 ════════════════════════════════════════════════════════ -->
@@ -6791,6 +7030,5 @@ UI._selectYear = function(fiscalYear) {
 
 console.log('[PATCH5] 会計年度ボタン修正 + 前月比・前年比HISTORY対応済み');
 </script>
-
 
 </html>
