@@ -6272,11 +6272,16 @@ const TSV_IMPORT = {
       planBtn.style.background = '#f8fafc'; planBtn.style.color = 'var(--text2)';
       histDesc.style.display = ''; planDesc.style.display = 'none';
     }
-    // ペーストエリアをクリア
+    // 種別切替時: その種別の保存データを復元
+    const yearEl = document.getElementById('tsv-year-sel');
     const ta = document.getElementById('tsv-paste-area');
-    if (ta) ta.value = '';
     const msg = document.getElementById('tsv-import-msg');
-    if (msg) msg.textContent = '';
+    if (yearEl && ta) {
+      const fy = parseInt(yearEl.value);
+      const saved = this._restoreRaw(fy, type);
+      ta.value = saved;
+      if(msg) msg.textContent = saved ? `${fy}年度の${type==='plan'?'計画':'実績'}データが保存されています` : '';
+    }
   },
 
   // TSVをパース（計画・実績共通）
@@ -6313,7 +6318,8 @@ const TSV_IMPORT = {
 
   // 取込み実行
   doImport() {
-    const raw    = document.getElementById('tsv-paste-area')?.value?.trim() || '';
+    const ta     = document.getElementById('tsv-paste-area');
+    const raw    = ta?.value?.trim() || '';
     const yearEl = document.getElementById('tsv-year-sel');
     const msgEl  = document.getElementById('tsv-import-msg');
     const fy     = parseInt(yearEl?.value || new Date().getFullYear());
@@ -6322,26 +6328,44 @@ const TSV_IMPORT = {
     const { monthMap, parsed } = this.parseTSV(raw, fy);
     if (parsed === 0) { if(msgEl) msgEl.textContent = '❌ 解析できる行がありません'; return; }
 
+    // ペーストデータを年度キーで保存（年度切替時に復元できるよう）
+    this._saveRaw(fy, this._type, raw);
+
     if (this._type === 'plan') {
-      // 計画データとして保存
       PLAN._data[PLAN.fyKey(fy)] = monthMap;
       PLAN._saveToStorage();
       PLAN._updateBadge();
-      if(msgEl) { msgEl.textContent = `✅ 計画データ取込完了（${fy}年度 / ${parsed}科目）`; msgEl.style.color='var(--green)'; }
-      // 計画バッジ更新
       const pb = document.getElementById('plan-badge');
       if(pb) { pb.textContent=`計画:${fy}年度`; pb.className='badge badge-ok'; }
     } else {
-      // 過去実績として保存
       HISTORY.saveData(fy, monthMap);
-      if(msgEl) { msgEl.textContent = `✅ 過去実績取込完了（${fy}年度 / ${parsed}科目）`; msgEl.style.color='var(--green)'; }
       const hb = document.getElementById('history-badge');
       if(hb) { hb.textContent=`実績:${fy}年度`; hb.className='badge badge-ok'; }
     }
 
-    setTimeout(() => { if(msgEl) msgEl.style.color='var(--text2)'; }, 5000);
-    // 月次収支表を再描画
+    if(msgEl) { msgEl.textContent = `✅ ${this._type==='plan'?'計画':'過去実績'}取込完了（${fy}年度 / ${parsed}科目）`; msgEl.style.color='var(--green)'; }
+    setTimeout(() => { if(msgEl) msgEl.style.color='var(--text2)'; }, 4000);
+
+    // ペーストエリアをクリア（すっきり）
+    if(ta) ta.value = '';
+
     if (STATE.activeDS() || HISTORY.hasData()) UI.renderPL();
+  },
+
+  // ペーストデータをlocalStorageに保存
+  _saveRaw(fy, type, raw) {
+    try {
+      const key = `tsv_raw_${CENTER.current.id}_${type}_${fy}`;
+      localStorage.setItem(key, raw);
+    } catch(e) {}
+  },
+
+  // 年度切替時にペーストデータを復元
+  _restoreRaw(fy, type) {
+    try {
+      const key = `tsv_raw_${CENTER.current.id}_${type}_${fy}`;
+      return localStorage.getItem(key) || '';
+    } catch(e) { return ''; }
   },
 
   // クリア
@@ -6360,7 +6384,7 @@ const TSV_IMPORT = {
     if(msgEl) msgEl.textContent = 'クリアしました';
   },
 
-  // 年度セレクトを初期化（PLAN.initYearSel と同じ）
+  // 年度セレクトを初期化
   initYearSel() {
     const sel = document.getElementById('tsv-year-sel');
     if (!sel) return;
@@ -6373,6 +6397,21 @@ const TSV_IMPORT = {
       if (y === now) opt.selected = true;
       sel.appendChild(opt);
     }
+    // 年度変更時に保存済みデータを復元
+    sel.onchange = () => this._onYearChange();
+    this._onYearChange();  // 初期表示時も復元
+  },
+
+  // 年度変更時: ペーストエリアを保存済みデータで埋める
+  _onYearChange() {
+    const yearEl = document.getElementById('tsv-year-sel');
+    const ta     = document.getElementById('tsv-paste-area');
+    const msgEl  = document.getElementById('tsv-import-msg');
+    if (!yearEl || !ta) return;
+    const fy = parseInt(yearEl.value);
+    const saved = this._restoreRaw(fy, this._type);
+    ta.value = saved;
+    if(msgEl) msgEl.textContent = saved ? `${fy}年度の${this._type==='plan'?'計画':'実績'}データが保存されています` : '';
   },
 };
 
