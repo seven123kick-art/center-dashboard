@@ -4729,6 +4729,15 @@ const PLAN = {
   // データ取込画面の年度セレクトを初期化
   initYearSel() {
     const sel = document.getElementById('plan-year-sel');
+     if (sel) {
+  sel.onchange = function(){
+    const ta = document.getElementById('plan-paste-area');
+    const msg = document.getElementById('plan-import-msg');
+
+    if (ta) ta.value = '';
+    if (msg) msg.textContent = '';
+  };
+}
     if (!sel) return;
     const now = new Date().getFullYear();
     sel.innerHTML = '';
@@ -4742,13 +4751,7 @@ const PLAN = {
 if (y === now) opt.selected = true;
 sel.appendChild(opt);
 }
-   sel.onchange = function(){
-  const ta = document.getElementById('plan-paste-area');
-  const msg = document.getElementById('plan-import-msg');
 
-  if (ta) ta.value = '';
-  if (msg) msg.textContent = '';
-};
 },
 };
 
