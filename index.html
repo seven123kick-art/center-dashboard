@@ -247,22 +247,62 @@ window.onunhandledrejection = function(e) {
 };
 const DATA_RESET = {
   async clearAll(){
-    if (!confirm('すべてのデータを完全削除しますか？\n\nSKDL収支・現場CSV・エリアPDF・計画・履歴・ローカル保存を削除します。')) return;
+    if (!confirm('すべてのデータを完全削除しますか？\n\nローカル保存・クラウド保存・表示中データを削除します。')) return;
 
     try {
-      // 1. IndexedDBの各ストアを削除
+      // 1. クラウド側を先に削除（残っていると再読込で復元されるため）
+      if (window.CLOUD && CLOUD.cfg && CLOUD.cfg.url && CLOUD.cfg.key && CLOUD.cfg.bucket) {
+        const prefix = window.CENTER && CENTER.pathPrefix ? CENTER.pathPrefix + '/' : '';
+        const { url, key, bucket } = CLOUD.cfg;
+
+        const listRes = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${key}`,
+            'apikey': key,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ prefix, limit: 1000 })
+        });
+
+        if (listRes.ok) {
+          const files = await listRes.json();
+          const paths = (files || [])
+            .map(f => f.name)
+            .filter(Boolean)
+            .map(name => prefix && !name.startsWith(prefix) ? prefix + name : name);
+
+          if (paths.length > 0) {
+            await fetch(`${url}/storage/v1/object/${bucket}`, {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${key}`,
+                'apikey': key,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ prefixes: paths })
+            });
+          }
+        }
+      }
+
+      // 2. IndexedDB各ストアを削除
       if (window.DB && typeof DB.clearStore === 'function') {
         await DB.clearStore('skdl');
         await DB.clearStore('field');
         await DB.clearStore('meta');
       }
 
-      // 2. IndexedDB自体も削除候補として実行
-      if (window.indexedDB) {
-        indexedDB.deleteDatabase('center-dashboard-db');
+      // 3. IndexedDB自体も削除
+      if (window.DB && DB._db) {
+        DB._db.close();
+        DB._db = null;
+      }
+      if (window.indexedDB && window.DB && DB.DB_NAME) {
+        indexedDB.deleteDatabase(DB.DB_NAME);
       }
 
-      // 3. 月次収支データのメモリ初期化
+      // 4. メモリ初期化
       if (window.STATE) {
         STATE.datasets = [];
         STATE.currentYM = null;
@@ -270,7 +310,6 @@ const DATA_RESET = {
         if (STATE._data) STATE._data = {};
       }
 
-      // 4. 現場明細データのメモリ初期化
       if (window.FIELD_STATE) {
         FIELD_STATE.datasets = [];
         FIELD_STATE.currentYM = null;
@@ -278,22 +317,18 @@ const DATA_RESET = {
         if (FIELD_STATE._data) FIELD_STATE._data = {};
       }
 
-      // 5. 計画データの初期化
       if (window.PLAN) {
         PLAN._data = {};
         PLAN.data = {};
-        if (typeof PLAN._saveToStorage === 'function') await PLAN._saveToStorage();
       }
 
-      // 6. 過去実績補完データの初期化
       if (window.HISTORY) {
         HISTORY._data = {};
         HISTORY._m = {};
         HISTORY.data = {};
-        if (typeof HISTORY._saveToStorage === 'function') await HISTORY._saveToStorage();
       }
 
-      // 7. localStorage / sessionStorage を削除
+      // 5. localStorage / sessionStorage削除
       localStorage.clear();
       sessionStorage.clear();
 
@@ -3407,15 +3442,25 @@ async clearStore(storeName) {
   },
 
   // ── 汎用: 削除
-  async delete(storeName, key) {
-    const db = await this.open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      tx.objectStore(storeName).delete(key);
-      tx.oncomplete = resolve;
-      tx.onerror    = e => reject(e.target.error);
-    });
-  },
+async delete(storeName, key) {
+  const db = await this.open();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    tx.objectStore(storeName).delete(key);
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+},
+
+async clearStore(storeName) {
+  const db = await this.open();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    tx.objectStore(storeName).clear();
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+},
 
   // ── カラム絞り込み（容量削減）
   trimRows(rows, cols) {
