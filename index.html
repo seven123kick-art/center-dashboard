@@ -921,14 +921,11 @@ window.onunhandledrejection = function(e) {
         <div class="card-body">
           <div class="rule-list">
             <p>このタブは <strong>収支実績データ（SKDL形式）</strong> 専用です</p>
-            <p><strong>SKDL0001</strong> … 日報（月中の速報確認用）／ <strong>SKDL0003</strong> … 確定値（月末締め後の正式数値）</p>
-            <p>ファイル名に「1」が含まれれば日報、「3」が含まれれば確定として自動判別します</p>
+            <p><strong>SKDL0001</strong> … 日報（速報値）／ <strong>SKDL0003</strong> … 確定値（正式数値）― ファイル名で自動判別</p>
             <p>同一月に両方読み込んだ場合は <strong>確定値を優先</strong> して表示します</p>
             <p>複数月まとめて選択すると推移グラフが自動生成されます</p>
-            <p>同一月のファイルを再度読み込むと上書き更新されます</p>
-            <p>データはこのPCのブラウザ内のみで処理します（外部送信・クラウド保存なし）</p>
-            <p>ブラウザを閉じるとデータはリセットされます。毎月読み込み直してください</p>
-            <p>2名それぞれのPCでこのHTMLファイルを開いて使います（データは各自で管理）</p>
+            <p>データはブラウザの IndexedDB に自動保存され、次回開いたときに自動復元されます</p>
+            <p>クラウド同期（Supabase）設定済みのため、2台のPCで同じデータを共有できます</p>
           </div>
         </div>
       </div>
@@ -1358,12 +1355,18 @@ const UI = {
     }
     let sel='';
     if(ml.length>1){
-      // 年→月の2段階選択UI
+      // 年選択 + 4月～3月の全ボタン常時表示
       const years=[...new Set(ml.map(y=>y.slice(0,4)))].sort();
       const curYear=STATE.currentYM?STATE.currentYM.slice(0,4):years[years.length-1];
-      const monthsInYear=ml.filter(y=>y.startsWith(curYear));
+      // 会計年度の月順 (4,5,6,7,8,9,10,11,12,1,2,3)
+      const fiscalMonths=['04','05','06','07','08','09','10','11','12','01','02','03'];
+      // 各月のYM文字列生成（1-3月は翌年）
+      const ymForMonth=mo=>{
+        const y=parseInt(mo)>=4?curYear:String(parseInt(curYear)+1);
+        return y+mo;
+      };
       sel=`<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
-        <div style="display:flex;gap:3px;align-items:center">
+        ${years.length>1?`<div style="display:flex;gap:3px;align-items:center">
           <span style="font-size:10px;color:var(--text3);margin-right:2px">年度:</span>
           ${years.map(yr=>`<button onclick="UI._selectYear('${yr}')"
             style="font-size:11px;padding:3px 9px;border-radius:4px;
@@ -1371,19 +1374,25 @@ const UI = {
                    background:${yr===curYear?'var(--navy)':'#fff'};
                    color:${yr===curYear?'#fff':'var(--text2)'};
                    cursor:pointer;font-family:inherit;font-weight:${yr===curYear?700:400}">
-            ${yr}年
+            ${yr}年度
           </button>`).join('')}
-        </div>
-        <div style="display:flex;gap:3px;align-items:center">
-          <span style="font-size:10px;color:var(--text3);margin-right:2px">月:</span>
-          ${monthsInYear.map(ym=>`<button onclick="UI.changeMonth('${ym}')"
-            style="font-size:11px;padding:3px 9px;border-radius:4px;
-                   border:1px solid ${ym===STATE.currentYM?'var(--blue)':'var(--border2)'};
-                   background:${ym===STATE.currentYM?'var(--blue)':'#fff'};
-                   color:${ym===STATE.currentYM?'#fff':'var(--text2)'};
-                   cursor:pointer;font-family:inherit;font-weight:${ym===STATE.currentYM?700:400}">
-            ${parseInt(ym.slice(4))}月
-          </button>`).join('')}
+        </div>`:''}
+        <div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">
+          ${fiscalMonths.map(mo=>{
+            const ym=ymForMonth(mo);
+            const hasData=ml.includes(ym);
+            const isCur=ym===STATE.currentYM;
+            return `<button onclick="${hasData?`UI.changeMonth('${ym}')`:'void(0)'}"
+              title="${hasData?UI.fmtYM(ym):'データなし'}"
+              style="font-size:11px;padding:3px 9px;border-radius:4px;
+                     border:1px solid ${isCur?'var(--blue)':hasData?'var(--border2)':'#eee'};
+                     background:${isCur?'var(--blue)':hasData?'#fff':'#f5f5f5'};
+                     color:${isCur?'#fff':hasData?'var(--text2)':'#ccc'};
+                     cursor:${hasData?'pointer':'default'};font-family:inherit;
+                     font-weight:${isCur?700:400}">
+              ${parseInt(mo)}月${hasData?'':''}
+            </button>`;
+          }).join('')}
         </div>
       </div>`;
     }
