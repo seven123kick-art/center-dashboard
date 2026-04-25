@@ -7138,8 +7138,21 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
     },
 
     show(type, title, body){
+      const activeView = document.querySelector('.view.active');
+      const pageTitle = document.getElementById('page-title');
+      const plTable = document.getElementById('pl-tbl');
+      const isPL = (activeView && activeView.id === 'view-pl')
+        || (pageTitle && (pageTitle.textContent || '').includes('月次収支表'))
+        || (plTable && plTable.offsetParent !== null && document.querySelector('.nav-item.active[data-view="pl"]'));
+
+      if (isPL) {
+        this.hide();
+        return;
+      }
+
       const p = this.panel();
       p.className = 'status-' + (type || 'info');
+      p.style.display = '';
       p.querySelector('.status-title').textContent = title || '';
       p.querySelector('.status-body').innerHTML = body || '';
     },
@@ -7190,6 +7203,18 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
     },
 
     evaluate(){
+      const activeView = document.querySelector('.view.active');
+      const pageTitle = document.getElementById('page-title');
+      const plTable = document.getElementById('pl-tbl');
+      const isPL = (activeView && activeView.id === 'view-pl')
+        || (pageTitle && (pageTitle.textContent || '').includes('月次収支表'))
+        || (plTable && plTable.offsetParent !== null && document.querySelector('.nav-item.active[data-view="pl"]'));
+
+      if (isPL) {
+        this.hide();
+        return;
+      }
+
       const view = this.currentView();
       if (view === 'import') { this.hide(); return; }
 
@@ -7371,6 +7396,88 @@ const months = this.skdlMonths();
   document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => STATUS.evaluate(), 300);
     setTimeout(() => STATUS.evaluate(), 1500);
+  });
+})();
+</script>
+
+
+<script>
+/* 月次収支表では未取込ステータス帯を出さない最終ガード */
+(function(){
+  'use strict';
+
+  function isPLScreen(){
+    const activeView = document.querySelector('.view.active');
+    const activeNav = document.querySelector('.nav-item.active');
+    const pageTitle = document.getElementById('page-title');
+    const plTable = document.getElementById('pl-tbl');
+
+    return (activeView && activeView.id === 'view-pl')
+      || (activeNav && activeNav.getAttribute('data-view') === 'pl')
+      || (pageTitle && (pageTitle.textContent || '').includes('月次収支表'))
+      || (plTable && plTable.offsetParent !== null);
+  }
+
+  function hidePLStatus(){
+    if (!isPLScreen()) return;
+    const panel = document.getElementById('app-status-panel');
+    if (panel) {
+      panel.className = '';
+      panel.style.display = 'none';
+      const title = panel.querySelector('.status-title');
+      const body = panel.querySelector('.status-body');
+      if (title) title.textContent = '';
+      if (body) body.innerHTML = '';
+    }
+  }
+
+  window.hidePLStatus = hidePLStatus;
+
+  if (window.STATUS && typeof STATUS.show === 'function') {
+    const originalShow = STATUS.show.bind(STATUS);
+    STATUS.show = function(type, title, body){
+      if (isPLScreen()) {
+        hidePLStatus();
+        return;
+      }
+      return originalShow(type, title, body);
+    };
+  }
+
+  if (window.STATUS && typeof STATUS.evaluate === 'function') {
+    const originalEvaluate = STATUS.evaluate.bind(STATUS);
+    STATUS.evaluate = function(){
+      if (isPLScreen()) {
+        hidePLStatus();
+        return;
+      }
+      return originalEvaluate();
+    };
+  }
+
+  if (window.NAV && typeof NAV.go === 'function') {
+    const originalNavGo = NAV.go.bind(NAV);
+    NAV.go = function(btn){
+      const result = originalNavGo(btn);
+      setTimeout(hidePLStatus, 0);
+      setTimeout(hidePLStatus, 200);
+      return result;
+    };
+  }
+
+  if (window.UI && typeof UI.changeMonth === 'function') {
+    const originalChangeMonth = UI.changeMonth.bind(UI);
+    UI.changeMonth = function(ym){
+      const result = originalChangeMonth(ym);
+      setTimeout(hidePLStatus, 0);
+      setTimeout(hidePLStatus, 200);
+      return result;
+    };
+  }
+
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(hidePLStatus, 0);
+    setTimeout(hidePLStatus, 500);
   });
 })();
 </script>
