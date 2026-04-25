@@ -1344,6 +1344,13 @@ const UI = {
     const ml=STATE.monthList();
     const right=document.getElementById('topbar-right');
     const sub=document.getElementById('page-sub');
+    // 現場明細ページではSKDL月ボタンを非表示
+    const activeView = document.querySelector('.view.active')?.id;
+    if (activeView === 'view-field') {
+      right.innerHTML = '';
+      sub.textContent = STATE.currentYM ? `${STATE.fiscalYear(STATE.currentYM)} ／ ${ml.length}ヶ月分データ読込済` : '読み込みデータなし';
+      return;
+    }
     if(!ds){
       right.innerHTML='<span style="font-size:11px;color:var(--text3)">データ取込からCSVを読み込んでください</span>';
       sub.textContent='読み込みデータなし';
@@ -1852,6 +1859,8 @@ const NAV = {
     document.getElementById('view-'+id).classList.add('active');
     btn.classList.add('active');
     document.getElementById('page-title').textContent=this.titles[id]||id;
+    // タブ切替時にtopbarを更新（現場明細では月ボタン非表示）
+    UI.updateTopbar();
     const fn={dashboard:UI.renderDashboard,pl:UI.renderPL,trend:UI.renderTrend,shipper:UI.renderShipper,annual:UI.renderAnnual};
     if(fn[id]) fn[id].call(UI);
   },
@@ -2575,7 +2584,12 @@ const FIELD_UI = {
       return;
     }
 
-    if (!_leafletMap) FIELD_MAP.init();
+    // 月切替時も確実に再描画するため毎回クリアして再初期化
+    if (!_leafletMap) {
+      FIELD_MAP.init();
+    } else {
+      FIELD_MAP.clear();  // 前の描画を消す
+    }
 
     if (sel === 'csv') {
       const ds = FIELD_STATE.activeCSV();
@@ -5646,4 +5660,209 @@ const CLOUD_DEBUG = {
     this.renderTab(this._tab);
   };
 })();
+</script>
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════
+   DISPLAY — 表示リセット統合モジュール
+   切り替え時は必ず clearXxx() → render の順番を保証する
+═══════════════════════════════════════════════════════════ */
+const DISPLAY = {
+
+  // ── 全グラフ・表示エリアをクリア
+  clearAll() {
+    // Chart.js インスタンスを全破棄
+    CHARTS.destroyAll();
+    // Leaflet マップをクリア
+    if (typeof FIELD_MAP !== 'undefined') FIELD_MAP.clear?.();
+    // KPI エリア
+    ['kpi-area','annual-kpi','f-kpi-worker','ind-kpi-area'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
+    // バーエリア
+    ['exp-bars-area','shipper-bars-area','inc-donut-legend',
+     'f-worker-bars','content-donut-legend','ind-trend-legend'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
+    // テーブル tbody
+    ['pl-tbody','trend-tbody','shipper-tbody','annual-tbody',
+     'f-worker-tbody','f-content-tbody','f-product-tbody','f-city-tbody',
+     'shipper-group-tbody','shipper-detail-tbody'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
+    // アラートコンテナ
+    const alertEl = document.getElementById('alerts-container');
+    if (alertEl) alertEl.innerHTML = '';
+  },
+
+  // ── 「データなし」メッセージを表示
+  showEmpty(msg = 'データを読み込んでください') {
+    this.clearAll();
+    const kpi = document.getElementById('kpi-area');
+    if (kpi) kpi.innerHTML = `<div style="color:var(--text3);font-size:12px;padding:16px 0">${msg}</div>`;
+  },
+
+  // ── 現場明細エリアをクリア
+  clearField() {
+    CHARTS.destroyAll();
+    if (typeof FIELD_MAP !== 'undefined') FIELD_MAP.clear?.();
+    ['f-kpi-worker','f-worker-bars','content-donut-legend',
+     'f-worker-tbody','f-content-tbody','f-product-tbody','f-city-tbody'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
+    const noData = document.getElementById('map-no-data');
+    if (noData) { noData.style.display = 'none'; }
+  },
+};
+
+/* ─── 全レンダリング関数をリセット付きに上書き ─── */
+
+// ── ダッシュボード
+const _origRenderDashboard = UI.renderDashboard.bind(UI);
+UI.renderDashboard = function() {
+  DISPLAY.clearAll();
+  _origRenderDashboard();
+};
+
+// ── 月次収支表
+const _origRenderPL = UI.renderPL.bind(UI);
+UI.renderPL = function() {
+  const el = document.getElementById('pl-tbody');
+  if (el) el.innerHTML = '';
+  _origRenderPL();
+};
+
+// ── 売上推移
+const _origRenderTrend = UI.renderTrend.bind(UI);
+UI.renderTrend = function() {
+  CHARTS.destroyAll();
+  const el = document.getElementById('trend-tbody');
+  if (el) el.innerHTML = '';
+  _origRenderTrend();
+};
+
+// ── 荷主分析
+const _origRenderShipper = UI.renderShipper.bind(UI);
+UI.renderShipper = function() {
+  CHARTS.destroyAll();
+  ['shipper-group-tbody','shipper-detail-tbody','shipper-tbody'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.innerHTML = '';
+  });
+  _origRenderShipper();
+};
+
+// ── 経営指標
+if (UI.renderIndicators) {
+  const _origRenderInd = UI.renderIndicators.bind(UI);
+  UI.renderIndicators = function() {
+    CHARTS.destroyAll();
+    ['ind-kpi-area','f-kpi-worker'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+    _origRenderInd();
+  };
+}
+
+// ── 年次サマリー
+const _origRenderAnnual = UI.renderAnnual.bind(UI);
+UI.renderAnnual = function() {
+  CHARTS.destroyAll();
+  const el = document.getElementById('annual-tbody');
+  if (el) el.innerHTML = '';
+  const kpi = document.getElementById('annual-kpi');
+  if (kpi) kpi.innerHTML = '';
+  _origRenderAnnual();
+};
+
+// ── アラート
+const _origRenderAlerts = UI.renderAlerts?.bind(UI);
+if (_origRenderAlerts) {
+  UI.renderAlerts = function() {
+    const el = document.getElementById('alerts-container');
+    if (el) el.innerHTML = '';
+    _origRenderAlerts();
+  };
+}
+
+// ── 現場明細タブ切替
+const _origSwitchTab = FIELD_UI.switchTab?.bind(FIELD_UI);
+if (_origSwitchTab) {
+  FIELD_UI.switchTab = function(btn) {
+    DISPLAY.clearField();  // 切替前にクリア
+    _origSwitchTab(btn);
+  };
+}
+
+// ── 現場明細の月切替
+const _origChangeFieldMonth = FIELD_UI.changeFieldMonth?.bind(FIELD_UI);
+if (_origChangeFieldMonth) {
+  FIELD_UI.changeFieldMonth = function(ym) {
+    DISPLAY.clearField();  // 月切替前にクリア
+    _origChangeFieldMonth(ym);
+  };
+} else {
+  FIELD_UI.changeFieldMonth = function(ym) {
+    DISPLAY.clearField();
+    FIELD_STATE.currentYM = ym;
+    this.updatePeriodBadge();
+    this.renderTab(this._tab);
+  };
+}
+
+// ── SKDLの月切替
+const _origChangeMonth = UI.changeMonth.bind(UI);
+UI.changeMonth = function(ym) {
+  DISPLAY.clearAll();  // 月切替前にクリア
+  _origChangeMonth(ym);
+};
+
+// ── センター切替（さらに確実に）
+const _origCenterSwitch = CENTER.switchTo.bind(CENTER);
+CENTER.switchTo = async function(centerId) {
+  if (this._current?.id === centerId) return;
+  // 即座に全クリア
+  DISPLAY.clearAll();
+  STATE.datasets = []; STATE.currentYM = null;
+  FIELD_STATE.datasets = []; FIELD_STATE.currentYM = null;
+  this._current = CONFIG.CENTERS.find(c => c.id === centerId) || CONFIG.CENTERS[0];
+  localStorage.setItem('active_center', centerId);
+  CENTER.renderSwitcher();
+  CENTER._updateHeaderColor(CENTER.current);
+  // 空の状態でUI更新
+  UI.renderDataList();
+  UI.updateTopbar();
+  FIELD_UI.updatePeriodBadge();
+  FIELD_UI.renderDataList();
+  // 「データなし」をダッシュボードに表示
+  const activeBtn = document.querySelector('.nav-item.active');
+  const activeId = activeBtn?.dataset?.view || 'dashboard';
+  if (activeId === 'dashboard' || activeId === 'field') {
+    DISPLAY.showEmpty(`${CENTER.current.name} のデータを読み込み中...`);
+  }
+  const msgEl = document.getElementById('session-msg');
+  if (msgEl) msgEl.textContent = `${CENTER.current.name} のデータを読み込み中...`;
+  // 新センターのデータを復元
+  const restored = await SIMPLE_STORE.restoreAll().catch(() => 0);
+  UI.renderDataList();
+  UI.updateTopbar();
+  FIELD_UI.updatePeriodBadge();
+  FIELD_UI.renderDataList();
+  PLAN._loadFromStorage().catch(()=>{});
+  MEMO._loadFromStorage().catch(()=>{});
+  if (msgEl) {
+    msgEl.innerHTML = restored > 0
+      ? `✅ ${CENTER.current.name}: ${restored}件復元済み`
+      : `${CENTER.current.name}: データなし<br><span style="font-size:10px;color:#4d6a88">CSVを読み込んでください</span>`;
+  }
+  if (restored > 0 && STATE.currentYM) {
+    const btn = document.querySelector('.nav-item[data-view="dashboard"]');
+    if (btn) setTimeout(() => NAV.go(btn), 100);
+  } else {
+    DISPLAY.showEmpty(`${CENTER.current.name} にデータがありません。CSVを読み込んでください。`);
+  }
+};
 </script>
