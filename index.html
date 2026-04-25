@@ -69,8 +69,8 @@ body{font-family:'Meiryo','メイリオ','Yu Gothic','游ゴシック',Arial,san
 /* ═══ COMPONENTS ═══ */
 /* KPI cards */
 .kpi-row{display:grid;gap:12px;margin-bottom:16px}
-.kpi-row-4{grid-template-columns:repeat(4,1fr)}
-.kpi-row-3{grid-template-columns:repeat(3,1fr)}
+.kpi-row-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.kpi-row-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow)}
 .kpi-card.accent-navy{border-top:3px solid var(--navy)}
 .kpi-card.accent-green{border-top:3px solid var(--green)}
@@ -339,13 +339,13 @@ window.onunhandledrejection = function(e) {
 <div id="main">
   <!-- トップバー -->
   <div id="topbar">
-    <div class="topbar-left">
+    <div class="topbar-left" style="flex-shrink:0">
       <div>
         <div class="page-title" id="page-title">ダッシュボード</div>
         <div class="page-sub" id="page-sub">読み込みデータなし</div>
       </div>
     </div>
-    <div class="topbar-right" id="topbar-right">
+    <div class="topbar-right" id="topbar-right" style="flex-wrap:wrap;justify-content:flex-end">
       <span style="font-size:11px;color:var(--text3)">データ取込からCSVを読み込んでください</span>
     </div>
   </div>
@@ -5280,32 +5280,60 @@ window.addEventListener('beforeunload', () => {
 
 // センター切替後にも復元
 (function patchSimpleCenterSwitch() {
-  const _orig = CENTER.switchTo.bind(CENTER);
   CENTER.switchTo = async function(centerId) {
-    // STATEをクリア
+    if (this._current?.id === centerId) return;
+
+    // ① 即座にSTATEをクリア
     STATE.datasets = []; STATE.currentYM = null;
     FIELD_STATE.datasets = []; FIELD_STATE.currentYM = null;
-    // センター変更
+
+    // ② センター変更
     this._current = CONFIG.CENTERS.find(c => c.id === centerId) || CONFIG.CENTERS[0];
     localStorage.setItem('active_center', centerId);
-    // UI反映
     CENTER.renderSwitcher();
     CENTER._updateHeaderColor(CENTER.current);
+
+    // ③ 空の状態でUIを即更新（前センターのデータを消す）
     UI.renderDataList();
     UI.updateTopbar();
+    UI.renderDashboard();   // ← ダッシュボードを「データなし」状態に
     FIELD_UI.updatePeriodBadge();
     FIELD_UI.renderDataList();
-    // 新センターのデータを復元
-    const restored = await SIMPLE_STORE.restoreAll().catch(() => 0);
-    UI.renderDataList();
-    UI.updateTopbar();
-    FIELD_UI.updatePeriodBadge();
-    FIELD_UI.renderDataList();
+
     const msgEl = document.getElementById('session-msg');
-    if (msgEl) msgEl.textContent = restored > 0 ? `✅ ${CENTER.current.name}: ${restored}件復元` : `${CENTER.current.name}: データなし`;
+    if (msgEl) msgEl.textContent = `${CENTER.current.name} のデータを読み込み中...`;
+
+    // ④ 新センターのデータを復元
+    const restored = await SIMPLE_STORE.restoreAll().catch(() => 0);
+
+    // ⑤ 復元後にUIを再更新
+    UI.renderDataList();
+    UI.updateTopbar();
+    FIELD_UI.updatePeriodBadge();
+    FIELD_UI.renderDataList();
+    PLAN._loadFromStorage().catch(()=>{});
+    MEMO._loadFromStorage().catch(()=>{});
+
+    if (msgEl) {
+      msgEl.innerHTML = restored > 0
+        ? `✅ ${CENTER.current.name}: ${restored}件復元済み`
+        : `${CENTER.current.name}: データなし<br><span style="font-size:10px;color:#4d6a88">CSVを読み込んでください</span>`;
+    }
+
     if (restored > 0 && STATE.currentYM) {
       const btn = document.querySelector('.nav-item[data-view="dashboard"]');
       if (btn) setTimeout(() => NAV.go(btn), 100);
+    } else {
+      // データなしの場合はダッシュボードを空表示
+      const btn = document.querySelector('.nav-item[data-view="dashboard"]');
+      if (btn) {
+        document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+        document.getElementById('view-dashboard').classList.add('active');
+        btn.classList.add('active');
+        document.getElementById('page-title').textContent = 'ダッシュボード';
+        UI.renderDashboard();
+      }
     }
   };
 })();
