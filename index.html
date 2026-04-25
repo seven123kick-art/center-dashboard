@@ -4739,7 +4739,17 @@ const PLAN = {
       if (y === now) opt.selected = true;
       sel.appendChild(opt);
     }
-  },
+if (y === now) opt.selected = true;
+sel.appendChild(opt);
+}
+   sel.onchange = function(){
+  const ta = document.getElementById('plan-paste-area');
+  const msg = document.getElementById('plan-import-msg');
+
+  if (ta) ta.value = '';
+  if (msg) msg.textContent = '';
+};
+},
 };
 
 /* ═══════════════════════════════════════════════════════════
