@@ -7208,16 +7208,15 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
         return;
       }
 
-     if (this.hasRevenueData()) {
+     if (view === 'pl') {
   this.hide();
   return;
 }
 
-setTimeout(() => {
-  if (STATUS.hasRevenueData()) {
-    STATUS.hide();
-  }
-}, 300);
+if (this.hasRevenueData()) {
+  this.hide();
+  return;
+}
 
 const months = this.skdlMonths();
       if (!months.length) {
