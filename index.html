@@ -4872,6 +4872,9 @@ UI.renderAlerts = function() {
   const ml   = STATE.monthList();
 
   ml.forEach(ym => {
+    // HISTORY（過去実績集計値）の月はSKDLがないため詳細チェックをスキップ
+    // 損益のみチェック
+    const isHistory = !STATE.dsForYM(ym) && HISTORY.getMonthMap(ym);
     const m   = byYM[ym] || {};
     const ind = CALC.indicators(m);
     const pm  = PLAN.getMonthMap(ym);
@@ -4886,14 +4889,14 @@ UI.renderAlerts = function() {
       }
     }
 
-    // ── 変動費率チェック（80%超）
-    if (ind.variableRate > 80) {
-      alerts.push({level:'warn', ym, msg:`【${ymLabel}】変動費率が高水準です。${ind.variableRate.toFixed(1)}%（目安: 80%未満）`});
-    }
-
-    // ── みなし人件費率（目標80%以下）
-    if (ind.pseudoLaborRate !== null && ind.pseudoLaborRate > 80) {
-      alerts.push({level:'warn', ym, msg:`【${ymLabel}】みなし人件費率が目標値を超えています。${ind.pseudoLaborRate.toFixed(1)}%（目標: 80%以下）`});
+    // ── 変動費率・みなし人件費率はSKDLデータがある月のみチェック
+    if (!isHistory) {
+      if (ind.variableRate > 80) {
+        alerts.push({level:'warn', ym, msg:`【${ymLabel}】変動費率が高水準です。${ind.variableRate.toFixed(1)}%（目安: 80%未満）`});
+      }
+      if (ind.pseudoLaborRate !== null && ind.pseudoLaborRate > 80) {
+        alerts.push({level:'warn', ym, msg:`【${ymLabel}】みなし人件費率が目標値を超えています。${ind.pseudoLaborRate.toFixed(1)}%（目標: 80%以下）`});
+      }
     }
 
     // ── 計画差異チェック（計画がある場合）
@@ -5339,7 +5342,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const lbl = document.getElementById('autosave-label');
       if (lbl) lbl.textContent = '自動保存 有効';
     } else {
-      if (msgEl) msgEl.textContent = 'データなし（CSVを読み込んでください）';
+      if (msgEl) msgEl.innerHTML = `データなし<br>
+        <span style="font-size:10px;color:#4d9fea">
+          データ取込からSKDLのCSVを読み込んでください
+        </span>`;
     }
 
     if (STATE.datasets.length > 0) setTimeout(() => UI.renderAlerts(), 800);
@@ -5573,7 +5579,8 @@ UI._renderPLFromHistory = function(m) {
       <td>${label}</td>
       <td class="r">${k}</td>
       <td class="r">${p}</td>
-      <td class="r vs-col" colspan="9" style="color:var(--text3);font-size:11px">詳細データなし（過去実績は集計値のみ）</td>
+      <td class="r" colspan="3" style="background:#fffdf0;color:var(--text3)">--</td>
+      <td class="r vs-col" colspan="6" style="color:var(--text3);font-size:10px;text-align:right">過去実績（集計値のみ）</td>
     </tr>`;
   };
 
