@@ -6996,3 +6996,157 @@ console.log('[PATCH2] _renderPLFromHistory 全科目表示に修正済み');
   console.log('[PATCH3] 起動時復元順序修正適用済み');
 })();
 </script>
+<!-- ════════════════════════════════════════════════════════
+     【追加パッチ4】過去実績月でも計画列を表示する修正
+     fix_patch3 の後ろに追記（</html>直前）
+════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+/* ══════════════════════════════════════════════════════
+   _renderPLFromHistory を再修正
+   問題1: 計画列が常に "--" 固定だった（パッチ2のミス）
+   問題2: 計画データのキーが「人件費」など集計名で保存されるが
+          PL_DEFは「給与手当」など個別科目名で検索していた → 0になる
+
+   修正:
+   ① 計画データがあれば計画列を表示
+   ② 個別科目で見つからなければグループ名でフォールバック検索
+══════════════════════════════════════════════════════ */
+UI._renderPLFromHistory = function(m) {
+  const ym = STATE.currentYM;
+  document.getElementById('pl-card-title').textContent =
+    `月次収支表 — ${this.fmtYM(ym)} （過去実績・集計値）`;
+
+  const inc = CALC.income(m);
+  const exp = CALC.expense(m);
+
+  // 計画データ取得
+  const pm = (typeof PLAN !== 'undefined') ? PLAN.getMonthMap(ym) : null;
+
+  // ── 計画値取得ヘルパー（個別科目 → グループ名 の順でフォールバック）
+  const getPlan = (keys, groupLabel) => {
+    if (!pm) return null;
+
+    // ① PL_DEFのkeyで個別科目の合計を試みる
+    const keyArr = [].concat(keys || []);
+    const detailSum = keyArr.reduce((s, k) => s + (pm[k] || 0), 0);
+    if (detailSum > 0) return detailSum;
+
+    // ② グループ名（例: '人件費計'）で直接取得
+    if (groupLabel && pm[groupLabel]) return pm[groupLabel];
+
+    // ③ 語尾の「計」を除いた名前（例: '人件費'）で取得
+    if (groupLabel) {
+      const stripped = groupLabel.replace(/計$/, '').trim();
+      if (pm[stripped]) return pm[stripped];
+    }
+
+    return null;
+  };
+
+  // ── 収入合計の計画値（'営業収益' または '営業収益計'）
+  const planInc = pm
+    ? (pm['営業収益計'] || pm['営業収益'] || null)
+    : null;
+
+  // ── 計画セル生成
+  const makePlanCells = (actual, planVal) => {
+    if (planVal == null)
+      return `<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>
+              <td class="r" style="background:#fffdf0;color:var(--text3)">--</td>
+              <td class="r" style="background:#fffdf0;color:var(--text3)">--</td>`;
+    const pk   = CALC.toK(planVal).toLocaleString();
+    const diff = CALC.toK(actual) - CALC.toK(planVal);
+    const dStr = diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString();
+    const dCls = diff > 0 ? 'cell-up' : diff < 0 ? 'cell-down' : 'cell-flat';
+    const ach  = planVal !== 0 ? (actual / planVal * 100).toFixed(1) + '%' : '--';
+    const achCls = (planVal !== 0 && actual / planVal >= 1) ? 'cell-up' : 'cell-down';
+    return `<td class="r" style="background:#fffdf0">${pk}</td>
+            <td class="r ${dCls}" style="background:#fffdf0">${dStr}</td>
+            <td class="r ${achCls}" style="background:#fffdf0">${ach}</td>`;
+  };
+
+  // 前月・前年は常に "--"（過去実績は比較データなし）
+  const blankVs6 = `<td class="r vs-col" style="color:var(--text3)">--</td>`.repeat(6);
+
+  const header = (label) =>
+    `<tr class="row-h"><td colspan="12">${label}</td></tr>`;
+
+  const row = (label, val, planVal, cls='', indent=0) => {
+    const k = CALC.toK(val).toLocaleString();
+    const p = inc > 0 ? (val / inc * 100).toFixed(1) + '%' : '--';
+    const iStyle = indent > 0
+      ? `style="padding-left:${indent*14+8}px;font-size:11px;color:var(--text2)"`
+      : '';
+    return `<tr class="${cls}">
+      <td ${iStyle}>${label}</td>
+      <td class="r">${k}</td>
+      <td class="r">${p}</td>
+      ${makePlanCells(val, planVal)}
+      ${blankVs6}
+    </tr>`;
+  };
+
+  let html = '';
+
+  CONFIG.PL_DEF.forEach(def => {
+    if (def.t === 'h') {
+      html += header(def.l);
+      return;
+    }
+
+    if (def.t === 'i') {
+      const v = CALC.sum(m, def.k);
+      if (v === 0) return; // 値なし行はスキップ
+      const planV = getPlan(def.k, def.l);
+      html += row(def.l, v, planV, '', 0);
+      return;
+    }
+
+    if (def.t === 'st') {
+      const v = def.k === 'inc' ? inc : exp;
+      const planV = def.k === 'inc' ? planInc : getPlan(null, '売上原価');
+      html += row(def.l, v, planV, 'row-sub');
+      return;
+    }
+
+    if (def.t === 'g') {
+      const gv = CALC.sum(m, def.k);
+      // サブ行（値があるもののみ）
+      if (def.s && def.s.length > 0) {
+        def.s.forEach(s => {
+          const sv = CALC.sum(m, s.k);
+          if (sv !== 0) {
+            const sPlanV = getPlan(s.k, s.l);
+            html += row(s.l, sv, sPlanV, '', 1);
+          }
+        });
+      }
+      if (gv !== 0) {
+        const gPlanV = getPlan(def.k, def.l);
+        html += row(def.l, gv, gPlanV, 'row-sub');
+      }
+      return;
+    }
+
+    if (def.t === 'tot') {
+      const planV = getPlan(null, '売上原価');
+      html += row(def.l, exp, planV, 'row-total');
+      return;
+    }
+
+    if (def.t === 'prf') {
+      const prf = inc - exp;
+      const planPrf = pm
+        ? (pm['粗利益'] || pm['センター利益'] || pm['営業利益'] ||
+           (planInc != null ? planInc - (getPlan(null,'売上原価')||0) : null))
+        : null;
+      html += row(def.l, prf, planPrf, prf >= 0 ? 'row-profit' : 'row-loss');
+    }
+  });
+
+  document.getElementById('pl-tbody').innerHTML = html;
+};
+
+console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
+</script>
