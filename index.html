@@ -5743,12 +5743,50 @@ const CLOUD_DEBUG = {
     }
   };
 
-  // 現場明細の月切り替え処理
+  // 現場明細の月切り替え処理（データなし月の通知つき）
   FIELD_UI.changeFieldMonth = function(ym) {
     FIELD_STATE.currentYM = ym;
     this.updatePeriodBadge();
+
+    const ymList = FIELD_STATE.ymList();
+    if (!ymList.includes(ym)) {
+      alert('この月の現場明細データはありません。データ取込からCSVまたはPDFを読み込んでください。');
+
+      ['fpane-worker','fpane-content','fpane-product','fpane-map'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.classList.contains('active')) {
+          const first = el.querySelector('.card-body, .kpi-row');
+          if (first) {
+            first.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text3)">この月のデータがありません</div>';
+          }
+        }
+      });
+      return;
+    }
+
     this.renderTab(this._tab);
   };
+
+  FIELD_UI.selectFY = function(fy) {
+    const ymList = FIELD_STATE.ymList();
+    const fyOf = y => {
+      const mo = parseInt(y.slice(4), 10);
+      const yr = parseInt(y.slice(0, 4), 10);
+      return mo >= (CONFIG.FISCAL_START_MONTH || 4) ? yr : yr - 1;
+    };
+    const fyMonths = ymList.filter(y => fyOf(y) === fy);
+
+    if (fyMonths.length === 0) {
+      alert(fy + '年度の現場明細データはありません。データ取込からCSVまたはPDFを読み込んでください。');
+      return;
+    }
+
+    FIELD_STATE.currentYM = fyMonths[fyMonths.length - 1];
+    this.updatePeriodBadge();
+    this.renderTab(this._tab);
+  };
+
+  FIELD_UI._selectFY = FIELD_UI.selectFY;
 })();
 </script>
 <script>
@@ -7046,53 +7084,5 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
   console.log('[FIX] renderAnnual: 会計年度ベースに修正済み');
 })();
 </script>
-
-
-<script>
-/* フィールドビュー年度選択 */
-FIELD_UI.changeFieldMonth = function(ym) {
-  FIELD_STATE.currentYM = ym;
-  this.updatePeriodBadge();
-
-  // データなし月はメッセージ表示
-  const ymList = FIELD_STATE.ymList();
-  if (!ymList.includes(ym)) {
-    alert('この月の現場明細データはありません。データ取込からCSVまたはPDFを読み込んでください。');
-
-    ['fpane-worker','fpane-content','fpane-product','fpane-map'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el && el.classList.contains('active')) {
-        const first = el.querySelector('.card-body, .kpi-row');
-        if (first) {
-          first.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text3)">この月のデータがありません</div>';
-        }
-      }
-    });
-    return;
-  }
-   
-     this.renderTab(this._tab);
-   };
-   
- 
-    FIELD_UI.selectFY = function(fy) {
-  const ymList = FIELD_STATE.ymList();
-  const fyOf = y => {
-    const mo = parseInt(y.slice(4)), yr = parseInt(y.slice(0,4));
-    return mo >= (CONFIG.FISCAL_START_MONTH||4) ? yr : yr-1;
-  };
-  const fyMonths = ymList.filter(y => fyOf(y) === fy);
-
-  if (fyMonths.length === 0) {
-    alert(fy + '年度の現場明細データはありません。データ取込からCSVまたはPDFを読み込んでください。');
-    return;
-  }
-
-  FIELD_STATE.currentYM = fyMonths[fyMonths.length-1];
-  this.updatePeriodBadge();
-  this.renderTab(this._tab);
-};
-
-FIELD_UI._selectFY = FIELD_UI.selectFY;
 </body>
 </html>
