@@ -4730,9 +4730,13 @@ const PLAN = {
   initYearSel() {
     const sel = document.getElementById('plan-year-sel');
     if (!sel) return;
-    const now = new Date().getFullYear();
-    sel.innerHTML = '';
-    for (let y = now - 2; y <= now + 3; y++) {
+    const today = new Date();
+const now = today.getMonth() + 1 >= (CONFIG.FISCAL_START_MONTH || 4)
+  ? today.getFullYear()
+  : today.getFullYear() - 1;
+
+sel.innerHTML = '';
+for (let y = now - 2; y <= now + 3; y++) {
       const opt = document.createElement('option');
       opt.value = String(y);
       opt.textContent = `${y}年度（${y}年4月〜${y+1}年3月）`;
