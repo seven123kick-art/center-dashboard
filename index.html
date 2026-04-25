@@ -653,6 +653,7 @@ window.onunhandledrejection = function(e) {
         <button class="field-tab"        data-ftab="map"      onclick="FIELD_UI.switchTab(this)">エリア地図</button>
         <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
           <span id="field-period-badge" style="font-size:11px;color:var(--text3)">データ未読込</span>
+          <div id="field-month-btns" style="display:flex;gap:3px;align-items:center"></div>
           <button class="btn" onclick="FIELD_UI.openImport()" style="font-size:11px;padding:4px 12px">+ データ取込</button>
         </div>
       </div>
@@ -1349,7 +1350,10 @@ const UI = {
     }
     let sel='';
     if(ml.length>1){
-      sel=`<select onchange="UI.changeMonth(this.value)">${ml.map(ym=>`<option value="${ym}"${ym===STATE.currentYM?' selected':''}>${this.fmtYM(ym)}</option>`).join('')}</select>`;
+      sel='<div style="display:flex;gap:3px;align-items:center;flex-wrap:wrap">' +
+        ml.map(ym=>`<button onclick="UI.changeMonth('${ym}')"
+          style="font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid ${ym===STATE.currentYM?'var(--navy)':'var(--border2)'};background:${ym===STATE.currentYM?'var(--navy)':'#fff'};color:${ym===STATE.currentYM?'#fff':'var(--text2)'};cursor:pointer;font-family:inherit;font-weight:${ym===STATE.currentYM?700:400}">${parseInt(ym.slice(4))}月</button>`).join('')
+        +'</div>';
     }
     const bdg=ds.type==='confirmed'?'<span class="badge badge-ok">確定値 (SKDL0003)</span>':'<span class="badge badge-warn">速報値 (SKDL0001・日報)</span>';
     right.innerHTML=`${sel}<span style="font-size:12px;font-weight:700;color:var(--navy)">${this.fmtYM(STATE.currentYM)}</span>${bdg}`;
@@ -5200,21 +5204,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     sidebarBottom.insertBefore(printBtn, sidebarBottom.firstChild);
   }
 
-  setTimeout(async () => {
+  // ⑤⑥ 復元処理（CENTER初期化後に確実に実行）
+  const doRestore = async () => {
     let restored = 0;
-
-    // ⑤ SIMPLE_STORE（IndexedDB）から復元（最優先・確実）
     try {
       restored = await SIMPLE_STORE.restoreAll();
-    } catch(e) { console.warn('SIMPLE_STORE restore failed:', e); }
+      console.log('[BOOT] restored:', restored, 'datasets');
+    } catch(e) { console.warn('[BOOT] SIMPLE_STORE restore failed:', e); }
 
-    // ⑥ クラウド同期（設定済みの場合、バックグラウンドで）
+    // クラウド同期（バックグラウンド）
     if (CLOUD.isConfigured()) {
       CLOUD._updateBadge(true);
-      CLOUD.restoreFromCloud().catch(e => console.warn('Cloud sync failed:', e));
+      CLOUD.restoreFromCloud().catch(e => console.warn('Cloud sync:', e));
     }
 
-    // ⑦ UI更新
+    // UI更新
     UI.renderDataList();
     UI.updateTopbar();
     FIELD_UI.updatePeriodBadge();
@@ -5225,22 +5229,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (restored > 0) {
       if (msgEl) msgEl.innerHTML = `✅ ${restored}件復元済み<br><span style="font-size:10px;color:#4d9fea">前回のデータを自動読込しました</span>`;
       const dot = document.getElementById('autosave-dot');
-      if (dot) { dot.style.background = '#16a34a'; }
+      if (dot) dot.style.background = '#16a34a';
       const lbl = document.getElementById('autosave-label');
       if (lbl) lbl.textContent = '自動保存 有効';
     } else {
       if (msgEl) msgEl.textContent = 'データなし（CSVを読み込んでください）';
     }
 
-    // アラートバッジ
-    if (STATE.datasets.length > 0) setTimeout(() => UI.renderAlerts(), 500);
+    if (STATE.datasets.length > 0) setTimeout(() => UI.renderAlerts(), 800);
 
-    // ダッシュボードへ
     if (STATE.currentYM) {
       const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-      if (btn) setTimeout(() => NAV.go(btn), 100);
+      if (btn) setTimeout(() => NAV.go(btn), 150);
     }
-  }, 200);
+  };
+  setTimeout(doRestore, 300);  // 少し長めに待ってCENTER確実に初期化
 });
 
 // ページ離脱前に確実に保存
@@ -5279,11 +5282,27 @@ window.addEventListener('beforeunload', () => {
 (function patchSimpleCenterSwitch() {
   const _orig = CENTER.switchTo.bind(CENTER);
   CENTER.switchTo = async function(centerId) {
-    await _orig(centerId);
+    // STATEをクリア
+    STATE.datasets = []; STATE.currentYM = null;
+    FIELD_STATE.datasets = []; FIELD_STATE.currentYM = null;
+    // センター変更
+    this._current = CONFIG.CENTERS.find(c => c.id === centerId) || CONFIG.CENTERS[0];
+    localStorage.setItem('active_center', centerId);
+    // UI反映
+    CENTER.renderSwitcher();
+    CENTER._updateHeaderColor(CENTER.current);
+    UI.renderDataList();
+    UI.updateTopbar();
+    FIELD_UI.updatePeriodBadge();
+    FIELD_UI.renderDataList();
+    // 新センターのデータを復元
     const restored = await SIMPLE_STORE.restoreAll().catch(() => 0);
     UI.renderDataList();
     UI.updateTopbar();
     FIELD_UI.updatePeriodBadge();
+    FIELD_UI.renderDataList();
+    const msgEl = document.getElementById('session-msg');
+    if (msgEl) msgEl.textContent = restored > 0 ? `✅ ${CENTER.current.name}: ${restored}件復元` : `${CENTER.current.name}: データなし`;
     if (restored > 0 && STATE.currentYM) {
       const btn = document.querySelector('.nav-item[data-view="dashboard"]');
       if (btn) setTimeout(() => NAV.go(btn), 100);
@@ -5532,4 +5551,52 @@ const CLOUD_DEBUG = {
     document.body.appendChild(overlay);
   }
 };
+</script>
+<script>
+'use strict';
+// ── 現場明細の月切り替えボタンを更新
+(function patchFieldMonthSwitch() {
+  const origUpdateBadge = FIELD_UI.updatePeriodBadge.bind(FIELD_UI);
+  FIELD_UI.updatePeriodBadge = function() {
+    origUpdateBadge();
+    const ym = FIELD_STATE.currentYM;
+    const el = document.getElementById('field-period-badge');
+    const btnEl = document.getElementById('field-month-btns');
+    if (!el) return;
+
+    const ymList = FIELD_STATE.ymList();
+    if (!ym || ymList.length === 0) {
+      el.textContent = 'データ未読込';
+      el.style.color = 'var(--text3)';
+      if (btnEl) btnEl.innerHTML = '';
+      return;
+    }
+
+    el.textContent = `${UI.fmtYM(ym)} / ${ymList.length}ヶ月分`;
+    el.style.color = 'var(--navy)';
+    el.style.fontWeight = '600';
+
+    // 月切り替えボタン
+    if (btnEl && ymList.length > 1) {
+      btnEl.innerHTML = ymList.map(y =>
+        `<button onclick="FIELD_UI.changeFieldMonth('${y}')"
+          style="font-size:11px;padding:3px 8px;border-radius:4px;
+                 border:1px solid ${y===ym?'var(--navy)':'var(--border2)'};
+                 background:${y===ym?'var(--navy)':'#fff'};
+                 color:${y===ym?'#fff':'var(--text2)'};
+                 cursor:pointer;font-family:inherit;font-weight:${y===ym?700:400}">
+          ${parseInt(y.slice(4))}月
+        </button>`).join('');
+    } else if (btnEl) {
+      btnEl.innerHTML = '';
+    }
+  };
+
+  // 現場明細の月切り替え処理
+  FIELD_UI.changeFieldMonth = function(ym) {
+    FIELD_STATE.currentYM = ym;
+    this.updatePeriodBadge();
+    this.renderTab(this._tab);
+  };
+})();
 </script>
