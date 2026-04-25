@@ -1904,6 +1904,8 @@ const NAV = {
     document.getElementById('view-'+id).classList.add('active');
     btn.classList.add('active');
     document.getElementById('page-title').textContent=this.titles[id]||id;
+    // 現在ページを記憶（リロード後に復元）
+    try { sessionStorage.setItem('lastView', id); } catch(e) {}
     // タブ切替時にtopbarを更新（現場明細では月ボタン非表示）
     UI.updateTopbar();
     const fn={dashboard:UI.renderDashboard,pl:UI.renderPL,trend:UI.renderTrend,shipper:UI.renderShipper,annual:UI.renderAnnual};
@@ -5311,7 +5313,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (STATE.datasets.length > 0) setTimeout(() => UI.renderAlerts(), 800);
 
     if (STATE.currentYM) {
-      const btn = document.querySelector('.nav-item[data-view="dashboard"]');
+      // リロード前の最後のページに戻る
+      const lastView = (() => { try { return sessionStorage.getItem('lastView') || 'dashboard'; } catch(e) { return 'dashboard'; } })();
+      const btn = document.querySelector(`.nav-item[data-view="${lastView}"]`) 
+                || document.querySelector('.nav-item[data-view="dashboard"]');
       if (btn) setTimeout(() => NAV.go(btn), 150);
     }
   };
@@ -5689,10 +5694,11 @@ const CLOUD_DEBUG = {
 
     // 月切り替えボタン
     if (btnEl && ymList.length > 1) {
-      // 年→月の2段階選択
+      // 年選択 + 4月～3月の全ボタン常時表示
       const fieldYears=[...new Set(ymList.map(y=>y.slice(0,4)))].sort();
       const fieldCurYear=ym?ym.slice(0,4):fieldYears[fieldYears.length-1];
-      const fieldMonths=ymList.filter(y=>y.startsWith(fieldCurYear));
+      const fiscalMos=['04','05','06','07','08','09','10','11','12','01','02','03'];
+      const fymFor=mo=>{const y=parseInt(mo)>=4?fieldCurYear:String(parseInt(fieldCurYear)+1);return y+mo;};
       btnEl.innerHTML=`
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-end">
           ${fieldYears.length>1?`<div style="display:flex;gap:3px">
@@ -5702,18 +5708,24 @@ const CLOUD_DEBUG = {
                      background:${yr===fieldCurYear?'var(--navy)':'#fff'};
                      color:${yr===fieldCurYear?'#fff':'var(--text2)'};
                      cursor:pointer;font-family:inherit;font-weight:${yr===fieldCurYear?700:400}">
-              ${yr}年
+              ${yr}年度
             </button>`).join('')}
           </div>`:''}
-          <div style="display:flex;gap:3px">
-            ${fieldMonths.map(y=>`<button onclick="FIELD_UI.changeFieldMonth('${y}')"
-              style="font-size:10px;padding:2px 7px;border-radius:3px;
-                     border:1px solid ${y===ym?'var(--blue)':'var(--border2)'};
-                     background:${y===ym?'var(--blue)':'#fff'};
-                     color:${y===ym?'#fff':'var(--text2)'};
-                     cursor:pointer;font-family:inherit;font-weight:${y===ym?700:400}">
-              ${parseInt(y.slice(4))}月
-            </button>`).join('')}
+          <div style="display:flex;gap:2px;flex-wrap:wrap">
+            ${fiscalMos.map(mo=>{
+              const y=fymFor(mo);
+              const has=ymList.includes(y);
+              const cur=y===ym;
+              return `<button onclick="${has?`FIELD_UI.changeFieldMonth('${y}')`:'void(0)'}"
+                style="font-size:10px;padding:2px 7px;border-radius:3px;
+                       border:1px solid ${cur?'var(--blue)':has?'var(--border2)':'#eee'};
+                       background:${cur?'var(--blue)':has?'#fff':'#f5f5f5'};
+                       color:${cur?'#fff':has?'var(--text2)':'#ccc'};
+                       cursor:${has?'pointer':'default'};font-family:inherit;
+                       font-weight:${cur?700:400}">
+                ${parseInt(mo)}月
+              </button>`;
+            }).join('')}
           </div>
         </div>`;
     } else if (btnEl) {
