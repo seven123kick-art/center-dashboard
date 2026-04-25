@@ -7059,7 +7059,7 @@ FIELD_UI.changeFieldMonth = function(ym) {
       const el = document.getElementById(id);
       if (el && el.classList.contains('active')) {
         const first = el.querySelector('.card-body, .kpi-row');
-        if (first) first.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text3)">この月のデータがありません</div>';
+        if (first) first.innerHTML = '';<div style="padding:30px;text-align:center;color:var(--text3)">この月のデータがありません</div>';
       }
     });
     return;
