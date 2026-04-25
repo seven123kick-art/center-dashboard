@@ -6526,3 +6526,118 @@ TSV_IMPORT.doClearHistory = function() {
   };
 })();
 </script>
+<!-- ════════════════════════════════════════════════════════
+     【貼り付け場所】このコードを、HTMLファイルの一番最後の
+     </html> の直前に追加してください
+════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+/* ══════════════════════════════════════════════════════
+   バグ修正パッチ (2025-04)
+   Bug1: 年ボタンを押すとボタン群が消える → 修正
+   Bug2: SKDLなし月に移動後、有データ年クリックで戻れない → 修正
+══════════════════════════════════════════════════════ */
+
+// ── updateTopbar の完全置き換え
+// 原因: if(!ds) でSKKSデータがない月に移動するとボタン全消滅していた
+UI.updateTopbar = function() {
+  const ds  = STATE.activeDS();
+  const ml  = STATE.monthList();
+  const right = document.getElementById('topbar-right');
+  const sub   = document.getElementById('page-sub');
+  if (!right || !sub) return;
+
+  // 現場明細ページではSKKS月ボタンを非表示（既存ロジック維持）
+  const activeView = document.querySelector('.view.active')?.id;
+  if (activeView === 'view-field') {
+    right.innerHTML = '';
+    sub.textContent = STATE.currentYM
+      ? `${STATE.fiscalYear(STATE.currentYM)} ／ ${ml.length}ヶ月分データ読込済`
+      : '読み込みデータなし';
+    return;
+  }
+
+  // ★修正: !ds ではなく ml.length===0 のときだけ「データなし」表示
+  if (ml.length === 0) {
+    right.innerHTML = '<span style="font-size:11px;color:var(--text3)">データ取込からCSVを読み込んでください</span>';
+    sub.textContent  = '読み込みデータなし';
+    return;
+  }
+
+  let sel = '';
+  if (ml.length > 1) {
+    const years   = [...new Set(ml.map(y => y.slice(0,4)))].sort();
+    const curYear = STATE.currentYM ? STATE.currentYM.slice(0,4) : years[years.length-1];
+    const fiscalMonths = ['04','05','06','07','08','09','10','11','12','01','02','03'];
+    const ymForMonth   = mo => {
+      const y = parseInt(mo) >= 4 ? curYear : String(parseInt(curYear)+1);
+      return y + mo;
+    };
+
+    sel = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+      ${years.length > 1 ? `<div style="display:flex;gap:3px;align-items:center">
+        <span style="font-size:10px;color:var(--text3);margin-right:2px">年度:</span>
+        ${years.map(yr => `<button onclick="UI._selectYear('${yr}')"
+          style="font-size:11px;padding:3px 9px;border-radius:4px;
+                 border:1px solid ${yr===curYear?'var(--navy)':'var(--border2)'};
+                 background:${yr===curYear?'var(--navy)':'#fff'};
+                 color:${yr===curYear?'#fff':'var(--text2)'};
+                 cursor:pointer;font-family:inherit;font-weight:${yr===curYear?700:400}">
+          ${yr}年度
+        </button>`).join('')}
+      </div>` : ''}
+      <div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">
+        ${fiscalMonths.map(mo => {
+          const ym      = ymForMonth(mo);
+          const hasData = ml.includes(ym);
+          const isCur   = ym === STATE.currentYM;
+          return `<button onclick="${hasData ? `UI.changeMonth('${ym}')` : 'void(0)'}"
+            title="${hasData ? UI.fmtYM(ym) : 'データなし'}"
+            style="font-size:11px;padding:3px 9px;border-radius:4px;
+                   border:1px solid ${isCur?'var(--blue)':hasData?'var(--border2)':'#eee'};
+                   background:${isCur?'var(--blue)':hasData?'#fff':'#f5f5f5'};
+                   color:${isCur?'#fff':hasData?'var(--text2)':'#ccc'};
+                   cursor:${hasData?'pointer':'default'};font-family:inherit;
+                   font-weight:${isCur?700:400}">
+            ${parseInt(mo)}月
+          </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  // ★修正: ds が null でもクラッシュしないよう null ガード
+  const bdg = ds
+    ? (ds.type === 'confirmed'
+        ? '<span class="badge badge-ok">確定値 (SKKS0003)</span>'
+        : '<span class="badge badge-warn">速報値 (SKKS0001・日報)</span>')
+    : (typeof HISTORY !== 'undefined' && STATE.currentYM &&
+       HISTORY.getSource && HISTORY.getSource(STATE.currentYM) === 'history'
+        ? '<span class="badge badge-info">過去実績（集計値）</span>'
+        : '');
+
+  right.innerHTML  = `${sel}<span style="font-size:12px;font-weight:700;color:var(--navy)">${this.fmtYM(STATE.currentYM)}</span>${bdg}`;
+  sub.textContent  = `${STATE.fiscalYear(STATE.currentYM)} ／ ${ml.length}ヶ月分データ読込済`;
+};
+
+// ── _selectYear の完全置き換え
+// 原因: SKDLデータのない月（HISTORY月）が先頭に来てds=nullになっていた
+UI._selectYear = function(year) {
+  const ml = STATE.monthList();
+  const monthsInYear = ml.filter(y => y.startsWith(year));
+  if (monthsInYear.length > 0) {
+    const cur = STATE.currentYM;
+    // ★SKDLデータのある月を優先 → なければHISTORY月でフォールバック
+    const skdlMonths = monthsInYear.filter(y => !!STATE.dsForYM(y));
+    const candidates = skdlMonths.length > 0 ? skdlMonths : monthsInYear;
+    // 既にその年のcandidatesにいる場合はジャンプしない
+    if (!cur || !candidates.includes(cur)) {
+      STATE.currentYM = candidates[0];
+    }
+  }
+  this.updateTopbar();
+  this.renderCurrentView(); // ★年切替後にコンテンツも再描画
+};
+
+console.log('[PATCH] updateTopbar / _selectYear 修正済み');
+</script>
