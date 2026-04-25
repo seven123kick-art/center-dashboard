@@ -826,11 +826,11 @@ window.onunhandledrejection = function(e) {
             <input type="file" id="file-input" accept=".csv" multiple style="display:none">
             <div style="font-size:32px;color:#94a3b8;margin-bottom:10px">⬆</div>
             <div style="font-size:15px;font-weight:700;margin-bottom:6px">クリックまたはCSVファイルをドロップ</div>
-            <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px">収支実績データ（SKDL形式）を選択</div>
-            <div style="font-size:12px;color:var(--text2);margin-bottom:8px">SKDL0001（日報）または SKDL0003（確定） — 複数月まとめてOK</div>
+            <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px">収支実績データ（SKKS形式）を選択</div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:8px">SKKS0001（日報）または SKKS0003（確定） — 複数月まとめてOK</div>
             <div style="display:flex;gap:12px;justify-content:center;margin-bottom:6px">
-              <span style="font-size:11px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;padding:2px 8px;border-radius:4px">SKDL0001 = 日報（速報値）</span>
-              <span style="font-size:11px;background:#d1fae5;border:1px solid #6ee7b7;color:#064e3b;padding:2px 8px;border-radius:4px">SKDL0003 = 確定値</span>
+              <span style="font-size:11px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;padding:2px 8px;border-radius:4px">SKKS0001 = 日報（速報値）</span>
+              <span style="font-size:11px;background:#d1fae5;border:1px solid #6ee7b7;color:#064e3b;padding:2px 8px;border-radius:4px">SKKS0003 = 確定値</span>
             </div>
             <div style="font-size:11px;color:var(--text3)">※ 作業者別CSV・PDFは左メニュー「現場明細」から取り込んでください</div>
           </div>
@@ -844,32 +844,16 @@ window.onunhandledrejection = function(e) {
         </div>
         <div id="data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
       </div>
-      <!-- 計画・過去実績データ取込（統合UI） -->
+      <!-- 計画データ取込（独立） -->
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
-          <span class="card-title">📋 計画・過去実績データ取込</span>
-          <div style="display:flex;gap:6px">
-            <span id="plan-badge" class="badge badge-warn">計画:未登録</span>
-            <span id="history-badge" class="badge badge-warn">実績:未登録</span>
-          </div>
+          <span class="card-title">📋 計画データ取込（予算管理）</span>
+          <span id="plan-badge" class="badge badge-warn">未登録</span>
         </div>
         <div class="card-body">
-          <div style="display:flex;gap:0;margin-bottom:14px;border-radius:6px;overflow:hidden;border:1px solid var(--border2);width:fit-content">
-            <button id="tsv-type-plan" onclick="TSV_IMPORT.setType('plan')"
-              style="padding:8px 20px;font-size:12px;font-weight:700;border:none;cursor:pointer;font-family:inherit;background:#1a4d7c;color:#fff">
-              📋 計画データ
-            </button>
-            <button id="tsv-type-history" onclick="TSV_IMPORT.setType('history')"
-              style="padding:8px 20px;font-size:12px;font-weight:700;border:none;cursor:pointer;font-family:inherit;background:#f8fafc;color:var(--text2)">
-              📊 過去実績（確定値）
-            </button>
-          </div>
-          <div id="tsv-desc-plan" style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8;padding:10px;background:#eff6ff;border-radius:6px;border-left:3px solid #1a4d7c">
-            <strong>計画データ</strong>：月次収支の予算値です。取込むと月次収支表に「計画・差異・達成率」列が追加されます。
-          </div>
-          <div id="tsv-desc-history" style="display:none;font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8;padding:10px;background:#f0fdf4;border-radius:6px;border-left:3px solid #16a34a">
-            <strong>過去実績（確定値）</strong>：詳細CSVがない月の補完データです。収支推移・KPI・月次収支表に反映されます。<br>
-            <span style="color:#065f46">※ 荷主別・作業者別の詳細は表示されません</span>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8;padding:8px 12px;background:#eff6ff;border-radius:6px;border-left:3px solid #1a4d7c">
+            月次収支の予算値（半期ごと入力）。取込むと月次収支表に<strong>「計画・差異・達成率」列</strong>が追加されます。<br>
+            SKKS → 収支管理 → 月次予算照会 を全選択コピー（Ctrl+A → Ctrl+C）してペースト
           </div>
           <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
             <label style="font-size:11px;font-weight:600;color:var(--text2)">対象年度：</label>
@@ -877,15 +861,45 @@ window.onunhandledrejection = function(e) {
             <span style="font-size:11px;color:var(--text2)">年度（4月始まり）</span>
           </div>
           <textarea id="tsv-paste-area"
-            placeholder="Excelからコピー（Ctrl+C）してここにペースト（Ctrl+V）&#10;列順: 科目名 | 年計 | 4月 | 5月 | ... | 3月"
-            style="width:100%;height:130px;font-size:11px;font-family:monospace;padding:8px;border:1px solid var(--border2);border-radius:6px;resize:vertical;color:var(--text)"></textarea>
+            placeholder="Excelからコピー（Ctrl+C）してここにペースト（Ctrl+V）&#10;列順: 科目名 | 年計 | 4月 | 5月 | 6月 | 7月 | 8月 | 9月 | 上半計 | 10月 | 11月 | 12月 | 1月 | 2月 | 3月"
+            style="width:100%;height:110px;font-size:11px;font-family:monospace;padding:8px;border:1px solid var(--border2);border-radius:6px;resize:vertical;color:var(--text)"></textarea>
           <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
-            <button class="btn btn-primary" onclick="TSV_IMPORT.doImport()" style="font-size:12px">取込む</button>
-            <button class="btn" onclick="TSV_IMPORT.doClear()" style="font-size:12px;color:var(--red)">クリア</button>
+            <button class="btn btn-primary" onclick="TSV_IMPORT._type='plan';TSV_IMPORT.doImport()" style="font-size:12px">取込む</button>
+            <button class="btn" onclick="TSV_IMPORT._type='plan';TSV_IMPORT.doClear()" style="font-size:12px;color:var(--red)">クリア</button>
             <span id="tsv-import-msg" style="font-size:11px;color:var(--text2)"></span>
           </div>
         </div>
       </div>
+
+      <!-- 過去実績データ（折りたたみ・普段は閉じておく） -->
+      <details class="card" style="margin-bottom:14px">
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+          <span class="card-title" style="color:var(--text3);font-size:12px">📊 過去実績補完データ（SKKSのCSVがない過去月用）</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="history-badge" class="badge badge-warn">未登録</span>
+            <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
+          </div>
+        </summary>
+        <div class="card-body">
+          <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8;padding:8px 12px;background:#f0fdf4;border-radius:6px;border-left:3px solid #16a34a">
+            SKKSの詳細CSVがない過去月を補完します。収支推移・KPI・月次収支表に反映されます。<br>
+            <span style="color:#065f46">※ 荷主別・作業者別の詳細は出ません　※ SKKSを毎月入れれば今後は不要になります</span>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+            <label style="font-size:11px;font-weight:600;color:var(--text2)">対象年度：</label>
+            <select id="tsv-year-sel-history" style="font-size:12px;padding:4px 8px"></select>
+            <span style="font-size:11px;color:var(--text2)">年度（4月始まり）</span>
+          </div>
+          <textarea id="tsv-paste-area-history"
+            placeholder="SKKS → 収支管理 → 月次収支照会 を全選択コピーしてペースト"
+            style="width:100%;height:100px;font-size:11px;font-family:monospace;padding:8px;border:1px solid var(--border2);border-radius:6px;resize:vertical;color:var(--text)"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+            <button class="btn btn-primary" onclick="TSV_IMPORT.doImportHistory()" style="font-size:12px;background:#16a34a;border-color:#16a34a">取込む</button>
+            <button class="btn" onclick="TSV_IMPORT.doClearHistory()" style="font-size:12px;color:var(--red)">クリア</button>
+            <span id="tsv-import-msg-history" style="font-size:11px;color:var(--text2)"></span>
+          </div>
+        </div>
+      </details>
 
             <!-- クラウド同期設定 -->
       <div class="card" style="margin-bottom:14px">
@@ -960,8 +974,8 @@ window.onunhandledrejection = function(e) {
         <div class="card-header"><span class="card-title">運用ガイド</span></div>
         <div class="card-body">
           <div class="rule-list">
-            <p>このタブは <strong>収支実績データ（SKDL形式）</strong> 専用です</p>
-            <p><strong>SKDL0001</strong> … 日報（速報値）／ <strong>SKDL0003</strong> … 確定値（正式数値）― ファイル名で自動判別</p>
+            <p>このタブは <strong>収支実績データ（SKKS形式）</strong> 専用です</p>
+            <p><strong>SKKS0001</strong> … 日報（速報値）／ <strong>SKKS0003</strong> … 確定値（正式数値）― ファイル名で自動判別</p>
             <p>同一月に両方読み込んだ場合は <strong>確定値を優先</strong> して表示します</p>
             <p>複数月まとめて選択すると推移グラフが自動生成されます</p>
             <p>データはブラウザの IndexedDB に自動保存され、次回開いたときに自動復元されます</p>
@@ -1082,7 +1096,7 @@ const CONFIG = {
     variableRateMax:  80,  // 変動費率 上限目安（%）
   },
 
-  // ── 計画データの科目名 → SKDL科目名 マッピング
+  // ── 計画データの科目名 → SKKS科目名 マッピング
   PLAN_ROW_MAP: {
     '営業収益':'income', '営業収益計':'income',
     '人件費':'labor',   '人件費計':'labor',
@@ -1381,7 +1395,7 @@ const UI = {
     const ml=STATE.monthList();
     const right=document.getElementById('topbar-right');
     const sub=document.getElementById('page-sub');
-    // 現場明細ページではSKDL月ボタンを非表示
+    // 現場明細ページではSKKS月ボタンを非表示
     const activeView = document.querySelector('.view.active')?.id;
     if (activeView === 'view-field') {
       right.innerHTML = '';
@@ -1436,7 +1450,7 @@ const UI = {
         </div>
       </div>`;
     }
-    const bdg=ds.type==='confirmed'?'<span class="badge badge-ok">確定値 (SKDL0003)</span>':'<span class="badge badge-warn">速報値 (SKDL0001・日報)</span>';
+    const bdg=ds.type==='confirmed'?'<span class="badge badge-ok">確定値 (SKKS0003)</span>':'<span class="badge badge-warn">速報値 (SKKS0001・日報)</span>';
     right.innerHTML=`${sel}<span style="font-size:12px;font-weight:700;color:var(--navy)">${this.fmtYM(STATE.currentYM)}</span>${bdg}`;
     sub.textContent=`${STATE.fiscalYear(STATE.currentYM)} ／ ${ml.length}ヶ月分データ読込済`;
   },
@@ -2801,7 +2815,7 @@ const MODAL = {
     // ファイル一覧
     list.innerHTML = Array.from(files).map(f=>{
       const type = f.name.endsWith('.pdf') ? 'PDF' :
-                   f.name.match(/\d{6}/) ? 'SKDL収支' : '作業明細CSV';
+                   f.name.match(/\d{6}/) ? 'SKKS収支' : '作業明細CSV';
       const cls = f.name.endsWith('.pdf')?'badge-info':'badge-ok';
       return `<div class="modal-file-item">
         <span class="modal-type-badge ${cls}">${type}</span>
@@ -2921,7 +2935,7 @@ EVENTS.handleFiles = function(files) {
   MODAL.show(files, 'skdl');
 };
 
-// YMを明示指定してSKDLを処理する（モーダルから呼ばれる）
+// YMを明示指定してSKKSを処理する（モーダルから呼ばれる）
 EVENTS._processFilesWithYM = async function(files, forcedYM) {
   const msgEl = document.getElementById('upload-msg');
   if (msgEl) msgEl.innerHTML = '<div class="msg msg-info">読み込み中...</div>';
@@ -3269,7 +3283,7 @@ const SESSION = {
         throw new Error('このファイルは対応していない形式です');
       }
 
-      // SKDL収支データを復元
+      // SKKS収支データを復元
       STATE.datasets = payload.datasets.map(d => ({
         file: d.file,
         type: d.type,
@@ -3301,7 +3315,7 @@ const SESSION = {
       const savedAt = new Date(payload.savedAt).toLocaleString('ja-JP');
       const skdlN   = STATE.datasets.length;
       const fieldN  = FIELD_STATE.datasets.length;
-      msgEl.textContent = `✅ 復元 (SKDL:${skdlN}件 / 現場:${fieldN}件)`;
+      msgEl.textContent = `✅ 復元 (SKKS:${skdlN}件 / 現場:${fieldN}件)`;
       setTimeout(() => { msgEl.textContent = `保存日時: ${savedAt}`; }, 2000);
 
       // ダッシュボードが表示中なら再描画
@@ -3346,7 +3360,7 @@ const DB = {
       const req = indexedDB.open(this.DB_NAME, this.DB_VERSION);
       req.onupgradeneeded = e => {
         const db = e.target.result;
-        // SKDL収支データ（月ごとにレコード保存）
+        // SKKS収支データ（月ごとにレコード保存）
         if (!db.objectStoreNames.contains('skdl')) {
           db.createObjectStore('skdl', { keyPath: 'key' }); // key = "ym_type" 例: "202603_confirmed"
         }
@@ -3405,7 +3419,7 @@ const DB = {
     });
   },
 
-  // ── SKDL収支データを自動保存
+  // ── SKKS収支データを自動保存
   async saveSKDL(dataset) {
     const key    = `${dataset.ym}_${dataset.type}`;
     const trimmed = this.trimRows(dataset.rows, this.SKDL_COLS);
@@ -3444,7 +3458,7 @@ const DB = {
       const meta = {};
       metaRecs.forEach(m => { meta[m.key] = m.value; });
 
-      // SKDL復元
+      // SKKS復元
       if (skdlRecs.length > 0) {
         STATE.datasets = skdlRecs.map(r => ({
           file: r.file, type: r.type, ym: r.ym, rows: r.rows,
@@ -3471,7 +3485,7 @@ const DB = {
         const newest = skdlRecs.concat(fieldRecs)
           .sort((a, b) => (b.savedAt||0) - (a.savedAt||0))[0];
         const savedAgo = newest ? this._timeAgo(newest.savedAt) : '';
-        if (msgEl) msgEl.innerHTML = `復元: SKDL ${skdlRecs.length}件 / 現場 ${fieldRecs.length}件<br><span style="color:#4d6a88">${savedAgo}</span>`;
+        if (msgEl) msgEl.innerHTML = `復元: SKKS ${skdlRecs.length}件 / 現場 ${fieldRecs.length}件<br><span style="color:#4d6a88">${savedAgo}</span>`;
         if (dot)   dot.style.background = '#16a34a';
         if (label) label.textContent = '自動保存 有効';
 
@@ -3534,7 +3548,7 @@ const DB = {
 
       listEl.innerHTML = `<table class="tbl">
         <thead><tr>
-          <th>年月</th><th>SKDL収支</th><th>現場CSV</th><th>エリアPDF</th><th class="c">削除</th>
+          <th>年月</th><th>SKKS収支</th><th>現場CSV</th><th>エリアPDF</th><th class="c">削除</th>
         </tr></thead>
         <tbody>${allYMs.map(ym => {
           const sk = skdlRecs.filter(r => r.ym === ym);
@@ -3638,7 +3652,7 @@ const DB = {
     await orig.call(this, files, forcedYM);
     // 読み込んだデータをIndexedDBに自動保存
     for (const ds of STATE.datasets) {
-      try { await DB.saveSKDL(ds); } catch(e) { console.warn('SKDL自動保存エラー', e); }
+      try { await DB.saveSKDL(ds); } catch(e) { console.warn('SKKS自動保存エラー', e); }
     }
     const msgEl = document.getElementById('session-msg');
     if (msgEl && STATE.datasets.length > 0) {
@@ -3844,7 +3858,7 @@ const CLOUD = {
       let meta = {};
       if (metaFile) { const m = await this.download('meta.json'); if (m) meta = m; }
 
-      // SKDL
+      // SKKS
       const skdlRecs = (await Promise.all(
         skdlFiles.map(f => this.download(f.name))
       )).filter(Boolean);
@@ -4329,7 +4343,7 @@ CENTER._restoreFromIndexedDB = async function() {
 ═══════════════════════════════════════════════════════════ */
 const DEL = {
 
-  // ── SKDL: 1件削除（インデックス指定）
+  // ── SKKS: 1件削除（インデックス指定）
   async skdlOne(idx) {
     const ds = STATE.datasets[idx];
     if (!ds) return;
@@ -4345,7 +4359,7 @@ const DEL = {
     await DB.showStorageInfo();
   },
 
-  // ── SKDL: センターの全データ削除
+  // ── SKKS: センターの全データ削除
   async skdlAll() {
     const name = CENTER.current.name;
     if (!confirm(`⚠️ 警告\n\n${name} の全収支データ（${STATE.datasets.length}件）を削除します。\nIndexedDB・クラウド両方から完全に削除されます。\n\n本当に削除しますか？`)) return;
@@ -4395,7 +4409,7 @@ const DEL = {
 
   // ── 年月単位で削除（ストレージ管理から呼ばれる）
   async _deleteYM(ym) {
-    // SKDL
+    // SKKS
     const skdlTargets = STATE.datasets.filter(d => d.ym === ym);
     for (const ds of skdlTargets) await this._deleteRecord('skdl', ds.ym, ds.type);
     STATE.datasets = STATE.datasets.filter(d => d.ym !== ym);
@@ -5189,7 +5203,7 @@ const SIMPLE_STORE = {
   async saveAll() {
     try {
       const cid = CENTER.current.id;
-      // SKDL収支データ（月ごと）
+      // SKKS収支データ（月ごと）
       for (const ds of STATE.datasets) {
         const rows = DB.trimRows ? DB.trimRows(ds.rows, DB.SKDL_COLS) : ds.rows;
         await this.save(`${cid}_skdl_${ds.ym}_${ds.type}`, {
@@ -5213,7 +5227,7 @@ const SIMPLE_STORE = {
       // 保存時刻を表示
       const msgEl = document.getElementById('session-msg');
       if (msgEl) {
-        msgEl.innerHTML = `💾 自動保存 ${new Date().toLocaleTimeString('ja-JP')}<br><span style="color:#4d6a88;font-size:10px">SKDL:${STATE.datasets.length}件 / 現場:${FIELD_STATE.datasets.length}件</span>`;
+        msgEl.innerHTML = `💾 自動保存 ${new Date().toLocaleTimeString('ja-JP')}<br><span style="color:#4d6a88;font-size:10px">SKKS:${STATE.datasets.length}件 / 現場:${FIELD_STATE.datasets.length}件</span>`;
       }
       const dot = document.getElementById('autosave-dot');
       if (dot) dot.style.background = '#16a34a';
@@ -5238,7 +5252,7 @@ const SIMPLE_STORE = {
       });
       console.log('[RESTORE] all keys:', keys);
 
-      // SKDL
+      // SKKS
       const skdlKeys = keys.filter(k => k.startsWith(`${cid}_skdl_`) && !k.endsWith('_meta'));
       console.log('[RESTORE] skdlKeys:', skdlKeys);
       const skdlRecs = (await Promise.all(skdlKeys.map(k => this.load(k)))).filter(Boolean);
@@ -5344,7 +5358,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       if (msgEl) msgEl.innerHTML = `データなし<br>
         <span style="font-size:10px;color:#4d9fea">
-          データ取込からSKDLのCSVを読み込んでください
+          データ取込からSKKSのCSVを読み込んでください
         </span>`;
     }
 
@@ -5379,7 +5393,7 @@ window.addEventListener('beforeunload', () => {
   if (!_orig) return;
   EVENTS._processFilesWithYM = async function(files, ym) {
     await _orig.call(this, files, ym);
-    await SIMPLE_STORE.saveAll().catch(e => console.warn('SimpleSave SKDL:', e));
+    await SIMPLE_STORE.saveAll().catch(e => console.warn('SimpleSave SKKS:', e));
   };
 })();
 
@@ -5405,7 +5419,7 @@ window.addEventListener('beforeunload', () => {
    優先順位: SKDL確定値 > SKDL日報 > 過去実績（集計値）
 ═══════════════════════════════════════════════════════════ */
 
-// ── 統合月リスト（SKDL + HISTORY）
+// ── 統合月リスト（SKKS + HISTORY）
 const _origMonthList = STATE.monthList.bind(STATE);
 STATE._origMonthList = _origMonthList;  // HISTORY.allMonthList から参照できるよう保存
 STATE.monthList = function() {
@@ -6130,7 +6144,7 @@ if (_origChangeFieldMonth) {
   };
 }
 
-// ── SKDLの月切替
+// ── SKKSの月切替
 const _origChangeMonth = UI.changeMonth.bind(UI);
 UI.changeMonth = function(ym) {
   DISPLAY.clearAll();  // 月切替前にクリア
@@ -6380,7 +6394,7 @@ const HISTORY = {
     return fyData ? (fyData[ym] || null) : null;
   },
 
-  // SKDL + HISTORY を統合した「全月リスト」を返す（_origMonthList で再帰回避）
+  // SKKS + HISTORY を統合した「全月リスト」を返す（_origMonthList で再帰回避）
   allMonthList() {
     const skdlYMs = new Set(STATE._origMonthList ? STATE._origMonthList() : []);
     const histYMs = new Set();
@@ -6457,4 +6471,58 @@ PLAN.initYearSel = function() {
 };
 
 // patchHistoryCenterSwitch removed (integrated into CENTER.switchTo)
+</script>
+<script>
+'use strict';
+// ── 過去実績専用の取込・クリアメソッドを追加
+TSV_IMPORT.doImportHistory = function() {
+  const ta    = document.getElementById('tsv-paste-area-history');
+  const yearEl= document.getElementById('tsv-year-sel-history');
+  const msgEl = document.getElementById('tsv-import-msg-history');
+  const raw   = ta?.value?.trim() || '';
+  const fy    = parseInt(yearEl?.value || new Date().getFullYear());
+  if (!raw) { if(msgEl) msgEl.textContent = '❌ データが空です'; return; }
+  const { monthMap, parsed } = this.parseTSV(raw, fy);
+  if (parsed === 0) { if(msgEl) msgEl.textContent = '❌ 解析できる行がありません'; return; }
+  this._saveRaw(fy, 'history', raw);
+  HISTORY.saveData(fy, monthMap);
+  const hb = document.getElementById('history-badge');
+  if(hb) { hb.textContent=`${fy}年度登録済`; hb.className='badge badge-ok'; }
+  if(ta) ta.value = '';
+  if(msgEl) { msgEl.textContent=`✅ ${fy}年度の過去実績を取込みました（${parsed}科目）`; msgEl.style.color='var(--green)'; }
+  setTimeout(()=>{ if(msgEl) msgEl.style.color='var(--text2)'; }, 4000);
+};
+
+TSV_IMPORT.doClearHistory = function() {
+  if (!confirm('過去実績データをクリアしますか？')) return;
+  HISTORY.clearAll();
+  const hb = document.getElementById('history-badge');
+  if(hb) { hb.textContent='未登録'; hb.className='badge badge-warn'; }
+  const msgEl = document.getElementById('tsv-import-msg-history');
+  if(msgEl) msgEl.textContent = 'クリアしました';
+};
+
+// 過去実績の年度セレクトを初期化
+(function initHistoryYearSel() {
+  const origInit = TSV_IMPORT.initYearSel.bind(TSV_IMPORT);
+  TSV_IMPORT.initYearSel = function() {
+    origInit();
+    const sel = document.getElementById('tsv-year-sel-history');
+    if (!sel) return;
+    const now = new Date().getFullYear();
+    sel.innerHTML = '';
+    for (let y = now - 3; y <= now + 2; y++) {
+      const opt = document.createElement('option');
+      opt.value = String(y);
+      opt.textContent = `${y}年度（${y}/4〜${y+1}/3）`;
+      if (y === now - 1) opt.selected = true; // デフォルトは前年度
+      sel.appendChild(opt);
+    }
+    sel.onchange = () => {
+      const fy = parseInt(sel.value);
+      const ta = document.getElementById('tsv-paste-area-history');
+      if (ta) ta.value = TSV_IMPORT._restoreRaw(fy, 'history');
+    };
+  };
+})();
 </script>
