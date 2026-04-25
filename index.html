@@ -5401,6 +5401,7 @@ window.addEventListener('beforeunload', () => {
 
 // ── 統合月リスト（SKDL + HISTORY）
 const _origMonthList = STATE.monthList.bind(STATE);
+STATE._origMonthList = _origMonthList;  // HISTORY.allMonthList から参照できるよう保存
 STATE.monthList = function() {
   const skdl = _origMonthList();
   if (!HISTORY.hasData()) return skdl;
@@ -6372,9 +6373,9 @@ const HISTORY = {
     return fyData ? (fyData[ym] || null) : null;
   },
 
-  // SKDL + HISTORY を統合した「全月リスト」を返す
+  // SKDL + HISTORY を統合した「全月リスト」を返す（_origMonthList で再帰回避）
   allMonthList() {
-    const skdlYMs = new Set(STATE.monthList());
+    const skdlYMs = new Set(STATE._origMonthList ? STATE._origMonthList() : []);
     const histYMs = new Set();
     for (const fyData of Object.values(this._data)) {
       Object.keys(fyData).forEach(ym => histYMs.add(ym));
