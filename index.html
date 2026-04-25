@@ -6641,3 +6641,247 @@ UI._selectYear = function(year) {
 
 console.log('[PATCH] updateTopbar / _selectYear 修正済み');
 </script>
+<!-- ════════════════════════════════════════════════════════
+     【追加パッチ2】過去実績月の月次収支表を全科目表示にする
+     fix_patch.html の後ろに追記（</html>直前）
+════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+/* ══════════════════════════════════════════════════════
+   _renderPLFromHistory を全科目表示に修正
+   原因: 元の実装が「8行の簡易版」しか出していなかった
+   修正: CONFIG.PL_DEF を使って通常の月次収支表と同じ構造で描画
+══════════════════════════════════════════════════════ */
+UI._renderPLFromHistory = function(m) {
+  document.getElementById('pl-card-title').textContent =
+    `月次収支表 — ${this.fmtYM(STATE.currentYM)} （過去実績・集計値）`;
+
+  const inc = CALC.income(m);
+  const exp = CALC.expense(m);
+
+  // 過去実績セルの共通スタイル（計画・前月・前年はすべて「--」）
+  const blankPlan = `<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>
+    <td class="r" style="background:#fffdf0;color:var(--text3)">--</td>
+    <td class="r" style="background:#fffdf0;color:var(--text3)">--</td>`;
+  const blankVs = `<td class="r vs-col" style="color:var(--text3)">--</td>
+    <td class="r vs-col" style="color:var(--text3)">--</td>
+    <td class="r vs-col" style="color:var(--text3)">--</td>`;
+  const histNote = `<td class="r vs-col" style="color:var(--text3);font-size:10px">過去実績</td>
+    <td class="r vs-col" style="color:var(--text3)">--</td>
+    <td class="r vs-col" style="color:var(--text3)">--</td>`;
+
+  const header = (label) =>
+    `<tr class="row-h"><td colspan="12">${label}</td></tr>`;
+
+  const row = (label, val, cls='', indent=0) => {
+    const k = CALC.toK(val).toLocaleString();
+    const p = inc > 0 ? (val / inc * 100).toFixed(1) + '%' : '--';
+    const iStyle = indent > 0
+      ? `style="padding-left:${indent*14+8}px;font-size:11px;color:var(--text2)"`
+      : '';
+    return `<tr class="${cls}">
+      <td ${iStyle}>${label}</td>
+      <td class="r">${k}</td>
+      <td class="r">${p}</td>
+      ${blankPlan}
+      ${blankVs}
+      ${histNote}
+    </tr>`;
+  };
+
+  let html = '';
+
+  CONFIG.PL_DEF.forEach(def => {
+    if (def.t === 'h') {
+      html += header(def.l);
+      return;
+    }
+
+    if (def.t === 'i') {
+      const v = CALC.sum(m, def.k);
+      const dimIt = v === 0;
+      if (!dimIt) html += row(def.l, v, '', 0);
+      return;
+    }
+
+    if (def.t === 'st') {
+      const v = def.k === 'inc' ? inc : exp;
+      html += row(def.l, v, 'row-sub');
+      return;
+    }
+
+    if (def.t === 'g') {
+      const gv = CALC.sum(m, def.k);
+      // サブ行を表示（値があるものだけ）
+      if (def.s && def.s.length > 0) {
+        def.s.forEach(s => {
+          const sv = CALC.sum(m, s.k);
+          if (sv !== 0) html += row(s.l, sv, '', 1);
+        });
+      }
+      if (gv !== 0) html += row(def.l, gv, 'row-sub');
+      return;
+    }
+
+    if (def.t === 'tot') {
+      html += row(def.l, exp, 'row-total');
+      return;
+    }
+
+    if (def.t === 'prf') {
+      const prf = inc - exp;
+      html += row(def.l, prf, prf >= 0 ? 'row-profit' : 'row-loss');
+    }
+  });
+
+  document.getElementById('pl-tbody').innerHTML = html;
+};
+
+/* ══════════════════════════════════════════════════════
+   renderPL も過去実績月で正しく呼ばれるように再パッチ
+   （HISTORY_PATCH の _origRenderPLPatch チェーンを上書き）
+══════════════════════════════════════════════════════ */
+(function repatchRenderPL() {
+  // 既存の全パッチを無視して完全に上書き
+  UI.renderPL = function() {
+    const plEl = document.getElementById('pl-tbody');
+    if (plEl) plEl.innerHTML = '';
+
+    const ds = STATE.activeDS();
+    const hm = STATE.currentYM ? HISTORY.getMonthMap(STATE.currentYM) : null;
+
+    // データなし
+    if (!ds && !hm) {
+      if (plEl) plEl.innerHTML =
+        '<tr><td colspan="12" style="padding:20px;color:var(--text3);text-align:center">データがありません</td></tr>';
+      return;
+    }
+
+    // 過去実績のみの月 → 全科目表示版
+    if (!ds && hm) {
+      UI._renderPLFromHistory(hm);
+      return;
+    }
+
+    // SKKSデータあり → 通常の描画（計画列つき）
+    // ── 以下は元の patchRenderPL の中身をそのまま再実装
+    const ym  = STATE.currentYM;
+    const mm  = CALC.buildMap(ds.rows);
+    const inc = CALC.income(mm), exp = CALC.expense(mm);
+    const pm  = (typeof PLAN !== 'undefined') ? PLAN.getMonthMap(ym) : null;
+
+    const prevYM   = STATE.prevYM(ym);
+    const prevYrYM = STATE.prevYearYM(ym);
+    const prevDS   = prevYM   ? STATE.dsForYM(prevYM)   : null;
+    const prevYrDS = prevYrYM ? STATE.dsForYM(prevYrYM) : null;
+    const prevM    = prevDS   ? CALC.buildMap(prevDS.rows)   : null;
+    const prevYrM  = prevYrDS ? CALC.buildMap(prevYrDS.rows) : null;
+
+    document.getElementById('pl-card-title').textContent =
+      `月次収支表 — ${UI.fmtYM(ym)}`;
+
+    const getPlan = (keys) => {
+      if (!pm) return null;
+      return [].concat(keys).reduce((s, k) => s + (pm[k]||0), 0) || null;
+    };
+
+    const planCells = (actual, planVal) => {
+      if (planVal == null)
+        return '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+               '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+               '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>';
+      const pk   = CALC.toK(planVal).toLocaleString();
+      const diff = CALC.toK(actual) - CALC.toK(planVal);
+      const dStr = diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString();
+      const dCls = diff > 0 ? 'cell-up' : diff < 0 ? 'cell-down' : 'cell-flat';
+      const ach  = planVal !== 0 ? (actual/planVal*100).toFixed(1)+'%' : '--';
+      const achCls = planVal !== 0 && actual/planVal >= 1 ? 'cell-up' : 'cell-down';
+      return `<td class="r" style="background:#fffdf0">${pk}</td>` +
+             `<td class="r ${dCls}" style="background:#fffdf0">${dStr}</td>` +
+             `<td class="r ${achCls}" style="background:#fffdf0">${ach}</td>`;
+    };
+
+    const pK = (mmap, keys) => mmap ? CALC.sum(mmap, [].concat(keys)) : null;
+
+    const row = (label, val, refVal, prevVal, prevYrVal, planVal, cls='', indent=0) => {
+      const k   = CALC.toK(val).toLocaleString();
+      const p   = CALC.pct(val, refVal);
+      const pvk = prevVal   != null ? CALC.toK(prevVal).toLocaleString()   : '--';
+      const pyVk= prevYrVal != null ? CALC.toK(prevYrVal).toLocaleString() : '--';
+      const df1 = prevVal   != null ? CALC.diff(val,prevVal)  : {txt:'--',cls:'cell-flat'};
+      const rt1 = prevVal   != null ? CALC.ratio(val,prevVal) : {txt:'--',cls:'cell-flat'};
+      const df2 = prevYrVal != null ? CALC.diff(val,prevYrVal)  : {txt:'--',cls:'cell-flat'};
+      const rt2 = prevYrVal != null ? CALC.ratio(val,prevYrVal) : {txt:'--',cls:'cell-flat'};
+      const iStyle = indent > 0
+        ? `style="padding-left:${indent*14+8}px;font-size:11px;color:var(--text2)"`
+        : '';
+      return `<tr class="${cls}">
+        <td ${iStyle}>${label}</td>
+        <td class="r">${k}</td><td class="r">${p}</td>
+        ${planCells(val, planVal)}
+        <td class="r vs-col">${pvk}</td>
+        <td class="r vs-col ${df1.cls}">${df1.txt}</td>
+        <td class="r vs-col ${rt1.cls}">${rt1.txt}</td>
+        <td class="r vs-col">${pyVk}</td>
+        <td class="r vs-col ${df2.cls}">${df2.txt}</td>
+        <td class="r vs-col ${rt2.cls}">${rt2.txt}</td>
+      </tr>`;
+    };
+
+    const header = (label) =>
+      `<tr class="row-h"><td colspan="12">${label}</td></tr>`;
+
+    let html = '';
+    CONFIG.PL_DEF.forEach(def => {
+      if (def.t === 'h') { html += header(def.l); return; }
+      if (def.t === 'i') {
+        const v = CALC.sum(mm, def.k);
+        const pv  = pK(prevM,  def.k);
+        const pyv = pK(prevYrM,def.k);
+        const planV = getPlan(def.k);
+        const dim = v===0 && (!pv||pv===0) && (!pyv||pyv===0) && !planV;
+        html += row(def.l, v, inc, pv, pyv, planV, dim?'dim':'', 0);
+        return;
+      }
+      if (def.t === 'st') {
+        const v   = def.k==='inc' ? inc : exp;
+        const pv  = prevM  ? (def.k==='inc' ? CALC.income(prevM)  : CALC.expense(prevM))  : null;
+        const pyv = prevYrM? (def.k==='inc' ? CALC.income(prevYrM): CALC.expense(prevYrM)): null;
+        const planV = def.k==='inc' ? getPlan(['営業収益','営業収益計']) : getPlan(['売上原価']);
+        html += row(def.l, v, inc, pv, pyv, planV, 'row-sub');
+        return;
+      }
+      if (def.t === 'g') {
+        const gv  = CALC.sum(mm, def.k);
+        const pgv = pK(prevM,  def.k);
+        const pygv= pK(prevYrM,def.k);
+        if (def.s) def.s.forEach(s => {
+          const sv = CALC.sum(mm, s.k); if (!sv) return;
+          const psv  = pK(prevM,  s.k);
+          const pysv = pK(prevYrM,s.k);
+          html += row(s.l, sv, inc, psv, pysv, getPlan(s.k), '', 1);
+        });
+        html += row(def.l, gv, inc, pgv, pygv, getPlan(def.k), 'row-sub');
+        return;
+      }
+      if (def.t === 'tot') {
+        const pv  = prevM  ? CALC.expense(prevM)  : null;
+        const pyv = prevYrM? CALC.expense(prevYrM): null;
+        html += row(def.l, exp, inc, pv, pyv, getPlan(['売上原価']), 'row-total');
+        return;
+      }
+      if (def.t === 'prf') {
+        const prf  = inc - exp;
+        const pprf = prevM  ? CALC.profit(prevM)  : null;
+        const pyprf= prevYrM? CALC.profit(prevYrM): null;
+        const planV= pm ? (pm['粗利益']||pm['営業利益']||pm['経常利益']||null) : null;
+        html += row(def.l, prf, inc, pprf, pyprf, planV,
+                    prf>=0 ? 'row-profit' : 'row-loss');
+      }
+    });
+    document.getElementById('pl-tbody').innerHTML = html;
+  };
+})();
+
+console.log('[PATCH2] _renderPLFromHistory 全科目表示に修正済み');
+</script>
