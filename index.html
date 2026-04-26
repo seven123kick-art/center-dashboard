@@ -2612,12 +2612,26 @@ const FIELD_UI = {
   renderMap() {
     const sel = document.getElementById('map-data-sel')?.value || 'csv';
     const metric = document.getElementById('map-metric-sel')?.value || 'count';
-    const noData = document.getElementById('map-no-data');
+    let noData = document.getElementById('map-no-data');
+
+    // map-no-dataが消えていた場合は再生成（renderFieldNoDataによる上書きの対策）
+    if (!noData) {
+      const cardBody = document.querySelector('#fpane-map .card-body');
+      if (cardBody) {
+        noData = document.createElement('div');
+        noData.id = 'map-no-data';
+        noData.style.cssText = 'display:none;padding:40px;text-align:center;color:var(--text3)';
+        noData.textContent = 'データを読み込んでください';
+        cardBody.appendChild(noData);
+      }
+    }
 
     // Leaflet未ロード確認
     if (typeof L === 'undefined') {
-      noData.textContent='地図ライブラリが読み込まれていません。インターネット接続を確認してください。';
-      noData.style.display='block';
+      if (noData) {
+        noData.textContent = '地図ライブラリが読み込まれていません。インターネット接続を確認してください。';
+        noData.style.display = 'block';
+      }
       return;
     }
 
@@ -6099,9 +6113,9 @@ const HISTORY = {
       // localStorage 優先
       const s = localStorage.getItem(key);
       if (s) { this._data = JSON.parse(s); this._updateBadge(); return; }
-      // SIMPLE_STORE fallback
-      const rec = await SIMPLE_STORE.get(key);
-      if (rec) { this._data = JSON.parse(rec); this._updateBadge(); }
+      // SIMPLE_STORE fallback (loadメソッドを使用)
+      const rec = await SIMPLE_STORE.load(key);
+      if (rec) { this._data = JSON.parse(typeof rec === 'string' ? rec : JSON.stringify(rec)); this._updateBadge(); }
     } catch(e) { console.warn('HISTORY読込エラー:', e); }
   },
 
@@ -7304,6 +7318,15 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 
     const pane = document.querySelector('#view-field .field-pane.active');
     if (pane) {
+      // マップペイン（fpane-map）はinnerHTMLを使うとmap-no-dataが消えるので専用処理
+      if (pane.id === 'fpane-map') {
+        const noData = document.getElementById('map-no-data');
+        if (noData) {
+          noData.style.display = 'block';
+          noData.innerHTML = html;
+        }
+        return;
+      }
       const first = pane.querySelector('.kpi-row, .card-body, .scroll-x');
       if (first) first.innerHTML = html;
     }
