@@ -13,7 +13,7 @@
 ═══════════════════════════════════════════ */
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:220px;
+  --sidebar-w:220px;ac
   --sidebar-bg:#1c2e44;
   --sidebar-hover:#243a55;
   --sidebar-active:#2e5282;
@@ -244,104 +244,7 @@ window.onunhandledrejection = function(e) {
     b.style.display = 'block';
     b.innerHTML += '<div>❌ Promise: ' + (e.reason||e) + '</div>';
   }
-};
-const DATA_RESET = {
-  async clearAll(){
-    if (!confirm('すべてのデータを完全削除しますか？\n\nローカル保存・クラウド保存・表示中データを削除します。')) return;
-
-    try {
-      // 1. クラウド側を先に削除（残っていると再読込で復元されるため）
-      if (window.CLOUD && CLOUD.cfg && CLOUD.cfg.url && CLOUD.cfg.key && CLOUD.cfg.bucket) {
-        const prefix = window.CENTER && CENTER.pathPrefix ? CENTER.pathPrefix + '/' : '';
-        const { url, key, bucket } = CLOUD.cfg;
-
-        const listRes = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${key}`,
-            'apikey': key,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ prefix, limit: 1000 })
-        });
-
-        if (listRes.ok) {
-          const files = await listRes.json();
-          const paths = (files || [])
-            .map(f => f.name)
-            .filter(Boolean)
-            .map(name => prefix && !name.startsWith(prefix) ? prefix + name : name);
-
-          if (paths.length > 0) {
-            await fetch(`${url}/storage/v1/object/${bucket}`, {
-              method: 'DELETE',
-              headers: {
-                'Authorization': `Bearer ${key}`,
-                'apikey': key,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ prefixes: paths })
-            });
-          }
-        }
-      }
-
-      // 2. IndexedDB各ストアを削除
-      if (window.DB && typeof DB.clearStore === 'function') {
-        await DB.clearStore('skdl');
-        await DB.clearStore('field');
-        await DB.clearStore('meta');
-      }
-
-      // 3. IndexedDB自体も削除
-      if (window.DB && DB._db) {
-        DB._db.close();
-        DB._db = null;
-      }
-      if (window.indexedDB && window.DB && DB.DB_NAME) {
-        indexedDB.deleteDatabase(DB.DB_NAME);
-      }
-
-      // 4. メモリ初期化
-      if (window.STATE) {
-        STATE.datasets = [];
-        STATE.currentYM = null;
-        if (STATE.data) STATE.data = {};
-        if (STATE._data) STATE._data = {};
-      }
-
-      if (window.FIELD_STATE) {
-        FIELD_STATE.datasets = [];
-        FIELD_STATE.currentYM = null;
-        if (FIELD_STATE.data) FIELD_STATE.data = {};
-        if (FIELD_STATE._data) FIELD_STATE._data = {};
-      }
-
-      if (window.PLAN) {
-        PLAN._data = {};
-        PLAN.data = {};
-      }
-
-      if (window.HISTORY) {
-        HISTORY._data = {};
-        HISTORY._m = {};
-        HISTORY.data = {};
-      }
-
-      // 5. localStorage / sessionStorage削除
-      localStorage.clear();
-      sessionStorage.clear();
-
-      alert('データを削除しました。画面を再読み込みします。');
-      location.reload();
-
-    } catch(e){
-      console.error(e);
-      alert('削除に失敗しました: ' + (e.message || e));
-    }
-  }
-};
-</script>
+};</script>
 
 <!-- ════════ SIDEBAR ════════ -->
 <div id="sidebar">
@@ -5542,7 +5445,132 @@ window.addEventListener('beforeunload', () => {
 })();
 </script>
 
-<!-- ===== 安定化: 旧ファイルで </body></html> の後ろにあった追加scriptを、正式に </body> 直前へ移動 ===== -->
+<!-- ===== 安定化: 旧ファイルで 
+<script>
+/* ═══════════════════════════════════════════════════════
+   DATA_RESET — 全データ削除（最終版）
+   ・このブロックは必ず </body> 直前に置く
+   ・CLOUD / DB / SIMPLE_STORE / CENTER 定義後に動かす
+═══════════════════════════════════════════════════════ */
+const DATA_RESET = {
+  async clearAll(){
+    if (!confirm('すべてのデータを完全削除しますか？\n\nローカル保存・クラウド保存・表示中データを削除します。')) return;
+
+    try {
+      // 1. クラウド側を削除（残っていると再読み込みで復元されるため）
+      if (window.CLOUD && CLOUD.cfg && CLOUD.cfg.url && CLOUD.cfg.key && CLOUD.cfg.bucket && window.CENTER) {
+        const { url, key, bucket } = CLOUD.cfg;
+        const prefix = CENTER.pathPrefix ? CENTER.pathPrefix + '/' : '';
+
+        const listRes = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${key}`,
+            'apikey': key,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ prefix, limit: 1000 })
+        });
+
+        if (listRes.ok) {
+          const files = await listRes.json();
+          const paths = (files || [])
+            .map(f => f.name)
+            .filter(Boolean)
+            .map(name => prefix && !name.startsWith(prefix) ? prefix + name : name);
+
+          if (paths.length > 0) {
+            await fetch(`${url}/storage/v1/object/${bucket}`, {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${key}`,
+                'apikey': key,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ prefixes: paths })
+            });
+          }
+        }
+      }
+
+      // 2. IndexedDBストアを削除
+      if (window.DB && typeof DB.clearStore === 'function') {
+        await DB.clearStore('skdl');
+        await DB.clearStore('field');
+        await DB.clearStore('meta');
+      }
+
+      // 3. 使用しているIndexedDB名を直接削除
+      if (window.DB && DB._db) {
+        DB._db.close();
+        DB._db = null;
+      }
+
+      if (window.indexedDB) {
+        await new Promise(resolve => {
+          const req = indexedDB.deleteDatabase('北埼玉センター_v1');
+          req.onsuccess = resolve;
+          req.onerror = resolve;
+          req.onblocked = resolve;
+        });
+      }
+
+      if (window.SIMPLE_STORE && SIMPLE_STORE._db) {
+        SIMPLE_STORE._db.close();
+        SIMPLE_STORE._db = null;
+      }
+
+      if (window.indexedDB) {
+        await new Promise(resolve => {
+          const req = indexedDB.deleteDatabase('EslineCenter_v2');
+          req.onsuccess = resolve;
+          req.onerror = resolve;
+          req.onblocked = resolve;
+        });
+      }
+
+      // 4. メモリ初期化
+      if (window.STATE) {
+        STATE.datasets = [];
+        STATE.currentYM = null;
+        if (STATE.data) STATE.data = {};
+        if (STATE._data) STATE._data = {};
+      }
+
+      if (window.FIELD_STATE) {
+        FIELD_STATE.datasets = [];
+        FIELD_STATE.currentYM = null;
+        if (FIELD_STATE.data) FIELD_STATE.data = {};
+        if (FIELD_STATE._data) FIELD_STATE._data = {};
+      }
+
+      if (window.PLAN) {
+        PLAN._data = {};
+        PLAN.data = {};
+      }
+
+      if (window.HISTORY) {
+        HISTORY._data = {};
+        HISTORY._m = {};
+        HISTORY.data = {};
+      }
+
+      // 5. ブラウザ保存も削除
+      localStorage.clear();
+      sessionStorage.clear();
+
+      alert('データを削除しました。画面を再読み込みします。');
+      location.reload();
+
+    } catch(e){
+      console.error(e);
+      alert('削除に失敗しました: ' + (e.message || e));
+    }
+  }
+};
+</script>
+
+</body></html> の後ろにあった追加scriptを、正式に </body> 直前へ移動 ===== -->
 
 <script>
 // 安定化チェック: 外部ライブラリが読み込めない場合に画面上へ理由を表示
