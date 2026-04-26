@@ -5717,15 +5717,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ⑤⑥ 復元処理（CENTER初期化後に確実に実行）
   const doRestore = async () => {
     let restored = 0;
-    try {
-      restored = await SIMPLE_STORE.restoreAll();
-      console.log('[BOOT] restored:', restored, 'datasets');
-    } catch(e) { console.warn('[BOOT] SIMPLE_STORE restore failed:', e); }
+    let restoredFrom = 'none';
 
-    // クラウド同期（バックグラウンド）
+    // 別PC反映を優先するため、起動時はクラウド復元を完了まで待つ
     if (CLOUD.isConfigured()) {
-      CLOUD._updateBadge(true);
-      CLOUD.restoreFromCloud().catch(e => console.warn('Cloud sync:', e));
+      try {
+        CLOUD._updateBadge(true);
+        const cloudResult = await CLOUD.restoreFromCloud();
+        const cloudCount = cloudResult ? ((cloudResult.skdl || 0) + (cloudResult.field || 0)) : 0;
+        if (cloudCount > 0) {
+          restored = cloudCount;
+          restoredFrom = 'cloud';
+          console.log('[BOOT] cloud restored:', cloudResult);
+        } else {
+          console.warn('[BOOT] cloud has no datasets, fallback to local');
+        }
+      } catch(e) {
+        console.warn('[BOOT] CLOUD restore failed:', e);
+      }
+    }
+
+    // クラウドにデータが無い/失敗した場合のみローカル復元
+    if (restored === 0) {
+      try {
+        restored = await SIMPLE_STORE.restoreAll();
+        restoredFrom = restored > 0 ? 'local' : 'none';
+        console.log('[BOOT] local restored:', restored, 'datasets');
+      } catch(e) { console.warn('[BOOT] SIMPLE_STORE restore failed:', e); }
     }
 
     // UI更新
@@ -5733,16 +5751,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     UI.updateTopbar();
     FIELD_UI.updatePeriodBadge();
     FIELD_UI.renderDataList();
-      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
+    if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
     DB.showStorageInfo().catch(()=>{});
 
     const msgEl = document.getElementById('session-msg');
     if (restored > 0) {
-      if (msgEl) msgEl.innerHTML = `✅ ${restored}件復元済み<br><span style="font-size:10px;color:#4d9fea">前回のデータを自動読込しました</span>`;
+      if (msgEl) {
+        const label = restoredFrom === 'cloud' ? 'クラウドから復元しました' : '前回のローカルデータを自動読込しました';
+        msgEl.innerHTML = `✅ ${restored}件復元済み<br><span style="font-size:10px;color:#4d9fea">${label}</span>`;
+      }
       const dot = document.getElementById('autosave-dot');
       if (dot) dot.style.background = '#16a34a';
       const lbl = document.getElementById('autosave-label');
-      if (lbl) lbl.textContent = '自動保存 有効';
+      if (lbl) lbl.textContent = restoredFrom === 'cloud' ? 'クラウド復元済み' : '自動保存 有効';
     } else {
       if (msgEl) msgEl.textContent = 'データなし（CSVを読み込んでください）';
     }
@@ -5829,8 +5850,19 @@ window.addEventListener('beforeunload', () => {
     const msgEl = document.getElementById('session-msg');
     if (msgEl) msgEl.textContent = `${CENTER.current.name} のデータを読み込み中...`;
 
-    // ④ 新センターのデータを復元
-    const restored = await SIMPLE_STORE.restoreAll().catch(() => 0);
+    // ④ 新センターのデータを復元（別PC反映を優先するためクラウド優先）
+    let restored = 0;
+    if (CLOUD.isConfigured()) {
+      try {
+        const cloudResult = await CLOUD.restoreFromCloud();
+        restored = cloudResult ? ((cloudResult.skdl || 0) + (cloudResult.field || 0)) : 0;
+      } catch(e) {
+        console.warn('[CENTER] cloud restore failed:', e);
+      }
+    }
+    if (restored === 0) {
+      restored = await SIMPLE_STORE.restoreAll().catch(() => 0);
+    }
 
     // ⑤ 復元後にUIを再更新
     UI.renderDataList();
@@ -6441,6 +6473,61 @@ const REPORT_UI = {
       NAV._reportPatched = true;
     }
   }catch(e){}
+})();
+</script>
+
+
+
+<script id="final-cloud-first-restore-safety-patch">
+'use strict';
+/* ══════════════════════════════════════════════════════
+   FINAL PATCH — 別PC反映を安定させる最終安全策
+   ・CLOUD.restoreFromCloud() 実行後は必ず画面を再描画
+   ・起動直後にも一度だけクラウド復元を再確認
+   ・Realtime通知でStorage復元した後も画面を再描画
+══════════════════════════════════════════════════════ */
+(function finalCloudFirstRestoreSafetyPatch(){
+  if (!window.CLOUD || CLOUD._finalCloudFirstRestorePatched) return;
+
+  function rerenderAfterCloudRestore(){
+    try { if (window.UI && typeof UI.renderDataList === 'function') UI.renderDataList(); } catch(e) {}
+    try { if (window.UI && typeof UI.updateTopbar === 'function') UI.updateTopbar(); } catch(e) {}
+    try { if (window.FIELD_UI && typeof FIELD_UI.updatePeriodBadge === 'function') FIELD_UI.updatePeriodBadge(); } catch(e) {}
+    try { if (window.FIELD_UI && typeof FIELD_UI.renderDataList === 'function') FIELD_UI.renderDataList(); } catch(e) {}
+    try { if (typeof window.renderFieldDataList2 === 'function') window.renderFieldDataList2(); } catch(e) {}
+    try {
+      const active = document.querySelector('.nav-item.active');
+      if (active && window.NAV && typeof NAV.go === 'function') NAV.go(active);
+    } catch(e) {}
+  }
+
+  const originalRestore = CLOUD.restoreFromCloud.bind(CLOUD);
+  CLOUD.restoreFromCloud = async function(){
+    const result = await originalRestore.apply(CLOUD, arguments);
+    rerenderAfterCloudRestore();
+    return result;
+  };
+
+  CLOUD._finalCloudFirstRestorePatched = true;
+
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(async function(){
+      if (!window.CLOUD || !CLOUD.isConfigured || !CLOUD.isConfigured()) return;
+      try {
+        const result = await CLOUD.restoreFromCloud();
+        const count = result ? ((result.skdl || 0) + (result.field || 0)) : 0;
+        const msgEl = document.getElementById('session-msg');
+        if (msgEl && count > 0) {
+          msgEl.innerHTML = `☁ 別PC共有データを確認済み<br><span style="font-size:10px;color:#4d6a88">月次:${result.skdl || 0}件 / 現場:${result.field || 0}件</span>`;
+        }
+      } catch(e) {
+        console.warn('[FINAL PATCH] cloud re-check failed:', e);
+      }
+    }, 1200);
+  });
+
+  window.CLOUD_RERENDER_AFTER_RESTORE = rerenderAfterCloudRestore;
+  console.log('[FINAL PATCH] cloud-first restore safety patch applied');
 })();
 </script>
 
@@ -7800,47 +7887,12 @@ console.log('[PATCH2] _renderPLFromHistory 全科目表示に修正済み');
 })();
 
 /* ══════════════════════════════════════════════════════
-   起動時の復元順序も修正
-   SIMPLE_STOREで復元したデータをクラウド同期が上書きしないように
-   doRestore内でクラウド同期後にSIMPLE_STOREの値を優先させる
+   起動時の復元順序をクラウド優先に変更
+   別PC反映を優先するため、SIMPLE_STOREでクラウド値を戻す処理は廃止
 ══════════════════════════════════════════════════════ */
 (function fixBootRestoreOrder() {
-  // DOMContentLoaded 後の最初の doRestore が終わった後に
-  // クラウドが後から来ても SIMPLE_STORE の値を守るフラグ
-  let _simpleRestoreDone = false;
-  let _simpleRestoredYM  = null;
-
-  // SIMPLE_STORE.restoreAll をラップして復元後の値を記録
-  const _origSimpleRestore = SIMPLE_STORE.restoreAll.bind(SIMPLE_STORE);
-  SIMPLE_STORE.restoreAll = async function() {
-    const result = await _origSimpleRestore.call(this);
-    if (result > 0) {
-      _simpleRestoreDone = true;
-      _simpleRestoredYM  = STATE.currentYM;
-      console.log('[PATCH3] SIMPLE_STORE復元完了, YM:', _simpleRestoredYM);
-    }
-    return result;
-  };
-
-  // CLOUD.restoreFromCloud をさらにラップ:
-  // SIMPLE_STOREで復元済みなら currentYM を上書きしない
-  const _prevCloudRestore = CLOUD.restoreFromCloud.bind(CLOUD);
-  CLOUD.restoreFromCloud = async function() {
-    const result = await _prevCloudRestore.call(this);
-
-    // SIMPLE_STOREで復元済みなのにクラウドがYMを変えていたら戻す
-    if (_simpleRestoreDone && _simpleRestoredYM &&
-        STATE.currentYM !== _simpleRestoredYM) {
-      console.log('[PATCH3] クラウドによるYM上書きを戻す:',
-        STATE.currentYM, '→', _simpleRestoredYM);
-      STATE.currentYM = _simpleRestoredYM;
-      UI.updateTopbar();
-    }
-
-    return result;
-  };
-
-  console.log('[PATCH3] 起動時復元順序修正適用済み');
+  window.CLOUD_FIRST_BOOT_RESTORE = true;
+  console.log('[PATCH3] 起動時復元順序: クラウド優先に変更済み');
 })();
 </script>
 
