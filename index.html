@@ -6738,6 +6738,122 @@ const REPORT_UI = {
 })();
 </script>
 
+
+
+<script id="final-cross-pc-restore-fix">
+'use strict';
+/* =========================================================
+   FINAL FIX: 別PCで必ずクラウドデータを表示する起動時復元
+========================================================= */
+(function(){
+  if (window.__FINAL_CROSS_PC_RESTORE_FIX__) return;
+  window.__FINAL_CROSS_PC_RESTORE_FIX__ = true;
+
+  function msg(html, color){
+    ['session-msg','cloud-test-msg','realtime-sync-status','share-sync-msg'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el){ el.innerHTML=html; if(color) el.style.color=color; }
+    });
+  }
+
+  function renderAllSafety(){
+    try{ if(window.UI && typeof UI.renderAll==='function') UI.renderAll(); }catch(e){ console.warn(e); }
+    try{ if(window.UI && typeof UI.renderDataList==='function') UI.renderDataList(); }catch(e){}
+    try{ if(window.UI && typeof UI.updateTopbar==='function') UI.updateTopbar(); }catch(e){}
+    try{ if(window.FIELD_UI && typeof FIELD_UI.updatePeriodBadge==='function') FIELD_UI.updatePeriodBadge(); }catch(e){}
+    try{ if(window.FIELD_UI && typeof FIELD_UI.renderDataList==='function') FIELD_UI.renderDataList(); }catch(e){}
+    try{ if(typeof window.renderFieldDataList2==='function') window.renderFieldDataList2(); }catch(e){}
+    try{ if(window.STATUS && typeof STATUS.evaluate==='function') STATUS.evaluate(); }catch(e){}
+  }
+
+  async function restoreSharedBundleIfAny(){
+    try{
+      if(window.SHARE_SYNC && typeof SHARE_SYNC.restoreSharedBundle==='function'){
+        await SHARE_SYNC.restoreSharedBundle({preferCloud:true});
+      }
+    }catch(e){ console.warn('[FINAL CROSS PC] shared bundle restore skipped:', e); }
+  }
+
+  async function forceCloudRestore(reason){
+    if(!window.CLOUD || typeof CLOUD.isConfigured!=='function' || !CLOUD.isConfigured()) return null;
+    try{
+      msg('☁ 別PC共有データを確認中...','#1a4d7c');
+      if(CLOUD._updateBadge) CLOUD._updateBadge(true);
+
+      var result = null;
+      if(typeof CLOUD.restoreFromCloud==='function'){
+        result = await CLOUD.restoreFromCloud();
+      }
+      await restoreSharedBundleIfAny();
+
+      try{
+        if(window.STATE && (!STATE.currentYM) && Array.isArray(STATE.datasets) && STATE.datasets.length){
+          var months = STATE.datasets.map(function(d){return d && d.ym;}).filter(Boolean).sort();
+          STATE.currentYM = months[months.length-1] || STATE.currentYM;
+        }
+        if(window.FIELD_STATE && (!FIELD_STATE.currentYM) && Array.isArray(FIELD_STATE.datasets) && FIELD_STATE.datasets.length){
+          var fmonths = FIELD_STATE.datasets.map(function(d){return d && d.ym;}).filter(Boolean).sort();
+          FIELD_STATE.currentYM = fmonths[fmonths.length-1] || FIELD_STATE.currentYM;
+        }
+      }catch(e){}
+
+      renderAllSafety();
+
+      var skdlCount = (window.STATE && Array.isArray(STATE.datasets)) ? STATE.datasets.length : 0;
+      var fieldCount = (window.FIELD_STATE && Array.isArray(FIELD_STATE.datasets)) ? FIELD_STATE.datasets.length : 0;
+      msg('✅ 別PC共有データを反映済み<br><span style="font-size:10px;color:#4d6a88">月次:'+skdlCount+'件 / 現場:'+fieldCount+'件　'+new Date().toLocaleTimeString('ja-JP')+'</span>','#15803d');
+      return result;
+    }catch(e){
+      console.warn('[FINAL CROSS PC] cloud restore failed:', e);
+      msg('⚠ クラウド復元失敗：'+(e && e.message ? e.message : e),'#b91c1c');
+      renderAllSafety();
+      return null;
+    }
+  }
+
+  window.forceCloudRestore = forceCloudRestore;
+
+  function patchInitRestore(){
+    if(!window.CLOUD || CLOUD.__finalInitRestorePatched) return;
+    if(typeof CLOUD.initRestore==='function'){
+      var oldInit=CLOUD.initRestore.bind(CLOUD);
+      CLOUD.initRestore=async function(){
+        var ret=null;
+        try{ ret=await oldInit.apply(CLOUD, arguments); }catch(e){ console.warn('[FINAL CROSS PC] old init failed:',e); }
+        await forceCloudRestore('initRestore');
+        return ret;
+      };
+      CLOUD.__finalInitRestorePatched=true;
+    }
+  }
+
+  function patchSyncNow(){
+    if(!window.CLOUD || CLOUD.__finalSyncNowPatched) return;
+    if(typeof CLOUD.syncNow==='function'){
+      var oldSync=CLOUD.syncNow.bind(CLOUD);
+      CLOUD.syncNow=async function(){
+        var ret=await oldSync.apply(CLOUD, arguments);
+        await forceCloudRestore('syncNow');
+        alert('同期と再読込が完了しました。\n\n別PCでは、同じURLをCtrl+F5で更新してください。');
+        return ret;
+      };
+      CLOUD.__finalSyncNowPatched=true;
+    }
+  }
+
+  function boot(){
+    patchInitRestore();
+    patchSyncNow();
+    setTimeout(function(){ patchInitRestore(); patchSyncNow(); forceCloudRestore('boot-1'); }, 800);
+    setTimeout(function(){ forceCloudRestore('boot-2'); }, 2500);
+    setTimeout(function(){ forceCloudRestore('boot-3'); }, 5000);
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+</script>
+
 </body> 直前に配置。 -->
 
 <script>
@@ -6921,20 +7037,9 @@ const CLOUD_DEBUG = {
     try {
       add('⏳', 'REST API接続テスト中...');
       const r = await fetch(`${url}/rest/v1/center_realtime_state?select=center_key,state_key&limit=1`, {
-        method: 'GET',
-        headers: {
-          'apikey': key,
-          'Authorization': `Bearer ${key}`,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
       });
-      const body = await r.text();
-      if (r.ok) {
-        add('✅', `REST API: OK（center_realtime_state 読込OK / HTTP ${r.status}）`);
-      } else {
-        add('❌', `REST API: HTTP ${r.status} → ${body.slice(0,160)}`);
-      }
+      add(r.ok ? '✅' : '❌', r.ok ? `REST API: OK（center_realtime_state 読込OK / HTTP ${r.status}）` : `REST API: HTTP ${r.status}`);
     } catch(e) {
       add('❌', `REST API接続失敗: ${e.message}`);
     }
@@ -9794,6 +9899,122 @@ const PAST_LIBRARY = {
   else boot();
 })();
 </script>
+
+
+<script id="final-cross-pc-restore-fix">
+'use strict';
+/* =========================================================
+   FINAL FIX: 別PCで必ずクラウドデータを表示する起動時復元
+========================================================= */
+(function(){
+  if (window.__FINAL_CROSS_PC_RESTORE_FIX__) return;
+  window.__FINAL_CROSS_PC_RESTORE_FIX__ = true;
+
+  function msg(html, color){
+    ['session-msg','cloud-test-msg','realtime-sync-status','share-sync-msg'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el){ el.innerHTML=html; if(color) el.style.color=color; }
+    });
+  }
+
+  function renderAllSafety(){
+    try{ if(window.UI && typeof UI.renderAll==='function') UI.renderAll(); }catch(e){ console.warn(e); }
+    try{ if(window.UI && typeof UI.renderDataList==='function') UI.renderDataList(); }catch(e){}
+    try{ if(window.UI && typeof UI.updateTopbar==='function') UI.updateTopbar(); }catch(e){}
+    try{ if(window.FIELD_UI && typeof FIELD_UI.updatePeriodBadge==='function') FIELD_UI.updatePeriodBadge(); }catch(e){}
+    try{ if(window.FIELD_UI && typeof FIELD_UI.renderDataList==='function') FIELD_UI.renderDataList(); }catch(e){}
+    try{ if(typeof window.renderFieldDataList2==='function') window.renderFieldDataList2(); }catch(e){}
+    try{ if(window.STATUS && typeof STATUS.evaluate==='function') STATUS.evaluate(); }catch(e){}
+  }
+
+  async function restoreSharedBundleIfAny(){
+    try{
+      if(window.SHARE_SYNC && typeof SHARE_SYNC.restoreSharedBundle==='function'){
+        await SHARE_SYNC.restoreSharedBundle({preferCloud:true});
+      }
+    }catch(e){ console.warn('[FINAL CROSS PC] shared bundle restore skipped:', e); }
+  }
+
+  async function forceCloudRestore(reason){
+    if(!window.CLOUD || typeof CLOUD.isConfigured!=='function' || !CLOUD.isConfigured()) return null;
+    try{
+      msg('☁ 別PC共有データを確認中...','#1a4d7c');
+      if(CLOUD._updateBadge) CLOUD._updateBadge(true);
+
+      var result = null;
+      if(typeof CLOUD.restoreFromCloud==='function'){
+        result = await CLOUD.restoreFromCloud();
+      }
+      await restoreSharedBundleIfAny();
+
+      try{
+        if(window.STATE && (!STATE.currentYM) && Array.isArray(STATE.datasets) && STATE.datasets.length){
+          var months = STATE.datasets.map(function(d){return d && d.ym;}).filter(Boolean).sort();
+          STATE.currentYM = months[months.length-1] || STATE.currentYM;
+        }
+        if(window.FIELD_STATE && (!FIELD_STATE.currentYM) && Array.isArray(FIELD_STATE.datasets) && FIELD_STATE.datasets.length){
+          var fmonths = FIELD_STATE.datasets.map(function(d){return d && d.ym;}).filter(Boolean).sort();
+          FIELD_STATE.currentYM = fmonths[fmonths.length-1] || FIELD_STATE.currentYM;
+        }
+      }catch(e){}
+
+      renderAllSafety();
+
+      var skdlCount = (window.STATE && Array.isArray(STATE.datasets)) ? STATE.datasets.length : 0;
+      var fieldCount = (window.FIELD_STATE && Array.isArray(FIELD_STATE.datasets)) ? FIELD_STATE.datasets.length : 0;
+      msg('✅ 別PC共有データを反映済み<br><span style="font-size:10px;color:#4d6a88">月次:'+skdlCount+'件 / 現場:'+fieldCount+'件　'+new Date().toLocaleTimeString('ja-JP')+'</span>','#15803d');
+      return result;
+    }catch(e){
+      console.warn('[FINAL CROSS PC] cloud restore failed:', e);
+      msg('⚠ クラウド復元失敗：'+(e && e.message ? e.message : e),'#b91c1c');
+      renderAllSafety();
+      return null;
+    }
+  }
+
+  window.forceCloudRestore = forceCloudRestore;
+
+  function patchInitRestore(){
+    if(!window.CLOUD || CLOUD.__finalInitRestorePatched) return;
+    if(typeof CLOUD.initRestore==='function'){
+      var oldInit=CLOUD.initRestore.bind(CLOUD);
+      CLOUD.initRestore=async function(){
+        var ret=null;
+        try{ ret=await oldInit.apply(CLOUD, arguments); }catch(e){ console.warn('[FINAL CROSS PC] old init failed:',e); }
+        await forceCloudRestore('initRestore');
+        return ret;
+      };
+      CLOUD.__finalInitRestorePatched=true;
+    }
+  }
+
+  function patchSyncNow(){
+    if(!window.CLOUD || CLOUD.__finalSyncNowPatched) return;
+    if(typeof CLOUD.syncNow==='function'){
+      var oldSync=CLOUD.syncNow.bind(CLOUD);
+      CLOUD.syncNow=async function(){
+        var ret=await oldSync.apply(CLOUD, arguments);
+        await forceCloudRestore('syncNow');
+        alert('同期と再読込が完了しました。\n\n別PCでは、同じURLをCtrl+F5で更新してください。');
+        return ret;
+      };
+      CLOUD.__finalSyncNowPatched=true;
+    }
+  }
+
+  function boot(){
+    patchInitRestore();
+    patchSyncNow();
+    setTimeout(function(){ patchInitRestore(); patchSyncNow(); forceCloudRestore('boot-1'); }, 800);
+    setTimeout(function(){ forceCloudRestore('boot-2'); }, 2500);
+    setTimeout(function(){ forceCloudRestore('boot-3'); }, 5000);
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+</script>
+
 </body>
 </html>
 
@@ -11521,12 +11742,12 @@ const SHARE_SYNC = {
     CLOUD._shareSyncRestorePatched=true;
   },
   boot(){
-    this.injectButton();
+    this.injectButton();a
     this.patchSaves();
     this.patchCloudRestore();
     setTimeout(()=>this.injectButton(),800);
     setTimeout(()=>this.autoMigrateOnce().catch(e=>console.warn('共有データ初回移行失敗',e)),1800);
-  }
+  }a
 };
 
 (function(){
@@ -11797,11 +12018,7 @@ const REALTIME_TABLE_SYNC = {
       return;
     }
     try{
-      this.client=window.supabase.createClient(url,key,{
-        auth:{persistSession:false},
-        global:{headers:{apikey:key, Authorization:`Bearer ${key}`}},
-        realtime:{params:{eventsPerSecond:5}}
-      });
+      this.client=window.supabase.createClient(url,key,{auth:{persistSession:false},realtime:{params:{eventsPerSecond:5}}});
       this.enabled=true;
       this.patchSaveHooks();
       await this.loadInitial();
