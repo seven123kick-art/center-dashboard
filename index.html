@@ -4579,9 +4579,10 @@ try {
       // 「skdl/202603_confirmed.json」のような相対名で返る場合と、
       // 「kitasaitama/skdl/202603_confirmed.json」のような完全名で返る場合がある。
       // どちらでも復元できるように両対応にする。
-      const skdlFiles  = files.filter(f => f.name && (f.name.startsWith('skdl/') || f.name.includes('/skdl/')));
-      const fieldFiles = files.filter(f => f.name && (f.name.startsWith('field/') || f.name.includes('/field/')));
-      const metaFile   = files.find(f => f.name && (f.name === 'meta.json' || f.name.endsWith('/meta.json')));
+    // より広く拾う（フォルダ名に依存しない）
+const skdlFiles  = files.filter(f => f.name && f.name.includes('skdl'));
+const fieldFiles = files.filter(f => f.name && f.name.includes('field'));
+const metaFile   = files.find(f => f.name && f.name.includes('meta.json'));
 
       let meta = {};
       if (metaFile) {
