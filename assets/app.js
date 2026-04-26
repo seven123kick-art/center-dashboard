@@ -5713,21 +5713,7 @@ const REPORT_UI = {
 
 
 
-// 安定化チェック: 外部ライブラリが読み込めない場合に画面上へ理由を表示
-(function(){
-  function showLibError(name){
-    var b=document.getElementById('js-error-banner');
-    if(!b) return;
-    b.style.display='block';
-    b.innerHTML += '<div>❌ 外部ライブラリ未読込: '+name+'<br><small>社内ネットワーク制限・CDN不調・オフラインの可能性があります。</small></div>';
-  }
-  window.addEventListener('DOMContentLoaded', function(){
-    if(typeof Chart==='undefined') showLibError('Chart.js');
-    if(typeof L==='undefined') showLibError('Leaflet');
-    if(typeof pdfjsLib==='undefined') showLibError('PDF.js');
-  });
-})();
-
+// 安定化チェック: PDF/XLSX/Leaflet は必要時に遅延読込するため起動時チェックは無効化
 
 
 'use strict';
@@ -12245,4 +12231,100 @@ const REALTIME_TABLE_SYNC = {
   };
   if(window.NAV){NAV.titles=NAV.titles||{};NAV.titles.capacity='キャパ分析';if(!NAV._capacityPatched){const oldGo=NAV.go.bind(NAV);NAV.go=function(btn){oldGo(btn);if(btn&&btn.dataset&&btn.dataset.view==='capacity')setTimeout(()=>CAPACITY_UI.init(),60);};NAV._capacityPatched=true;}}
   if(window.UI&&UI.renderCurrentView&&!UI._capacityRenderPatched){const oldRender=UI.renderCurrentView.bind(UI);UI.renderCurrentView=function(){const active=document.querySelector('.view.active');if(active&&active.id==='view-capacity'){CAPACITY_UI.init();return;}return oldRender();};UI._capacityRenderPatched=true;}
+})();
+
+
+/* FINAL STABILITY + FAST BOOT PATCH */
+(function(){
+  const LABEL='[FINAL FAST STABLE]';
+  const bootAt=Date.now();
+  const LIBS={};
+  function loadScriptOnce(name,url){
+    if(LIBS[name]) return LIBS[name];
+    LIBS[name]=new Promise((resolve,reject)=>{
+      try{
+        if([...document.scripts].some(s=>s.src && s.src.indexOf(url)>=0)) return resolve();
+        const sc=document.createElement('script');sc.src=url;sc.async=true;
+        sc.onload=()=>resolve();sc.onerror=()=>reject(new Error(name+' の読込に失敗しました'));
+        document.head.appendChild(sc);
+      }catch(e){reject(e);}
+    });
+    return LIBS[name];
+  }
+  window.ensurePdfLib=function(){if(window.pdfjsLib || window['pdfjs-dist/build/pdf']) return Promise.resolve();return loadScriptOnce('PDF.js','https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js');};
+  window.ensureXlsxLib=function(){if(window.XLSX) return Promise.resolve();return loadScriptOnce('XLSX','https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');};
+  window.ensureLeafletLib=function(){if(window.L) return Promise.resolve();return loadScriptOnce('Leaflet','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');};
+
+  function patchNavGuard(){
+    if(!window.NAV || !NAV.go || NAV.__finalNoAutoJump) return false;
+    let lastUserNavAt=0;
+    document.addEventListener('pointerdown',e=>{if(e.target&&e.target.closest&&e.target.closest('.nav-item'))lastUserNavAt=Date.now();},true);
+    document.addEventListener('click',e=>{if(e.target&&e.target.closest&&e.target.closest('.nav-item'))lastUserNavAt=Date.now();},true);
+    const realGo=NAV.go.bind(NAV);
+    NAV.go=function(btn,opts){
+      const view=btn&&btn.dataset?btn.dataset.view:'';
+      const active=document.querySelector('.nav-item.active');
+      const activeView=active&&active.dataset?active.dataset.view:'';
+      const userNav=(Date.now()-lastUserNavAt)<1200;
+      const explicit=opts&&opts.allowAuto===true;
+      if(!userNav&&!explicit&&activeView&&view&&view!==activeView){
+        console.warn(LABEL,'auto navigation blocked:',activeView,'->',view);
+        try{if(window.UI&&UI.renderCurrentView)UI.renderCurrentView();}catch(e){}
+        return;
+      }
+      return realGo(btn);
+    };
+    NAV.__finalNoAutoJump=true;return true;
+  }
+
+  function patchCloudRestore(){
+    if(!window.CLOUD||!CLOUD.restoreFromCloud||CLOUD.__finalFastStableRestore)return false;
+    const realRestore=CLOUD.restoreFromCloud.bind(CLOUD);
+    let bgTimer=null,bgRunning=false,restorePromise=null;
+    function scheduleBackground(){
+      if(bgTimer||bgRunning)return;
+      bgTimer=setTimeout(async()=>{bgTimer=null;bgRunning=true;try{window.__FINAL_BG_CLOUD_RESTORE__=true;await realRestore('background-delayed');}catch(e){console.warn(LABEL,'background cloud skipped:',e);}finally{window.__FINAL_BG_CLOUD_RESTORE__=false;bgRunning=false;}},4500);
+    }
+    CLOUD.restoreFromCloud=async function(reason){
+      const r=String(reason||'');
+      const manual=window.__FINAL_MANUAL_SYNC__||/manual|sync|button|user/i.test(r);
+      const duringBoot=(Date.now()-bootAt)<6000;
+      if(!manual&&duringBoot){scheduleBackground();return{skdl:0,field:0,skipped:true,reason:'fast-boot-local-first'};}
+      if(restorePromise&&!manual)return restorePromise;
+      restorePromise=(async()=>realRestore.apply(CLOUD,arguments))();
+      try{return await restorePromise;}finally{setTimeout(()=>{restorePromise=null;},1000);}
+    };
+    if(CLOUD.syncNow&&!CLOUD.__finalSyncNowWrapped){const realSync=CLOUD.syncNow.bind(CLOUD);CLOUD.syncNow=async function(){window.__FINAL_MANUAL_SYNC__=true;try{return await realSync();}finally{window.__FINAL_MANUAL_SYNC__=false;}};CLOUD.__finalSyncNowWrapped=true;}
+    CLOUD.__finalFastStableRestore=true;return true;
+  }
+
+  function patchDeferredLibraries(){
+    try{
+      if(window.PDF_FIELD&&PDF_FIELD.parse&&!PDF_FIELD.__finalDeferred){const real=PDF_FIELD.parse.bind(PDF_FIELD);PDF_FIELD.parse=async function(file){await window.ensurePdfLib();return real(file);};PDF_FIELD.__finalDeferred=true;}
+      if(window.PAST_LIBRARY&&!PAST_LIBRARY.__finalDeferred){
+        if(PAST_LIBRARY.extractPdf){const realPdf=PAST_LIBRARY.extractPdf.bind(PAST_LIBRARY);PAST_LIBRARY.extractPdf=async function(file){await window.ensurePdfLib();return realPdf(file);};}
+        if(PAST_LIBRARY.extractExcel){const realX=PAST_LIBRARY.extractExcel.bind(PAST_LIBRARY);PAST_LIBRARY.extractExcel=async function(file){await window.ensureXlsxLib();return realX(file);};}
+        PAST_LIBRARY.__finalDeferred=true;
+      }
+      if(window.CAPACITY_UI&&!CAPACITY_UI.__finalDeferred){
+        if(CAPACITY_UI.importCapacityExcel){const realCap=CAPACITY_UI.importCapacityExcel.bind(CAPACITY_UI);CAPACITY_UI.importCapacityExcel=async function(file){await window.ensureXlsxLib();return realCap(file);};}
+        if(CAPACITY_UI.importAreaPdf){const realPdfImport=CAPACITY_UI.importAreaPdf.bind(CAPACITY_UI);CAPACITY_UI.importAreaPdf=async function(files){await window.ensurePdfLib();return realPdfImport(files);};}
+        CAPACITY_UI.__finalDeferred=true;
+      }
+      if(window.FIELD_UI&&FIELD_UI.renderMap&&!FIELD_UI.__finalLeafletDeferred){const realMap=FIELD_UI.renderMap.bind(FIELD_UI);FIELD_UI.renderMap=function(){if(window.L)return realMap();const noData=document.getElementById('map-no-data');if(noData){noData.style.display='block';noData.textContent='地図を読み込み中...';}window.ensureLeafletLib().then(()=>realMap()).catch(e=>{const nd=document.getElementById('map-no-data');if(nd){nd.style.display='block';nd.textContent='地図ライブラリの読み込みに失敗しました。';}console.warn(LABEL,e);});};FIELD_UI.__finalLeafletDeferred=true;}
+    }catch(e){console.warn(LABEL,'defer patch failed:',e);}
+  }
+
+  function patchRenderCurrentViewFast(){
+    if(!window.UI||!UI.renderCurrentView||UI.__finalFastCurrentView)return false;
+    UI.renderCurrentView=function(){
+      const active=document.querySelector('.view.active');if(!active)return;const id=active.id.replace('view-','');
+      try{switch(id){case'dashboard':return UI.renderDashboard&&UI.renderDashboard();case'pl':return UI.renderPL&&UI.renderPL();case'trend':return UI.renderTrend&&UI.renderTrend();case'shipper':return UI.renderShipper&&UI.renderShipper();case'annual':return UI.renderAnnual&&UI.renderAnnual();case'capacity':return window.CAPACITY_UI&&CAPACITY_UI.init&&CAPACITY_UI.init();case'alerts':return typeof UI.renderAlerts==='function'&&UI.renderAlerts();case'memo':return typeof UI.renderMemo==='function'&&UI.renderMemo();case'field':return window.FIELD_UI&&FIELD_UI.renderCurrent&&FIELD_UI.renderCurrent();}}catch(e){console.warn(LABEL,'renderCurrentView skipped:',id,e);}
+    };
+    UI.__finalFastCurrentView=true;return true;
+  }
+
+  function apply(){patchNavGuard();patchCloudRestore();patchDeferredLibraries();patchRenderCurrentViewFast();try{document.documentElement.classList.remove('restore-view-booting');}catch(e){}}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(apply,0));else setTimeout(apply,0);
+  setTimeout(apply,600);setTimeout(apply,1800);setTimeout(apply,3500);
 })();
