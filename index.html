@@ -4317,6 +4317,59 @@ const CLOUD = {
     } catch(e) { /* バケット作成エラーは無視 */ }
   },
 
+  // ── 今すぐ同期ボタン用：現在の月次・現場データをStorageへ保存
+  async syncNow() {
+    if (!this.isConfigured()) {
+      alert('クラウド設定がありません');
+      return;
+    }
+
+    const msgEl = document.getElementById('session-msg') || document.getElementById('cloud-test-msg');
+
+    try {
+      if (msgEl) msgEl.innerHTML = '☁ 同期中...';
+
+      let skdlCount = 0;
+      let fieldCount = 0;
+
+      if (STATE && Array.isArray(STATE.datasets)) {
+        for (const ds of STATE.datasets) {
+          await this.pushDataset('skdl', ds);
+          skdlCount++;
+        }
+      }
+
+      if (FIELD_STATE && Array.isArray(FIELD_STATE.datasets)) {
+        for (const ds of FIELD_STATE.datasets) {
+          await this.pushDataset('field', ds);
+          fieldCount++;
+        }
+      }
+
+      await this.upload('meta.json', {
+        currentYM: STATE.currentYM,
+        fieldCurrentYM: FIELD_STATE.currentYM,
+        updatedAt: new Date().toISOString(),
+        updatedBy: navigator.userAgent.slice(0, 40),
+      });
+
+      await DB.showStorageInfo();
+
+      if (msgEl) {
+        msgEl.innerHTML =
+          `✅ 同期完了<br><span style="color:#4d6a88">月次:${skdlCount}件 / 現場:${fieldCount}件</span>`;
+      }
+
+      this._updateBadge(true);
+      this._flashSync();
+
+    } catch(e) {
+      console.error('今すぐ同期エラー:', e);
+      if (msgEl) msgEl.innerHTML = `❌ 同期失敗: ${e.message}`;
+      alert('同期に失敗しました：' + e.message);
+    }
+  },
+
   // ── バッジ表示を更新
   _updateBadge(connected, state = 'ok') {
     const dot   = document.getElementById('cloud-dot');
