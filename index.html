@@ -3913,7 +3913,7 @@ async clearStore(storeName) {
   },
 
   // ── バックアップから復元: JSONファイルを読み込み
-  async importJSON(file) {
+    async importJSON(file) {
     if (!file) return;
     const msgEl = document.getElementById('session-msg');
     try {
@@ -3934,7 +3934,37 @@ async clearStore(storeName) {
 
       // 再復元
       await this.restoreAll();
-      if (msgEl) msgEl.textContent = '✅ バックアップから復元完了';
+
+      // ▼ JSON復元後、Supabase Storageへも自動共有する
+      try {
+        if (window.CLOUD && CLOUD.isConfigured && CLOUD.isConfigured()) {
+          if (window.STATE && Array.isArray(STATE.datasets)) {
+            for (const ds of STATE.datasets) {
+              await CLOUD.pushDataset('skdl', ds);
+            }
+          }
+          if (window.FIELD_STATE && Array.isArray(FIELD_STATE.datasets)) {
+            for (const ds of FIELD_STATE.datasets) {
+              await CLOUD.pushDataset('field', ds);
+            }
+          }
+        }
+      } catch(e) {
+        console.warn('JSON復元後クラウド共有エラー', e);
+      }
+
+      // ▼ JSON復元後、Realtimeテーブルへも自動保存・通知する
+      try {
+        if (window.REALTIME_TABLE_SYNC && REALTIME_TABLE_SYNC.enabled) {
+          console.log('[Realtime] JSON復元後の自動共有を実行');
+          REALTIME_TABLE_SYNC.scheduleSave(0);
+          REALTIME_TABLE_SYNC.broadcastPing('restore_json');
+        }
+      } catch(e) {
+        console.warn('JSON復元後Realtime共有エラー', e);
+      }
+
+      if (msgEl) msgEl.textContent = '✅ バックアップから復元完了・共有反映中';
     } catch(e) {
       if (msgEl) msgEl.textContent = `❌ ${e.message}`;
     }
