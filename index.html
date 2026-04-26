@@ -5588,7 +5588,201 @@ window.addEventListener('beforeunload', () => {
 })();
 </script>
 
-<!-- DATA_RESET旧ブロックはコメント化されていたため削除済み。実行版は </body> 直前に配置。 -->
+<!-- DATA_RESET旧ブロックはコメント化されていたため削除済み。実行版は 
+<script>
+/* PATCH — 前年実績もHISTORYから取得する修正版（window.HISTORY不使用） */
+(function(){
+  'use strict';
+
+  if (!window.UI || !window.CALC || !window.STATE || !window.CONFIG) return;
+
+  function hasHistory(){
+    return (typeof HISTORY !== 'undefined' && HISTORY && typeof HISTORY.getMonthMap === 'function');
+  }
+
+  function getMonthMapAnyV2(ym){
+    if (!ym) return null;
+
+    const ds = STATE.dsForYM ? STATE.dsForYM(ym) : null;
+    if (ds && ds.rows) return CALC.buildMap(ds.rows);
+
+    if (hasHistory()) {
+      const hm = HISTORY.getMonthMap(ym);
+      if (hm) return hm;
+    }
+    return null;
+  }
+
+  function getPlanMapV2(ym){
+    return (typeof PLAN !== 'undefined' && PLAN && typeof PLAN.getMonthMap === 'function') ? PLAN.getMonthMap(ym) : null;
+  }
+
+  function sumMapV2(m, keys){
+    if (!m) return null;
+    return CALC.sum(m, [].concat(keys || []));
+  }
+
+  function planSumV2(pm, keys){
+    if (!pm) return null;
+    const v = [].concat(keys || []).reduce(function(s,k){ return s + (pm[k] || 0); }, 0);
+    return v || null;
+  }
+
+  function planCellsV2(actual, planVal){
+    if (planVal == null) {
+      return '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+             '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+             '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>';
+    }
+    const pk = CALC.toK(planVal).toLocaleString();
+    const diff = CALC.toK(actual) - CALC.toK(planVal);
+    const dStr = diff > 0 ? '+' + diff.toLocaleString() : diff.toLocaleString();
+    const dCls = diff > 0 ? 'cell-up' : diff < 0 ? 'cell-down' : 'cell-flat';
+    const ach = planVal !== 0 ? (actual / planVal * 100).toFixed(1) + '%' : '--';
+    const achCls = planVal !== 0 && actual / planVal >= 1 ? 'cell-up' : 'cell-down';
+    return '<td class="r" style="background:#fffdf0">' + pk + '</td>' +
+           '<td class="r ' + dCls + '" style="background:#fffdf0">' + dStr + '</td>' +
+           '<td class="r ' + achCls + '" style="background:#fffdf0">' + ach + '</td>';
+  }
+
+  function makeRowV2(label, val, refVal, prevVal, prevYrVal, planVal, cls, indent){
+    cls = cls || '';
+    indent = indent || 0;
+    const k = CALC.toK(val).toLocaleString();
+    const p = CALC.pct(val, refVal);
+    const pvk = prevVal != null ? CALC.toK(prevVal).toLocaleString() : '--';
+    const pyvk = prevYrVal != null ? CALC.toK(prevYrVal).toLocaleString() : '--';
+    const df1 = prevVal != null ? CALC.diff(val, prevVal) : {txt:'--', cls:'cell-flat'};
+    const rt1 = prevVal != null ? CALC.ratio(val, prevVal) : {txt:'--', cls:'cell-flat'};
+    const df2 = prevYrVal != null ? CALC.diff(val, prevYrVal) : {txt:'--', cls:'cell-flat'};
+    const rt2 = prevYrVal != null ? CALC.ratio(val, prevYrVal) : {txt:'--', cls:'cell-flat'};
+    const iStyle = indent > 0 ? 'style="padding-left:' + (indent*14+8) + 'px;font-size:11px;color:var(--text2)"' : '';
+    return '<tr class="' + cls + '">' +
+      '<td ' + iStyle + '>' + label + '</td>' +
+      '<td class="r">' + k + '</td>' +
+      '<td class="r">' + p + '</td>' +
+      planCellsV2(val, planVal) +
+      '<td class="r vs-col">' + pvk + '</td>' +
+      '<td class="r vs-col ' + df1.cls + '">' + df1.txt + '</td>' +
+      '<td class="r vs-col ' + rt1.cls + '">' + rt1.txt + '</td>' +
+      '<td class="r vs-col">' + pyvk + '</td>' +
+      '<td class="r vs-col ' + df2.cls + '">' + df2.txt + '</td>' +
+      '<td class="r vs-col ' + rt2.cls + '">' + rt2.txt + '</td>' +
+    '</tr>';
+  }
+
+  function renderPLFromMapV2(ym, currentMap, isHistoryOnly){
+    const tbody = document.getElementById('pl-tbody');
+    if (!tbody) return;
+
+    const inc = CALC.income(currentMap);
+    const exp = CALC.expense(currentMap);
+    const pm = getPlanMapV2(ym);
+    const prevYM = STATE.prevYM ? STATE.prevYM(ym) : null;
+    const prevYrYM = STATE.prevYearYM ? STATE.prevYearYM(ym) : null;
+    const prevM = getMonthMapAnyV2(prevYM);
+    const prevYrM = getMonthMapAnyV2(prevYrYM);
+
+    const title = document.getElementById('pl-card-title');
+    if (title) title.textContent = '月次収支表 — ' + UI.fmtYM(ym) + (isHistoryOnly ? '（過去実績・集計値）' : '');
+
+    const header = function(label){ return '<tr class="row-h"><td colspan="12">' + label + '</td></tr>'; };
+    const getPlan = function(keys){ return planSumV2(pm, keys); };
+
+    let html = '';
+    CONFIG.PL_DEF.forEach(function(def){
+      if (def.t === 'h') { html += header(def.l); return; }
+
+      if (def.t === 'i') {
+        const v = sumMapV2(currentMap, def.k) || 0;
+        const pv = sumMapV2(prevM, def.k);
+        const pyv = sumMapV2(prevYrM, def.k);
+        const planV = getPlan(def.k);
+        const dim = v === 0 && (!pv || pv === 0) && (!pyv || pyv === 0) && !planV;
+        if (!dim) html += makeRowV2(def.l, v, inc, pv, pyv, planV, '', 0);
+        return;
+      }
+
+      if (def.t === 'st') {
+        const v = def.k === 'inc' ? inc : exp;
+        const pv = prevM ? (def.k === 'inc' ? CALC.income(prevM) : CALC.expense(prevM)) : null;
+        const pyv = prevYrM ? (def.k === 'inc' ? CALC.income(prevYrM) : CALC.expense(prevYrM)) : null;
+        const planV = def.k === 'inc' ? getPlan(['営業収益','営業収益計']) : getPlan(['売上原価']);
+        html += makeRowV2(def.l, v, inc, pv, pyv, planV, 'row-sub', 0);
+        return;
+      }
+
+      if (def.t === 'g') {
+        const gv = sumMapV2(currentMap, def.k) || 0;
+        const pgv = sumMapV2(prevM, def.k);
+        const pygv = sumMapV2(prevYrM, def.k);
+        if (def.s) {
+          def.s.forEach(function(s){
+            const sv = sumMapV2(currentMap, s.k) || 0;
+            const psv = sumMapV2(prevM, s.k);
+            const pysv = sumMapV2(prevYrM, s.k);
+            const sPlan = getPlan(s.k);
+            if (sv !== 0 || psv || pysv || sPlan) html += makeRowV2(s.l, sv, inc, psv, pysv, sPlan, '', 1);
+          });
+        }
+        if (gv !== 0 || pgv || pygv || getPlan(def.k)) {
+          html += makeRowV2(def.l, gv, inc, pgv, pygv, getPlan(def.k), 'row-sub', 0);
+        }
+        return;
+      }
+
+      if (def.t === 'tot') {
+        const pv = prevM ? CALC.expense(prevM) : null;
+        const pyv = prevYrM ? CALC.expense(prevYrM) : null;
+        html += makeRowV2(def.l, exp, inc, pv, pyv, getPlan(['売上原価']), 'row-total', 0);
+        return;
+      }
+
+      if (def.t === 'prf') {
+        const prf = inc - exp;
+        const pprf = prevM ? CALC.profit(prevM) : null;
+        const pyprf = prevYrM ? CALC.profit(prevYrM) : null;
+        const planV = pm ? (pm['粗利益'] || pm['営業利益'] || pm['経常利益'] || null) : null;
+        html += makeRowV2(def.l, prf, inc, pprf, pyprf, planV, prf >= 0 ? 'row-profit' : 'row-loss', 0);
+      }
+    });
+
+    tbody.innerHTML = html;
+  }
+
+  UI._renderPLFromHistory = function(m){
+    renderPLFromMapV2(STATE.currentYM, m, true);
+  };
+
+  UI.renderPL = function(){
+    const tbody = document.getElementById('pl-tbody');
+    const ym = STATE.currentYM;
+    const ds = STATE.activeDS ? STATE.activeDS() : null;
+    const currentMap = ds && ds.rows ? CALC.buildMap(ds.rows) : getMonthMapAnyV2(ym);
+
+    if (!ym || !currentMap) {
+      if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="padding:20px;color:var(--text3);text-align:center">データがありません</td></tr>';
+      return;
+    }
+
+    renderPLFromMapV2(ym, currentMap, !(ds && ds.rows));
+  };
+
+  if (window.STATE && typeof STATE.monthList === 'function' && !STATE._historyMonthListPatchedForPLV2) {
+    const originalMonthList = STATE.monthList.bind(STATE);
+    STATE.monthList = function(){
+      const base = originalMonthList() || [];
+      const hist = hasHistory() ? HISTORY.monthList() : [];
+      return Array.from(new Set([].concat(base, hist))).sort();
+    };
+    STATE._historyMonthListPatchedForPLV2 = true;
+  }
+
+  console.log('[PATCH] 月次収支表 前年実績HISTORY補完 V2 適用済み');
+})();
+</script>
+
+</body> 直前に配置。 -->
 
 <script>
 // 安定化チェック: 外部ライブラリが読み込めない場合に画面上へ理由を表示
