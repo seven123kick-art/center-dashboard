@@ -11905,3 +11905,297 @@ const REALTIME_TABLE_SYNC = {
 })();
 
 /* TWO_STAGE_LOAD_OPTIMIZED 2026-04-26: local-first boot + background cloud check, cloud boot hammering disabled. */
+
+/* ========================================================================== 
+   FAST_CACHE_DASHBOARD 2026-04-26
+   目的:
+   1) CSV行配列の集計結果をWeakMapでキャッシュし、同じ月を再集計しない
+   2) 起動直後のダッシュボードは当月を優先表示し、全月トレンド集計は裏で作る
+   3) 体感表示速度を優先しつつ、同期・手動更新は維持する
+========================================================================== */
+(function FAST_CACHE_DASHBOARD(){
+  'use strict';
+  const LABEL = '[FAST_CACHE_DASHBOARD]';
+  const idle = window.requestIdleCallback || function(fn){ return setTimeout(() => fn({timeRemaining:()=>10}), 80); };
+
+  function ready(){ return window.CALC && window.STATE && window.UI && window.CHARTS && window.CONFIG; }
+  function activeView(){ const v=document.querySelector('.view.active'); return v ? v.id.replace('view-','') : 'dashboard'; }
+  function fmtK(v){ return CALC.toK(v || 0).toLocaleString(); }
+  function safePct(v,t){ return t>0 ? (v/t*100).toFixed(1)+'%' : '--'; }
+  function currentRowsKey(ds){ return ds ? `${ds.ym||''}|${ds.type||''}|${ds.file||''}|${(ds.rows||[]).length}` : ''; }
+
+  function applyCalcCache(){
+    if (CALC.__fastCacheApplied) return;
+    const mapCache = new WeakMap();
+    const countCache = new WeakMap();
+    const shipperDetailCache = new WeakMap();
+    const shipperGroupCache = new WeakMap();
+
+    const rawBuildMap = CALC.buildMap.bind(CALC);
+    CALC.buildMap = function(rows){
+      if (!Array.isArray(rows)) return rawBuildMap(rows || []);
+      const hit = mapCache.get(rows);
+      if (hit) return hit;
+      const val = rawBuildMap(rows);
+      mapCache.set(rows, val);
+      return val;
+    };
+
+    if (typeof CALC.count === 'function') {
+      const rawCount = CALC.count.bind(CALC);
+      CALC.count = function(rows){
+        if (!Array.isArray(rows)) return rawCount(rows || []);
+        if (countCache.has(rows)) return countCache.get(rows);
+        const val = rawCount(rows);
+        countCache.set(rows, val);
+        return val;
+      };
+    }
+
+    if (typeof CALC.shippersByDetail === 'function') {
+      const rawDetail = CALC.shippersByDetail.bind(CALC);
+      CALC.shippersByDetail = function(rows){
+        if (!Array.isArray(rows)) return rawDetail(rows || []);
+        const hit = shipperDetailCache.get(rows);
+        if (hit) return hit;
+        const val = rawDetail(rows);
+        shipperDetailCache.set(rows, val);
+        return val;
+      };
+      CALC.shippers = function(rows){ return CALC.shippersByDetail(rows); };
+    }
+
+    if (typeof CALC.shippersByGroup === 'function') {
+      const rawGroup = CALC.shippersByGroup.bind(CALC);
+      CALC.shippersByGroup = function(rows){
+        if (!Array.isArray(rows)) return rawGroup(rows || []);
+        const hit = shipperGroupCache.get(rows);
+        if (hit) return hit;
+        const val = rawGroup(rows);
+        shipperGroupCache.set(rows, val);
+        return val;
+      };
+    }
+
+    CALC.__fastCacheApplied = true;
+  }
+
+  function ensureSummaryCache(){
+    if (!STATE.__summaryCache) STATE.__summaryCache = {};
+    return STATE.__summaryCache;
+  }
+
+  function summarizeDS(ds){
+    if (!ds || !Array.isArray(ds.rows)) return null;
+    const cache = ensureSummaryCache();
+    const sig = currentRowsKey(ds);
+    const hit = cache[ds.ym];
+    if (hit && hit.sig === sig) return hit;
+    const m = CALC.buildMap(ds.rows);
+    const inc = CALC.income(m);
+    const exp = CALC.expense(m);
+    const prf = inc - exp;
+    const cnt = CALC.count(ds.rows);
+    const val = { sig, ym:ds.ym, inc, exp, prf, cnt, map:m };
+    cache[ds.ym] = val;
+    return val;
+  }
+
+  function getSummary(ym){
+    const cache = ensureSummaryCache();
+    if (cache[ym]) return cache[ym];
+    const ds = STATE.dsForYM ? STATE.dsForYM(ym) : null;
+    return summarizeDS(ds);
+  }
+
+  let bgBuilding = false;
+  function buildSummariesInBackground(){
+    if (bgBuilding) return;
+    bgBuilding = true;
+    const months = STATE.monthList ? STATE.monthList() : [];
+    let i = 0;
+    function step(){
+      idle(function(deadline){
+        const start = Date.now();
+        while(i < months.length && (deadline.timeRemaining ? deadline.timeRemaining() > 2 : Date.now()-start < 16)){
+          try { getSummary(months[i]); } catch(e){ console.warn(LABEL, 'summary skipped', months[i], e); }
+          i++;
+        }
+        if (i < months.length) step();
+        else {
+          bgBuilding = false;
+          if (activeView() === 'dashboard') {
+            try { renderTrendOnly(); } catch(e){}
+          }
+        }
+      });
+    }
+    step();
+  }
+
+  function renderTrendOnly(){
+    const canvas = document.getElementById('c-main-trend');
+    if (!canvas || !window.CHARTS || typeof Chart === 'undefined') return;
+    const ml = STATE.monthList ? STATE.monthList() : [];
+    if (!ml.length) return;
+    const labels = ml.map(ym => `${ym.slice(4)}月`);
+    CHARTS.trend('c-main-trend', labels,
+      ml.map(ym => CALC.toK((getSummary(ym) || {}).inc || 0)),
+      ml.map(ym => CALC.toK((getSummary(ym) || {}).exp || 0)),
+      ml.map(ym => CALC.toK((getSummary(ym) || {}).prf || 0))
+    );
+  }
+
+  function renderBars(id, items, max){
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = (items || []).map(x => {
+      const p = max > 0 ? Math.min(100, x.v / max * 100) : 0;
+      return `<div class="mbar-row"><div class="mbar-label" title="${x.l}">${x.l}</div><div class="mbar-track"><div class="mbar-fill" style="width:${p.toFixed(1)}%;background:${x.c}"></div></div><div class="mbar-val">${fmtK(x.v)}千円</div></div>`;
+    }).join('');
+  }
+
+  function renderFastDashboard(){
+    if (typeof Chart === 'undefined') { setTimeout(renderFastDashboard, 200); return; }
+    const kpiEl = document.getElementById('kpi-area');
+    if (!kpiEl) return;
+    const ds = STATE.activeDS ? STATE.activeDS() : null;
+    if (!ds) {
+      try { CHARTS.destroyAll(); } catch(e){}
+      kpiEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0">データを読み込んでください</div>';
+      const expEl=document.getElementById('exp-bars-area'); if(expEl) expEl.innerHTML='';
+      const shipEl=document.getElementById('shipper-bars-area'); if(shipEl) shipEl.innerHTML='';
+      return;
+    }
+
+    const cur = summarizeDS(ds);
+    const inc = cur.inc, exp = cur.exp, prf = cur.prf, cnt = cur.cnt;
+    const prevYM = STATE.prevYM ? STATE.prevYM(STATE.currentYM) : null;
+    const prev = prevYM ? getSummary(prevYM) : null;
+    const ratio = CALC.ratio;
+    const mkPill = (now, prevVal) => {
+      if(!prevVal) return '';
+      const o = ratio(now, prevVal);
+      return `<span class="pill ${o.cls==='cell-up'?'up':o.cls==='cell-down'?'down':'flat'}">${o.txt}</span><span class="kpi-sub">前月比</span>`;
+    };
+
+    kpiEl.innerHTML = `
+      <div class="kpi-card accent-navy">
+        <div class="kpi-label">売上（収入合計）</div>
+        <div class="kpi-value navy">${fmtK(inc)}<span style="font-size:13px;font-weight:400;color:var(--text2)">千円</span></div>
+        <div class="kpi-sub-row">${mkPill(inc, prev && prev.inc)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">費用合計</div>
+        <div class="kpi-value">${fmtK(exp)}<span style="font-size:13px;font-weight:400;color:var(--text2)">千円</span></div>
+        <div class="kpi-sub-row"><span class="kpi-sub">収支率 ${safePct(exp,inc)}</span></div>
+      </div>
+      <div class="kpi-card ${prf>=0?'accent-green':'accent-red'}">
+        <div class="kpi-label">センター利益</div>
+        <div class="kpi-value ${prf>=0?'green':'red'}">${fmtK(prf)}<span style="font-size:13px;font-weight:400">千円</span></div>
+        <div class="kpi-sub-row">${mkPill(prf, prev && prev.prf)}<span class="kpi-sub">利益率 ${safePct(prf,inc)}</span></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">月間件数 / 単価</div>
+        <div class="kpi-value">${(cnt||0).toLocaleString()}<span style="font-size:13px;font-weight:400;color:var(--text2)">件</span></div>
+        <div class="kpi-sub-row">${mkPill(cnt, prev && prev.cnt)}<span class="kpi-sub">単価 ${cnt>0?Math.round(inc/cnt).toLocaleString():'--'}円</span></div>
+      </div>`;
+
+    // 当月だけ先に描画。全月推移はキャッシュができ次第、裏で更新。
+    try { renderTrendOnly(); } catch(e){}
+
+    const m = cur.map || {};
+    const idItems = [
+      {l:'家電収入',v:m['家電収入']||0,c:CONFIG.INC_COLORS[0]},
+      {l:'委託収入',v:m['委託収入']||0,c:CONFIG.INC_COLORS[1]},
+      {l:'その他収入',v:m['その他収入']||0,c:CONFIG.INC_COLORS[2]},
+      {l:'一般収入',v:m['一般収入']||0,c:CONFIG.INC_COLORS[3]},
+      {l:'その他',v:(m['コンピュータ収入']||0)+(m['保管料収入']||0),c:CONFIG.INC_COLORS[4]},
+    ].filter(x=>x.v>0);
+    try { CHARTS.donut('c-inc-donut', idItems.map(x=>x.l), idItems.map(x=>x.v), idItems.map(x=>x.c)); } catch(e){}
+    const legend = document.getElementById('inc-donut-legend');
+    if (legend) legend.innerHTML = idItems.map(x=>`<div class="legend-item"><div class="legend-dot" style="background:${x.c}"></div>${x.l} ${inc>0?(x.v/inc*100).toFixed(0):0}%</div>`).join('');
+
+    const expOther = Math.max(0, exp-(m['集配傭車']||0)-(m['路線備車']||0)-(m['路線傭車']||0)-(m['委託費']||0)-(m['給与手当']||0)-(m['その他人件費']||0)-(m['借地借家料']||0)-(m['その他施設費']||0));
+    const expItems = [
+      {l:'集配傭車・路線',v:(m['集配傭車']||0)+(m['路線備車']||0)+(m['路線傭車']||0),c:CONFIG.EXP_COLORS[0]},
+      {l:'委託費',v:m['委託費']||0,c:CONFIG.EXP_COLORS[1]},
+      {l:'給与・人件費',v:(m['給与手当']||0)+(m['その他人件費']||0),c:CONFIG.EXP_COLORS[2]},
+      {l:'施設費',v:(m['借地借家料']||0)+(m['その他施設費']||0),c:CONFIG.EXP_COLORS[3]},
+      {l:'その他',v:expOther,c:CONFIG.EXP_COLORS[4]},
+    ].filter(x=>x.v>0);
+    renderBars('exp-bars-area', expItems, exp);
+
+    // 荷主上位は重いので、KPI表示後に後回し。
+    const shipEl = document.getElementById('shipper-bars-area');
+    if (shipEl) shipEl.innerHTML = '<div style="font-size:11px;color:var(--text3);padding:6px 0">荷主別売上を準備中...</div>';
+    setTimeout(() => {
+      try{
+        if (activeView() !== 'dashboard') return;
+        const sh = CALC.shippers(ds.rows).slice(0,8);
+        renderBars('shipper-bars-area', sh.map((s,i)=>({l:s.name,v:s.amt,c:CONFIG.COLORS[i%CONFIG.COLORS.length]})), sh[0]?.amt || 1);
+      }catch(e){ console.warn(LABEL, 'shipper delayed skipped', e); }
+    }, 80);
+
+    buildSummariesInBackground();
+  }
+
+  function patchStateInvalidation(){
+    if (STATE.__fastCacheInvalidation) return;
+    const rawUpsert = STATE.upsert ? STATE.upsert.bind(STATE) : null;
+    if (rawUpsert) {
+      STATE.upsert = function(entry){
+        const ret = rawUpsert(entry);
+        try { if (this.__summaryCache) delete this.__summaryCache[entry.ym]; } catch(e){}
+        return ret;
+      };
+    }
+    const rawRemove = STATE.remove ? STATE.remove.bind(STATE) : null;
+    if (rawRemove) {
+      STATE.remove = function(i){
+        const ret = rawRemove(i);
+        try { this.__summaryCache = {}; } catch(e){}
+        return ret;
+      };
+    }
+    STATE.__fastCacheInvalidation = true;
+  }
+
+  function patchDBRestoreInvalidation(){
+    if (!window.DB || !DB.restoreAll || DB.__fastCacheRestoreInvalidation) return;
+    const rawRestore = DB.restoreAll.bind(DB);
+    DB.restoreAll = async function(){
+      const ret = await rawRestore();
+      try { if (window.STATE) STATE.__summaryCache = {}; } catch(e){}
+      setTimeout(buildSummariesInBackground, 120);
+      return ret;
+    };
+    DB.__fastCacheRestoreInvalidation = true;
+  }
+
+  function apply(){
+    if (!ready()) { setTimeout(apply, 150); return; }
+    try{
+      applyCalcCache();
+      patchStateInvalidation();
+      patchDBRestoreInvalidation();
+      UI.renderDashboard = renderFastDashboard;
+      if (STATE.mapByYM && !STATE.__fastMapByYm) {
+        STATE.mapByYM = function(){
+          const out = {};
+          (this.monthList ? this.monthList() : []).forEach(ym => {
+            const s = getSummary(ym);
+            if (s && s.map) out[ym] = s.map;
+          });
+          return out;
+        };
+        STATE.__fastMapByYm = true;
+      }
+      setTimeout(buildSummariesInBackground, 250);
+      console.log(LABEL, 'applied');
+    }catch(e){ console.warn(LABEL, e); }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply);
+  else apply();
+})();
