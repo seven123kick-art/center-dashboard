@@ -4349,71 +4349,71 @@ document.addEventListener('DOMContentLoaded', async () => {
     sidebarBottom.insertBefore(printBtn, sidebarBottom.firstChild);
   }
 
-  // ⑤⑥ 復元処理（CENTER初期化後に確実に実行）
-  const doRestore = async () => {
-    let restored = 0;
-    let restoredFrom = 'none';
-
-    // 別PC反映を優先するため、起動時はクラウド復元を完了まで待つ
-    if (CLOUD.isConfigured()) {
-      try {
-        CLOUD._updateBadge(true);
-        const cloudResult = await CLOUD.restoreFromCloud();
-        const cloudCount = cloudResult ? ((cloudResult.skdl || 0) + (cloudResult.field || 0)) : 0;
-        if (cloudCount > 0) {
-          restored = cloudCount;
-          restoredFrom = 'cloud';
-          console.log('[BOOT] cloud restored:', cloudResult);
-        } else {
-          console.warn('[BOOT] cloud has no datasets, fallback to local');
-        }
-      } catch(e) {
-        console.warn('[BOOT] CLOUD restore failed:', e);
-      }
-    }
-
-    // クラウドにデータが無い/失敗した場合のみローカル復元
-    if (restored === 0) {
-      try {
-        restored = await SIMPLE_STORE.restoreAll();
-        restoredFrom = restored > 0 ? 'local' : 'none';
-        console.log('[BOOT] local restored:', restored, 'datasets');
-      } catch(e) { console.warn('[BOOT] SIMPLE_STORE restore failed:', e); }
-    }
-
-    // UI更新
-    UI.renderDataList();
-    UI.updateTopbar();
-    FIELD_UI.updatePeriodBadge();
-    FIELD_UI.renderDataList();
-    if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
-    DB.showStorageInfo().catch(()=>{});
+  // ⑤⑥ 復元処理（2段階ロード版）
+  const refreshBootUI = (restored, restoredFrom) => {
+    try { UI.renderDataList(); } catch(e){}
+    try { UI.updateTopbar(); } catch(e){}
+    try { FIELD_UI.updatePeriodBadge(); } catch(e){}
+    try { FIELD_UI.renderDataList(); } catch(e){}
+    try { if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2(); } catch(e){}
 
     const msgEl = document.getElementById('session-msg');
     if (restored > 0) {
       if (msgEl) {
-        const label = restoredFrom === 'cloud' ? 'クラウドから復元しました' : '前回のローカルデータを自動読込しました';
+        const label = restoredFrom === 'cloud' ? 'クラウドを確認して反映しました' : '前回のローカルデータを即表示しました';
         msgEl.innerHTML = `✅ ${restored}件復元済み<br><span style="font-size:10px;color:#4d9fea">${label}</span>`;
       }
       const dot = document.getElementById('autosave-dot');
       if (dot) dot.style.background = '#16a34a';
       const lbl = document.getElementById('autosave-label');
-      if (lbl) lbl.textContent = restoredFrom === 'cloud' ? 'クラウド復元済み' : '自動保存 有効';
+      if (lbl) lbl.textContent = restoredFrom === 'cloud' ? 'クラウド確認済み' : 'ローカル即表示';
     } else {
       if (msgEl) msgEl.textContent = 'データなし（CSVを読み込んでください）';
     }
-
-    if (STATE.datasets.length > 0) setTimeout(() => UI.renderAlerts(), 800);
 
     if (STATE.currentYM) {
       const btn = document.querySelector('.nav-item[data-view="dashboard"]');
       if (btn) {
         const _lv150 = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
-        if (!_lv150 || _lv150 === 'dashboard') setTimeout(() => NAV.go(btn), 150);
+        if (!_lv150 || _lv150 === 'dashboard') setTimeout(() => NAV.go(btn), 60);
       }
     }
   };
-  setTimeout(doRestore, 300);  // 少し長めに待ってCENTER確実に初期化
+
+  const doRestore = async () => {
+    let restored = 0;
+
+    // 1段階目: ローカルを先に即表示（起動体感を最優先）
+    try {
+      restored = await SIMPLE_STORE.restoreAll();
+      console.log('[BOOT] local restored first:', restored, 'datasets');
+    } catch(e) {
+      console.warn('[BOOT] SIMPLE_STORE restore failed:', e);
+    }
+    refreshBootUI(restored, restored > 0 ? 'local' : 'none');
+
+    // 重い補助処理は初期表示後に回す
+    setTimeout(() => { try { DB.showStorageInfo().catch(()=>{}); } catch(e){} }, 1500);
+    setTimeout(() => { try { if (STATE.datasets.length > 0 && typeof UI.renderAlerts === 'function') UI.renderAlerts(); } catch(e){} }, 2200);
+
+    // 2段階目: クラウドは裏で1回だけ確認。画面表示をブロックしない
+    if (CLOUD.isConfigured()) {
+      setTimeout(async () => {
+        try {
+          CLOUD._updateBadge(true);
+          const cloudResult = await CLOUD.restoreFromCloud('boot-background');
+          const cloudCount = cloudResult ? ((cloudResult.skdl || 0) + (cloudResult.field || 0)) : 0;
+          if (cloudCount > 0) {
+            console.log('[BOOT] background cloud restored:', cloudResult);
+            refreshBootUI(cloudCount, 'cloud');
+          }
+        } catch(e) {
+          console.warn('[BOOT] background CLOUD restore failed:', e);
+        }
+      }, restored > 0 ? 1800 : 500);
+    }
+  };
+  setTimeout(doRestore, 80);
 });
 
 // ページ離脱前に確実に保存
@@ -5141,21 +5141,8 @@ const REPORT_UI = {
 
   CLOUD._finalCloudFirstRestorePatched = true;
 
-  document.addEventListener('DOMContentLoaded', function(){
-    setTimeout(async function(){
-      if (!window.CLOUD || !CLOUD.isConfigured || !CLOUD.isConfigured()) return;
-      try {
-        const result = await CLOUD.restoreFromCloud();
-        const count = result ? ((result.skdl || 0) + (result.field || 0)) : 0;
-        const msgEl = document.getElementById('session-msg');
-        if (msgEl && count > 0) {
-          msgEl.innerHTML = `☁ 別PC共有データを確認済み<br><span style="font-size:10px;color:#4d6a88">月次:${result.skdl || 0}件 / 現場:${result.field || 0}件</span>`;
-        }
-      } catch(e) {
-        console.warn('[FINAL PATCH] cloud re-check failed:', e);
-      }
-    }, 1200);
-  });
+  // 起動直後の追加クラウド再確認は、2段階ロード側に統合。
+  // 手動同期・Realtime後の再描画安全策だけ残す。
 
   window.CLOUD_RERENDER_AFTER_RESTORE = rerenderAfterCloudRestore;
   console.log('[FINAL PATCH] cloud-first restore safety patch applied');
@@ -5418,9 +5405,8 @@ const REPORT_UI = {
   function boot(){
     patchInitRestore();
     patchSyncNow();
-    setTimeout(function(){ patchInitRestore(); patchSyncNow(); forceCloudRestore('boot-1'); }, 800);
-    setTimeout(function(){ forceCloudRestore('boot-2'); }, 2500);
-    setTimeout(function(){ forceCloudRestore('boot-3'); }, 5000);
+    // 起動時の強制クラウド復元連打は廃止。
+    // 初期表示後のクラウド確認は2段階ロード側で1回だけ実施する。
   }
 
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot);
@@ -11917,3 +11903,5 @@ const REALTIME_TABLE_SYNC = {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(apply, 0));
   else setTimeout(apply, 0);
 })();
+
+/* TWO_STAGE_LOAD_OPTIMIZED 2026-04-26: local-first boot + background cloud check, cloud boot hammering disabled. */
