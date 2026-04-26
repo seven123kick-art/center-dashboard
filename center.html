@@ -14,18 +14,8 @@
 
 
 
-<link rel="stylesheet" href="assets/app.css">
-<script>
-(function(){
-  try{
-    var p = new URLSearchParams(location.search);
-    var c = p.get('c') || p.get('center') || 'kitasaitama';
-    if (!['kitasaitama','toda'].includes(c)) c = 'kitasaitama';
-    window.APP_FORCE_CENTER = c;
-    localStorage.setItem('active_center', c);
-  }catch(e){ window.APP_FORCE_CENTER='kitasaitama'; }
-})();
-</script>
+<link rel="stylesheet" href="app.css">
+
 </head>
 <body>
 <div id="js-error-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:10px 16px;font-size:12px;font-family:monospace;max-height:40vh;overflow-y:auto"></div>
@@ -1168,6 +1158,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="assets/app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
