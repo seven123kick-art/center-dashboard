@@ -11258,9 +11258,18 @@ const REALTIME_TABLE_SYNC = {
     try{return (window.CENTER && CENTER.pathPrefix) ? CENTER.pathPrefix : 'kitasaitama';}
     catch(e){return 'kitasaitama';}
   },
-  cfg(){
-    const url=(window.CONFIG && CONFIG.SUPABASE_URL) || (window.CLOUD && CLOUD.cfg && CLOUD.cfg.url) || '';
-    const key=(window.CONFIG && CONFIG.SUPABASE_KEY) || (window.CLOUD && CLOUD.cfg && CLOUD.cfg.key) || '';
+   cfg(){
+    const localConfig = (typeof CONFIG !== 'undefined') ? CONFIG : null;
+    const url =
+      (localConfig && localConfig.SUPABASE_URL) ||
+      (window.CONFIG && window.CONFIG.SUPABASE_URL) ||
+      (window.CLOUD && CLOUD.cfg && CLOUD.cfg.url) ||
+      '';
+    const key =
+      (localConfig && localConfig.SUPABASE_KEY) ||
+      (window.CONFIG && window.CONFIG.SUPABASE_KEY) ||
+      (window.CLOUD && CLOUD.cfg && CLOUD.cfg.key) ||
+      '';
     return {url,key};
   },
   now(){return new Date().toISOString();},
