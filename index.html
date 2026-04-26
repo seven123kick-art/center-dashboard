@@ -4565,7 +4565,13 @@ try {
       const listRes = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prefix, limit: 500 }),
+       body: JSON.stringify({
+  prefix: prefix,
+  limit: 1000,
+  offset: 0,
+  sortBy: { column: 'name', order: 'asc' },
+  recursive: true
+}),
       });
       if (!listRes.ok) throw new Error(`リスト取得失敗: ${listRes.status}`);
       const files = await listRes.json();
