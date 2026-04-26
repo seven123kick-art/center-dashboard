@@ -16,7 +16,7 @@
 :root{
   --sidebar-w:220px;
   --sidebar-bg:#1c2e44;
-  --sidebar-hover:#243a55;a
+  --sidebar-hover:#243a55;
   --sidebar-active:#2e5282;
   --sidebar-text:#a8bdd4;
   --sidebar-text-active:#ffffff;
@@ -6920,10 +6920,19 @@ const CLOUD_DEBUG = {
     // 2. Supabase REST API疎通確認
     try {
       add('⏳', 'REST API接続テスト中...');
-      const r = await fetch(`${url}/rest/v1/`, {
-        headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
+      // PostgREST のルート (/rest/v1/) は環境により 401 になるため、
+      // 実際に使う public.center_realtime_state を読めるかで判定する。
+      const r = await fetch(`${url}/rest/v1/center_realtime_state?select=center_key,state_key&limit=1`, {
+        method: 'GET',
+        headers: {
+          'apikey': key,
+          'Authorization': `Bearer ${key}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
       });
-      add(r.ok || r.status===404 ? '✅' : '❌', `REST API: HTTP ${r.status}`);
+      const body = await r.text().catch(()=> '');
+      add(r.ok ? '✅' : '❌', r.ok ? `REST API: OK (${r.status})` : `REST API: HTTP ${r.status} → ${body.slice(0,120)}`);
     } catch(e) {
       add('❌', `REST API接続失敗: ${e.message}`);
     }
@@ -11510,12 +11519,12 @@ const SHARE_SYNC = {
     CLOUD._shareSyncRestorePatched=true;
   },
   boot(){
-    this.injectButton();
+    this.injectButton();a
     this.patchSaves();
     this.patchCloudRestore();
     setTimeout(()=>this.injectButton(),800);
     setTimeout(()=>this.autoMigrateOnce().catch(e=>console.warn('共有データ初回移行失敗',e)),1800);
-  }
+  }a
 };
 
 (function(){
