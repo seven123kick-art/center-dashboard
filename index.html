@@ -7531,243 +7531,152 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 </script>
 
 <script>
-/* DATA_RESET — 現場明細だけを確実に削除（収支・計画・過去実績・メモは残す） */
+/* DATA_RESET — 完全書き直し版 */
 (function(){
-  'use strict';
+'use strict';
 
-  function msg(text){
-    const el = document.getElementById('field-upload-msg') || document.getElementById('session-msg') || document.getElementById('upload-msg');
-    if (el) el.textContent = text;
-    console.log('[DATA_RESET]', text);
-  }
-  // CENTER.pathPrefix = 'kitasaitama' (スラッシュなし)
-  function getPrefix(){
-    // CENTER.pathPrefix を優先、未定義の場合は localStorage._last_center を使う
-    if (window.CENTER && CENTER.pathPrefix) return String(CENTER.pathPrefix).replace(/^\/+|\/+$/g,'');
-    const saved = localStorage.getItem('_last_center') || localStorage.getItem('active_center');
-    return saved ? String(saved).replace(/^\/+|\/+$/g,'') : 'kitasaitama';
-  }
-  function fieldTargetsFromState(){
-    const list = (window.FIELD_STATE && Array.isArray(FIELD_STATE.datasets)) ? FIELD_STATE.datasets : [];
-    return list.filter(d => d && d.ym && d.type).map(d => ({ ym:String(d.ym), type:String(d.type), file:d.file || '' }));
-  }
+window.DATA_RESET = {
 
-  async function idbDeleteFromDB(storeName, key){
-    if (!(window.DB && typeof DB.open === 'function')) return;
+  async clearFieldAll() {
+    // prefix は localStorage から直接取得（CENTER依存なし）
+    const prefix = localStorage.getItem('_last_center') || 'kitasaitama';
+    const centerName = prefix === 'kitasaitama' ? '北埼玉センター' : prefix;
+
+    if (!confirm(
+      `${centerName} の現場明細データを削除します。\n\n` +
+      `削除：現場明細CSV・PDFデータ\n` +
+      `残す：月次収支・計画・過去実績・メモ\n\n` +
+      `よろしいですか？`
+    )) return;
+
+    const log = [];
+    const errors = [];
+
+    // ── Step1: 北埼玉センター_v1 の field ストアをクリア
     try {
-      const db = await DB.open();
-      if (!db.objectStoreNames.contains(storeName)) return;
       await new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).delete(key);
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
+        const req = indexedDB.open('北埼玉センター_v1');
+        req.onerror = e => reject(new Error('DB open失敗: ' + e.target.error));
+        req.onsuccess = e => {
+          const db = e.target.result;
+          const stores = Array.from(db.objectStoreNames);
+
+          const doDelete = async () => {
+            // field store クリア
+            if (stores.includes('field')) {
+              await new Promise((res, rej) => {
+                const tx = db.transaction('field', 'readwrite');
+                tx.objectStore('field').clear();
+                tx.oncomplete = () => { log.push('北埼玉_v1.field クリア済み'); res(); };
+                tx.onerror = () => rej(tx.error);
+              });
+            }
+            // meta から fieldCurrentYM を削除
+            if (stores.includes('meta')) {
+              await new Promise((res, rej) => {
+                const tx = db.transaction('meta', 'readwrite');
+                const os = tx.objectStore('meta');
+                os.delete(prefix + '_fieldCurrentYM');
+                os.delete('field_currentYM');
+                tx.oncomplete = () => { log.push('北埼玉_v1.meta fieldCurrentYM 削除済み'); res(); };
+                tx.onerror = () => rej(tx.error);
+              });
+            }
+            db.close();
+            resolve();
+          };
+          doDelete().catch(e => { db.close(); reject(e); });
+        };
       });
-    } catch(e) { console.warn('[DATA_RESET] IndexedDB削除失敗:', storeName, key, e); }
-  }
+    } catch(e) {
+      errors.push('Step1失敗: ' + e.message);
+    }
 
-    // window.DB に依存せず直接 IndexedDB を開く
-  const IDB_NAME = '北埼玉センター_v1';
-
-  function openIDB() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(IDB_NAME);
-      req.onsuccess = e => resolve(e.target.result);
-      req.onerror   = e => reject(e.target.error);
-      // onupgradeneeded は発火しないはず（既存DB）
-    });
-  }
-
-  async function idbClearFieldStore(){
+    // ── Step2: EslineCenter_v2 の field系キーを削除
     try {
-      const db = await openIDB();
-      const stores = Array.from(db.objectStoreNames);
-      console.log('[DATA_RESET] DB:', IDB_NAME, 'stores:', stores);
-
-      if (stores.includes('field')) {
-        await new Promise((resolve, reject) => {
-          const tx = db.transaction('field', 'readwrite');
-          tx.objectStore('field').clear();
-          tx.oncomplete = resolve;
-          tx.onerror = () => reject(tx.error);
-        });
-        console.log('[DATA_RESET] field ストア クリア完了');
-      } else {
-        console.log('[DATA_RESET] field ストア が存在しない（他の保存先を確認）');
-      }
-
-      if (stores.includes('meta')) {
-        const prefix = getPrefix();
-        const deleteKeys = [
-          prefix + '_fieldCurrentYM',
-          'field_currentYM',
-          prefix + '_field_meta',
-        ];
-        const tx = db.transaction('meta', 'readwrite');
-        const os = tx.objectStore('meta');
-        deleteKeys.forEach(k => os.delete(k));
-        await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
-        console.log('[DATA_RESET] meta削除完了:', deleteKeys);
-      }
-
-      db.close();
-    } catch(e) { console.warn('[DATA_RESET] fieldストア削除失敗:', e); }
-  }
-
-  async function idbDeleteFromDB(storeName, key){
-    try {
-      const db = await openIDB();
-      if (!Array.from(db.objectStoreNames).includes(storeName)) { db.close(); return; }
       await new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).delete(key);
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
+        const req = indexedDB.open('EslineCenter_v2');
+        req.onerror = e => reject(new Error('DB open失敗: ' + e.target.error));
+        req.onsuccess = e => {
+          const db = e.target.result;
+
+          const doDelete = async () => {
+            if (!db.objectStoreNames.contains('data')) {
+              db.close(); resolve(); return;
+            }
+
+            // 全キー取得
+            const allKeys = await new Promise((res, rej) => {
+              const r = db.transaction('data','readonly')
+                          .objectStore('data').getAllKeys();
+              r.onsuccess = ev => res(ev.target.result || []);
+              r.onerror   = ev => rej(ev.target.error);
+            });
+
+            // field系のみ抽出（skdlは残す）
+            const fieldKeys = allKeys.filter(k => {
+              const s = String(k);
+              return s.startsWith(prefix + '_field_')
+                  || s === prefix + '_field_meta';
+            });
+
+            log.push('EslineCenter_v2 field系キー: ' + JSON.stringify(fieldKeys));
+
+            if (fieldKeys.length > 0) {
+              await new Promise((res, rej) => {
+                const tx = db.transaction('data', 'readwrite');
+                const os = tx.objectStore('data');
+                fieldKeys.forEach(k => os.delete(k));
+                tx.oncomplete = () => { log.push('EslineCenter_v2 削除完了: ' + fieldKeys.length + '件'); res(); };
+                tx.onerror = () => rej(tx.error);
+              });
+            } else {
+              log.push('EslineCenter_v2 削除対象なし');
+            }
+
+            db.close();
+            resolve();
+          };
+          doDelete().catch(e => { db.close(); reject(e); });
+        };
       });
-      db.close();
-    } catch(e) { console.warn('[DATA_RESET] IndexedDB削除失敗:', storeName, key, e); }
-  }
-
-    async function simpleStoreDeleteFieldOnly(){
-    // EslineCenter_v2 を直接開いて field系キーを削除
-    const prefix = getPrefix(); // 'kitasaitama'
-    try {
-      const db = await new Promise((res, rej) => {
-        const r = indexedDB.open('EslineCenter_v2');
-        r.onsuccess = e => res(e.target.result);
-        r.onerror   = e => rej(e.target.error);
-      });
-
-      if (!db.objectStoreNames.contains('data')) { db.close(); return; }
-
-      const keys = await new Promise((res, rej) => {
-        const req = db.transaction('data','readonly').objectStore('data').getAllKeys();
-        req.onsuccess = e => res(e.target.result || []);
-        req.onerror   = e => rej(e.target.error);
-      });
-
-      // field系キーのみ削除（skdl系は残す）
-      const deleteKeys = keys.filter(k => {
-        const s = String(k || '');
-        return s === `${prefix}_field_meta`
-          || s.startsWith(`${prefix}_field_`);
-      });
-
-      console.log('[DATA_RESET] EslineCenter_v2 削除対象:', deleteKeys);
-
-      if (deleteKeys.length > 0) {
-        await new Promise((res, rej) => {
-          const tx = db.transaction('data', 'readwrite');
-          const os = tx.objectStore('data');
-          deleteKeys.forEach(k => os.delete(k));
-          tx.oncomplete = res;
-          tx.onerror = () => rej(tx.error);
-        });
-        console.log('[DATA_RESET] EslineCenter_v2 削除完了:', deleteKeys.length, '件');
-      } else {
-        console.log('[DATA_RESET] EslineCenter_v2 削除対象なし');
-      }
-
-      db.close();
-    } catch(e) { console.warn('[DATA_RESET] EslineCenter_v2 削除失敗:', e); }
-  }
-
-  async function cloudList(prefix){
-    if (!(window.CLOUD && CLOUD.cfg && CLOUD.cfg.url && CLOUD.cfg.key && CLOUD.cfg.bucket)) return [];
-    const { url, key, bucket } = CLOUD.cfg;
-    try {
-      const res = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
-        method:'POST',
-        headers:{ 'Authorization':`Bearer ${key}`, 'apikey':key, 'Content-Type':'application/json' },
-        body:JSON.stringify({ prefix:prefix || '', limit:1000 })
-      });
-      if (!res.ok) return [];
-      const files = await res.json();
-      return Array.isArray(files) ? files : [];
-    } catch(e) { console.warn('[DATA_RESET] クラウド一覧取得失敗:', e); return []; }
-  }
-
-  async function cloudDeleteObject(path){
-    if (!(window.CLOUD && CLOUD.cfg && CLOUD.cfg.url && CLOUD.cfg.key && CLOUD.cfg.bucket)) return;
-    const clean = String(path || '').replace(/^\/+/, '');
-    if (!clean) return;
-    const { url, key, bucket } = CLOUD.cfg;
-    try {
-      await fetch(`${url}/storage/v1/object/${bucket}/${clean}`, {
-        method:'DELETE',
-        headers:{ 'Authorization':`Bearer ${key}`, 'apikey':key }
-      });
-    } catch(e) { console.warn('[DATA_RESET] クラウド単体削除失敗:', clean, e); }
-  }
-
-  async function cloudDeleteFieldOnly(targets){
-    const prefix = getPrefix(); // 例: 'kitasaitama'
-    const paths = new Set();
-
-    // CLOUD.uploadはpatchCloudPathsで ${prefix}/${path} に変換される
-    // なので実際のStorage上のパスは ${prefix}/field/${ym}_${type}.json
-    targets.forEach(t => {
-      paths.add(`${prefix}/field/${t.ym}_${t.type}.json`);
-    });
-
-    // Storage上の${prefix}/field/配下を全列挙して追加（確実に全削除）
-    const prefFieldFiles = await cloudList(`${prefix}/field`);
-    prefFieldFiles.forEach(f => {
-      if (!f || !f.name) return;
-      const p = f.name.startsWith(`${prefix}/field/`) ? f.name : `${prefix}/field/${f.name}`;
-      paths.add(p);
-    });
-
-    console.log('[DATA_RESET] 削除対象パス:', [...paths]);
-    for (const p of paths) await cloudDeleteObject(p);
-    try {
-      if (window.CLOUD && typeof CLOUD.download === 'function' && typeof CLOUD.upload === 'function') {
-        const meta = await CLOUD.download('meta.json').catch(() => null);
-        if (meta && typeof meta === 'object') {
-          delete meta.fieldCurrentYM;
-          meta.updatedAt = new Date().toISOString();
-          await CLOUD.upload('meta.json', meta).catch(e => console.warn('[DATA_RESET] meta更新失敗:', e));
-        }
-      }
-    } catch(e) { console.warn('[DATA_RESET] meta調整失敗:', e); }
-  }
-
-  function clearFieldMemoryAndUi(){
-    if (window.FIELD_STATE) {
-      FIELD_STATE.datasets = [];
-      FIELD_STATE.currentYM = null;
+    } catch(e) {
+      errors.push('Step2失敗: ' + e.message);
     }
-    try { sessionStorage.setItem('kitasaitama_last_view', 'field'); } catch(e) {}
-    if (window.FIELD_UI) {
-      if (typeof FIELD_UI.renderDataList === 'function') FIELD_UI.renderDataList();
-      if (typeof FIELD_UI.updatePeriodBadge === 'function') FIELD_UI.updatePeriodBadge();
-      if (typeof FIELD_UI.renderWorker === 'function') FIELD_UI.renderWorker();
-      if (typeof FIELD_UI.renderMonthButtons === 'function') FIELD_UI.renderMonthButtons();
-    }
-    if (window.DB && typeof DB.showStorageInfo === 'function') DB.showStorageInfo().catch(()=>{});
-  }
 
-  window.DATA_RESET = {
-    async clearFieldAll(){
-      const targets = fieldTargetsFromState();
-      const countText = targets.length ? `${targets.length}件` : '画面未読込分も含めて削除';
-      const centerName = (window.CENTER && CENTER.current && CENTER.current.name) ? CENTER.current.name : '現在のセンター';
-      if (!confirm(`${centerName} の現場明細データを削除しますか？\n\n削除対象：作業者別CSV・エリア別PDFなどの現場明細データ（${countText}）\n削除しない：月次収支、計画、過去実績、メモ\n\n※クラウド・IndexedDB・ローカル保存から現場明細だけ削除します。`)) return;
-      try {
-        msg('現場明細データ削除中...');
-        await simpleStoreDeleteFieldOnly();
-        await idbClearFieldStore();
-        await cloudDeleteFieldOnly(targets);
-        clearFieldMemoryAndUi();
-        msg('現場明細データを削除しました。');
-        alert('現場明細データを削除しました。\n\n月次収支・計画・過去実績・メモは残しています。');
-      } catch(e) {
-        console.error('[DATA_RESET] 現場明細削除失敗:', e);
-        alert('現場明細データの削除に失敗しました。\n\n' + (e.message || e));
+    // ── Step3: メモリ・UIクリア
+    try {
+      if (window.FIELD_STATE) {
+        FIELD_STATE.datasets  = [];
+        FIELD_STATE.currentYM = null;
       }
-    },
-    async clearAll(){ return this.clearFieldAll(); }
-  };
+      if (window.FIELD_UI) {
+        if (typeof FIELD_UI.updatePeriodBadge === 'function') FIELD_UI.updatePeriodBadge();
+        if (typeof FIELD_UI.renderDataList    === 'function') FIELD_UI.renderDataList();
+        if (typeof FIELD_UI.renderWorker      === 'function') FIELD_UI.renderWorker();
+      }
+      log.push('UIクリア完了');
+    } catch(e) {
+      errors.push('Step3失敗: ' + e.message);
+    }
+
+    // ── 結果表示
+    console.log('[DATA_RESET] 実行ログ:', log.join(' / '));
+    if (errors.length > 0) {
+      console.error('[DATA_RESET] エラー:', errors);
+      alert('削除中にエラーが発生しました。\n\n' + errors.join('\n') + '\n\nログ: ' + log.join(' / '));
+    } else {
+      alert(
+        '現場明細データを削除しました。\n\n' +
+        '【削除内容】\n' + log.join('\n') + '\n\n' +
+        '月次収支・計画・過去実績・メモは残しています。'
+      );
+    }
+  },
+
+  async clearAll() { return this.clearFieldAll(); }
+};
+
 })();
 </script>
 </body>
