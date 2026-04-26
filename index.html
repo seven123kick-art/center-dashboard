@@ -9028,6 +9028,334 @@ setTimeout(renderFieldDataList2, 3000); // 復元が遅い場合のフォール�
 
 console.log('[FIELD_IMPORT2] データ取込タブ現場明細セクション 読み込み完了');
 </script>
+
+<script>
+/* PATCH — 年度別現場分析（商品・地域・月別推移） */
+(function(){
+  'use strict';
+
+  const AF = window.FIELD_ANNUAL = window.FIELD_ANNUAL || {};
+  AF._charts = AF._charts || {};
+
+  function yen(n){ return Math.round(Number(n)||0).toLocaleString('ja-JP'); }
+  function kYen(n){ return Math.round((Number(n)||0)/1000).toLocaleString('ja-JP'); }
+  function pct(n){ return isFinite(n) ? (Math.round(n*10)/10).toFixed(1) + '%' : '--'; }
+  function ymLabel(ym){ return String(ym||'').replace(/^(\d{4})(\d{2})$/, '$1年$2月'); }
+  function fiscalYearOfYM(ym){
+    const y = Number(String(ym).slice(0,4));
+    const m = Number(String(ym).slice(4,6));
+    if (!y || !m) return null;
+    return m >= 4 ? y : y - 1;
+  }
+  function fiscalMonths(year){
+    const out = [];
+    for (let m=4;m<=12;m++) out.push(String(year) + String(m).padStart(2,'0'));
+    for (let m=1;m<=3;m++) out.push(String(year+1) + String(m).padStart(2,'0'));
+    return out;
+  }
+  function parseAmt(v){
+    if (typeof v === 'number') return v;
+    return Number(String(v||'').replace(/,/g,'')) || 0;
+  }
+  function getRowAddr(r){ return r['お届け先住所'] || r['住所'] || r['納品先住所'] || r['届け先住所'] || ''; }
+  function getTicket(r){ return r['原票番号'] || r['荷主伝票番号'] || r['伝票番号'] || r['受付番号'] || ''; }
+  function safeClassifyProduct(name){
+    try { if (typeof classifyProduct === 'function') return classifyProduct(name); } catch(e) {}
+    const n = String(name||'');
+    if (/冷蔵庫/.test(n)) return '冷蔵庫';
+    if (/洗濯/.test(n)) return '洗濯機';
+    if (/テレビ|TV|ＴＶ/.test(n)) return 'テレビ';
+    if (/エアコン/.test(n)) return 'エアコン';
+    if (/レンジ/.test(n)) return '電子レンジ';
+    if (/リサイクル/.test(n)) return 'リサイクル料';
+    return 'その他';
+  }
+  function safeCity(addr){
+    try { if (typeof extractCityInfo === 'function') return extractCityInfo(addr); } catch(e) {}
+    const a = String(addr||'');
+    const pm = a.match(/^(.+?[都道府県])/);
+    const pref = pm ? pm[1] : '';
+    const rest = pref ? a.slice(pref.length) : a;
+    const cm = rest.match(/^(.{2,8}?[市区町村])/);
+    return { pref, city: cm ? cm[1] : '' };
+  }
+  function destroyChart(id){
+    try { if (AF._charts[id]) { AF._charts[id].destroy(); delete AF._charts[id]; } } catch(e) {}
+  }
+  function makeChart(id, cfg){
+    const el = document.getElementById(id);
+    if (!el || !window.Chart) return;
+    destroyChart(id);
+    AF._charts[id] = new Chart(el, cfg);
+  }
+  function barRows(items, key, labelKey, maxRows){
+    const rows = (items||[]).slice(0, maxRows || 10);
+    const max = Math.max(1, ...rows.map(x => Number(x[key])||0));
+    return rows.map((x, i) => {
+      const width = Math.max(4, Math.round(((Number(x[key])||0)/max)*100));
+      return '<div class="af-bar-row">' +
+        '<div class="af-rank">' + (i+1) + '</div>' +
+        '<div class="af-name" title="' + String(x[labelKey]||'') + '">' + String(x[labelKey]||'未設定') + '</div>' +
+        '<div class="af-track"><div class="af-fill" style="width:' + width + '%"></div></div>' +
+        '<div class="af-val">' + (key === 'amt' ? kYen(x[key]) + '千円' : yen(x[key]) + '件') + '</div>' +
+      '</div>';
+    }).join('') || '<div style="font-size:12px;color:var(--text3);padding:10px">データがありません</div>';
+  }
+
+  async function loadFieldRecords(){
+    try {
+      if (window.DB && typeof DB.getAll === 'function') {
+        const recs = await DB.getAll('field');
+        if (Array.isArray(recs) && recs.length) return recs;
+      }
+    } catch(e) { console.warn('[FIELD_ANNUAL] DB.getAll(field) failed', e); }
+    try { return (FIELD_STATE && Array.isArray(FIELD_STATE.datasets)) ? FIELD_STATE.datasets : []; } catch(e) { return []; }
+  }
+
+  function aggregate(records, year){
+    const yms = new Set(fiscalMonths(Number(year)));
+    const csvRecords = records.filter(r => r && r.type === 'csv' && yms.has(String(r.ym)) && Array.isArray(r.rows));
+    const pdfRecords = records.filter(r => r && r.type === 'pdf' && yms.has(String(r.ym)) && Array.isArray(r.areas));
+    const allRows = csvRecords.flatMap(r => (r.rows||[]).map(row => Object.assign({__ym:r.ym}, row)));
+    const allAreas = pdfRecords.flatMap(r => (r.areas||[]).map(a => Object.assign({__ym:r.ym}, a)));
+
+    const monthly = {};
+    fiscalMonths(Number(year)).forEach(ym => monthly[ym] = {ym, cnt:0, amt:0});
+
+    const products = {};
+    const cities = {};
+    const ticketSeen = new Set();
+    const productSeen = new Set();
+
+    allRows.forEach((r, idx) => {
+      const ym = String(r.__ym || '');
+      const amt = parseAmt(r['金額']);
+      const ticket = getTicket(r) || ('row' + idx);
+      if (!ticketSeen.has(ticket + '_' + ym)) {
+        ticketSeen.add(ticket + '_' + ym);
+        if (monthly[ym]) monthly[ym].cnt += 1;
+      }
+      if (monthly[ym]) monthly[ym].amt += amt;
+
+      const cat = safeClassifyProduct(r['商品名'] || r['品名'] || r['作業内容'] || '');
+      if (!products[cat]) products[cat] = {name:cat, cnt:0, amt:0, months:{}};
+      products[cat].amt += amt;
+      if (!products[cat].months[ym]) products[cat].months[ym] = {cnt:0, amt:0};
+      products[cat].months[ym].amt += amt;
+      const pKey = ym + '_' + ticket + '_' + cat;
+      if (!productSeen.has(pKey)) { productSeen.add(pKey); products[cat].cnt += 1; products[cat].months[ym].cnt += 1; }
+
+      const ci = safeCity(getRowAddr(r));
+      if (ci.city) {
+        const key = (ci.pref || '') + ci.city;
+        if (!cities[key]) cities[key] = {name:key, pref:ci.pref||'', city:ci.city, cnt:0, amt:0, months:{}};
+        cities[key].amt += amt;
+        if (!cities[key].months[ym]) cities[key].months[ym] = {cnt:0, amt:0};
+        cities[key].months[ym].amt += amt;
+        cities[key].cnt += 1;
+        cities[key].months[ym].cnt += 1;
+      }
+    });
+
+    allAreas.forEach(a => {
+      const ym = String(a.__ym || '');
+      const cnt = Number(a.count || a.cnt || a.delivery || 0) || 0;
+      const amt = parseAmt(a.amount || a.amt || 0);
+      if (monthly[ym]) monthly[ym].cnt += cnt;
+      if (monthly[ym]) monthly[ym].amt += amt;
+      const city = String(a.city || '').trim();
+      if (city) {
+        const key = String(a.pref || '') + city;
+        if (!cities[key]) cities[key] = {name:key, pref:a.pref||'', city, cnt:0, amt:0, months:{}};
+        cities[key].cnt += cnt;
+        cities[key].amt += amt;
+        if (!cities[key].months[ym]) cities[key].months[ym] = {cnt:0, amt:0};
+        cities[key].months[ym].cnt += cnt;
+        cities[key].months[ym].amt += amt;
+      }
+    });
+
+    const productList = Object.values(products).sort((a,b)=>b.cnt-a.cnt || b.amt-a.amt);
+    const cityList = Object.values(cities).sort((a,b)=>b.cnt-a.cnt || b.amt-a.amt);
+    const monthList = fiscalMonths(Number(year)).map(ym => monthly[ym]);
+    const totalCnt = monthList.reduce((s,x)=>s+x.cnt,0);
+    const totalAmt = monthList.reduce((s,x)=>s+x.amt,0);
+    const top5Cnt = cityList.slice(0,5).reduce((s,x)=>s+x.cnt,0);
+    return { year:Number(year), csvRecords, pdfRecords, allRows, allAreas, productList, cityList, monthList, totalCnt, totalAmt, top5Rate: totalCnt ? top5Cnt/totalCnt*100 : NaN };
+  }
+
+  function ensureUI(){
+    if (!document.getElementById('view-field-annual')) {
+      const content = document.getElementById('content');
+      if (!content) return false;
+      const view = document.createElement('div');
+      view.className = 'view';
+      view.id = 'view-field-annual';
+      view.innerHTML = `
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-header">
+            <span class="card-title">年度別現場分析</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <label style="font-size:11px;color:var(--text2);font-weight:700">年度:</label>
+              <select id="field-annual-year" onchange="FIELD_ANNUAL.render()" style="font-size:12px;padding:5px 8px"></select>
+              <span id="field-annual-status" class="badge badge-info">集計前</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="kpi-row kpi-row-4" id="field-annual-kpis"></div>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <div class="card-header"><span class="card-title">商品カテゴリ別 年間件数ランキング</span><span style="font-size:11px;color:var(--text3)">何が多く出ているか</span></div>
+            <div class="card-body-sm" id="field-annual-products"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">市区町村別 年間件数ランキング</span><span style="font-size:11px;color:var(--text3)">どのエリアが多いか</span></div>
+            <div class="card-body-sm" id="field-annual-cities"></div>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <div class="card-header"><span class="card-title">月別 件数・売上推移</span></div>
+            <div class="card-body"><div style="height:250px;position:relative"><canvas id="c-field-annual-monthly"></canvas></div></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">上位5商品 月別件数推移</span></div>
+            <div class="card-body"><div style="height:250px;position:relative"><canvas id="c-field-annual-products-monthly"></canvas></div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">上位5エリア 月別件数推移</span></div>
+          <div class="card-body"><div style="height:260px;position:relative"><canvas id="c-field-annual-cities-monthly"></canvas></div></div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <div class="card-header"><span class="card-title">商品カテゴリ別 詳細</span></div>
+            <div class="scroll-x"><table class="tbl"><thead><tr><th>商品カテゴリ</th><th class="r">件数</th><th class="r">売上（千円）</th><th class="r">構成比</th></tr></thead><tbody id="field-annual-product-tbody"></tbody></table></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">市区町村別 詳細</span></div>
+            <div class="scroll-x"><table class="tbl"><thead><tr><th>都道府県</th><th>市区町村</th><th class="r">件数</th><th class="r">売上（千円）</th><th class="r">構成比</th></tr></thead><tbody id="field-annual-city-tbody"></tbody></table></div>
+          </div>
+        </div>`;
+      content.appendChild(view);
+    }
+    if (!document.querySelector('.nav-item[data-view="field-annual"]')) {
+      const fieldNav = document.querySelector('.nav-item[data-view="field"]');
+      const nav = document.createElement('div');
+      nav.className = 'nav-item';
+      nav.dataset.view = 'field-annual';
+      nav.onclick = function(){ NAV.go(this); };
+      nav.innerHTML = '<svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V3M2 13h12"/><rect x="4" y="8" width="2" height="5"/><rect x="8" y="5" width="2" height="8"/><rect x="12" y="2" width="2" height="11"/></svg>年度別現場分析';
+      if (fieldNav && fieldNav.parentNode) fieldNav.parentNode.insertBefore(nav, fieldNav.nextSibling);
+    }
+    return true;
+  }
+
+  async function populateYearOptions(records){
+    const sel = document.getElementById('field-annual-year');
+    if (!sel) return null;
+    const years = [...new Set((records||[]).map(r => fiscalYearOfYM(r.ym)).filter(Boolean))].sort((a,b)=>b-a);
+    const nowFY = fiscalYearOfYM((window.STATE && STATE.currentYM) || (years[0] ? String(years[0])+'04' : '')) || years[0] || new Date().getFullYear();
+    if (!sel.options.length || years.join(',') !== sel.dataset.years) {
+      sel.innerHTML = (years.length ? years : [nowFY]).map(y => '<option value="' + y + '">' + y + '年度（' + y + '/4〜' + (y+1) + '/3）</option>').join('');
+      sel.dataset.years = years.join(',');
+      sel.value = String(years.includes(nowFY) ? nowFY : years[0] || nowFY);
+    }
+    return Number(sel.value || years[0] || nowFY);
+  }
+
+  AF.render = async function(){
+    if (!ensureUI()) return;
+    const status = document.getElementById('field-annual-status');
+    if (status) { status.textContent = '集計中...'; status.className = 'badge badge-info'; }
+    const records = await loadFieldRecords();
+    const year = await populateYearOptions(records);
+    const data = aggregate(records, year);
+    const months = fiscalMonths(year);
+    const monthLabels = months.map(ym => String(Number(ym.slice(4,6))) + '月');
+
+    const avg = data.totalCnt ? data.totalAmt / data.totalCnt : 0;
+    const csvMonths = new Set(data.csvRecords.map(r=>r.ym)).size;
+    const pdfMonths = new Set(data.pdfRecords.map(r=>r.ym)).size;
+    if (status) { status.textContent = 'CSV ' + csvMonths + 'ヶ月 / PDF ' + pdfMonths + 'ヶ月'; status.className = (csvMonths || pdfMonths) ? 'badge badge-ok' : 'badge badge-warn'; }
+
+    document.getElementById('field-annual-kpis').innerHTML = [
+      ['年間件数', yen(data.totalCnt) + '件', 'CSV/PDFの年度合計', 'accent-navy'],
+      ['年間売上', kYen(data.totalAmt) + '千円', '作業者別CSVの金額合計', 'accent-green'],
+      ['平均単価', yen(avg) + '円', '売上 ÷ 件数', 'accent-amber'],
+      ['上位5エリア比率', pct(data.top5Rate), '配送集中度の目安', 'accent-red']
+    ].map(k => '<div class="kpi-card ' + k[3] + '"><div class="kpi-label">' + k[0] + '</div><div class="kpi-value">' + k[1] + '</div><div class="kpi-sub">' + k[2] + '</div></div>').join('');
+
+    document.getElementById('field-annual-products').innerHTML = barRows(data.productList, 'cnt', 'name', 12);
+    document.getElementById('field-annual-cities').innerHTML = barRows(data.cityList, 'cnt', 'name', 12);
+
+    const totalProductCnt = Math.max(1, data.productList.reduce((s,x)=>s+x.cnt,0));
+    document.getElementById('field-annual-product-tbody').innerHTML = data.productList.slice(0,40).map(p => '<tr><td>' + p.name + '</td><td class="r">' + yen(p.cnt) + '</td><td class="r">' + kYen(p.amt) + '</td><td class="r">' + pct(p.cnt/totalProductCnt*100) + '</td></tr>').join('') || '<tr><td colspan="4" class="c" style="color:var(--text3)">データがありません</td></tr>';
+    const totalCityCnt = Math.max(1, data.cityList.reduce((s,x)=>s+x.cnt,0));
+    document.getElementById('field-annual-city-tbody').innerHTML = data.cityList.slice(0,40).map(c => '<tr><td>' + (c.pref||'') + '</td><td>' + c.city + '</td><td class="r">' + yen(c.cnt) + '</td><td class="r">' + kYen(c.amt) + '</td><td class="r">' + pct(c.cnt/totalCityCnt*100) + '</td></tr>').join('') || '<tr><td colspan="5" class="c" style="color:var(--text3)">データがありません</td></tr>';
+
+    makeChart('c-field-annual-monthly', {
+      type:'bar',
+      data:{ labels:monthLabels, datasets:[
+        { type:'bar', label:'件数', data:data.monthList.map(x=>x.cnt), yAxisID:'y' },
+        { type:'line', label:'売上（千円）', data:data.monthList.map(x=>Math.round(x.amt/1000)), yAxisID:'y1', tension:.25 }
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, scales:{ y:{beginAtZero:true,title:{display:true,text:'件数'}}, y1:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'千円'}} } }
+    });
+
+    const topProducts = data.productList.slice(0,5);
+    makeChart('c-field-annual-products-monthly', {
+      type:'line',
+      data:{ labels:monthLabels, datasets:topProducts.map(p => ({ label:p.name, data:months.map(ym => (p.months[ym] && p.months[ym].cnt) || 0), tension:.25 })) },
+      options:{ responsive:true, maintainAspectRatio:false, scales:{ y:{beginAtZero:true,title:{display:true,text:'件数'}} } }
+    });
+
+    const topCities = data.cityList.slice(0,5);
+    makeChart('c-field-annual-cities-monthly', {
+      type:'line',
+      data:{ labels:monthLabels, datasets:topCities.map(c => ({ label:c.city, data:months.map(ym => (c.months[ym] && c.months[ym].cnt) || 0), tension:.25 })) },
+      options:{ responsive:true, maintainAspectRatio:false, scales:{ y:{beginAtZero:true,title:{display:true,text:'件数'}} } }
+    });
+  };
+
+  function injectStyle(){
+    if (document.getElementById('field-annual-style')) return;
+    const st = document.createElement('style');
+    st.id = 'field-annual-style';
+    st.textContent = '.af-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}.af-rank{width:22px;font-size:11px;color:var(--text3);text-align:right;font-weight:700}.af-name{width:130px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.af-track{flex:1;height:16px;background:#e9eaec;border-radius:4px;overflow:hidden}.af-fill{height:100%;background:#1a4d7c;border-radius:4px}.af-val{width:90px;font-size:11px;text-align:right;font-weight:700;color:var(--text2)}';
+    document.head.appendChild(st);
+  }
+
+  function patchNav(){
+    if (!window.NAV || typeof NAV.go !== 'function') return false;
+    NAV.titles = NAV.titles || {};
+    NAV.titles['field-annual'] = '年度別現場分析';
+    if (!NAV._fieldAnnualPatched) {
+      const orig = NAV.go.bind(NAV);
+      NAV.go = function(btn){
+        const id = btn && btn.dataset ? btn.dataset.view : '';
+        const ret = orig(btn);
+        if (id === 'field-annual') setTimeout(AF.render, 50);
+        return ret;
+      };
+      NAV._fieldAnnualPatched = true;
+    }
+    return true;
+  }
+
+  function init(){
+    injectStyle();
+    ensureUI();
+    patchNav();
+    console.log('[PATCH] 年度別現場分析 追加済み');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else setTimeout(init, 100);
+})();
+</script>
+
 </html>
 
 <script>
