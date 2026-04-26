@@ -2821,8 +2821,11 @@ const MODAL = {
 
     if (this._pendingTarget === 'skdl') {
       await EVENTS._processFilesWithYM(this._pendingFiles, ym);
+      UI.renderDataList();
     } else {
       await FIELD_EVENTS._processFiles(this._pendingFiles, ym);
+      // データ取込タブの現場明細リストを更新
+      if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
     }
   },
 };
@@ -8147,18 +8150,8 @@ FIELD_IMPORT2.deleteOne = function(idx) {
 
 /* 初期描画（DOMContentLoadedは既に発火済みなのでsetTimeoutで対応） */
 setTimeout(renderFieldDataList2, 600);
-setTimeout(renderFieldDataList2, 1500); // 復元完了後にも再描画
-
-/* FIELD_EVENTS._processFiles を再度フック
-   ※ 複数パッチで上書きされた最終版を確実に捕捉するため遅延実行 */
-setTimeout(() => {
-  const _latest = FIELD_EVENTS._processFiles;
-  FIELD_EVENTS._processFiles = async function(files, ym) {
-    await _latest.apply(this, arguments);
-    setTimeout(renderFieldDataList2, 200);
-  };
-  console.log('[FIELD_IMPORT2] _processFiles フック完了（遅延版）');
-}, 300);
+setTimeout(renderFieldDataList2, 1500);
+setTimeout(renderFieldDataList2, 3000); // 復元が遅い場合のフォールバック
 
 console.log('[FIELD_IMPORT2] データ取込タブ現場明細セクション 読み込み完了');
 </script>
