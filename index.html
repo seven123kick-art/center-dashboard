@@ -5267,7 +5267,41 @@ const PLAN = {
   },
 
 };
+/* ─── 起動時に現在選択中センターのクラウドデータを自動復元 ─── */
+(function bootCloudRestoreOnOpen(){
+  async function run(){
+    try {
+      const msgEl = document.getElementById('session-msg');
+      if (msgEl) msgEl.textContent = `${CENTER.current.name} のクラウドデータを起動時に確認中...`;
 
+      if (window.CLOUD && typeof CLOUD.initRestore === 'function') {
+        await CLOUD.initRestore();
+      }
+
+      if (window.CLOUD && typeof CLOUD.restoreFromCloud === 'function') {
+        await CLOUD.restoreFromCloud();
+      }
+
+      UI.renderDataList();
+      UI.updateTopbar();
+      FIELD_UI.updatePeriodBadge();
+      FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
+
+      if (msgEl) msgEl.textContent = `${CENTER.current.name} のクラウドデータを復元しました`;
+    } catch(e) {
+      console.warn('起動時クラウド自動復元失敗', e);
+      const msgEl = document.getElementById('session-msg');
+      if (msgEl) msgEl.textContent = '起動時クラウド復元に失敗しました';
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(run, 600));
+  } else {
+    setTimeout(run, 600);
+  }
+})();
 /* ═══════════════════════════════════════════════════════════
    MEMO — 月次メモ管理
 ═══════════════════════════════════════════════════════════ */
