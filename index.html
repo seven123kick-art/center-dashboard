@@ -7628,30 +7628,48 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
     } catch(e) { console.warn('[DATA_RESET] IndexedDB削除失敗:', storeName, key, e); }
   }
 
-  async function simpleStoreDeleteFieldOnly(){
-    if (!(window.SIMPLE_STORE && typeof SIMPLE_STORE.open === 'function')) return;
-    const cid = getCid();
+    async function simpleStoreDeleteFieldOnly(){
+    // EslineCenter_v2 を直接開いて field系キーを削除
+    const prefix = getPrefix(); // 'kitasaitama'
     try {
-      const db = await SIMPLE_STORE.open();
-      if (!db.objectStoreNames.contains('data')) return;
-      const keys = await new Promise((resolve, reject) => {
-        const req = db.transaction('data', 'readonly').objectStore('data').getAllKeys();
-        req.onsuccess = e => resolve(e.target.result || []);
-        req.onerror = e => reject(e.target.error);
+      const db = await new Promise((res, rej) => {
+        const r = indexedDB.open('EslineCenter_v2');
+        r.onsuccess = e => res(e.target.result);
+        r.onerror   = e => rej(e.target.error);
       });
+
+      if (!db.objectStoreNames.contains('data')) { db.close(); return; }
+
+      const keys = await new Promise((res, rej) => {
+        const req = db.transaction('data','readonly').objectStore('data').getAllKeys();
+        req.onsuccess = e => res(e.target.result || []);
+        req.onerror   = e => rej(e.target.error);
+      });
+
+      // field系キーのみ削除（skdl系は残す）
       const deleteKeys = keys.filter(k => {
-        const key = String(k || '');
-        return key === `${cid}_field_meta` || key.startsWith(`${cid}_field_`);
+        const s = String(k || '');
+        return s === `${prefix}_field_meta`
+          || s.startsWith(`${prefix}_field_`);
       });
-      if (!deleteKeys.length) return;
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction('data', 'readwrite');
-        const os = tx.objectStore('data');
-        deleteKeys.forEach(k => os.delete(k));
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
-      });
-    } catch(e) { console.warn('[DATA_RESET] SIMPLE_STORE削除失敗:', e); }
+
+      console.log('[DATA_RESET] EslineCenter_v2 削除対象:', deleteKeys);
+
+      if (deleteKeys.length > 0) {
+        await new Promise((res, rej) => {
+          const tx = db.transaction('data', 'readwrite');
+          const os = tx.objectStore('data');
+          deleteKeys.forEach(k => os.delete(k));
+          tx.oncomplete = res;
+          tx.onerror = () => rej(tx.error);
+        });
+        console.log('[DATA_RESET] EslineCenter_v2 削除完了:', deleteKeys.length, '件');
+      } else {
+        console.log('[DATA_RESET] EslineCenter_v2 削除対象なし');
+      }
+
+      db.close();
+    } catch(e) { console.warn('[DATA_RESET] EslineCenter_v2 削除失敗:', e); }
   }
 
   async function cloudList(prefix){
