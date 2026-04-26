@@ -658,6 +658,9 @@ window.onunhandledrejection = function(e) {
            <button class="btn" onclick="DATA_RESET.clearFieldAll()" style="font-size:12px;color:#dc2626">
   現場データ削除
 </button>
+<button class="btn" onclick="FIELD_DELETE_DEBUG.run()" style="font-size:12px;color:#d97706;margin-left:4px" title="保存先を確認してから削除対象を特定します">
+  🔍 保存先確認
+</button>
         </div>
       </div>
 
@@ -7535,9 +7538,10 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
   function msg(text){
     const el = document.getElementById('field-upload-msg') || document.getElementById('session-msg') || document.getElementById('upload-msg');
     if (el) el.textContent = text;
+    console.log('[DATA_RESET]', text);
   }
-  function getCid(){ return (window.CENTER && CENTER.current && CENTER.current.id) ? CENTER.current.id : 'kitasaitama'; }
-  function getPrefix(){ return (window.CENTER && CENTER.pathPrefix) ? String(CENTER.pathPrefix).replace(/^\/+|\/+$/g,'') : getCid(); }
+  // CENTER.pathPrefix = 'kitasaitama' (スラッシュなし)
+  function getPrefix(){ return (window.CENTER && CENTER.pathPrefix) ? String(CENTER.pathPrefix).replace(/^\/+|\/+$/g,'') : 'kitasaitama'; }
   function fieldTargetsFromState(){
     const list = (window.FIELD_STATE && Array.isArray(FIELD_STATE.datasets)) ? FIELD_STATE.datasets : [];
     return list.filter(d => d && d.ym && d.type).map(d => ({ ym:String(d.ym), type:String(d.type), file:d.file || '' }));
@@ -7569,9 +7573,12 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
           tx.onerror = () => reject(tx.error);
         });
       }
-      await idbDeleteFromDB('meta', 'field_currentYM');
-      await idbDeleteFromDB('meta', getPrefix() + '_fieldCurrentYM');
-      await idbDeleteFromDB('meta', getCid() + '_field_meta');
+      // metaキーは CENTER.pathPrefix + '_' + 'fieldCurrentYM' = 'kitasaitama_fieldCurrentYM'
+      const prefix = getPrefix();
+      const ck = prefix + '_';
+      await idbDeleteFromDB('meta', ck + 'fieldCurrentYM');
+      await idbDeleteFromDB('meta', 'field_currentYM'); // 旧キー互換
+      console.log('[DATA_RESET] meta削除キー:', ck + 'fieldCurrentYM');
     } catch(e) { console.warn('[DATA_RESET] fieldストア削除失敗:', e); }
   }
 
@@ -7630,18 +7637,24 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
   }
 
   async function cloudDeleteFieldOnly(targets){
-    const cid = getCid();
-    const prefix = getPrefix();
+    const prefix = getPrefix(); // 例: 'kitasaitama'
     const paths = new Set();
+
+    // CLOUD.uploadはpatchCloudPathsで ${prefix}/${path} に変換される
+    // なので実際のStorage上のパスは ${prefix}/field/${ym}_${type}.json
     targets.forEach(t => {
-      paths.add(`field/${t.ym}_${t.type}.json`);
       paths.add(`${prefix}/field/${t.ym}_${t.type}.json`);
-      paths.add(`${cid}/field/${t.ym}_${t.type}.json`);
     });
-    const fieldFiles = await cloudList('field');
-    fieldFiles.forEach(f => { if (f && f.name) paths.add(f.name.startsWith('field/') ? f.name : `field/${f.name}`); });
+
+    // Storage上の${prefix}/field/配下を全列挙して追加（確実に全削除）
     const prefFieldFiles = await cloudList(`${prefix}/field`);
-    prefFieldFiles.forEach(f => { if (f && f.name) paths.add(f.name.startsWith(`${prefix}/field/`) ? f.name : `${prefix}/field/${f.name}`); });
+    prefFieldFiles.forEach(f => {
+      if (!f || !f.name) return;
+      const p = f.name.startsWith(`${prefix}/field/`) ? f.name : `${prefix}/field/${f.name}`;
+      paths.add(p);
+    });
+
+    console.log('[DATA_RESET] 削除対象パス:', [...paths]);
     for (const p of paths) await cloudDeleteObject(p);
     try {
       if (window.CLOUD && typeof CLOUD.download === 'function' && typeof CLOUD.upload === 'function') {
@@ -7694,4 +7707,152 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 })();
 </script>
 </body>
+</html>
+
+<script>
+'use strict';
+/* ══════════════════════════════════════════════════════
+   FIELD_DELETE_DEBUG — 現場明細データ保存先確認ツール
+   「🔍 保存先確認」ボタンで実行
+══════════════════════════════════════════════════════ */
+const FIELD_DELETE_DEBUG = {
+
+  async run() {
+    const lines = ['===== 現場明細 保存先確認 =====', ''];
+
+    // 1. CENTER情報
+    lines.push('【CENTER】');
+    lines.push(`  pathPrefix: ${window.CENTER?.pathPrefix ?? '未定義'}`);
+    lines.push(`  current.id: ${window.CENTER?.current?.id ?? '未定義'}`);
+    lines.push(`  current.name: ${window.CENTER?.current?.name ?? '未定義'}`);
+    lines.push('');
+
+    // 2. FIELD_STATE
+    lines.push('【FIELD_STATE】');
+    if (window.FIELD_STATE) {
+      lines.push(`  currentYM: ${FIELD_STATE.currentYM}`);
+      lines.push(`  datasets数: ${FIELD_STATE.datasets?.length ?? 0}`);
+      FIELD_STATE.datasets?.forEach((d,i) => {
+        lines.push(`    [${i}] ym=${d.ym} type=${d.type} file=${d.file} rows=${d.rows?.length ?? (d.areas?.length ?? '-')}`);
+      });
+    } else {
+      lines.push('  FIELD_STATE 未定義');
+    }
+    lines.push('');
+
+    // 3. localStorage（全キー）
+    lines.push('【localStorage キー一覧】');
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      const v = localStorage.getItem(k);
+      lines.push(`  ${k}: ${v?.length > 60 ? v.slice(0,60)+'...' : v}`);
+    }
+    lines.push('');
+
+    // 4. sessionStorage
+    lines.push('【sessionStorage キー一覧】');
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      lines.push(`  ${k}: ${sessionStorage.getItem(k)}`);
+    }
+    lines.push('');
+
+    // 5. IndexedDB: 北埼玉センター_v1 のfieldストア全キー
+    lines.push('【IndexedDB: 北埼玉センター_v1 → fieldストア】');
+    try {
+      const db = await window.DB?.open();
+      if (db && db.objectStoreNames.contains('field')) {
+        const recs = await new Promise((res, rej) => {
+          const req = db.transaction('field','readonly').objectStore('field').getAll();
+          req.onsuccess = e => res(e.target.result || []);
+          req.onerror   = e => rej(e.target.error);
+        });
+        lines.push(`  field store レコード数: ${recs.length}`);
+        recs.forEach(r => lines.push(`    key=${r.key} ym=${r.ym} type=${r.type} rows=${r.rows?.length ?? (r.areas?.length ?? '-')}`));
+      } else {
+        lines.push('  fieldストアなし（または DB未定義）');
+      }
+    } catch(e) { lines.push(`  エラー: ${e.message}`); }
+
+    lines.push('【IndexedDB: 北埼玉センター_v1 → metaストア（全キー）】');
+    try {
+      const db = await window.DB?.open();
+      if (db && db.objectStoreNames.contains('meta')) {
+        const recs = await new Promise((res, rej) => {
+          const req = db.transaction('meta','readonly').objectStore('meta').getAll();
+          req.onsuccess = e => res(e.target.result || []);
+          req.onerror   = e => rej(e.target.error);
+        });
+        recs.forEach(r => lines.push(`  key=${r.key} value=${JSON.stringify(r.value)?.slice(0,60)}`));
+      }
+    } catch(e) { lines.push(`  エラー: ${e.message}`); }
+    lines.push('');
+
+    // 6. SIMPLE_STORE (EslineCenter_v2) の全キー
+    lines.push('【IndexedDB: EslineCenter_v2 → dataストア（全キー）】');
+    try {
+      const db2 = await window.SIMPLE_STORE?.open();
+      if (db2) {
+        const keys = await new Promise((res, rej) => {
+          const req = db2.transaction('data','readonly').objectStore('data').getAllKeys();
+          req.onsuccess = e => res(e.target.result || []);
+          req.onerror   = e => rej(e.target.error);
+        });
+        keys.forEach(k => lines.push(`  key=${k}`));
+      }
+    } catch(e) { lines.push(`  エラー: ${e.message}`); }
+    lines.push('');
+
+    // 7. Supabase Storage の列挙
+    lines.push('【Supabase Storage】');
+    lines.push(`  bucket: ${window.CLOUD?.cfg?.bucket ?? '未設定'}`);
+    lines.push(`  url: ${window.CLOUD?.cfg?.url ?? '未設定'}`);
+    if (window.CLOUD?.isConfigured?.()) {
+      const prefix = window.CENTER?.pathPrefix ?? 'kitasaitama';
+      const { url, key, bucket } = CLOUD.cfg;
+      try {
+        // prefixなしで全ファイルを取得
+        const res = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefix: prefix + '/', limit: 200 })
+        });
+        if (res.ok) {
+          const files = await res.json();
+          lines.push(`  ${prefix}/配下のファイル数: ${files?.length ?? 0}`);
+          (files || []).filter(f => f?.name).forEach(f => lines.push(`    ${prefix}/${f.name}`));
+        } else {
+          lines.push(`  リスト取得失敗: ${res.status}`);
+        }
+      } catch(e) { lines.push(`  エラー: ${e.message}`); }
+    } else {
+      lines.push('  CLOUD未設定（接続情報なし）');
+    }
+
+    lines.push('');
+    lines.push('===== 確認完了 =====');
+
+    // コンソール出力
+    console.log(lines.join('\n'));
+
+    // 画面上にもポップアップ表示
+    const out = lines.join('\n');
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:#0f172a;color:#e2e8f0;border-radius:12px;padding:20px;max-width:800px;width:100%;max-height:80vh;overflow-y:auto;font-family:monospace;font-size:11px;line-height:1.7">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span style="font-size:14px;font-weight:700;color:#60a5fa">🔍 現場明細 保存先確認</span>
+          <div style="display:flex;gap:8px">
+            <button onclick="navigator.clipboard.writeText(${JSON.stringify(out)}).then(()=>alert('コピーしました'))" style="padding:4px 12px;background:#1e40af;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">📋 コピー</button>
+            <button onclick="this.closest('div[style*=fixed]').remove()" style="padding:4px 12px;background:#dc2626;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">✕ 閉じる</button>
+          </div>
+        </div>
+        <pre style="margin:0;white-space:pre-wrap;word-break:break-all">${out.replace(/</g,'&lt;')}</pre>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+};
+console.log('[FIELD_DELETE_DEBUG] 保存先確認ツール 読み込み完了');
+</script>
 </html>
