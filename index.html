@@ -5780,9 +5780,10 @@ const CLOUD_DEBUG = {
     const fiscalOrder = ['04','05','06','07','08','09','10','11','12','01','02','03'];
 
     if (!ymList.length) {
-      el.textContent = `${curFY}年度 / データ未読込`;
-      el.style.color = 'var(--text3)';
+      el.textContent = 'データなし（取込してください）';
+      el.style.color = 'var(--red,#dc2626)';
       el.style.fontWeight = '600';
+      // データなし時は月ボタンをグレーのみで表示（年度ボタンは維持）
     } else {
       el.textContent = `${UI.fmtYM(ym)} / ${ymList.length}ヶ月分`;
       el.style.color = 'var(--navy)';
@@ -7669,32 +7670,74 @@ window.DATA_RESET = {
 
     // ── Step3: メモリ・UIクリア
     try {
+      // ① グラフ・テーブルを先に破棄（FIELD_STATEが空になる前に）
+      if (window.DISPLAY && typeof DISPLAY.clearField === 'function') {
+        DISPLAY.clearField();
+      }
+      if (window.CHARTS && typeof CHARTS.destroyAll === 'function') {
+        CHARTS.destroyAll();
+      }
+
+      // ② メモリクリア
       if (window.FIELD_STATE) {
         FIELD_STATE.datasets  = [];
         FIELD_STATE.currentYM = null;
       }
+
+      // ③ UI更新（月ボタン・データ一覧を空状態に）
       if (window.FIELD_UI) {
         if (typeof FIELD_UI.updatePeriodBadge === 'function') FIELD_UI.updatePeriodBadge();
         if (typeof FIELD_UI.renderDataList    === 'function') FIELD_UI.renderDataList();
-        if (typeof FIELD_UI.renderWorker      === 'function') FIELD_UI.renderWorker();
       }
+
+      // ④ 現場タブの各ペインを空メッセージに
+      ['fpane-worker','fpane-content','fpane-product'].forEach(id => {
+        const pane = document.getElementById(id);
+        if (!pane) return;
+        ['kpi-row','f-kpi-worker'].forEach(cls => {
+          const el = pane.querySelector('.' + cls) || document.getElementById('f-kpi-worker');
+          if (el) el.innerHTML = '';
+        });
+        ['f-worker-tbody','f-content-tbody','f-product-tbody'].forEach(tid => {
+          const el = document.getElementById(tid);
+          if (el) el.innerHTML = '<tr><td colspan="8" style="padding:16px;text-align:center;color:var(--text3)">データが削除されました</td></tr>';
+        });
+      });
+      // マップ
+      const noData = document.getElementById('map-no-data');
+      if (noData) { noData.style.display = 'block'; noData.textContent = 'データが削除されました。再取込してください。'; }
+      if (window.FIELD_MAP && typeof FIELD_MAP.clear === 'function') FIELD_MAP.clear();
+
       log.push('UIクリア完了');
     } catch(e) {
       errors.push('Step3失敗: ' + e.message);
     }
 
-    // ── 結果表示
+    // ── 結果表示（DOM描画を先に走らせるためsetTimeout）
     console.log('[DATA_RESET] 実行ログ:', log.join(' / '));
-    if (errors.length > 0) {
-      console.error('[DATA_RESET] エラー:', errors);
-      alert('削除中にエラーが発生しました。\n\n' + errors.join('\n') + '\n\nログ: ' + log.join(' / '));
-    } else {
-      alert(
-        '現場明細データを削除しました。\n\n' +
-        '【削除内容】\n' + log.join('\n') + '\n\n' +
-        '月次収支・計画・過去実績・メモは残しています。'
-      );
+
+    // フィールドビューに削除済みメッセージを表示
+    const msgEl2 = document.getElementById('field-upload-msg');
+    if (msgEl2) {
+      msgEl2.innerHTML = '<div class="msg msg-ok" style="margin-top:10px">✅ 現場明細データを削除しました。再度取込できます。</div>';
     }
+    const dataList = document.getElementById('field-data-list');
+    if (dataList) {
+      dataList.innerHTML = '<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div>';
+    }
+
+    setTimeout(() => {
+      if (errors.length > 0) {
+        console.error('[DATA_RESET] エラー:', errors);
+        alert('削除中にエラーが発生しました。\n\n' + errors.join('\n') + '\n\nログ: ' + log.join(' / '));
+      } else {
+        alert(
+          '現場明細データを削除しました。\n\n' +
+          '【削除内容】\n' + log.join('\n') + '\n\n' +
+          '月次収支・計画・過去実績・メモは残しています。'
+        );
+      }
+    }, 150);
   },
 
   async clearAll() { return this.clearFieldAll(); }
