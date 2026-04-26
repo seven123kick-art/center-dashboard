@@ -11465,3 +11465,25 @@ const REALTIME_TABLE_SYNC = {
   async function boot(){if(!ready()){setTimeout(boot,300);return;}patchHistory();patchImport();patchNav();lighten();const sel=document.getElementById('tsv-year-sel-history');if(sel&&!sel.__centerPlanHistoryPatched){sel.addEventListener('change',render);sel.__centerPlanHistoryPatched=true;}updateTitles();try{await HISTORY._loadFromStorage();}catch(e){}render();console.log(LABEL,'OK');}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(boot,2600));else setTimeout(boot,2600);
 })();
+
+
+/* FINAL_SPLIT_PAGE_CENTER_LOCK */
+(function(){
+  'use strict';
+  const forced = window.APP_FORCE_CENTER || '';
+  if (!forced) return;
+  function applyLock(){
+    if (!window.CONFIG || !window.CENTER || !CONFIG.CENTERS) { setTimeout(applyLock,300); return; }
+    const fixed = CONFIG.CENTERS.find(c => c.id === forced) || CONFIG.CENTERS[0];
+    if (!fixed) return;
+    try { CENTER._current = fixed; CONFIG.DEFAULT_CENTER = fixed.id; CONFIG.CENTER_NAME = fixed.name; localStorage.setItem('active_center', fixed.id); } catch(e) {}
+    CENTER.renderSwitcher = function(){ const list=document.getElementById('center-list'); if(list) list.innerHTML=''; };
+    CENTER.switchTo = async function(centerId){
+      if(centerId && centerId !== fixed.id) console.warn('[CENTER_LOCK] このページは '+fixed.name+' 専用です:', centerId);
+      try { CENTER._current=fixed; localStorage.setItem('active_center', fixed.id); if(typeof CENTER._updateHeaderColor==='function') CENTER._updateHeaderColor(fixed); } catch(e) {}
+      return false;
+    };
+    try { CENTER.renderSwitcher(); if(typeof CENTER._updateHeaderColor==='function') CENTER._updateHeaderColor(fixed); } catch(e) {}
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',()=>setTimeout(applyLock,500)); else setTimeout(applyLock,500);
+})();

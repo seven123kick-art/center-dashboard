@@ -19,11 +19,6 @@
 </head>
 <body>
 <div id="js-error-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:10px 16px;font-size:12px;font-family:monospace;max-height:40vh;overflow-y:auto"></div>
-<div id="js-test-bar" style="position:fixed;bottom:0;right:0;z-index:99999;background:#1a4d7c;padding:8px 12px;border-radius:8px 0 0 0">
-  <button onclick="alert('JS動作OK！\nURL: '+location.href)" style="font-size:12px;padding:4px 10px;background:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:700">JS動作テスト</button>
-</div>
-
-
 <!-- ════════ SIDEBAR ════════ -->
 <div id="sidebar">
   <div class="sidebar-logo">
@@ -38,11 +33,15 @@
     </div>
   </div>
 
-  <!-- センター切替 -->
-  <div id="center-switcher" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08)">
-    <div style="font-size:10px;color:#607d9a;margin-bottom:5px;padding-left:4px;letter-spacing:.04em;font-weight:700">ACTIVE CENTER</div>
-    <div id="center-list" style="display:flex;flex-direction:column;gap:3px"></div>
+  <!-- センター表示（固定） -->
+  <div class="fixed-center-box">
+    <div class="fixed-center-label">CENTER</div>
+    <div class="fixed-center-name">北埼玉センター</div>
   </div>
+
+  <a class="sidebar-top-link" href="index.html">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 7.5L8 2l6 5.5"/><path d="M4 7v7h8V7"/></svg>TOPへ戻る
+  </a>
 
   <div class="sidebar-section">メインメニュー</div>
   <div class="nav-item active" data-view="dashboard" onclick="NAV.go(this)">
@@ -84,11 +83,8 @@
   </div>
   <div class="sidebar-divider"></div>
   <div class="sidebar-section">データ管理</div>
-  <div class="nav-item" data-view="import-kitasaitama" data-import-center="kitasaitama" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M5 7l3 3 3-3M2 12v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>北埼玉データ取込
-  </div>
-  <div class="nav-item" data-view="import-toda" data-import-center="toda" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M5 7l3 3 3-3M2 12v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>戸田データ取込
+  <div class="nav-item" data-view="import" data-import-center="kitasaitama" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M5 7l3 3 3-3M2 12v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>北埼玉センターデータ取込
   </div>
 
   <div class="sidebar-bottom">
@@ -828,8 +824,8 @@
           <span id="import-target-badge" class="badge badge-info">センター別取込</span>
         </div>
         <div class="card-body" style="font-size:12px;line-height:1.8;color:var(--text2)">
-          <div id="import-target-desc" style="font-weight:700;color:var(--navy)">この画面で取り込んだデータは、選択中センターだけに保存されます。</div>
-          <div style="margin-top:4px">北埼玉データ取込と戸田データ取込をサイドバーで分け、保存キー・表示・クリアをセンター別に固定します。</div>
+          <div id="import-target-desc" style="font-weight:700;color:var(--navy)">この画面で取り込んだデータは、北埼玉センターだけに保存されます。</div>
+          <div style="margin-top:4px">このページは北埼玉センター専用です。保存キー・表示・クリアは北埼玉センターだけに固定します。</div>
         </div>
       </div>
       <div class="card" style="margin-bottom:14px">
@@ -1121,9 +1117,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="assets/app.js"></script>
 </body> 直前に配置。 -->
@@ -1204,26 +1197,3 @@
 <script src="assets/app.js"></script>
 </body>
 </html>
-
-
-</html>
-
-
-
-
-
-</html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
