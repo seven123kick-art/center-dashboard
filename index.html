@@ -7684,7 +7684,16 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 
     NAV._pageStatePatched2 = true;
   }
-
+/* PATCH — F5直前に現在画面を保存（最重要） */
+window.addEventListener('beforeunload', function(){
+  try {
+    const activeNav = document.querySelector('.nav-item.active');
+    if (activeNav && activeNav.dataset && activeNav.dataset.view) {
+      sessionStorage.setItem('kitasaitama_last_view', activeNav.dataset.view);
+      console.log('[PATCH] F5前に画面保存:', activeNav.dataset.view);
+    }
+  } catch(e){}
+});
   document.addEventListener('DOMContentLoaded', function(){
     setTimeout(restoreActiveView, 300);
     setTimeout(restoreActiveView, 900);
