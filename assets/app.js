@@ -12328,3 +12328,142 @@ const REALTIME_TABLE_SYNC = {
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(apply,0));else setTimeout(apply,0);
   setTimeout(apply,600);setTimeout(apply,1800);setTimeout(apply,3500);
 })();
+
+/* FINAL PATCH 2026-04-27 — initial dashboard render + no random auto navigation */
+(function(){
+  'use strict';
+  const LABEL = '[BOOT DASHBOARD FIX]';
+  const bootAt = Date.now();
+  let userNavAt = 0;
+
+  function centerId(){ return window.APP_FORCE_CENTER || (window.CENTER && CENTER.current && CENTER.current.id) || 'kitasaitama'; }
+  function viewBtn(id){ return document.querySelector('.nav-item[data-view="' + id + '"]'); }
+  function viewPane(id){ return document.getElementById('view-' + id); }
+  function activeView(){
+    const nav = document.querySelector('.nav-item.active[data-view]');
+    if (nav && nav.dataset && nav.dataset.view) return nav.dataset.view;
+    const pane = document.querySelector('.view.active');
+    if (pane && pane.id) return pane.id.replace(/^view-/, '');
+    return 'dashboard';
+  }
+  function setActiveView(id){
+    const btn = viewBtn(id) || viewBtn('dashboard');
+    const pane = viewPane(id) || viewPane('dashboard');
+    if (!btn || !pane) return 'dashboard';
+    document.querySelectorAll('.nav-item[data-view]').forEach(el => el.classList.toggle('active', el === btn));
+    document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el === pane));
+    const title = document.getElementById('page-title');
+    if (title && window.NAV && NAV.titles) title.textContent = NAV.titles[id] || (id === 'dashboard' ? 'ダッシュボード' : id);
+    return id;
+  }
+  function renderActive(){
+    try{
+      const id = activeView() || 'dashboard';
+      if (window.UI && typeof UI.renderCurrentView === 'function') {
+        UI.renderCurrentView();
+      } else if (id === 'dashboard' && window.UI && typeof UI.renderDashboard === 'function') {
+        UI.renderDashboard();
+      }
+      try { if (window.UI && typeof UI.updateTopbar === 'function') UI.updateTopbar(); } catch(e){}
+    }catch(e){ console.warn(LABEL, 'render failed', e); }
+  }
+  function showDashboardAndRender(){
+    setActiveView('dashboard');
+    renderActive();
+  }
+
+  // User click marker: user navigation must not be blocked.
+  document.addEventListener('pointerdown', function(e){
+    if (e.target && e.target.closest && e.target.closest('.nav-item[data-view]')) userNavAt = Date.now();
+  }, true);
+  document.addEventListener('click', function(e){
+    if (e.target && e.target.closest && e.target.closest('.nav-item[data-view]')) userNavAt = Date.now();
+  }, true);
+
+  function patchNav(){
+    if (!window.NAV || !NAV.go || NAV.__bootDashboardFixPatched) return false;
+    const realGo = NAV.go.bind(NAV);
+    NAV.go = function(btn, opts){
+      const view = btn && btn.dataset ? btn.dataset.view : '';
+      const isUser = (Date.now() - userNavAt) < 1500;
+      const allowAuto = opts && opts.allowAuto === true;
+      const inBoot = (Date.now() - bootAt) < 8000;
+
+      // During boot, block old saved-view patches from jumping to trend/shipper/etc.
+      // User clicks and explicit calls are allowed.
+      if (inBoot && !isUser && !allowAuto && view && view !== 'dashboard') {
+        console.warn(LABEL, 'blocked auto nav during boot:', view);
+        showDashboardAndRender();
+        return;
+      }
+
+      const ret = realGo(btn);
+      // Ensure clicking already-active dashboard still paints the content.
+      setTimeout(renderActive, 0);
+      return ret;
+    };
+    NAV.__bootDashboardFixPatched = true;
+    return true;
+  }
+
+  function forceDashboardSavedViewDuringBoot(){
+    try {
+      const k = centerId() + '_last_view';
+      sessionStorage.setItem(k, 'dashboard');
+      localStorage.setItem(k, 'dashboard');
+      // Some older patches used this fixed key. Neutralize it too.
+      localStorage.setItem('kitasaitama_user_last_view', 'dashboard');
+      window.__BOOT_LAST_VIEW__ = 'dashboard';
+    } catch(e) {}
+  }
+
+  function afterRestoreRender(){
+    // The app sometimes restores data after boot. Repaint dashboard when data is ready.
+    showDashboardAndRender();
+  }
+
+  function patchRestoreHooks(){
+    if (window.CLOUD && CLOUD.restoreFromCloud && !CLOUD.__bootDashboardFixRestorePatched) {
+      const real = CLOUD.restoreFromCloud.bind(CLOUD);
+      CLOUD.restoreFromCloud = async function(){
+        const result = await real.apply(CLOUD, arguments);
+        setTimeout(afterRestoreRender, 0);
+        setTimeout(afterRestoreRender, 250);
+        return result;
+      };
+      CLOUD.__bootDashboardFixRestorePatched = true;
+    }
+    if (window.SIMPLE_STORE && SIMPLE_STORE.restoreAll && !SIMPLE_STORE.__bootDashboardFixRestorePatched) {
+      const realLocal = SIMPLE_STORE.restoreAll.bind(SIMPLE_STORE);
+      SIMPLE_STORE.restoreAll = async function(){
+        const result = await realLocal.apply(SIMPLE_STORE, arguments);
+        setTimeout(afterRestoreRender, 0);
+        setTimeout(afterRestoreRender, 250);
+        return result;
+      };
+      SIMPLE_STORE.__bootDashboardFixRestorePatched = true;
+    }
+  }
+
+  function bootApply(){
+    forceDashboardSavedViewDuringBoot();
+    patchNav();
+    patchRestoreHooks();
+    showDashboardAndRender();
+    try { document.documentElement.classList.remove('restore-view-booting'); } catch(e) {}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function(){
+      setTimeout(bootApply, 0);
+      setTimeout(bootApply, 300);
+      setTimeout(bootApply, 1200);
+      setTimeout(bootApply, 3000);
+    });
+  } else {
+    setTimeout(bootApply, 0);
+    setTimeout(bootApply, 300);
+    setTimeout(bootApply, 1200);
+    setTimeout(bootApply, 3000);
+  }
+})();
