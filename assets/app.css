@@ -240,3 +240,11 @@ html.restore-view-booting body::after{
 .fixed-center-name{font-size:12px;font-weight:700;color:#fff;line-height:1.5}
 .sidebar-top-link{display:flex;align-items:center;gap:8px;padding:9px 16px;color:var(--sidebar-text);font-size:12px;text-decoration:none;border-left:3px solid transparent;transition:all .15s}
 .sidebar-top-link:hover{background:var(--sidebar-hover);color:#fff}
+
+
+/* Common center build */
+.center-fixed-box{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08)}
+.center-fixed-label{font-size:10px;color:#607d9a;margin-bottom:5px;padding-left:4px;letter-spacing:.04em;font-weight:700}
+.center-fixed-name{font-size:12px;font-weight:700;color:#fff;padding-left:4px;line-height:1.5}
+.sidebar-top-link{display:flex;align-items:center;gap:8px;padding:8px 16px;color:#a8bdd4;text-decoration:none;font-size:12px;border-left:3px solid transparent}
+.sidebar-top-link:hover{background:#243a55;color:#fff}

@@ -1,9 +1,20 @@
+/* Common center build */
+(function(){
+  try{
+    var p = new URLSearchParams(location.search);
+    var c = p.get('c') || p.get('center') || window.APP_FORCE_CENTER || localStorage.getItem('active_center') || 'kitasaitama';
+    if (!['kitasaitama','toda'].includes(c)) c = 'kitasaitama';
+    window.APP_FORCE_CENTER = c;
+    localStorage.setItem('active_center', c);
+  }catch(e){ window.APP_FORCE_CENTER = window.APP_FORCE_CENTER || 'kitasaitama'; }
+})();
 /* Split build */
 window.APP_IS_SPLIT_BUILD = true;
 
 (function(){
   try{
-    var key = 'kitasaitama_last_view';
+    var cid = (window.APP_FORCE_CENTER || 'kitasaitama');
+    var key = cid + '_last_view';
     window.__BOOT_LAST_VIEW__ = sessionStorage.getItem(key) || localStorage.getItem(key) || '';
   }catch(e){ window.__BOOT_LAST_VIEW__ = ''; }
   document.documentElement.classList.add('restore-view-booting');
@@ -2081,7 +2092,7 @@ const SESSION = {
       if (STATE.currentYM) {
         const btn = document.querySelector('.nav-item[data-view="dashboard"]');
         if (btn) {
-        const _lv150 = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv150 = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
         if (!_lv150 || _lv150 === 'dashboard') setTimeout(() => NAV.go(btn), 150);
       }
       }
@@ -2112,7 +2123,7 @@ const DB = {
   SKDL_COLS:  ['収支科目名','収支補助科目名','金額','荷主名','荷主基本コード','数量','計上日','計上支店名'],
   FIELD_COLS: ['作業者','作業内容','金額','商品名','お届け先住所','数量','原票番号','荷主名','荷主店舗名','配達完了日','伝票区分'],
 
-  DB_NAME:    '北埼玉センター_v1',
+  DB_NAME:    'EslineCenter_' + (window.APP_FORCE_CENTER || 'kitasaitama') + '_v1',
   DB_VERSION: 1,
   _db: null,
 
@@ -2283,11 +2294,11 @@ async clearStore(storeName) {
 
         // ダッシュボード表示（ただしユーザーが別ページを開いていた場合は移動しない）
         if (STATE.currentYM) {
-          const lastView = sessionStorage.getItem('kitasaitama_last_view');
+          const lastView = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
           if (!lastView || lastView === 'dashboard') {
             const btn = document.querySelector('.nav-item[data-view="dashboard"]');
             if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 200);
         }
@@ -2740,7 +2751,7 @@ const CLOUD = {
       if (STATE.currentYM) {
         const btn = document.querySelector('.nav-item[data-view="dashboard"]');
         if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 200);
         }
@@ -3131,7 +3142,7 @@ const metaFile   = files.find(f => f.name && f.name.includes('meta.json'));
       if (STATE.currentYM) {
         const btn = document.querySelector('.nav-item[data-view="dashboard"]');
         if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 200);
         }
@@ -3182,7 +3193,7 @@ CENTER._restoreFromIndexedDB = async function() {
   if (STATE.currentYM) {
     const btn = document.querySelector('.nav-item[data-view="dashboard"]');
     if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 200);
         }
@@ -4397,7 +4408,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (STATE.currentYM) {
       const btn = document.querySelector('.nav-item[data-view="dashboard"]');
       if (btn) {
-        const _lv150 = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv150 = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
         if (!_lv150 || _lv150 === 'dashboard') setTimeout(() => NAV.go(btn), 150);
       }
     }
@@ -4504,11 +4515,11 @@ window.addEventListener('beforeunload', () => {
     }
 
     if (restored > 0 && STATE.currentYM) {
-      const lastView = sessionStorage.getItem('kitasaitama_last_view');
+      const lastView = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
       if (!lastView || lastView === 'dashboard') {
         const btn = document.querySelector('.nav-item[data-view="dashboard"]');
         if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 100);
         }
@@ -6317,7 +6328,7 @@ CENTER.switchTo = async function(centerId) {
   if (restored > 0 && STATE.currentYM) {
     const btn = document.querySelector('.nav-item[data-view="dashboard"]');
     if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 100);
         }
@@ -7734,7 +7745,7 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 (function(){
   'use strict';
 
-  const KEY_VIEW_SESSION = 'kitasaitama_last_view';
+  const KEY_VIEW_SESSION = ((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view');
   const KEY_VIEW_LOCAL   = 'kitasaitama_user_last_view';
   const START_MS = Date.now();
 
@@ -7993,7 +8004,7 @@ window.DATA_RESET = {
     // ── Step1: 北埼玉センター_v1 の field ストアをクリア
     try {
       await new Promise((resolve, reject) => {
-        const req = indexedDB.open('北埼玉センター_v1');
+        const req = indexedDB.open((typeof DB !== 'undefined' && DB.DB_NAME) ? DB.DB_NAME : ('EslineCenter_' + (window.APP_FORCE_CENTER || 'kitasaitama') + '_v1'));
         req.onerror = e => reject(new Error('DB open失敗: ' + e.target.error));
         req.onsuccess = e => {
           const db = e.target.result;
@@ -8133,7 +8144,7 @@ window.DATA_RESET = {
       if (cityTbody) cityTbody.innerHTML = '';
 
       // 現場明細ビューに留まる（ダッシュボードに飛ばないよう sessionStorage を更新）
-      try { sessionStorage.setItem('kitasaitama_last_view', 'field'); } catch(e) {}
+      try { sessionStorage.setItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'), 'field'); } catch(e) {}
 
       log.push('UIクリア完了');
     } catch(e) {
@@ -9338,7 +9349,7 @@ window.renderFieldDataList2 = async function() {
   try {
     // ① 北埼玉センター_v1.field を直接読む
     const db = await new Promise((res, rej) => {
-      const r = indexedDB.open('北埼玉センター_v1');
+      const r = indexedDB.open((typeof DB !== 'undefined' && DB.DB_NAME) ? DB.DB_NAME : ('EslineCenter_' + (window.APP_FORCE_CENTER || 'kitasaitama') + '_v1'));
       r.onsuccess = e => res(e.target.result);
       r.onerror   = e => rej(e.target.error);
     });
@@ -9423,7 +9434,7 @@ FIELD_IMPORT2.deleteOne = async function(ym, type) {
   // 北埼玉センター_v1.field から削除
   const idbKey = `${prefix}_${ym}_${type}`;
   await new Promise((res, rej) => {
-    const req = indexedDB.open('北埼玉センター_v1');
+    const req = indexedDB.open((typeof DB !== 'undefined' && DB.DB_NAME) ? DB.DB_NAME : ('EslineCenter_' + (window.APP_FORCE_CENTER || 'kitasaitama') + '_v1'));
     req.onsuccess = e => {
       const db = e.target.result;
       if (!Array.from(db.objectStoreNames).includes('field')) { db.close(); res(); return; }
@@ -9478,13 +9489,13 @@ setTimeout(renderFieldDataList2, 3000); // 復元が遅い場合のフォール�
     const original = obj[fnName].bind(obj);
 
     obj[fnName] = async function(){
-      const beforeView = currentView() || sessionStorage.getItem('kitasaitama_last_view') || 'import';
+      const beforeView = currentView() || sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view')) || 'import';
       const realNavGo = NAV.go.bind(NAV);
 
       NAV.go = function(btn){
         const target = btn && btn.dataset ? btn.dataset.view : '';
         if (target === 'dashboard' && (beforeView === 'import' || beforeView === 'field')) {
-          sessionStorage.setItem('kitasaitama_last_view', beforeView);
+          sessionStorage.setItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'), beforeView);
           console.log('[PATCH] 取込後のダッシュボード強制遷移をブロック:', beforeView);
           return;
         }
@@ -9496,7 +9507,7 @@ setTimeout(renderFieldDataList2, 3000); // 復元が遅い場合のフォール�
       } finally {
         setTimeout(function(){
           NAV.go = realNavGo;
-          sessionStorage.setItem('kitasaitama_last_view', beforeView);
+          sessionStorage.setItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'), beforeView);
           const keepBtn = document.querySelector('.nav-item[data-view="' + beforeView + '"]');
           if (keepBtn) realNavGo(keepBtn);
         }, 300);
@@ -9520,7 +9531,7 @@ setTimeout(renderFieldDataList2, 3000); // 復元が遅い場合のフォール�
 (function(){
   'use strict';
 
-  const KEY_VIEW = 'kitasaitama_last_view';
+  const KEY_VIEW = ((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view');
   const BOOT_GUARD_MS = 6000;
   const bootStartedAt = performance.now();
 
@@ -11486,4 +11497,41 @@ const REALTIME_TABLE_SYNC = {
     try { CENTER.renderSwitcher(); if(typeof CENTER._updateHeaderColor==='function') CENTER._updateHeaderColor(fixed); } catch(e) {}
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',()=>setTimeout(applyLock,500)); else setTimeout(applyLock,500);
+})();
+/* Common center build patch: ページ共通化・センター固定 */
+(function(){
+  function getCenter(){
+    try{
+      var id = window.APP_FORCE_CENTER || 'kitasaitama';
+      var list = (typeof CONFIG !== 'undefined' && CONFIG.CENTERS) ? CONFIG.CENTERS : [];
+      return list.find(function(c){ return c.id === id; }) || {id:id, name:id==='toda'?'戸田センター':'北埼玉センター', color:'#1a4d7c'};
+    }catch(e){ return {id:'kitasaitama', name:'北埼玉センター', color:'#1a4d7c'}; }
+  }
+  function applyCenterLabels(){
+    var c = getCenter();
+    document.title = '経営管理システム｜' + c.name;
+    document.querySelectorAll('[data-center-name]').forEach(function(el){ el.textContent = c.name; });
+    document.querySelectorAll('[data-center-import-name]').forEach(function(el){ el.textContent = c.name + 'データ取込'; });
+    var title = document.getElementById('import-target-title');
+    if (title) title.textContent = c.name + 'データ取込';
+    var desc = document.getElementById('import-target-desc');
+    if (desc) desc.textContent = 'この画面で取り込んだデータは、' + c.name + 'だけに保存されます。';
+    var note = document.getElementById('import-target-note');
+    if (note) note.textContent = 'ページは共通ですが、保存キー・クラウドパス・IndexedDBはセンターIDで分離します。';
+  }
+  document.addEventListener('DOMContentLoaded', applyCenterLabels);
+  setTimeout(applyCenterLabels, 400);
+  setTimeout(function(){
+    try{
+      if (typeof CENTER !== 'undefined') {
+        CENTER.renderSwitcher = function(){};
+        CENTER.switchTo = async function(centerId){
+          var current = window.APP_FORCE_CENTER || 'kitasaitama';
+          if (centerId && centerId !== current) {
+            location.href = 'center.html?c=' + encodeURIComponent(centerId);
+          }
+        };
+      }
+    }catch(e){}
+  }, 0);
 })();
