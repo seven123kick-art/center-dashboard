@@ -11781,3 +11781,139 @@ const REALTIME_TABLE_SYNC = {
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();
+
+/* ========================================================================== 
+   FINAL_LIGHT_OPTIMIZE 2026-04-26
+   目的:
+   1) 同じ復元・同期・描画の連続実行を抑止する
+   2) 表示中画面だけ描画する
+   3) center.html 共通運用を維持したまま体感速度を上げる
+========================================================================== */
+(function FINAL_LIGHT_OPTIMIZE(){
+  'use strict';
+  const LABEL = '[FINAL_LIGHT_OPTIMIZE]';
+
+  function cid(){
+    try{
+      const p = new URLSearchParams(location.search);
+      const c = p.get('c') || p.get('center') || window.APP_FORCE_CENTER || localStorage.getItem('active_center') || 'kitasaitama';
+      return ['kitasaitama','toda'].includes(c) ? c : 'kitasaitama';
+    }catch(e){ return 'kitasaitama'; }
+  }
+
+  function activeViewId(){
+    const active = document.querySelector('.view.active');
+    return active ? active.id.replace('view-','') : 'dashboard';
+  }
+
+  function isVisibleCanvas(id){
+    const el = typeof id === 'string' ? document.getElementById(id) : id;
+    if (!el) return false;
+    const view = el.closest('.view');
+    if (view && !view.classList.contains('active')) return false;
+    const pane = el.closest('.field-pane');
+    if (pane && !pane.classList.contains('active')) return false;
+    return true;
+  }
+
+  function apply(){
+    try{
+      if (window.CHARTS && !CHARTS.__lightOptimized) {
+        const oldMake = CHARTS.make.bind(CHARTS);
+        CHARTS.make = function(id, cfg){
+          if (!isVisibleCanvas(id)) return;
+          return oldMake(id, cfg);
+        };
+        CHARTS.__lightOptimized = true;
+      }
+
+      if (window.UI && !UI.__lightOptimized) {
+        let renderTimer = null;
+        UI.renderCurrentView = function(){
+          clearTimeout(renderTimer);
+          renderTimer = setTimeout(() => {
+            const id = activeViewId();
+            try{
+              switch(id){
+                case 'dashboard': if (typeof UI.renderDashboard === 'function') UI.renderDashboard(); break;
+                case 'pl':        if (typeof UI.renderPL === 'function') UI.renderPL(); break;
+                case 'trend':     if (typeof UI.renderTrend === 'function') UI.renderTrend(); break;
+                case 'shipper':   if (typeof UI.renderShipper === 'function') UI.renderShipper(); break;
+                case 'indicators':if (typeof UI.renderIndicators === 'function') UI.renderIndicators(); break;
+                case 'annual':    if (typeof UI.renderAnnual === 'function') UI.renderAnnual(); break;
+                case 'alerts':    if (typeof UI.renderAlerts === 'function') UI.renderAlerts(); break;
+                case 'memo':      if (typeof UI.renderMemo === 'function') UI.renderMemo(); break;
+                case 'field':     if (window.FIELD_UI && typeof FIELD_UI.renderCurrent === 'function') FIELD_UI.renderCurrent(); break;
+                case 'report':    if (window.REPORT_UI && typeof REPORT_UI.refresh === 'function') REPORT_UI.refresh(); break;
+                case 'library':   if (window.PAST_LIBRARY && typeof PAST_LIBRARY.renderList === 'function') PAST_LIBRARY.renderList(); break;
+                case 'import':    if (typeof UI.renderDataList === 'function') UI.renderDataList(); break;
+              }
+            }catch(e){ console.warn(LABEL, 'render skipped', e); }
+          }, 50);
+        };
+        UI.__lightOptimized = true;
+      }
+
+      if (window.NAV && !NAV.__lightOptimized) {
+        const oldGo = NAV.go.bind(NAV);
+        NAV.go = function(btn){
+          if (!btn) return;
+          const id = btn.dataset && btn.dataset.view;
+          const current = activeViewId();
+          if (id && id === current && document.getElementById('view-' + id)?.classList.contains('active')) return;
+          const ret = oldGo(btn);
+          try{
+            const key = cid() + '_last_view';
+            sessionStorage.setItem(key, id || 'dashboard');
+            localStorage.setItem(key, id || 'dashboard');
+          }catch(e){}
+          return ret;
+        };
+        NAV.__lightOptimized = true;
+      }
+
+      if (window.DB && typeof DB.restoreAll === 'function' && !DB.__restoreLightOptimized) {
+        const oldRestoreAll = DB.restoreAll.bind(DB);
+        let inFlight = null;
+        DB.restoreAll = async function(){
+          if (inFlight) return inFlight;
+          inFlight = Promise.resolve().then(() => oldRestoreAll()).finally(() => { inFlight = null; });
+          return inFlight;
+        };
+        DB.__restoreLightOptimized = true;
+      }
+
+      if (window.CLOUD && typeof CLOUD.restoreFromCloud === 'function' && !CLOUD.__restoreLightOptimized) {
+        const oldRestoreCloud = CLOUD.restoreFromCloud.bind(CLOUD);
+        let inFlight = null;
+        let lastAt = 0;
+        let manual = false;
+
+        CLOUD.restoreFromCloud = async function(reason){
+          const force = manual || reason === 'manual' || reason === 'force';
+          const now = Date.now();
+          if (!force && inFlight) return inFlight;
+          if (!force && now - lastAt < 30000) return null;
+          lastAt = now;
+          inFlight = Promise.resolve().then(() => oldRestoreCloud(reason)).finally(() => { inFlight = null; });
+          return inFlight;
+        };
+
+        if (typeof CLOUD.syncNow === 'function') {
+          const oldSyncNow = CLOUD.syncNow.bind(CLOUD);
+          CLOUD.syncNow = async function(){
+            manual = true;
+            try { return await oldSyncNow(); }
+            finally { manual = false; }
+          };
+        }
+        CLOUD.__restoreLightOptimized = true;
+      }
+
+      console.log(LABEL, 'applied');
+    }catch(e){ console.warn(LABEL, e); }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(apply, 0));
+  else setTimeout(apply, 0);
+})();

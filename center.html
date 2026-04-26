@@ -29,9 +29,6 @@
 </head>
 <body>
 <div id="js-error-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:10px 16px;font-size:12px;font-family:monospace;max-height:40vh;overflow-y:auto"></div>
-<div id="js-test-bar" style="position:fixed;bottom:0;right:0;z-index:99999;background:#1a4d7c;padding:8px 12px;border-radius:8px 0 0 0">
-  <button onclick="alert('JS動作OK！\nURL: '+location.href)" style="font-size:12px;padding:4px 10px;background:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:700">JS動作テスト</button>
-</div>
 
 
 <!-- ════════ SIDEBAR ════════ -->
@@ -1068,7 +1065,7 @@
     <div class="modal-file-list" id="modal-file-list"></div>
     <div class="modal-ym-row">
       <label>対象年月：</label>
-      <select id="modal-year" style="width:90px" id="modal-year">
+      <select id="modal-year" style="width:90px">
       </select>
       <span style="font-size:13px;font-weight:700">年</span>
       <select id="modal-month" style="width:70px">
@@ -1085,115 +1082,6 @@
     </div>
   </div>
 </div>
-
-
-
-
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<!-- DATA_RESET旧ブロックはコメント化されていたため削除済み。実行版は 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="assets/app.js"></script>
-</body> 直前に配置。 -->
-
-
-
-
-
-
-
-
-<!-- ════════════════════════════════════════════════════════
-     【パッチ0】HISTORYモジュール + TSV_IMPORT追加
-     ※ fix_patch.html より前に貼る（全パッチの先頭）
-════════════════════════════════════════════════════════ -->
-
-
-<!-- ════════════════════════════════════════════════════════
-     【統合パッチ】会計年度ベースの年度・月選択 完全版
-     ※ patch1(fix_patch.html) と patch5(fix_patch5) を統合
-     ※ 元HTMLの  直前、PATCH0(HISTORY)の後に貼る
-════════════════════════════════════════════════════════ -->
-
-
-<!-- ════════════════════════════════════════════════════════
-     【追加パッチ2】過去実績月の月次収支表を全科目表示にする
-     fix_patch.html の後ろに追記（直前）
-════════════════════════════════════════════════════════ -->
-
-
-<!-- ════════════════════════════════════════════════════════
-     【追加パッチ3】クラウド同期が強制的にページを切り替える問題を修正
-     fix_patch2 の後ろに追記（直前）
-════════════════════════════════════════════════════════ -->
-
-
-<!-- ════════════════════════════════════════════════════════
-     【追加パッチ4】過去実績月でも計画列を表示する修正
-     fix_patch3 の後ろに追記（直前）
-════════════════════════════════════════════════════════ -->
-
-
-
-
-<!-- ════════════════════════════════════════════════════════
-     【パッチ】年次サマリー 会計年度ベース修正
-     「選択会計年度 × 4月〜選択月までの累計」に修正
-════════════════════════════════════════════════════════ -->
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
