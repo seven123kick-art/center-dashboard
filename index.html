@@ -22,6 +22,7 @@
   --header-h:54px;
   --bg:#eef0f3;
   --surface:#ffffff;
+  --light:#f8fafc;
   --border:#e0e2e6;
   --border2:#c8ccd4;
   --navy:#1a4d7c;
@@ -5445,132 +5446,7 @@ window.addEventListener('beforeunload', () => {
 })();
 </script>
 
-<!-- ===== 安定化: 旧ファイルで 
-<script>
-/* ═══════════════════════════════════════════════════════
-   DATA_RESET — 全データ削除（最終版）
-   ・このブロックは必ず </body> 直前に置く
-   ・CLOUD / DB / SIMPLE_STORE / CENTER 定義後に動かす
-═══════════════════════════════════════════════════════ */
-const DATA_RESET = {
-  async clearAll(){
-    if (!confirm('すべてのデータを完全削除しますか？\n\nローカル保存・クラウド保存・表示中データを削除します。')) return;
-
-    try {
-      // 1. クラウド側を削除（残っていると再読み込みで復元されるため）
-      if (window.CLOUD && CLOUD.cfg && CLOUD.cfg.url && CLOUD.cfg.key && CLOUD.cfg.bucket && window.CENTER) {
-        const { url, key, bucket } = CLOUD.cfg;
-        const prefix = CENTER.pathPrefix ? CENTER.pathPrefix + '/' : '';
-
-        const listRes = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${key}`,
-            'apikey': key,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ prefix, limit: 1000 })
-        });
-
-        if (listRes.ok) {
-          const files = await listRes.json();
-          const paths = (files || [])
-            .map(f => f.name)
-            .filter(Boolean)
-            .map(name => prefix && !name.startsWith(prefix) ? prefix + name : name);
-
-          if (paths.length > 0) {
-            await fetch(`${url}/storage/v1/object/${bucket}`, {
-              method: 'DELETE',
-              headers: {
-                'Authorization': `Bearer ${key}`,
-                'apikey': key,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ prefixes: paths })
-            });
-          }
-        }
-      }
-
-      // 2. IndexedDBストアを削除
-      if (window.DB && typeof DB.clearStore === 'function') {
-        await DB.clearStore('skdl');
-        await DB.clearStore('field');
-        await DB.clearStore('meta');
-      }
-
-      // 3. 使用しているIndexedDB名を直接削除
-      if (window.DB && DB._db) {
-        DB._db.close();
-        DB._db = null;
-      }
-
-      if (window.indexedDB) {
-        await new Promise(resolve => {
-          const req = indexedDB.deleteDatabase('北埼玉センター_v1');
-          req.onsuccess = resolve;
-          req.onerror = resolve;
-          req.onblocked = resolve;
-        });
-      }
-
-      if (window.SIMPLE_STORE && SIMPLE_STORE._db) {
-        SIMPLE_STORE._db.close();
-        SIMPLE_STORE._db = null;
-      }
-
-      if (window.indexedDB) {
-        await new Promise(resolve => {
-          const req = indexedDB.deleteDatabase('EslineCenter_v2');
-          req.onsuccess = resolve;
-          req.onerror = resolve;
-          req.onblocked = resolve;
-        });
-      }
-
-      // 4. メモリ初期化
-      if (window.STATE) {
-        STATE.datasets = [];
-        STATE.currentYM = null;
-        if (STATE.data) STATE.data = {};
-        if (STATE._data) STATE._data = {};
-      }
-
-      if (window.FIELD_STATE) {
-        FIELD_STATE.datasets = [];
-        FIELD_STATE.currentYM = null;
-        if (FIELD_STATE.data) FIELD_STATE.data = {};
-        if (FIELD_STATE._data) FIELD_STATE._data = {};
-      }
-
-      if (window.PLAN) {
-        PLAN._data = {};
-        PLAN.data = {};
-      }
-
-      if (window.HISTORY) {
-        HISTORY._data = {};
-        HISTORY._m = {};
-        HISTORY.data = {};
-      }
-
-      // 5. ブラウザ保存も削除
-      localStorage.clear();
-      sessionStorage.clear();
-
-      alert('データを削除しました。画面を再読み込みします。');
-      location.reload();
-
-    } catch(e){
-      console.error(e);
-      alert('削除に失敗しました: ' + (e.message || e));
-    }
-  }
-};
-</script>
-
-</body></html> の後ろにあった追加scriptを、正式に </body> 直前へ移動 ===== -->
+<!-- DATA_RESET旧ブロックはコメント化されていたため削除済み。実行版は </body> 直前に配置。 -->
 
 <script>
 // 安定化チェック: 外部ライブラリが読み込めない場合に画面上へ理由を表示
@@ -7619,6 +7495,177 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
     setTimeout(hidePLStatus, 0);
     setTimeout(hidePLStatus, 500);
   });
+})();
+</script>
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   DATA_RESET — 全データ削除（実行版）
+   ・現場明細「データ削除」ボタンの呼び出し先
+   ・CLOUD / DB / SIMPLE_STORE / CENTER 定義後に動くよう </body> 直前に配置
+═══════════════════════════════════════════════════════ */
+(function(){
+  'use strict';
+
+  function safeSetMessage(text){
+    const msg = document.getElementById('session-msg') || document.getElementById('field-upload-msg') || document.getElementById('upload-msg');
+    if (msg) msg.textContent = text;
+  }
+
+  function deleteIndexedDb(name){
+    return new Promise(resolve => {
+      if (!window.indexedDB) { resolve(); return; }
+      try {
+        const req = indexedDB.deleteDatabase(name);
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      } catch(e) {
+        console.warn('[DATA_RESET] IndexedDB削除スキップ:', name, e);
+        resolve();
+      }
+    });
+  }
+
+  async function clearDbStores(){
+    if (window.DB && typeof DB.clearStore === 'function') {
+      for (const storeName of ['skdl','field','meta']) {
+        try { await DB.clearStore(storeName); }
+        catch(e) { console.warn('[DATA_RESET] DB.clearStore失敗:', storeName, e); }
+      }
+    }
+
+    if (window.DB && DB._db) {
+      try { DB._db.close(); } catch(e) {}
+      DB._db = null;
+    }
+
+    if (window.SIMPLE_STORE && SIMPLE_STORE._db) {
+      try { SIMPLE_STORE._db.close(); } catch(e) {}
+      SIMPLE_STORE._db = null;
+    }
+
+    await deleteIndexedDb('北埼玉センター_v1');
+    await deleteIndexedDb('EslineCenter_v2');
+  }
+
+  async function clearCloudStorage(){
+    if (!(window.CLOUD && CLOUD.cfg && CLOUD.cfg.url && CLOUD.cfg.key && CLOUD.cfg.bucket)) {
+      console.warn('[DATA_RESET] CLOUD未設定のためクラウド削除はスキップ');
+      return;
+    }
+
+    const { url, key, bucket } = CLOUD.cfg;
+    const rawPrefix = (window.CENTER && CENTER.pathPrefix) ? String(CENTER.pathPrefix).replace(/^\/+|\/+$/g,'') : '';
+    const prefixesToTry = [...new Set([
+      rawPrefix ? rawPrefix + '/' : '',
+      rawPrefix || '',
+      ''
+    ])];
+
+    const allPaths = new Set();
+
+    for (const prefix of prefixesToTry) {
+      try {
+        const listRes = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${key}`,
+            'apikey': key,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ prefix, limit: 1000, offset: 0 })
+        });
+
+        if (!listRes.ok) {
+          console.warn('[DATA_RESET] Storage list失敗:', prefix, listRes.status, await listRes.text().catch(()=>'')); 
+          continue;
+        }
+
+        const files = await listRes.json();
+        (files || []).forEach(f => {
+          if (!f || !f.name) return;
+          const name = String(f.name);
+          const path = prefix && !name.startsWith(prefix) ? prefix + name : name;
+          if (path && !path.endsWith('/')) allPaths.add(path);
+        });
+      } catch(e) {
+        console.warn('[DATA_RESET] Storage list例外:', prefix, e);
+      }
+    }
+
+    const paths = Array.from(allPaths);
+    if (paths.length === 0) {
+      console.info('[DATA_RESET] Storage削除対象なし');
+      return;
+    }
+
+    const deleteRes = await fetch(`${url}/storage/v1/object/${bucket}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'apikey': key,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ prefixes: paths })
+    });
+
+    if (!deleteRes.ok) {
+      const errText = await deleteRes.text().catch(()=>'');
+      throw new Error(`クラウド削除失敗 (${deleteRes.status}): ${errText}`);
+    }
+
+    console.info('[DATA_RESET] Storage削除完了:', paths);
+  }
+
+  function clearMemory(){
+    if (window.STATE) {
+      STATE.datasets = [];
+      STATE.currentYM = null;
+      if ('data' in STATE) STATE.data = {};
+      if ('_data' in STATE) STATE._data = {};
+    }
+
+    if (window.FIELD_STATE) {
+      FIELD_STATE.datasets = [];
+      FIELD_STATE.currentYM = null;
+      if ('data' in FIELD_STATE) FIELD_STATE.data = {};
+      if ('_data' in FIELD_STATE) FIELD_STATE._data = {};
+    }
+
+    if (window.PLAN) {
+      if ('_data' in PLAN) PLAN._data = {};
+      if ('data' in PLAN) PLAN.data = {};
+    }
+
+    if (window.HISTORY) {
+      if ('_data' in HISTORY) HISTORY._data = {};
+      if ('_m' in HISTORY) HISTORY._m = {};
+      if ('data' in HISTORY) HISTORY.data = {};
+    }
+  }
+
+  window.DATA_RESET = {
+    async clearAll(){
+      if (!confirm('すべてのデータを完全削除しますか？\n\nローカル保存・クラウド保存・表示中データを削除します。')) return;
+
+      try {
+        safeSetMessage('データ削除中...');
+        await clearCloudStorage();
+        await clearDbStores();
+        clearMemory();
+
+        try { localStorage.clear(); } catch(e) {}
+        try { sessionStorage.clear(); } catch(e) {}
+
+        alert('データを削除しました。画面を再読み込みします。');
+        location.reload();
+      } catch(e) {
+        console.error('[DATA_RESET] 削除失敗:', e);
+        alert('削除に失敗しました。\n\n' + (e.message || e));
+      }
+    }
+  };
 })();
 </script>
 
