@@ -11479,7 +11479,18 @@ const REALTIME_TABLE_SYNC = {
       this.client=window.supabase.createClient(url,key,{auth:{persistSession:false},realtime:{params:{eventsPerSecond:5}}});
       this.enabled=true;
       this.patchSaveHooks();
-      await this.loadInitial();
+       await this.loadInitial();
+
+// ▼ 既存データがある場合は初回だけ自動共有
+try{
+  if(window.STATE && Array.isArray(STATE.datasets) && STATE.datasets.length > 0){
+    console.log('[Realtime] 初回データ共有を実行');
+    this.scheduleSave(0);
+    this.broadcastPing('init_sync');
+  }
+}catch(e){
+  console.warn('初回共有エラー', e);
+}
       this.subscribe();
       this.scheduleSave(1500);
     }catch(e){
