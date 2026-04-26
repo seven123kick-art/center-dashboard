@@ -886,6 +886,10 @@ window.onunhandledrejection = function(e) {
             <span class="card-title">🚚 現場明細データ（作業者別CSV・エリアPDF）</span>
             <span id="field-import-badge" class="badge badge-warn">未読込</span>
           </div>
+          <button onclick="renderFieldDataList2()" title="一覧を最新状態に更新"
+            style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border2);background:#f8fafc;cursor:pointer;font-family:inherit;color:var(--text2)">
+            🔄 更新
+          </button>
         </div>
         <div class="card-body">
           <!-- 取込ゾーン -->
@@ -7628,6 +7632,12 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
     NAV.go = function(btn){
       const id = btn && btn.dataset ? btn.dataset.view : '';
       saveActiveView(id);
+      // データ取込タブに移動したとき現場明細リストを更新
+      if (id === 'import') {
+        setTimeout(() => {
+          if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
+        }, 100);
+      }
       return originalGo(btn);
     };
     NAV._pageStatePatched = true;
@@ -8023,7 +8033,7 @@ const FIELD_IMPORT2 = {
    field-data-list2 の描画（データ取込タブ用）
    FIELD_UI.renderDataList() の後に呼ぶ
 ══════════════════════════════════════════════════════ */
-function renderFieldDataList2() {
+window.renderFieldDataList2 = function renderFieldDataList2() {
   const el    = document.getElementById('field-data-list2');
   const badge = document.getElementById('field-import-badge');
   const delRow = document.getElementById('field-delete-all-row');
