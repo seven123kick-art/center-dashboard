@@ -7541,7 +7541,12 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
     console.log('[DATA_RESET]', text);
   }
   // CENTER.pathPrefix = 'kitasaitama' (スラッシュなし)
-  function getPrefix(){ return (window.CENTER && CENTER.pathPrefix) ? String(CENTER.pathPrefix).replace(/^\/+|\/+$/g,'') : 'kitasaitama'; }
+  function getPrefix(){
+    // CENTER.pathPrefix を優先、未定義の場合は localStorage._last_center を使う
+    if (window.CENTER && CENTER.pathPrefix) return String(CENTER.pathPrefix).replace(/^\/+|\/+$/g,'');
+    const saved = localStorage.getItem('_last_center') || localStorage.getItem('active_center');
+    return saved ? String(saved).replace(/^\/+|\/+$/g,'') : 'kitasaitama';
+  }
   function fieldTargetsFromState(){
     const list = (window.FIELD_STATE && Array.isArray(FIELD_STATE.datasets)) ? FIELD_STATE.datasets : [];
     return list.filter(d => d && d.ym && d.type).map(d => ({ ym:String(d.ym), type:String(d.type), file:d.file || '' }));
@@ -7561,25 +7566,66 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
     } catch(e) { console.warn('[DATA_RESET] IndexedDB削除失敗:', storeName, key, e); }
   }
 
+    // window.DB に依存せず直接 IndexedDB を開く
+  const IDB_NAME = '北埼玉センター_v1';
+
+  function openIDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME);
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror   = e => reject(e.target.error);
+      // onupgradeneeded は発火しないはず（既存DB）
+    });
+  }
+
   async function idbClearFieldStore(){
-    if (!(window.DB && typeof DB.open === 'function')) return;
     try {
-      const db = await DB.open();
-      if (db.objectStoreNames.contains('field')) {
+      const db = await openIDB();
+      const stores = Array.from(db.objectStoreNames);
+      console.log('[DATA_RESET] DB:', IDB_NAME, 'stores:', stores);
+
+      if (stores.includes('field')) {
         await new Promise((resolve, reject) => {
           const tx = db.transaction('field', 'readwrite');
           tx.objectStore('field').clear();
           tx.oncomplete = resolve;
           tx.onerror = () => reject(tx.error);
         });
+        console.log('[DATA_RESET] field ストア クリア完了');
+      } else {
+        console.log('[DATA_RESET] field ストア が存在しない（他の保存先を確認）');
       }
-      // metaキーは CENTER.pathPrefix + '_' + 'fieldCurrentYM' = 'kitasaitama_fieldCurrentYM'
-      const prefix = getPrefix();
-      const ck = prefix + '_';
-      await idbDeleteFromDB('meta', ck + 'fieldCurrentYM');
-      await idbDeleteFromDB('meta', 'field_currentYM'); // 旧キー互換
-      console.log('[DATA_RESET] meta削除キー:', ck + 'fieldCurrentYM');
+
+      if (stores.includes('meta')) {
+        const prefix = getPrefix();
+        const deleteKeys = [
+          prefix + '_fieldCurrentYM',
+          'field_currentYM',
+          prefix + '_field_meta',
+        ];
+        const tx = db.transaction('meta', 'readwrite');
+        const os = tx.objectStore('meta');
+        deleteKeys.forEach(k => os.delete(k));
+        await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+        console.log('[DATA_RESET] meta削除完了:', deleteKeys);
+      }
+
+      db.close();
     } catch(e) { console.warn('[DATA_RESET] fieldストア削除失敗:', e); }
+  }
+
+  async function idbDeleteFromDB(storeName, key){
+    try {
+      const db = await openIDB();
+      if (!Array.from(db.objectStoreNames).includes(storeName)) { db.close(); return; }
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readwrite');
+        tx.objectStore(storeName).delete(key);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    } catch(e) { console.warn('[DATA_RESET] IndexedDB削除失敗:', storeName, key, e); }
   }
 
   async function simpleStoreDeleteFieldOnly(){
@@ -7757,11 +7803,20 @@ const FIELD_DELETE_DEBUG = {
     }
     lines.push('');
 
-    // 5. IndexedDB: 北埼玉センター_v1 のfieldストア全キー
-    lines.push('【IndexedDB: 北埼玉センター_v1 → fieldストア】');
+    // 5. 全IndexedDB を直接アクセスで確認
+    const openDBDirect = name => new Promise((res, rej) => {
+      const r = indexedDB.open(name);
+      r.onsuccess = e => res(e.target.result);
+      r.onerror   = e => rej(e.target.error);
+    });
+
+    // 北埼玉センター_v1 → field / meta
+    lines.push('【IndexedDB: 北埼玉センター_v1 → fieldストア（直接アクセス）】');
     try {
-      const db = await window.DB?.open();
-      if (db && db.objectStoreNames.contains('field')) {
+      const db = await openDBDirect('北埼玉センター_v1');
+      const stores = Array.from(db.objectStoreNames);
+      lines.push(`  stores: ${stores.join(', ')}`);
+      if (stores.includes('field')) {
         const recs = await new Promise((res, rej) => {
           const req = db.transaction('field','readonly').objectStore('field').getAll();
           req.onsuccess = e => res(e.target.result || []);
@@ -7770,36 +7825,36 @@ const FIELD_DELETE_DEBUG = {
         lines.push(`  field store レコード数: ${recs.length}`);
         recs.forEach(r => lines.push(`    key=${r.key} ym=${r.ym} type=${r.type} rows=${r.rows?.length ?? (r.areas?.length ?? '-')}`));
       } else {
-        lines.push('  fieldストアなし（または DB未定義）');
+        lines.push('  fieldストアなし');
       }
-    } catch(e) { lines.push(`  エラー: ${e.message}`); }
-
-    lines.push('【IndexedDB: 北埼玉センター_v1 → metaストア（全キー）】');
-    try {
-      const db = await window.DB?.open();
-      if (db && db.objectStoreNames.contains('meta')) {
+      if (stores.includes('meta')) {
         const recs = await new Promise((res, rej) => {
           const req = db.transaction('meta','readonly').objectStore('meta').getAll();
           req.onsuccess = e => res(e.target.result || []);
           req.onerror   = e => rej(e.target.error);
         });
-        recs.forEach(r => lines.push(`  key=${r.key} value=${JSON.stringify(r.value)?.slice(0,60)}`));
+        lines.push('  【meta全キー】');
+        recs.forEach(r => lines.push(`    key=${r.key} value=${JSON.stringify(r.value)?.slice(0,80)}`));
       }
+      db.close();
     } catch(e) { lines.push(`  エラー: ${e.message}`); }
     lines.push('');
 
-    // 6. SIMPLE_STORE (EslineCenter_v2) の全キー
-    lines.push('【IndexedDB: EslineCenter_v2 → dataストア（全キー）】');
+    // EslineCenter_v2
+    lines.push('【IndexedDB: EslineCenter_v2 → dataストア（直接アクセス）】');
     try {
-      const db2 = await window.SIMPLE_STORE?.open();
-      if (db2) {
-        const keys = await new Promise((res, rej) => {
-          const req = db2.transaction('data','readonly').objectStore('data').getAllKeys();
-          req.onsuccess = e => res(e.target.result || []);
-          req.onerror   = e => rej(e.target.error);
-        });
+      const db2 = await openDBDirect('EslineCenter_v2');
+      const keys = await new Promise((res, rej) => {
+        const req = db2.transaction('data','readonly').objectStore('data').getAllKeys();
+        req.onsuccess = e => res(e.target.result || []);
+        req.onerror   = e => rej(e.target.error);
+      });
+      if (keys.length === 0) {
+        lines.push('  (空)');
+      } else {
         keys.forEach(k => lines.push(`  key=${k}`));
       }
+      db2.close();
     } catch(e) { lines.push(`  エラー: ${e.message}`); }
     lines.push('');
 
