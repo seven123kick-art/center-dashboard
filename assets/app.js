@@ -11535,3 +11535,249 @@ const REALTIME_TABLE_SYNC = {
     }catch(e){}
   }, 0);
 })();
+
+/* ========================================================================== 
+   FINAL_COMMON_CENTER_DATA_FIX 2026-04-26
+   目的:
+   1) center.html 共通化後も、表示・保存・復元を現在センターだけに固定する
+   2) 戸田画面に北埼玉ファイル名が出る混在を防ぐ
+   3) 今後サイドバーや機能追加は center.html / app.js / app.css の1回修正で済む構造を維持する
+========================================================================== */
+(function FINAL_COMMON_CENTER_DATA_FIX(){
+  'use strict';
+  const LABEL = '[FINAL_COMMON_CENTER_DATA_FIX]';
+
+  function centerId(){
+    try {
+      const p = new URLSearchParams(location.search);
+      const q = p.get('c') || p.get('center');
+      if (q && ['kitasaitama','toda'].includes(q)) return q;
+    } catch(e){}
+    try { if (window.APP_FORCE_CENTER && ['kitasaitama','toda'].includes(window.APP_FORCE_CENTER)) return window.APP_FORCE_CENTER; } catch(e){}
+    try { if (window.CENTER && CENTER.current && CENTER.current.id) return CENTER.current.id; } catch(e){}
+    return 'kitasaitama';
+  }
+
+  function centerObj(){
+    const cid = centerId();
+    try {
+      const c = (CONFIG.CENTERS || []).find(x => x.id === cid);
+      if (c) return c;
+    } catch(e){}
+    return cid === 'toda'
+      ? { id:'toda', name:'戸田センター', code:'110XXX', color:'#1a7a52' }
+      : { id:'kitasaitama', name:'北埼玉センター', code:'110203', color:'#1a4d7c' };
+  }
+
+  function normalizeCenter(){
+    const c = centerObj();
+    window.APP_FORCE_CENTER = c.id;
+    try { localStorage.setItem('active_center', c.id); } catch(e){}
+    try {
+      if (window.CONFIG) {
+        CONFIG.DEFAULT_CENTER = c.id;
+        CONFIG.CENTER_NAME = c.name;
+      }
+      if (window.CENTER) {
+        CENTER._current = c;
+      }
+    } catch(e){}
+  }
+
+  function visibleForCurrent(d){
+    const cid = centerId();
+    if (!d) return false;
+    const dc = d.centerId || d.center || d.center_id;
+    if (dc) return dc === cid || dc === centerObj().name;
+    const f = String(d.file || d.filename || '');
+    if (cid === 'toda' && /(北埼玉|kitasaitama|110203)/i.test(f)) return false;
+    if (cid === 'kitasaitama' && /(戸田|toda)/i.test(f)) return false;
+    return true;
+  }
+
+  function tagDataset(d){
+    if (!d) return d;
+    return Object.assign({}, d, { centerId: centerId(), centerName: centerObj().name });
+  }
+
+  function currentList(){
+    try {
+      if (!window.STATE) return [];
+      if (!Array.isArray(STATE.datasets)) STATE.datasets = [];
+      return STATE.datasets.filter(visibleForCurrent);
+    } catch(e){ return []; }
+  }
+
+  function currentFieldList(){
+    try {
+      if (!window.FIELD_STATE) return [];
+      if (!Array.isArray(FIELD_STATE.datasets)) FIELD_STATE.datasets = [];
+      return FIELD_STATE.datasets.filter(visibleForCurrent);
+    } catch(e){ return []; }
+  }
+
+  function patchState(){
+    if (!window.STATE || STATE.__commonCenterDataFixed) return;
+    STATE.monthList = function(){ return [...new Set(currentList().map(d => d.ym).filter(Boolean))].sort(); };
+    STATE.activeDS = function(){
+      if (!this.currentYM) return null;
+      const same = currentList().filter(d => d.ym === this.currentYM);
+      return same.find(d => d.type === 'confirmed') || same.find(d => d.type === 'daily') || same[0] || null;
+    };
+    STATE.dsForYM = function(ym){
+      const same = currentList().filter(d => d.ym === ym);
+      return same.find(d => d.type === 'confirmed') || same.find(d => d.type === 'daily') || same[0] || null;
+    };
+    STATE.upsert = function(entry){
+      const e = tagDataset(entry);
+      const list = Array.isArray(this.datasets) ? this.datasets : (this.datasets = []);
+      const i = list.findIndex(d => visibleForCurrent(d) && d.file === e.file && d.ym === e.ym && d.type === e.type);
+      if (i >= 0) list[i] = e; else list.push(e);
+    };
+    STATE.remove = function(i){
+      const list = currentList();
+      const target = list[i];
+      if (!target) return;
+      const idx = this.datasets.indexOf(target);
+      if (idx >= 0) this.datasets.splice(idx, 1);
+      const ml = this.monthList();
+      if (!ml.includes(this.currentYM)) this.currentYM = ml.length > 0 ? ml[ml.length - 1] : null;
+    };
+    STATE.mapByYM = function(){
+      const m = {};
+      this.monthList().forEach(ym => { const ds = this.dsForYM(ym); if (ds) m[ym] = CALC.buildMap(ds.rows || []); });
+      return m;
+    };
+    STATE.__commonCenterDataFixed = true;
+  }
+
+  function patchFieldState(){
+    if (!window.FIELD_STATE || FIELD_STATE.__commonCenterDataFixed) return;
+    if (typeof FIELD_STATE.ymList === 'function') {
+      FIELD_STATE.ymList = function(){ return [...new Set(currentFieldList().map(d => d.ym).filter(Boolean))].sort(); };
+    }
+    if (typeof FIELD_STATE.activeDS === 'function') {
+      FIELD_STATE.activeDS = function(){
+        if (!this.currentYM) return null;
+        const same = currentFieldList().filter(d => d.ym === this.currentYM);
+        return same.find(d => d.type === 'csv') || same.find(d => d.type === 'pdf') || same[0] || null;
+      };
+    }
+    if (typeof FIELD_STATE.upsert === 'function') {
+      FIELD_STATE.upsert = function(entry){
+        const e = tagDataset(entry);
+        const list = Array.isArray(this.datasets) ? this.datasets : (this.datasets = []);
+        const i = list.findIndex(d => visibleForCurrent(d) && d.file === e.file && d.ym === e.ym && d.type === e.type);
+        if (i >= 0) list[i] = e; else list.push(e);
+      };
+    }
+    FIELD_STATE.__commonCenterDataFixed = true;
+  }
+
+  function patchDB(){
+    if (!window.DB || DB.__commonCenterDataFixed) return;
+    const cid = centerId();
+    DB.DB_NAME = 'EslineCenter_' + cid + '_v1';
+    try { if (DB._db && DB._db.close) DB._db.close(); } catch(e){}
+    DB._db = null;
+
+    DB.saveSKDL = async function(dataset){
+      const ds = tagDataset(dataset);
+      const key = `${centerId()}_${ds.ym}_${ds.type}`;
+      const trimmed = this.trimRows ? this.trimRows(ds.rows || [], this.SKDL_COLS || []) : (ds.rows || []);
+      await this.put('skdl', { key, ym:ds.ym, type:ds.type, file:ds.file, rows:trimmed, centerId:centerId(), centerName:centerObj().name, savedAt:Date.now() });
+      await this.put('meta', { key:`${centerId()}_skdl_currentYM`, value:STATE.currentYM, centerId:centerId() });
+      try { if (window.CLOUD && typeof CLOUD.pushDataset === 'function') await CLOUD.pushDataset('skdl', ds); } catch(e){ console.warn(LABEL, 'cloud skdl push skipped', e); }
+      return true;
+    };
+
+    DB.saveField = async function(dataset){
+      const ds = tagDataset(dataset);
+      const key = `${centerId()}_${ds.ym}_${ds.type}`;
+      let record;
+      if (ds.type === 'csv') {
+        const trimmed = this.trimRows ? this.trimRows(ds.rows || [], this.FIELD_COLS || []) : (ds.rows || []);
+        record = { key, ym:ds.ym, type:'csv', file:ds.file, rows:trimmed, centerId:centerId(), centerName:centerObj().name, savedAt:Date.now() };
+      } else {
+        record = { key, ym:ds.ym, type:'pdf', file:ds.file, areas:ds.areas || [], centerId:centerId(), centerName:centerObj().name, savedAt:Date.now() };
+      }
+      await this.put('field', record);
+      await this.put('meta', { key:`${centerId()}_field_currentYM`, value:FIELD_STATE.currentYM, centerId:centerId() });
+      try { if (window.CLOUD && typeof CLOUD.pushDataset === 'function') await CLOUD.pushDataset('field', ds); } catch(e){ console.warn(LABEL, 'cloud field push skipped', e); }
+      return true;
+    };
+
+    const oldRestoreAll = typeof DB.restoreAll === 'function' ? DB.restoreAll.bind(DB) : null;
+    DB.restoreAll = async function(){
+      const msgEl = document.getElementById('session-msg');
+      const dot = document.getElementById('autosave-dot');
+      const label = document.getElementById('autosave-label');
+      try {
+        const [allSkdl, allField, metaRecs] = await Promise.all([
+          this.getAll('skdl').catch(() => []),
+          this.getAll('field').catch(() => []),
+          this.getAll('meta').catch(() => []),
+        ]);
+        const skdlRecs = (allSkdl || []).filter(visibleForCurrent);
+        const fieldRecs = (allField || []).filter(visibleForCurrent);
+        const meta = {}; (metaRecs || []).forEach(m => { meta[m.key] = m.value; });
+        STATE.datasets = skdlRecs.map(r => tagDataset({ file:r.file, type:r.type, ym:r.ym, rows:r.rows || [] }));
+        STATE.currentYM = meta[`${centerId()}_skdl_currentYM`] || meta['skdl_currentYM'] || STATE.monthList().slice(-1)[0] || null;
+        if (window.FIELD_STATE) {
+          FIELD_STATE.datasets = fieldRecs.map(r => r.type === 'csv'
+            ? tagDataset({ file:r.file, type:'csv', ym:r.ym, rows:r.rows || [] })
+            : tagDataset({ file:r.file, type:'pdf', ym:r.ym, areas:r.areas || [] })
+          );
+          FIELD_STATE.currentYM = meta[`${centerId()}_field_currentYM`] || meta['field_currentYM'] || (FIELD_STATE.ymList ? FIELD_STATE.ymList().slice(-1)[0] : null) || null;
+        }
+        try { UI.renderDataList(); } catch(e){}
+        try { UI.updateTopbar(); } catch(e){}
+        try { FIELD_UI.updatePeriodBadge(); } catch(e){}
+        try { FIELD_UI.renderDataList(); } catch(e){}
+        try { if (typeof window.renderFieldDataList2 === 'function') window.renderFieldDataList2(); } catch(e){}
+        if (msgEl) msgEl.innerHTML = `復元: ${centerObj().name} / SKDL ${skdlRecs.length}件 / 現場 ${fieldRecs.length}件`;
+        if (dot) dot.style.background = '#16a34a';
+        if (label) label.textContent = '自動保存 有効';
+        return { skdl: skdlRecs.length, field: fieldRecs.length };
+      } catch(e) {
+        console.warn(LABEL, 'restoreAll failed', e);
+        if (oldRestoreAll) return oldRestoreAll();
+        throw e;
+      }
+    };
+    DB.__commonCenterDataFixed = true;
+  }
+
+  function sanitizeVisibleData(){
+    try {
+      if (window.STATE && Array.isArray(STATE.datasets)) {
+        STATE.datasets = STATE.datasets.filter(visibleForCurrent).map(tagDataset);
+        const ml = STATE.monthList ? STATE.monthList() : [];
+        if (!ml.includes(STATE.currentYM)) STATE.currentYM = ml.length ? ml[ml.length - 1] : null;
+      }
+      if (window.FIELD_STATE && Array.isArray(FIELD_STATE.datasets)) {
+        FIELD_STATE.datasets = FIELD_STATE.datasets.filter(visibleForCurrent).map(tagDataset);
+        const fl = FIELD_STATE.ymList ? FIELD_STATE.ymList() : [];
+        if (!fl.includes(FIELD_STATE.currentYM)) FIELD_STATE.currentYM = fl.length ? fl[fl.length - 1] : null;
+      }
+    } catch(e){ console.warn(LABEL, 'sanitize failed', e); }
+  }
+
+  function rerender(){
+    try { UI.renderDataList(); } catch(e){}
+    try { UI.updateTopbar(); } catch(e){}
+    try { UI.renderCurrentView(); } catch(e){}
+    try { FIELD_UI.updatePeriodBadge(); } catch(e){}
+    try { FIELD_UI.renderDataList(); } catch(e){}
+  }
+
+  function boot(){
+    if (!window.CONFIG || !window.STATE || !window.DB) { setTimeout(boot, 200); return; }
+    normalizeCenter(); patchState(); patchFieldState(); patchDB(); sanitizeVisibleData(); rerender();
+    setTimeout(function(){ sanitizeVisibleData(); rerender(); }, 500);
+    setTimeout(function(){ sanitizeVisibleData(); rerender(); }, 1500);
+    console.log(LABEL, 'applied for', centerId());
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
