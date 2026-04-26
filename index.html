@@ -3266,7 +3266,10 @@ const SESSION = {
       // ダッシュボードが表示中なら再描画
       if (STATE.currentYM) {
         const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-        if (btn) setTimeout(() => NAV.go(btn), 150);
+        if (btn) {
+        const _lv150 = sessionStorage.getItem('kitasaitama_last_view');
+        if (!_lv150 || _lv150 === 'dashboard') setTimeout(() => NAV.go(btn), 150);
+      }
       }
 
     } catch(e) {
@@ -3462,10 +3465,19 @@ async clearStore(storeName) {
         if (dot)   dot.style.background = '#16a34a';
         if (label) label.textContent = '自動保存 有効';
 
-        // ダッシュボード表示
+        // ダッシュボード表示（ただしユーザーが別ページを開いていた場合は移動しない）
         if (STATE.currentYM) {
-          const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-          if (btn) setTimeout(() => NAV.go(btn), 200);
+          const lastView = sessionStorage.getItem('kitasaitama_last_view');
+          if (!lastView || lastView === 'dashboard') {
+            const btn = document.querySelector('.nav-item[data-view="dashboard"]');
+            if (btn) {
+        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        if (!_lv || _lv === 'dashboard') {
+          setTimeout(() => NAV.go(btn), 200);
+        }
+      }
+          }
+          // lastViewがあればそのビューを復元（既存のPAGE_STATE任せ）
         }
       } else {
         if (msgEl) msgEl.textContent = '保存データなし';
@@ -3879,7 +3891,12 @@ const CLOUD = {
       // ダッシュボードへ
       if (STATE.currentYM) {
         const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-        if (btn) setTimeout(() => NAV.go(btn), 200);
+        if (btn) {
+        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        if (!_lv || _lv === 'dashboard') {
+          setTimeout(() => NAV.go(btn), 200);
+        }
+      }
       }
 
       await DB.showStorageInfo();
@@ -4176,7 +4193,12 @@ const CENTER = {
 
       if (STATE.currentYM) {
         const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-        if (btn) setTimeout(() => NAV.go(btn), 200);
+        if (btn) {
+        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        if (!_lv || _lv === 'dashboard') {
+          setTimeout(() => NAV.go(btn), 200);
+        }
+      }
       }
 
       await DB.showStorageInfo();
@@ -4221,7 +4243,12 @@ CENTER._restoreFromIndexedDB = async function() {
   FIELD_UI.renderDataList();
   if (STATE.currentYM) {
     const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-    if (btn) setTimeout(() => NAV.go(btn), 200);
+    if (btn) {
+        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        if (!_lv || _lv === 'dashboard') {
+          setTimeout(() => NAV.go(btn), 200);
+        }
+      }
   }
 };
 
@@ -5353,7 +5380,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (STATE.currentYM) {
       const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-      if (btn) setTimeout(() => NAV.go(btn), 150);
+      if (btn) {
+        const _lv150 = sessionStorage.getItem('kitasaitama_last_view');
+        if (!_lv150 || _lv150 === 'dashboard') setTimeout(() => NAV.go(btn), 150);
+      }
     }
   };
   setTimeout(doRestore, 300);  // 少し長めに待ってCENTER確実に初期化
@@ -5445,8 +5475,16 @@ window.addEventListener('beforeunload', () => {
     }
 
     if (restored > 0 && STATE.currentYM) {
-      const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-      if (btn) setTimeout(() => NAV.go(btn), 100);
+      const lastView = sessionStorage.getItem('kitasaitama_last_view');
+      if (!lastView || lastView === 'dashboard') {
+        const btn = document.querySelector('.nav-item[data-view="dashboard"]');
+        if (btn) {
+        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        if (!_lv || _lv === 'dashboard') {
+          setTimeout(() => NAV.go(btn), 100);
+        }
+      }
+      }
     } else {
       // データなしの場合はダッシュボードを空表示
       const btn = document.querySelector('.nav-item[data-view="dashboard"]');
@@ -5915,6 +5953,8 @@ const DISPLAY = {
     });
     const noData = document.getElementById('map-no-data');
     if (noData) { noData.style.display = 'none'; }
+    const dbg = document.getElementById('map-debug-info');
+    if (dbg) { dbg.style.display = 'none'; dbg.textContent = ''; }
   },
 };
 
@@ -6059,7 +6099,12 @@ CENTER.switchTo = async function(centerId) {
   }
   if (restored > 0 && STATE.currentYM) {
     const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-    if (btn) setTimeout(() => NAV.go(btn), 100);
+    if (btn) {
+        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        if (!_lv || _lv === 'dashboard') {
+          setTimeout(() => NAV.go(btn), 100);
+        }
+      }
   } else {
     DISPLAY.showEmpty(`${CENTER.current.name} にデータがありません。CSVを読み込んでください。`);
   }
@@ -7703,10 +7748,22 @@ window.DATA_RESET = {
           if (el) el.innerHTML = '<tr><td colspan="8" style="padding:16px;text-align:center;color:var(--text3)">データが削除されました</td></tr>';
         });
       });
-      // マップ
+      // マップ: debug-info を消し、no-dataメッセージを表示
+      const dbgInfo = document.getElementById('map-debug-info');
+      if (dbgInfo) { dbgInfo.style.display = 'none'; dbgInfo.textContent = ''; }
       const noData = document.getElementById('map-no-data');
-      if (noData) { noData.style.display = 'block'; noData.textContent = 'データが削除されました。再取込してください。'; }
+      if (noData) {
+        noData.style.display = 'block';
+        noData.style.cssText = 'display:block;padding:40px;text-align:center;color:#64748b;background:rgba(255,255,255,0.92);position:absolute;inset:0;z-index:500;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center';
+        noData.textContent = 'データが削除されました。右上の「+ データ取込」から再取込してください。';
+      }
       if (window.FIELD_MAP && typeof FIELD_MAP.clear === 'function') FIELD_MAP.clear();
+      // f-city-tbody も念のため再クリア
+      const cityTbody = document.getElementById('f-city-tbody');
+      if (cityTbody) cityTbody.innerHTML = '';
+
+      // 現場明細ビューに留まる（ダッシュボードに飛ばないよう sessionStorage を更新）
+      try { sessionStorage.setItem('kitasaitama_last_view', 'field'); } catch(e) {}
 
       log.push('UIクリア完了');
     } catch(e) {
