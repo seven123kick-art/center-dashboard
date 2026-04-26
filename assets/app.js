@@ -12467,3 +12467,150 @@ const REALTIME_TABLE_SYNC = {
     setTimeout(bootApply, 3000);
   }
 })();
+
+/* =========================================================
+   FINAL UX PATCH: センター切替・起動中の自動ダッシュボード戻り防止
+   目的：
+   - 読み込み完了時の自動処理が、ユーザーが選んだ画面を上書きしない
+   - センター切替中に売上推移・荷主分析等を押した場合、その画面を維持する
+   - 復元完了後は現在表示中の画面だけ再描画する
+========================================================= */
+(function stableCenterNavigationPatch(){
+  if (window.__STABLE_CENTER_NAV_PATCHED__) return;
+  window.__STABLE_CENTER_NAV_PATCHED__ = true;
+
+  window.__USER_NAV_TS__ = 0;
+  window.__USER_NAV_VIEW__ = '';
+  window.__CENTER_RESTORE_STARTED_AT__ = 0;
+  window.__CENTER_RESTORING__ = false;
+
+  document.addEventListener('click', function(e){
+    const item = e.target && e.target.closest ? e.target.closest('.nav-item[data-view]') : null;
+    if (!item) return;
+    window.__USER_NAV_TS__ = Date.now();
+    window.__USER_NAV_VIEW__ = item.dataset.view || '';
+  }, true);
+
+  function activeViewId(){
+    const active = document.querySelector('.view.active');
+    return active ? active.id.replace('view-','') : '';
+  }
+
+  function renderActiveOnly(){
+    try {
+      if (window.UI && typeof UI.updateTopbar === 'function') UI.updateTopbar();
+      if (window.UI && typeof UI.renderCurrentView === 'function') UI.renderCurrentView();
+    } catch(e) { console.warn('[STABLE NAV] render active skipped:', e); }
+  }
+
+  // 遅延処理が勝手にdashboardへ戻すのを防ぐ。
+  // ただし、ユーザー本人がdashboardを押した場合は許可する。
+  if (window.NAV && typeof NAV.go === 'function' && !NAV._stableAutoDashboardBlockPatched) {
+    const originalGo = NAV.go.bind(NAV);
+    NAV.go = function(btn){
+      const target = btn && btn.dataset ? (btn.dataset.view || '') : '';
+      const current = activeViewId();
+      const userRecentlyClickedOther =
+        target === 'dashboard' &&
+        current && current !== 'dashboard' &&
+        window.__USER_NAV_VIEW__ && window.__USER_NAV_VIEW__ !== 'dashboard' &&
+        (Date.now() - window.__USER_NAV_TS__ < 10000);
+
+      if (userRecentlyClickedOther && !window.__ALLOW_AUTO_DASHBOARD__) {
+        console.log('[STABLE NAV] blocked delayed auto-dashboard. current=', current, 'user=', window.__USER_NAV_VIEW__);
+        return;
+      }
+      return originalGo(btn);
+    };
+    NAV._stableAutoDashboardBlockPatched = true;
+  }
+
+  // センター切替は、復元後にdashboardへ強制移動しない。
+  // 現在ユーザーが見ている画面を再描画する。
+  if (window.CENTER && typeof CENTER.switchTo === 'function') {
+    CENTER.switchTo = async function(centerId){
+      const c = CONFIG.CENTERS.find(x => x.id === centerId);
+      if (!c || c.id === this._current?.id) return;
+
+      const startedAt = Date.now();
+      window.__CENTER_RESTORE_STARTED_AT__ = startedAt;
+      window.__CENTER_RESTORING__ = true;
+      window.APP_FORCE_CENTER = centerId;
+
+      try {
+        // センター情報更新
+        this._current = c;
+        try { localStorage.setItem('active_center', centerId); } catch(e) {}
+
+        // 表示データを即クリア（前センター混在防止）
+        try { STATE.datasets = []; STATE.currentYM = null; } catch(e) {}
+        try { FIELD_STATE.datasets = []; FIELD_STATE.currentYM = null; } catch(e) {}
+        try { if (window.CHARTS && typeof CHARTS.destroyAll === 'function') CHARTS.destroyAll(); } catch(e) {}
+
+        // DOM上の前センター表示を軽く消す
+        ['kpi-area','exp-bars-area','shipper-bars-area','inc-donut-legend','data-list'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.innerHTML = '';
+        });
+
+        try { this.renderSwitcher(); } catch(e) {}
+        try { this._updateHeaderColor(c); } catch(e) {}
+
+        const msgEl = document.getElementById('session-msg');
+        if (msgEl) msgEl.innerHTML = `${c.name} のデータを読み込み中...<br><span style="font-size:10px;color:#4d9fea">画面操作はそのまま可能です</span>`;
+
+        // 空状態を現在表示中の画面へ反映
+        try { UI.renderDataList(); UI.updateTopbar(); } catch(e) {}
+        try { FIELD_UI.updatePeriodBadge(); FIELD_UI.renderDataList(); } catch(e) {}
+        try { if (typeof window.renderFieldDataList2 === 'function') window.renderFieldDataList2(); } catch(e) {}
+
+        // まずローカル即復元。クラウドはその後。
+        let restored = 0;
+        try {
+          if (window.SIMPLE_STORE && typeof SIMPLE_STORE.restoreAll === 'function') {
+            restored = await SIMPLE_STORE.restoreAll();
+          }
+        } catch(e) { console.warn('[STABLE CENTER] local restore failed:', e); }
+
+        // ローカル復元時点で、ユーザーが見ている画面を再描画
+        renderActiveOnly();
+
+        // クラウド確認は必要だが、ユーザー画面をdashboardへ戻さない
+        if (window.CLOUD && CLOUD.isConfigured && CLOUD.isConfigured()) {
+          try {
+            const result = await CLOUD.restoreFromCloud('center-switch');
+            const cloudCount = result ? ((result.skdl || 0) + (result.field || 0)) : 0;
+            if (cloudCount > 0) restored = cloudCount;
+          } catch(e) { console.warn('[STABLE CENTER] cloud restore failed:', e); }
+        }
+
+        try { PLAN && PLAN._loadFromStorage && PLAN._loadFromStorage().catch(()=>{}); } catch(e) {}
+        try { MEMO && MEMO._loadFromStorage && MEMO._loadFromStorage().catch(()=>{}); } catch(e) {}
+
+        if (msgEl) {
+          msgEl.innerHTML = restored > 0
+            ? `✅ ${c.name}: ${restored}件復元済み`
+            : `${c.name}: データなし<br><span style="font-size:10px;color:#4d6a88">CSVを読み込んでください</span>`;
+        }
+
+        // 最後も現在の画面だけ再描画。dashboard強制遷移はしない。
+        renderActiveOnly();
+      } finally {
+        window.__CENTER_RESTORING__ = false;
+      }
+    };
+  }
+
+  // CLOUD.restoreFromCloud 完了後の再描画も、dashboard固定ではなく現在画面優先に統一
+  if (window.CLOUD && typeof CLOUD.restoreFromCloud === 'function' && !CLOUD._stableActiveViewRestorePatched) {
+    const originalRestore = CLOUD.restoreFromCloud.bind(CLOUD);
+    CLOUD.restoreFromCloud = async function(){
+      const result = await originalRestore.apply(CLOUD, arguments);
+      setTimeout(renderActiveOnly, 0);
+      return result;
+    };
+    CLOUD._stableActiveViewRestorePatched = true;
+  }
+
+  console.log('[STABLE NAV] center navigation patch applied');
+})();
