@@ -753,6 +753,63 @@ window.onunhandledrejection = function(e) {
 
     <!-- ▼ 過去資料ライブラリ -->
     <div class="view" id="view-library">
+      <div class="card" style="margin-bottom:14px;border-top:3px solid var(--navy)">
+        <div class="card-header">
+          <span class="card-title">過去資料 一括取込</span>
+          <span style="font-size:11px;color:var(--text3)">複数ファイルをまとめて登録します。資料名はファイル名から自動作成します</span>
+        </div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">まとめて付ける資料区分</label>
+              <select id="library-bulk-category" style="width:100%;font-size:12px;padding:6px 8px">
+                <option value="管理者会議資料">管理者会議資料</option>
+                <option value="月次報告書">月次報告書</option>
+                <option value="収支着地予測">収支着地予測</option>
+                <option value="年度方針">年度方針</option>
+                <option value="収支実績">収支実績</option>
+                <option value="その他">その他</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">まとめて付ける対象年度</label>
+              <select id="library-bulk-fy" style="width:100%;font-size:12px;padding:6px 8px"></select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">まとめて付ける対象月</label>
+              <select id="library-bulk-month" style="width:100%;font-size:12px;padding:6px 8px">
+                <option value="">年度全体・指定なし</option>
+                <option value="04">4月</option><option value="05">5月</option><option value="06">6月</option><option value="07">7月</option><option value="08">8月</option><option value="09">9月</option>
+                <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option><option value="01">1月</option><option value="02">2月</option><option value="03">3月</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)">
+              <input type="checkbox" id="library-bulk-auto-title" checked> ファイル名を資料名にする
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)">
+              <input type="checkbox" id="library-bulk-extract" checked> 可能な範囲で本文・表を自動抽出する
+            </label>
+          </div>
+
+          <div class="upload-zone no-print" id="library-bulk-upload-zone" style="padding:18px;margin-bottom:12px;border-radius:8px;border:2px dashed var(--border2);background:#f8fafc;text-align:center;cursor:pointer" onclick="document.getElementById('library-bulk-file-input').click()">
+            <input type="file" id="library-bulk-file-input" accept=".pdf,.xlsx,.xls,.doc,.docx,.txt,.csv" multiple style="display:none" onchange="PAST_LIBRARY.handleBulkFiles(this.files)">
+            <div style="font-size:22px;color:#94a3b8;margin-bottom:4px">⬆</div>
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">PDF・Excel・Wordをまとめて選択</div>
+            <div style="font-size:11px;color:var(--text3)">同じ区分・年度・月をまとめて付けます。あとから個別削除できます。</div>
+          </div>
+
+          <div id="library-bulk-preview" style="display:none;border:1px solid var(--border);border-radius:6px;background:#f8fafc;margin-bottom:10px;max-height:180px;overflow:auto"></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-primary" onclick="PAST_LIBRARY.saveBulkSelected()" style="font-size:12px">まとめて登録</button>
+            <button class="btn" onclick="PAST_LIBRARY.clearBulk()" style="font-size:12px">一括取込をクリア</button>
+            <span id="library-bulk-msg" style="font-size:11px;color:var(--text2)"></span>
+          </div>
+        </div>
+      </div>
+
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
           <span class="card-title">過去資料ライブラリ</span>
@@ -9065,6 +9122,8 @@ window.DATA_RESET = {
 <script id="past-library-patch">
 const PAST_LIBRARY = {
   fileInfo:null,
+  bulkFiles:[],
+  bulkItems:[],
   key(){
     try{
       const prefix = (typeof CENTER !== 'undefined' && CENTER.pathPrefix) ? CENTER.pathPrefix : 'kitasaitama';
@@ -9096,6 +9155,13 @@ const PAST_LIBRARY = {
     else {
       try{ if(typeof STATE !== 'undefined' && STATE.currentFY) sel.value=String(STATE.currentFY); }catch(e){}
     }
+    const bulkSel=document.getElementById('library-bulk-fy');
+    if(bulkSel){
+      const bulkCurrent=bulkSel.value;
+      bulkSel.innerHTML=sel.innerHTML;
+      if(bulkCurrent) bulkSel.value=bulkCurrent;
+      else bulkSel.value=sel.value;
+    }
   },
   clearForm(){
     ['library-title','library-memo','library-content'].forEach(id=>{const el=document.getElementById(id); if(el) el.value='';});
@@ -9103,6 +9169,113 @@ const PAST_LIBRARY = {
     const fi=document.getElementById('library-file-input'); if(fi) fi.value='';
     this.fileInfo=null;
     this.msg('入力をクリアしました','#4b5563');
+  },
+  bulkMsg(text,color){
+    const el=document.getElementById('library-bulk-msg');
+    if(el){el.textContent=text;el.style.color=color||'var(--text2)';}
+  },
+  clearBulk(){
+    this.bulkFiles=[];
+    this.bulkItems=[];
+    const input=document.getElementById('library-bulk-file-input'); if(input) input.value='';
+    const prev=document.getElementById('library-bulk-preview');
+    if(prev){prev.style.display='none';prev.innerHTML='';}
+    this.bulkMsg('一括取込をクリアしました','#4b5563');
+  },
+  handleBulkFiles(files){
+    const arr=Array.from(files || []);
+    if(!arr.length) return;
+    this.bulkFiles=arr;
+    this.bulkItems=arr.map(file=>{
+      const ext=(file.name.split('.').pop()||'').toLowerCase();
+      return {
+        file,
+        name:file.name,
+        type:ext,
+        size:file.size,
+        title:file.name.replace(/\.[^.]+$/,''),
+        status:'未登録',
+        content:'',
+        error:''
+      };
+    });
+    this.renderBulkPreview();
+    this.bulkMsg(`${arr.length}件のファイルを選択しました。内容を確認して「まとめて登録」を押してください。`,'#1a4d7c');
+  },
+  renderBulkPreview(){
+    const box=document.getElementById('library-bulk-preview');
+    if(!box) return;
+    if(!this.bulkItems.length){box.style.display='none';box.innerHTML='';return;}
+    box.style.display='block';
+    box.innerHTML=this.bulkItems.map((x,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">
+      <span style="width:24px;color:var(--text3);text-align:right">${i+1}</span>
+      <span class="badge badge-info">${this.escape(x.type || 'file')}</span>
+      <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:var(--text)">${this.escape(x.name)}</span>
+      <span style="width:70px;text-align:right;color:var(--text3);font-size:11px">${Math.round((x.size||0)/1024)}KB</span>
+      <span style="width:90px;text-align:right;color:${x.error ? '#b91c1c' : (x.status==='登録済み' ? '#15803d' : 'var(--text3)')};font-size:11px">${this.escape(x.error || x.status)}</span>
+    </div>`).join('');
+  },
+  async saveBulkSelected(){
+    if(!this.bulkItems.length){this.bulkMsg('ファイルを選択してください','#b91c1c');return;}
+    const category=document.getElementById('library-bulk-category')?.value || 'その他';
+    const fiscalYear=document.getElementById('library-bulk-fy')?.value || '';
+    const month=document.getElementById('library-bulk-month')?.value || '';
+    const autoTitle=document.getElementById('library-bulk-auto-title')?.checked !== false;
+    const doExtract=document.getElementById('library-bulk-extract')?.checked !== false;
+    const list=this.load();
+    let ok=0;
+    this.bulkMsg('登録中です。ファイル数が多い場合は少し時間がかかります。','#1a4d7c');
+    for(const item of this.bulkItems){
+      item.status='読取中'; item.error=''; this.renderBulkPreview();
+      let text='';
+      try{
+        if(doExtract){
+          if(item.type==='pdf') text=await this.extractPdf(item.file);
+          else if(['xlsx','xls'].includes(item.type)) text=await this.extractExcel(item.file);
+          else if(['txt','csv'].includes(item.type)) text=await item.file.text();
+          else text='※Word形式はこの画面では本文自動抽出できないため、必要な文章は要点メモ・抽出テキスト欄にあとで貼り付けてください。';
+        }else{
+          text='※本文自動抽出なしで登録しました。必要な内容はあとで要点メモとして追記してください。';
+        }
+        const title=autoTitle ? item.title : item.name.replace(/\.[^.]+$/,'');
+        list.unshift({
+          id:'lib_'+Date.now()+'_'+Math.random().toString(16).slice(2),
+          title,
+          category,
+          fiscalYear,
+          month,
+          sourceType:item.type,
+          fileName:item.name,
+          fileSize:item.size,
+          memo:'',
+          content:(text||'').slice(0,25000),
+          createdAt:new Date().toISOString()
+        });
+        ok++;
+        item.status='登録済み';
+      }catch(e){
+        item.error='読取失敗';
+        list.unshift({
+          id:'lib_'+Date.now()+'_'+Math.random().toString(16).slice(2),
+          title:item.title,
+          category,
+          fiscalYear,
+          month,
+          sourceType:item.type,
+          fileName:item.name,
+          fileSize:item.size,
+          memo:'※本文抽出に失敗しました。必要な要点を後で手入力してください。',
+          content:'抽出エラー：'+(e.message||e),
+          createdAt:new Date().toISOString()
+        });
+        ok++;
+      }
+      this.renderBulkPreview();
+    }
+    this.store(list);
+    this.renderList();
+    this.renderReportSelection();
+    this.bulkMsg(`✅ ${ok}件を過去資料として登録しました`,'#15803d');
   },
   async handleFile(file){
     if(!file) return;
@@ -9261,6 +9434,13 @@ const PAST_LIBRARY = {
       zone.addEventListener('dragleave',()=>zone.classList.remove('drag'));
       zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('drag');this.handleFile(e.dataTransfer.files[0]);});
       zone._dropReady=true;
+    }
+    const bulkZone=document.getElementById('library-bulk-upload-zone');
+    if(bulkZone && !bulkZone._dropReady){
+      bulkZone.addEventListener('dragover',e=>{e.preventDefault();bulkZone.classList.add('drag');});
+      bulkZone.addEventListener('dragleave',()=>bulkZone.classList.remove('drag'));
+      bulkZone.addEventListener('drop',e=>{e.preventDefault();bulkZone.classList.remove('drag');this.handleBulkFiles(e.dataTransfer.files);});
+      bulkZone._dropReady=true;
     }
     document.querySelectorAll('.report-library-category').forEach(el=>{
       if(!el._libReady){el.addEventListener('change',()=>this.renderReportSelection());el._libReady=true;}
