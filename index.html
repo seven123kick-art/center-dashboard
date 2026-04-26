@@ -9035,7 +9035,7 @@ console.log('[FIELD_IMPORT2] データ取込タブ現場明細セクション �
 (function(){
   'use strict';
 
-  function ready(){ return window.UI && window.CALC && window.STATE && window.CONFIG; }
+  function ready(){ return (typeof UI !== 'undefined') && (typeof CALC !== 'undefined') && (typeof STATE !== 'undefined') && (typeof CONFIG !== 'undefined'); }
 
   function getCenterPrefix(){
     try {
@@ -9254,6 +9254,211 @@ console.log('[FIELD_IMPORT2] データ取込タブ現場明細セクション �
     setTimeout(renderPLUnified, 0);
     setTimeout(renderPLUnified, 800);
     console.log('[PATCH FINAL] 前年実績HISTORY補完 最終版を適用しました');
+  }
+
+  apply();
+})();
+</script>
+
+
+<script>
+/* PATCH FINAL V4 — 月次収支表の前年実績をHISTORYから確実に補完（window.*不使用） */
+(function(){
+  'use strict';
+
+  function ready(){
+    return (typeof UI !== 'undefined') && (typeof CALC !== 'undefined') &&
+           (typeof STATE !== 'undefined') && (typeof CONFIG !== 'undefined');
+  }
+
+  function centerPrefix(){
+    try {
+      if (typeof CENTER !== 'undefined' && CENTER && CENTER.pathPrefix) return CENTER.pathPrefix;
+      return localStorage.getItem('_last_center') || 'kitasaitama';
+    } catch(e){ return 'kitasaitama'; }
+  }
+
+  function historyMap(ym){
+    if (!ym) return null;
+    try {
+      if (typeof HISTORY !== 'undefined' && HISTORY && typeof HISTORY.getMonthMap === 'function') {
+        const m = HISTORY.getMonthMap(ym);
+        if (m && Object.keys(m).length) return m;
+      }
+    } catch(e) {}
+    try {
+      const raw = localStorage.getItem('history_' + centerPrefix());
+      if (raw) {
+        const data = JSON.parse(raw);
+        const m = data && data[ym];
+        if (m && Object.keys(m).length) return m;
+      }
+    } catch(e) {}
+    return null;
+  }
+
+  function monthMap(ym){
+    if (!ym || !ready()) return null;
+    try {
+      const ds = STATE.dsForYM ? STATE.dsForYM(ym) : null;
+      if (ds && Array.isArray(ds.rows) && ds.rows.length) {
+        const m = CALC.buildMap(ds.rows);
+        if (m && Object.keys(m).length) return m;
+      }
+    } catch(e) {}
+    return historyMap(ym);
+  }
+
+  function planMap(ym){
+    try { return (typeof PLAN !== 'undefined' && PLAN && PLAN.getMonthMap) ? PLAN.getMonthMap(ym) : null; }
+    catch(e) { return null; }
+  }
+
+  function sum(m, keys){
+    if (!m) return null;
+    const v = CALC.sum(m, [].concat(keys || []));
+    return v || 0;
+  }
+
+  function planSum(pm, keys){
+    if (!pm) return null;
+    const v = [].concat(keys || []).reduce(function(a,k){ return a + (pm[k] || 0); }, 0);
+    return v || null;
+  }
+
+  function fmtK(v){ return v == null ? '--' : CALC.toK(v).toLocaleString(); }
+
+  function planCells(actual, planVal){
+    if (planVal == null) {
+      return '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+             '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+             '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>';
+    }
+    const diff = CALC.toK(actual) - CALC.toK(planVal);
+    const diffCls = diff > 0 ? 'cell-up' : diff < 0 ? 'cell-down' : 'cell-flat';
+    const diffTxt = diff > 0 ? '+' + diff.toLocaleString() : diff.toLocaleString();
+    const rate = planVal !== 0 ? actual / planVal : 0;
+    const achCls = rate >= 1 ? 'cell-up' : 'cell-down';
+    const achTxt = planVal !== 0 ? (rate * 100).toFixed(1) + '%' : '--';
+    return '<td class="r" style="background:#fffdf0">' + CALC.toK(planVal).toLocaleString() + '</td>' +
+           '<td class="r ' + diffCls + '" style="background:#fffdf0">' + diffTxt + '</td>' +
+           '<td class="r ' + achCls + '" style="background:#fffdf0">' + achTxt + '</td>';
+  }
+
+  function row(label, val, ref, prev, prevY, plan, cls, indent){
+    val = val || 0;
+    cls = cls || '';
+    indent = indent || 0;
+    const d1 = prev != null ? CALC.diff(val, prev) : {txt:'--', cls:'cell-flat'};
+    const r1 = prev != null ? CALC.ratio(val, prev) : {txt:'--', cls:'cell-flat'};
+    const d2 = prevY != null ? CALC.diff(val, prevY) : {txt:'--', cls:'cell-flat'};
+    const r2 = prevY != null ? CALC.ratio(val, prevY) : {txt:'--', cls:'cell-flat'};
+    const iStyle = indent > 0 ? 'style="padding-left:' + (indent*14+8) + 'px;font-size:11px;color:var(--text2)"' : '';
+    return '<tr class="' + cls + '">' +
+      '<td ' + iStyle + '>' + label + '</td>' +
+      '<td class="r">' + fmtK(val) + '</td>' +
+      '<td class="r">' + CALC.pct(val, ref) + '</td>' +
+      planCells(val, plan) +
+      '<td class="r vs-col">' + fmtK(prev) + '</td>' +
+      '<td class="r vs-col ' + d1.cls + '">' + d1.txt + '</td>' +
+      '<td class="r vs-col ' + r1.cls + '">' + r1.txt + '</td>' +
+      '<td class="r vs-col">' + fmtK(prevY) + '</td>' +
+      '<td class="r vs-col ' + d2.cls + '">' + d2.txt + '</td>' +
+      '<td class="r vs-col ' + r2.cls + '">' + r2.txt + '</td>' +
+    '</tr>';
+  }
+
+  function renderPLHistoryFixed(){
+    if (!ready()) return;
+    const ym = STATE.currentYM;
+    const tbody = document.getElementById('pl-tbody');
+    if (!ym || !tbody) return;
+
+    const cur = monthMap(ym);
+    if (!cur) {
+      tbody.innerHTML = '<tr><td colspan="12" style="padding:20px;color:var(--text3);text-align:center">データがありません</td></tr>';
+      return;
+    }
+
+    const prevYM = STATE.prevYM ? STATE.prevYM(ym) : null;
+    const prevYearYM = STATE.prevYearYM ? STATE.prevYearYM(ym) : (String(parseInt(ym.slice(0,4),10)-1) + ym.slice(4));
+    const prev = monthMap(prevYM);
+    const prevY = monthMap(prevYearYM);
+    const pm = planMap(ym);
+    const inc = CALC.income(cur);
+    const exp = CALC.expense(cur);
+
+    const title = document.getElementById('pl-card-title');
+    if (title) title.textContent = '月次収支表 — ' + UI.fmtYM(ym) + (historyMap(ym) && !(STATE.dsForYM && STATE.dsForYM(ym)) ? '（過去実績・集計値）' : '');
+
+    const getPlan = function(keys){ return planSum(pm, keys); };
+    let html = '';
+    CONFIG.PL_DEF.forEach(function(def){
+      if (def.t === 'h') { html += '<tr class="row-h"><td colspan="12">' + def.l + '</td></tr>'; return; }
+      if (def.t === 'i') {
+        const v = sum(cur, def.k), pv = sum(prev, def.k), py = sum(prevY, def.k), pl = getPlan(def.k);
+        if (v || pv || py || pl) html += row(def.l, v, inc, pv, py, pl, '', 0);
+        return;
+      }
+      if (def.t === 'st') {
+        const v = def.k === 'inc' ? inc : exp;
+        const pv = prev ? (def.k === 'inc' ? CALC.income(prev) : CALC.expense(prev)) : null;
+        const py = prevY ? (def.k === 'inc' ? CALC.income(prevY) : CALC.expense(prevY)) : null;
+        const pl = def.k === 'inc' ? getPlan(['営業収益','営業収益計']) : getPlan(['売上原価']);
+        html += row(def.l, v, inc, pv, py, pl, 'row-sub', 0);
+        return;
+      }
+      if (def.t === 'g') {
+        const v = sum(cur, def.k), pv = sum(prev, def.k), py = sum(prevY, def.k);
+        if (def.s) def.s.forEach(function(s){
+          const sv = sum(cur, s.k), spv = sum(prev, s.k), spy = sum(prevY, s.k), spl = getPlan(s.k);
+          if (sv || spv || spy || spl) html += row(s.l, sv, inc, spv, spy, spl, '', 1);
+        });
+        const pl = getPlan(def.k);
+        if (v || pv || py || pl) html += row(def.l, v, inc, pv, py, pl, 'row-sub', 0);
+        return;
+      }
+      if (def.t === 'tot') {
+        const pv = prev ? CALC.expense(prev) : null;
+        const py = prevY ? CALC.expense(prevY) : null;
+        html += row(def.l, exp, inc, pv, py, getPlan(['売上原価']), 'row-total', 0);
+        return;
+      }
+      if (def.t === 'prf') {
+        const prf = inc - exp;
+        const pv = prev ? CALC.profit(prev) : null;
+        const py = prevY ? CALC.profit(prevY) : null;
+        const pl = pm ? (pm['粗利益'] || pm['営業利益'] || pm['経常利益'] || null) : null;
+        html += row(def.l, prf, inc, pv, py, pl, prf >= 0 ? 'row-profit' : 'row-loss', 0);
+      }
+    });
+    tbody.innerHTML = html;
+
+    const note = document.getElementById('pl-notice');
+    if (note) {
+      note.innerHTML = prevYearYM && !prevY
+        ? '<div class="msg msg-warn">前年実績（' + UI.fmtYM(prevYearYM) + '）が未登録です。過去実績補完データで該当年度を取り込むと表示されます。</div>'
+        : '';
+    }
+  }
+
+  function apply(){
+    if (!ready()) { setTimeout(apply, 300); return; }
+    UI.renderPL = renderPLHistoryFixed;
+    UI._renderPLFromHistory = renderPLHistoryFixed;
+    const oldChangeMonth = UI.changeMonth ? UI.changeMonth.bind(UI) : null;
+    if (oldChangeMonth && !UI._historyCompareV4ChangeMonthPatched) {
+      UI.changeMonth = function(ym){
+        oldChangeMonth(ym);
+        setTimeout(renderPLHistoryFixed, 30);
+        setTimeout(renderPLHistoryFixed, 300);
+      };
+      UI._historyCompareV4ChangeMonthPatched = true;
+    }
+    setTimeout(renderPLHistoryFixed, 0);
+    setTimeout(renderPLHistoryFixed, 500);
+    setTimeout(renderPLHistoryFixed, 1500);
+    console.log('[PATCH FINAL V4] 月次収支表 前年実績HISTORY補完を適用しました');
   }
 
   apply();
