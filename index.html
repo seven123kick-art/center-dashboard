@@ -8189,7 +8189,56 @@ FIELD_IMPORT2.deleteOne = async function(ym, type) {
 setTimeout(renderFieldDataList2, 600);
 setTimeout(renderFieldDataList2, 1500);
 setTimeout(renderFieldDataList2, 3000); // 復元が遅い場合のフォールバック
+<script>
+/* PATCH — データ取込後にダッシュボードへ勝手に移動しない */
+(function(){
+  'use strict';
 
+  function currentView(){
+    return document.querySelector('.nav-item.active')?.dataset?.view || '';
+  }
+
+  function blockDashboardJumpDuring(fnName, obj){
+    if (!obj || typeof obj[fnName] !== 'function') return;
+    if (obj[fnName]._noDashboardJumpPatched) return;
+
+    const original = obj[fnName].bind(obj);
+
+    obj[fnName] = async function(){
+      const beforeView = currentView() || sessionStorage.getItem('kitasaitama_last_view') || 'import';
+      const realNavGo = NAV.go.bind(NAV);
+
+      NAV.go = function(btn){
+        const target = btn && btn.dataset ? btn.dataset.view : '';
+        if (target === 'dashboard' && (beforeView === 'import' || beforeView === 'field')) {
+          sessionStorage.setItem('kitasaitama_last_view', beforeView);
+          console.log('[PATCH] 取込後のダッシュボード強制遷移をブロック:', beforeView);
+          return;
+        }
+        return realNavGo(btn);
+      };
+
+      try {
+        return await original.apply(this, arguments);
+      } finally {
+        setTimeout(function(){
+          NAV.go = realNavGo;
+          sessionStorage.setItem('kitasaitama_last_view', beforeView);
+          const keepBtn = document.querySelector('.nav-item[data-view="' + beforeView + '"]');
+          if (keepBtn) realNavGo(keepBtn);
+        }, 300);
+      }
+    };
+
+    obj[fnName]._noDashboardJumpPatched = true;
+  }
+
+  blockDashboardJumpDuring('_processFilesWithYM', EVENTS);
+  blockDashboardJumpDuring('_processFiles', FIELD_EVENTS);
+
+  console.log('[PATCH] データ取込後のダッシュボード遷移防止 適用済み');
+})();
+</script>
 console.log('[FIELD_IMPORT2] データ取込タブ現場明細セクション 読み込み完了');
 </script>
 </html>
