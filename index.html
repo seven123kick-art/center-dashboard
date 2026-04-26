@@ -8107,6 +8107,201 @@ window.DATA_RESET = {
 
 })();
 </script>
+
+
+<script>
+/* PATCH — 月次収支表の前月・前年を過去実績補完データからも参照する 完全版 */
+(function(){
+  'use strict';
+
+  if (!window.UI || !window.CALC || !window.STATE || !window.CONFIG) return;
+
+  function getMonthMapAny(ym){
+    if (!ym) return null;
+    const ds = STATE.dsForYM ? STATE.dsForYM(ym) : null;
+    if (ds && ds.rows) return CALC.buildMap(ds.rows);
+    if (window.HISTORY && typeof HISTORY.getMonthMap === 'function') {
+      const hm = HISTORY.getMonthMap(ym);
+      if (hm) return hm;
+    }
+    return null;
+  }
+
+  function hasMonthAny(ym){
+    return !!getMonthMapAny(ym);
+  }
+
+  function getPlanMap(ym){
+    return (window.PLAN && typeof PLAN.getMonthMap === 'function') ? PLAN.getMonthMap(ym) : null;
+  }
+
+  function sumMap(m, keys){
+    return m ? CALC.sum(m, [].concat(keys || [])) : null;
+  }
+
+  function planSum(pm, keys){
+    if (!pm) return null;
+    const v = [].concat(keys || []).reduce((s,k)=>s+(pm[k]||0),0);
+    return v || null;
+  }
+
+  function planCells(actual, planVal){
+    if (planVal == null) {
+      return '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+             '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+             '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>';
+    }
+    const pk = CALC.toK(planVal).toLocaleString();
+    const diff = CALC.toK(actual) - CALC.toK(planVal);
+    const dStr = diff > 0 ? '+' + diff.toLocaleString() : diff.toLocaleString();
+    const dCls = diff > 0 ? 'cell-up' : diff < 0 ? 'cell-down' : 'cell-flat';
+    const ach = planVal !== 0 ? (actual / planVal * 100).toFixed(1) + '%' : '--';
+    const achCls = planVal !== 0 && actual / planVal >= 1 ? 'cell-up' : 'cell-down';
+    return '<td class="r" style="background:#fffdf0">' + pk + '</td>' +
+           '<td class="r ' + dCls + '" style="background:#fffdf0">' + dStr + '</td>' +
+           '<td class="r ' + achCls + '" style="background:#fffdf0">' + ach + '</td>';
+  }
+
+  function makeRow(label, val, refVal, prevVal, prevYrVal, planVal, cls, indent){
+    cls = cls || '';
+    indent = indent || 0;
+    const k = CALC.toK(val).toLocaleString();
+    const p = CALC.pct(val, refVal);
+    const pvk = prevVal != null ? CALC.toK(prevVal).toLocaleString() : '--';
+    const pyvk = prevYrVal != null ? CALC.toK(prevYrVal).toLocaleString() : '--';
+    const df1 = prevVal != null ? CALC.diff(val, prevVal) : {txt:'--', cls:'cell-flat'};
+    const rt1 = prevVal != null ? CALC.ratio(val, prevVal) : {txt:'--', cls:'cell-flat'};
+    const df2 = prevYrVal != null ? CALC.diff(val, prevYrVal) : {txt:'--', cls:'cell-flat'};
+    const rt2 = prevYrVal != null ? CALC.ratio(val, prevYrVal) : {txt:'--', cls:'cell-flat'};
+    const iStyle = indent > 0 ? 'style="padding-left:' + (indent*14+8) + 'px;font-size:11px;color:var(--text2)"' : '';
+    return '<tr class="' + cls + '">' +
+      '<td ' + iStyle + '>' + label + '</td>' +
+      '<td class="r">' + k + '</td>' +
+      '<td class="r">' + p + '</td>' +
+      planCells(val, planVal) +
+      '<td class="r vs-col">' + pvk + '</td>' +
+      '<td class="r vs-col ' + df1.cls + '">' + df1.txt + '</td>' +
+      '<td class="r vs-col ' + rt1.cls + '">' + rt1.txt + '</td>' +
+      '<td class="r vs-col">' + pyvk + '</td>' +
+      '<td class="r vs-col ' + df2.cls + '">' + df2.txt + '</td>' +
+      '<td class="r vs-col ' + rt2.cls + '">' + rt2.txt + '</td>' +
+    '</tr>';
+  }
+
+  function renderPLFromMap(ym, currentMap, isHistoryOnly){
+    const tbody = document.getElementById('pl-tbody');
+    if (!tbody) return;
+
+    const inc = CALC.income(currentMap);
+    const exp = CALC.expense(currentMap);
+    const pm = getPlanMap(ym);
+
+    const prevYM = STATE.prevYM(ym);
+    const prevYrYM = STATE.prevYearYM(ym);
+    const prevM = getMonthMapAny(prevYM);
+    const prevYrM = getMonthMapAny(prevYrYM);
+
+    const title = document.getElementById('pl-card-title');
+    if (title) {
+      title.textContent = '月次収支表 — ' + UI.fmtYM(ym) + (isHistoryOnly ? '（過去実績・集計値）' : '');
+    }
+
+    const header = label => '<tr class="row-h"><td colspan="12">' + label + '</td></tr>';
+    const getPlan = keys => planSum(pm, keys);
+
+    let html = '';
+    CONFIG.PL_DEF.forEach(def => {
+      if (def.t === 'h') { html += header(def.l); return; }
+
+      if (def.t === 'i') {
+        const v = sumMap(currentMap, def.k) || 0;
+        const pv = sumMap(prevM, def.k);
+        const pyv = sumMap(prevYrM, def.k);
+        const planV = getPlan(def.k);
+        const dim = v === 0 && (!pv || pv === 0) && (!pyv || pyv === 0) && !planV;
+        if (!dim) html += makeRow(def.l, v, inc, pv, pyv, planV, '', 0);
+        return;
+      }
+
+      if (def.t === 'st') {
+        const v = def.k === 'inc' ? inc : exp;
+        const pv = prevM ? (def.k === 'inc' ? CALC.income(prevM) : CALC.expense(prevM)) : null;
+        const pyv = prevYrM ? (def.k === 'inc' ? CALC.income(prevYrM) : CALC.expense(prevYrM)) : null;
+        const planV = def.k === 'inc' ? getPlan(['営業収益','営業収益計']) : getPlan(['売上原価']);
+        html += makeRow(def.l, v, inc, pv, pyv, planV, 'row-sub', 0);
+        return;
+      }
+
+      if (def.t === 'g') {
+        const gv = sumMap(currentMap, def.k) || 0;
+        const pgv = sumMap(prevM, def.k);
+        const pygv = sumMap(prevYrM, def.k);
+        if (def.s) {
+          def.s.forEach(s => {
+            const sv = sumMap(currentMap, s.k) || 0;
+            const psv = sumMap(prevM, s.k);
+            const pysv = sumMap(prevYrM, s.k);
+            const sPlan = getPlan(s.k);
+            if (sv !== 0 || psv || pysv || sPlan) html += makeRow(s.l, sv, inc, psv, pysv, sPlan, '', 1);
+          });
+        }
+        if (gv !== 0 || pgv || pygv || getPlan(def.k)) {
+          html += makeRow(def.l, gv, inc, pgv, pygv, getPlan(def.k), 'row-sub', 0);
+        }
+        return;
+      }
+
+      if (def.t === 'tot') {
+        const pv = prevM ? CALC.expense(prevM) : null;
+        const pyv = prevYrM ? CALC.expense(prevYrM) : null;
+        html += makeRow(def.l, exp, inc, pv, pyv, getPlan(['売上原価']), 'row-total', 0);
+        return;
+      }
+
+      if (def.t === 'prf') {
+        const prf = inc - exp;
+        const pprf = prevM ? CALC.profit(prevM) : null;
+        const pyprf = prevYrM ? CALC.profit(prevYrM) : null;
+        const planV = pm ? (pm['粗利益'] || pm['営業利益'] || pm['経常利益'] || null) : null;
+        html += makeRow(def.l, prf, inc, pprf, pyprf, planV, prf >= 0 ? 'row-profit' : 'row-loss', 0);
+      }
+    });
+
+    tbody.innerHTML = html;
+  }
+
+  UI._renderPLFromHistory = function(m){
+    renderPLFromMap(STATE.currentYM, m, true);
+  };
+
+  UI.renderPL = function(){
+    const tbody = document.getElementById('pl-tbody');
+    const ym = STATE.currentYM;
+    const ds = STATE.activeDS ? STATE.activeDS() : null;
+    const currentMap = ds && ds.rows ? CALC.buildMap(ds.rows) : getMonthMapAny(ym);
+
+    if (!ym || !currentMap) {
+      if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="padding:20px;color:var(--text3);text-align:center">データがありません</td></tr>';
+      return;
+    }
+
+    renderPLFromMap(ym, currentMap, !(ds && ds.rows));
+  };
+
+  // 年度/月ボタンの「データあり」判定でも HISTORY を対象にする補強
+  if (window.STATE && typeof STATE.monthList === 'function' && !STATE._historyMonthListPatchedForPL) {
+    const originalMonthList = STATE.monthList.bind(STATE);
+    STATE.monthList = function(){
+      const base = originalMonthList() || [];
+      const hist = (window.HISTORY && typeof HISTORY.monthList === 'function') ? HISTORY.monthList() : [];
+      return Array.from(new Set([].concat(base, hist))).sort();
+    };
+    STATE._historyMonthListPatchedForPL = true;
+  }
+
+  console.log('[PATCH] 月次収支表の前月・前年をHISTORYから補完する処理を適用しました');
+})();
+</script>
 </body>
 </html>
 
