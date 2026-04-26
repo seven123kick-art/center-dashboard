@@ -1231,7 +1231,7 @@ window.onunhandledrejection = function(e) {
             </div>
             <div style="display:flex;gap:8px;align-items:center">
               <button class="btn btn-primary" onclick="CLOUD.saveConfig()" style="font-size:12px">再接続テスト</button>
-              <button class="btn" onclick="CLOUD.restoreFromCloud()" style="font-size:12px">今すぐ同期</button>
+              <button class="btn" onclick="CLOUD.syncNow()" style="font-size:12px">今すぐ同期</button>
               <button class="btn" onclick="CLOUD_DEBUG.run()" style="font-size:12px;background:#f59e0b;color:#fff;border-color:#f59e0b">🔍 接続診断</button>
               <span id="cloud-test-msg" style="font-size:11px;color:var(--text2)"></span>
             </div>
@@ -6528,6 +6528,160 @@ const REPORT_UI = {
 
   window.CLOUD_RERENDER_AFTER_RESTORE = rerenderAfterCloudRestore;
   console.log('[FINAL PATCH] cloud-first restore safety patch applied');
+})();
+</script>
+
+
+
+<script id="cloud-sync-now-final-patch">
+/* =========================================================
+   FINAL PATCH: 別PC共有用「今すぐ同期」完全保存処理
+   目的：画面上の月次・現場明細データを必ずSupabase Storageへ保存し、
+        別PCが開いた時にStorageから復元できる状態にする。
+========================================================= */
+(function(){
+  if (!window.CLOUD || CLOUD._syncNowFinalPatched) return;
+
+  function _nowText(){
+    try { return new Date().toLocaleTimeString('ja-JP'); } catch(e) { return ''; }
+  }
+
+  function _setSyncMessage(html){
+    const ids = ['cloud-test-msg','session-msg'];
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = html;
+    });
+  }
+
+  async function _saveAllLocalToCloud(){
+    if (!CLOUD.isConfigured || !CLOUD.isConfigured()) {
+      throw new Error('Supabaseの接続設定がありません');
+    }
+
+    const skdlList  = Array.isArray(STATE.datasets) ? STATE.datasets : [];
+    const fieldList = Array.isArray(FIELD_STATE.datasets) ? FIELD_STATE.datasets : [];
+
+    let skdlSaved = 0;
+    let fieldCsvSaved = 0;
+    let fieldPdfSaved = 0;
+    const errors = [];
+
+    // 月次収支（SKDL）をStorageへ保存
+    for (const ds of skdlList) {
+      if (!ds || !ds.ym || !ds.type) continue;
+      try {
+        await CLOUD.pushDataset('skdl', ds);
+        skdlSaved++;
+      } catch(e) {
+        errors.push(`SKDL ${ds.ym}: ${e.message || e}`);
+      }
+    }
+
+    // 現場明細（CSV/PDF）をStorageへ保存
+    for (const ds of fieldList) {
+      if (!ds || !ds.ym || !ds.type) continue;
+      try {
+        await CLOUD.pushDataset('field', ds);
+        if (ds.type === 'csv') fieldCsvSaved++;
+        if (ds.type === 'pdf') fieldPdfSaved++;
+      } catch(e) {
+        errors.push(`現場 ${ds.ym}_${ds.type}: ${e.message || e}`);
+      }
+    }
+
+    // meta.jsonを最後に保存。別PCはこの情報を見て現在月を復元する。
+    await CLOUD.upload('meta.json', {
+      currentYM: STATE.currentYM || (STATE.monthList ? STATE.monthList().slice(-1)[0] : null),
+      fieldCurrentYM: FIELD_STATE.currentYM || (FIELD_STATE.ymList ? FIELD_STATE.ymList().slice(-1)[0] : null),
+      updatedAt: new Date().toISOString(),
+      center: window.CENTER && CENTER.current ? CENTER.current.name : '北埼玉センター',
+      counts: {
+        skdl: skdlSaved,
+        fieldCsv: fieldCsvSaved,
+        fieldPdf: fieldPdfSaved,
+        fieldTotal: fieldCsvSaved + fieldPdfSaved
+      }
+    });
+
+    if (errors.length) {
+      console.warn('[SYNC NOW] 一部保存失敗:', errors);
+    }
+
+    return { skdlSaved, fieldCsvSaved, fieldPdfSaved, errors };
+  }
+
+  CLOUD.syncNow = async function(){
+    const btn = document.querySelector('button[onclick="CLOUD.syncNow()"]');
+    const originalText = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '同期中...'; }
+
+    try {
+      _setSyncMessage('☁ Storageへ保存中...');
+      if (CLOUD._updateBadge) CLOUD._updateBadge(true);
+
+      const result = await _saveAllLocalToCloud();
+
+      // Storage管理の表示を更新
+      if (DB && DB.showStorageInfo) await DB.showStorageInfo().catch(()=>{});
+
+      // 共有通知（Realtime用の既存処理がある場合のみ）
+      try {
+        if (window.REALTIME && typeof REALTIME.broadcast === 'function') {
+          await REALTIME.broadcast('sync_now', {
+            center: window.CENTER && CENTER.current ? CENTER.current.id : 'kitasaitama',
+            at: new Date().toISOString()
+          });
+        }
+      } catch(e) {
+        console.warn('[SYNC NOW] realtime notify skipped:', e);
+      }
+
+      const msg = `✅ Storage保存完了<br><span style="font-size:10px;color:#4d6a88">月次:${result.skdlSaved}件 / 現場CSV:${result.fieldCsvSaved}件 / エリアPDF:${result.fieldPdfSaved}件　${_nowText()}</span>`;
+      _setSyncMessage(msg);
+      if (CLOUD._flashSync) CLOUD._flashSync();
+
+      alert(`共有保存が完了しました。\n\n月次：${result.skdlSaved}件\n現場CSV：${result.fieldCsvSaved}件\nエリアPDF：${result.fieldPdfSaved}件\n\n別PCでページを更新してください。`);
+      return result;
+    } catch(e) {
+      console.error('[SYNC NOW] failed:', e);
+      _setSyncMessage(`<span style="color:#dc2626">❌ Storage保存失敗：${e.message || e}</span>`);
+      alert('共有保存に失敗しました。\n\n' + (e.message || e));
+      throw e;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = originalText || '今すぐ同期'; }
+    }
+  };
+
+  // 起動時の復元後に必ず画面を再描画する安全処理
+  const _origRestore = CLOUD.restoreFromCloud ? CLOUD.restoreFromCloud.bind(CLOUD) : null;
+  if (_origRestore && !CLOUD._restoreRerenderPatchedBySyncNow) {
+    CLOUD.restoreFromCloud = async function(){
+      const result = await _origRestore.apply(CLOUD, arguments);
+      try {
+        if (window.UI) {
+          if (typeof UI.renderAll === 'function') UI.renderAll();
+          else {
+            if (typeof UI.renderDataList === 'function') UI.renderDataList();
+            if (typeof UI.updateTopbar === 'function') UI.updateTopbar();
+            if (typeof UI.renderDashboard === 'function') UI.renderDashboard();
+          }
+        }
+        if (window.FIELD_UI) {
+          if (typeof FIELD_UI.updatePeriodBadge === 'function') FIELD_UI.updatePeriodBadge();
+          if (typeof FIELD_UI.renderDataList === 'function') FIELD_UI.renderDataList();
+        }
+        if (typeof window.renderFieldDataList2 === 'function') window.renderFieldDataList2();
+        if (DB && DB.showStorageInfo) DB.showStorageInfo().catch(()=>{});
+      } catch(e) {
+        console.warn('[RESTORE RERENDER] skipped:', e);
+      }
+      return result;
+    };
+    CLOUD._restoreRerenderPatchedBySyncNow = true;
+  }
+
+  CLOUD._syncNowFinalPatched = true;
 })();
 </script>
 
