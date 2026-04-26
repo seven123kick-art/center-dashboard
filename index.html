@@ -3913,7 +3913,7 @@ async clearStore(storeName) {
   },
 
   // ── バックアップから復元: JSONファイルを読み込み
-    async importJSON(file) {
+  async importJSON(file) {
     if (!file) return;
     const msgEl = document.getElementById('session-msg');
     try {
@@ -4501,18 +4501,27 @@ const CENTER = {
       if (!listRes.ok) throw new Error(`リスト取得失敗: ${listRes.status}`);
       const files = await listRes.json();
 
-      const skdlFiles  = files.filter(f => f.name && f.name.includes('/skdl/'));
-      const fieldFiles = files.filter(f => f.name && f.name.includes('/field/'));
-      const metaFile   = files.find(f => f.name && f.name.endsWith('/meta.json'));
+      const toFullCloudPath = (name) => {
+        if (!name) return name;
+        return name.startsWith(prefix) ? name : prefix + name;
+      };
+
+      // Supabase Storage の list(prefix指定) は、環境により
+      // 「skdl/202603_confirmed.json」のような相対名で返る場合と、
+      // 「kitasaitama/skdl/202603_confirmed.json」のような完全名で返る場合がある。
+      // どちらでも復元できるように両対応にする。
+      const skdlFiles  = files.filter(f => f.name && (f.name.startsWith('skdl/') || f.name.includes('/skdl/')));
+      const fieldFiles = files.filter(f => f.name && (f.name.startsWith('field/') || f.name.includes('/field/')));
+      const metaFile   = files.find(f => f.name && (f.name === 'meta.json' || f.name.endsWith('/meta.json')));
 
       let meta = {};
       if (metaFile) {
-        const m = await origDownload(metaFile.name);
+        const m = await origDownload(toFullCloudPath(metaFile.name));
         if (m) meta = m;
       }
 
-      const skdlRecs = (await Promise.all(skdlFiles.map(f => origDownload(f.name)))).filter(Boolean);
-      const fieldRecs = (await Promise.all(fieldFiles.map(f => origDownload(f.name)))).filter(Boolean);
+      const skdlRecs = (await Promise.all(skdlFiles.map(f => origDownload(toFullCloudPath(f.name))))).filter(Boolean);
+      const fieldRecs = (await Promise.all(fieldFiles.map(f => origDownload(toFullCloudPath(f.name))))).filter(Boolean);
 
       // IndexedDB に保存（センター別キー）
       const ck = CENTER.pathPrefix + '_';
@@ -11288,7 +11297,7 @@ const REALTIME_TABLE_SYNC = {
     try{return (window.CENTER && CENTER.pathPrefix) ? CENTER.pathPrefix : 'kitasaitama';}
     catch(e){return 'kitasaitama';}
   },
-   cfg(){
+  cfg(){
     const localConfig = (typeof CONFIG !== 'undefined') ? CONFIG : null;
     const url =
       (localConfig && localConfig.SUPABASE_URL) ||
@@ -11509,18 +11518,19 @@ const REALTIME_TABLE_SYNC = {
       this.client=window.supabase.createClient(url,key,{auth:{persistSession:false},realtime:{params:{eventsPerSecond:5}}});
       this.enabled=true;
       this.patchSaveHooks();
-       await this.loadInitial();
+      await this.loadInitial();
 
-// ▼ 既存データがある場合は初回だけ自動共有
-try{
-  if(window.STATE && Array.isArray(STATE.datasets) && STATE.datasets.length > 0){
-    console.log('[Realtime] 初回データ共有を実行');
-    this.scheduleSave(0);
-    this.broadcastPing('init_sync');
-  }
-}catch(e){
-  console.warn('初回共有エラー', e);
-}
+      // ▼ 既存データがある場合は初回だけ自動共有
+      try{
+        if(window.STATE && Array.isArray(STATE.datasets) && STATE.datasets.length > 0){
+          console.log('[Realtime] 初回データ共有を実行');
+          this.scheduleSave(0);
+          this.broadcastPing('init_sync');
+        }
+      }catch(e){
+        console.warn('初回共有エラー', e);
+      }
+
       this.subscribe();
       this.scheduleSave(1500);
     }catch(e){
