@@ -2884,6 +2884,7 @@ const FIELD_EVENTS = {
 
     FIELD_UI.updatePeriodBadge();
     FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
     if (ok > 0) {
       // PDFが含まれていればエリア地図タブに切り替え
       const hasPDF = Array.from(files).some(f => f.name.toLowerCase().endsWith('.pdf'));
@@ -2902,6 +2903,7 @@ const FIELD_EVENTS = {
     FIELD_STATE.currentYM = ym.length>0?ym[ym.length-1]:null;
     FIELD_UI.updatePeriodBadge();
     FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
   },
 
   init() {
@@ -3300,6 +3302,7 @@ const SESSION = {
       UI.updateTopbar();
       FIELD_UI.updatePeriodBadge();
       FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
 
       const savedAt = new Date(payload.savedAt).toLocaleString('ja-JP');
       const skdlN   = STATE.datasets.length;
@@ -3500,6 +3503,7 @@ async clearStore(storeName) {
       UI.updateTopbar();
       FIELD_UI.updatePeriodBadge();
       FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
 
       if (skdlRecs.length > 0 || fieldRecs.length > 0) {
         const newest = skdlRecs.concat(fieldRecs)
@@ -3922,6 +3926,7 @@ const CLOUD = {
       UI.updateTopbar();
       FIELD_UI.updatePeriodBadge();
       FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
       if (msgEl) {
         const updAt = meta.updatedAt ? new Date(meta.updatedAt).toLocaleString('ja-JP') : '不明';
         msgEl.innerHTML = `☁ クラウド復元完了<br><span style="color:#4d6a88">更新: ${updAt}</span>`;
@@ -4108,6 +4113,7 @@ const CENTER = {
     UI.renderDataList();
     FIELD_UI.updatePeriodBadge();
     FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
 
     // 新しいセンターのデータをクラウド/DBから復元
     const msgEl = document.getElementById('session-msg');
@@ -4226,6 +4232,7 @@ const CENTER = {
       UI.updateTopbar();
       FIELD_UI.updatePeriodBadge();
       FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
 
       const msgEl = document.getElementById('session-msg');
       const updAt = meta.updatedAt ? new Date(meta.updatedAt).toLocaleString('ja-JP') : '初回';
@@ -4285,6 +4292,7 @@ CENTER._restoreFromIndexedDB = async function() {
   UI.updateTopbar();
   FIELD_UI.updatePeriodBadge();
   FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
   if (STATE.currentYM) {
     const btn = document.querySelector('.nav-item[data-view="dashboard"]');
     if (btn) {
@@ -4431,6 +4439,7 @@ const DEL = {
     if (!ml.includes(FIELD_STATE.currentYM)) FIELD_STATE.currentYM = ml.slice(-1)[0] || null;
 
     FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
     FIELD_UI.updatePeriodBadge();
     await DB.showStorageInfo();
   },
@@ -4447,6 +4456,7 @@ const DEL = {
     FIELD_STATE.currentYM = null;
 
     FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
     FIELD_UI.updatePeriodBadge();
     await DB.showStorageInfo();
   },
@@ -4468,6 +4478,7 @@ const DEL = {
     UI.renderDataList();
     UI.updateTopbar();
     FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
     FIELD_UI.updatePeriodBadge();
   },
 
@@ -5407,6 +5418,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     UI.updateTopbar();
     FIELD_UI.updatePeriodBadge();
     FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
     DB.showStorageInfo().catch(()=>{});
 
     const msgEl = document.getElementById('session-msg');
@@ -5497,6 +5509,7 @@ window.addEventListener('beforeunload', () => {
     UI.renderDashboard();   // ← ダッシュボードを「データなし」状態に
     FIELD_UI.updatePeriodBadge();
     FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
 
     const msgEl = document.getElementById('session-msg');
     if (msgEl) msgEl.textContent = `${CENTER.current.name} のデータを読み込み中...`;
@@ -5509,6 +5522,7 @@ window.addEventListener('beforeunload', () => {
     UI.updateTopbar();
     FIELD_UI.updatePeriodBadge();
     FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
     PLAN._loadFromStorage().catch(()=>{});
     MEMO._loadFromStorage().catch(()=>{});
 
@@ -6120,6 +6134,7 @@ CENTER.switchTo = async function(centerId) {
   UI.updateTopbar();
   FIELD_UI.updatePeriodBadge();
   FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
   // 「データなし」をダッシュボードに表示
   const activeBtn = document.querySelector('.nav-item.active');
   const activeId = activeBtn?.dataset?.view || 'dashboard';
@@ -6134,6 +6149,7 @@ CENTER.switchTo = async function(centerId) {
   UI.updateTopbar();
   FIELD_UI.updatePeriodBadge();
   FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
   PLAN._loadFromStorage().catch(()=>{});
   MEMO._loadFromStorage().catch(()=>{});
   if (msgEl) {
@@ -7783,6 +7799,7 @@ window.DATA_RESET = {
       if (window.FIELD_UI) {
         if (typeof FIELD_UI.updatePeriodBadge === 'function') FIELD_UI.updatePeriodBadge();
         if (typeof FIELD_UI.renderDataList    === 'function') FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
       }
 
       // ④ 現場タブの各ペインを空メッセージに
@@ -8136,6 +8153,7 @@ FIELD_IMPORT2.deleteOne = function(idx) {
   if (window.FIELD_UI) {
     if (typeof FIELD_UI.updatePeriodBadge === 'function') FIELD_UI.updatePeriodBadge();
     if (typeof FIELD_UI.renderDataList    === 'function') FIELD_UI.renderDataList();
+      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
   }
 };
 
@@ -8144,7 +8162,8 @@ FIELD_IMPORT2.deleteOne = function(idx) {
 ══════════════════════════════════════════════════════ */
 (function hookFieldRenderDataList() {
   // 遅延してフック（他パッチによる上書き後に確実に適用）
-  setTimeout(() => {
+  // 即時フック（FIELD_IMPORT2は最後のscriptなので全パッチ適用済み）
+  (function() {
     const _orig = FIELD_UI.renderDataList?.bind(FIELD_UI);
     FIELD_UI.renderDataList = function() {
       if (_orig) _orig.call(this);
