@@ -337,8 +337,11 @@ window.onunhandledrejection = function(e) {
   </div>
   <div class="sidebar-divider"></div>
   <div class="sidebar-section">データ管理</div>
-  <div class="nav-item" data-view="import" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M5 7l3 3 3-3M2 12v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>データ取込
+  <div class="nav-item" data-view="import-kitasaitama" data-import-center="kitasaitama" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M5 7l3 3 3-3M2 12v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>北埼玉データ取込
+  </div>
+  <div class="nav-item" data-view="import-toda" data-import-center="toda" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M5 7l3 3 3-3M2 12v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>戸田データ取込
   </div>
 
   <div class="sidebar-bottom">
@@ -1072,6 +1075,16 @@ window.onunhandledrejection = function(e) {
 
     <!-- ▼ データ取込 -->
     <div class="view" id="view-import">
+      <div class="card" id="import-center-card" style="margin-bottom:14px;border:2px solid #60a5fa;background:#eff6ff">
+        <div class="card-header" style="border-bottom:1px solid #bfdbfe">
+          <span class="card-title" id="import-target-title">取込先センター確認</span>
+          <span id="import-target-badge" class="badge badge-info">センター別取込</span>
+        </div>
+        <div class="card-body" style="font-size:12px;line-height:1.8;color:var(--text2)">
+          <div id="import-target-desc" style="font-weight:700;color:var(--navy)">この画面で取り込んだデータは、選択中センターだけに保存されます。</div>
+          <div style="margin-top:4px">北埼玉データ取込と戸田データ取込をサイドバーで分け、保存キー・表示・クリアをセンター別に固定します。</div>
+        </div>
+      </div>
       <div class="card" style="margin-bottom:14px">
         <div class="card-body">
           <div class="upload-zone no-print" id="upload-zone">
@@ -1096,7 +1109,7 @@ window.onunhandledrejection = function(e) {
       <!-- 計画データ取込 -->
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
-          <span class="card-title">📋 計画データ取込（予算管理）</span>
+          <span class="card-title" id="plan-import-title">📋 計画データ取込（予算管理）</span>
           <span id="plan-badge" class="badge badge-warn">未登録</span>
         </div>
         <div class="card-body">
@@ -12154,5 +12167,224 @@ const REALTIME_TABLE_SYNC = {
   function patchSaveHooks(){if(DB._finalCenterStorageSavePatched)return;if(DB.saveSKDL){const oldSaveSKDL=DB.saveSKDL.bind(DB);DB.saveSKDL=async function(ds){const ret=await oldSaveSKDL(ds);try{await CLOUD.pushDataset('skdl',ds);}catch(e){console.warn(LABEL,'saveSKDL cloud push failed',e);}return ret;};}if(DB.saveField){const oldSaveField=DB.saveField.bind(DB);DB.saveField=async function(ds){const ret=await oldSaveField(ds);try{await CLOUD.pushDataset('field',ds);}catch(e){console.warn(LABEL,'saveField cloud push failed',e);}return ret;};}DB._finalCenterStorageSavePatched=true;}
   function boot(){if(!hasCore()){setTimeout(boot,300);return;}try{window.CONFIG=CONFIG;window.CENTER=CENTER;window.CLOUD=CLOUD;window.DB=DB;window.STATE=STATE;window.FIELD_STATE=FIELD_STATE;}catch(e){}patchCloud();patchCenter();patchSaveHooks();try{CENTER.renderSwitcher();}catch(e){}try{CENTER._updateHeaderColor(CENTER.current);}catch(e){}setTimeout(()=>{try{CLOUD.initRestore();}catch(e){console.warn(LABEL,'起動時復元失敗',e);}},900);setTimeout(()=>document.documentElement.classList.remove('restore-view-booting'),1800);}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+})();
+
+
+/* ═══════════════════════════════════════════════════════
+   FINAL_SEPARATE_IMPORT_BY_CENTER
+   目的:
+   ・データ取込メニューを「北埼玉」「戸田」で最初から分離
+   ・取込画面を開いた時点で取込先センターを固定
+   ・計画データの読込/表示/クリアもセンター別に再読込
+═══════════════════════════════════════════════════════ */
+(function FINAL_SEPARATE_IMPORT_BY_CENTER(){
+  'use strict';
+  const LABEL='[FINAL_SEPARATE_IMPORT_BY_CENTER]';
+
+  function ready(){
+    return typeof CONFIG!=='undefined'
+      && typeof CENTER!=='undefined'
+      && typeof STATE!=='undefined'
+      && typeof FIELD_STATE!=='undefined'
+      && typeof UI!=='undefined'
+      && typeof NAV!=='undefined';
+  }
+
+  function centers(){ return CONFIG.CENTERS || []; }
+  function centerById(id){
+    return centers().find(c => c.id === id) || centers()[0] || {id:id||'kitasaitama', name:id||'北埼玉'};
+  }
+  function activeCenter(){
+    try { return CENTER.current || centerById(CONFIG.DEFAULT_CENTER); }
+    catch(e){ return centerById(CONFIG.DEFAULT_CENTER); }
+  }
+  function centerName(id){ return centerById(id).name || id; }
+  function isImportId(id){ return /^import-/.test(String(id || '')); }
+  function importCenterFromId(id){ return String(id || '').replace(/^import-/, ''); }
+
+  function clearChartsAndVisible(){
+    try { CHARTS && CHARTS.destroyAll && CHARTS.destroyAll(); } catch(e){}
+    ['kpi-area','exp-bars-area','shipper-bars-area','inc-donut-legend'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
+  }
+
+  async function reloadPlanForCurrentCenter(){
+    if (typeof PLAN === 'undefined' || !PLAN) return;
+    try { PLAN._data = {}; } catch(e){}
+    try { await PLAN._loadFromStorage(); } catch(e){ console.warn(LABEL, 'PLAN読込失敗', e); }
+    try { PLAN._updateBadge(); } catch(e){}
+    try { PLAN.initYearSel(); } catch(e){}
+  }
+
+  function renderCommon(){
+    try { CENTER.renderSwitcher && CENTER.renderSwitcher(); } catch(e){}
+    try { CENTER._updateHeaderColor && CENTER._updateHeaderColor(activeCenter()); } catch(e){}
+    try { UI.updateTopbar && UI.updateTopbar(); } catch(e){}
+    try { UI.renderDataList && UI.renderDataList(); } catch(e){}
+    try { FIELD_UI && FIELD_UI.updatePeriodBadge && FIELD_UI.updatePeriodBadge(); } catch(e){}
+    try { FIELD_UI && FIELD_UI.renderDataList && FIELD_UI.renderDataList(); } catch(e){}
+    try { if (typeof window.renderFieldDataList2 === 'function') window.renderFieldDataList2(); } catch(e){}
+  }
+
+  async function switchCenterFixed(centerId, options){
+    const opts = options || {};
+    const c = centerById(centerId);
+    const before = activeCenter().id;
+
+    CENTER._current = c;
+    try { localStorage.setItem('active_center', c.id); } catch(e){}
+
+    STATE.datasets = [];
+    STATE.currentYM = null;
+    FIELD_STATE.datasets = [];
+    FIELD_STATE.currentYM = null;
+
+    clearChartsAndVisible();
+    await reloadPlanForCurrentCenter();
+    renderCommon();
+
+    const msgEl = document.getElementById('session-msg');
+    if (msgEl) msgEl.textContent = `${c.name} のデータを読み込み中...`;
+
+    if (opts.restore !== false) {
+      try {
+        if (typeof CLOUD !== 'undefined' && CLOUD && typeof CLOUD.initRestore === 'function') {
+          await CLOUD.initRestore();
+        } else if (typeof SIMPLE_STORE !== 'undefined' && SIMPLE_STORE && typeof SIMPLE_STORE.restoreAll === 'function') {
+          await SIMPLE_STORE.restoreAll();
+        }
+      } catch(e) {
+        console.warn(LABEL, 'センター復元失敗', e);
+        if (msgEl) msgEl.textContent = `${c.name} の読込に失敗しました: ${e.message}`;
+      }
+    }
+
+    await reloadPlanForCurrentCenter();
+    renderCommon();
+    return before !== c.id;
+  }
+
+  function updateImportTarget(fixedCenterId){
+    const c = centerById(fixedCenterId || activeCenter().id);
+    const title = document.getElementById('import-target-title');
+    const desc = document.getElementById('import-target-desc');
+    const badge = document.getElementById('import-target-badge');
+    const planTitle = document.getElementById('plan-import-title');
+
+    if (title) title.textContent = `取込先：${c.name}`;
+    if (desc) desc.textContent = `この画面のCSV・計画データ・クリア操作は「${c.name}」だけに反映します。`;
+    if (badge) {
+      badge.textContent = `${c.name}専用`;
+      badge.className = 'badge badge-info';
+    }
+    if (planTitle) planTitle.textContent = `📋 ${c.name} 計画データ取込（予算管理）`;
+  }
+
+  function activateView(id, btn){
+    const viewId = isImportId(id) ? 'import' : id;
+    document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    const view = document.getElementById('view-' + viewId);
+    if (view) view.classList.add('active');
+    if (btn) btn.classList.add('active');
+  }
+
+  function patchNav(){
+    NAV.titles = Object.assign({}, NAV.titles || {}, {
+      'import-kitasaitama':'北埼玉データ取込',
+      'import-toda':'戸田データ取込',
+      import:'データ取込'
+    });
+
+    NAV.go = async function(btn){
+      if (!btn || !btn.dataset) return;
+      const id = btn.dataset.view;
+
+      if (isImportId(id)) {
+        const fixedCenter = btn.dataset.importCenter || importCenterFromId(id);
+        await switchCenterFixed(fixedCenter, {restore:true});
+        activateView(id, btn);
+        updateImportTarget(fixedCenter);
+
+        const pt = document.getElementById('page-title');
+        if (pt) pt.textContent = this.titles[id] || `${centerName(fixedCenter)}データ取込`;
+
+        try { UI.updateTopbar && UI.updateTopbar(); } catch(e){}
+        return;
+      }
+
+      activateView(id, btn);
+      const pt = document.getElementById('page-title');
+      if (pt) pt.textContent = this.titles[id] || id;
+
+      try { UI.updateTopbar && UI.updateTopbar(); } catch(e){}
+      const fn = {dashboard:UI.renderDashboard, pl:UI.renderPL, trend:UI.renderTrend, shipper:UI.renderShipper, annual:UI.renderAnnual};
+      if (fn[id]) fn[id].call(UI);
+    };
+  }
+
+  function patchCenter(){
+    CENTER.switchTo = async function(centerId){
+      if (activeCenter().id === centerId) return;
+      await switchCenterFixed(centerId, {restore:true});
+
+      const active = document.querySelector('.nav-item.active');
+      const id = active && active.dataset ? active.dataset.view : '';
+      if (isImportId(id)) {
+        const matching = document.querySelector(`.nav-item[data-import-center="${centerId}"]`);
+        if (matching) {
+          document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+          matching.classList.add('active');
+        }
+        updateImportTarget(centerId);
+        const pt = document.getElementById('page-title');
+        if (pt) pt.textContent = `${centerName(centerId)}データ取込`;
+      }
+    };
+  }
+
+  function patchPlanMessages(){
+    if (typeof PLAN === 'undefined' || !PLAN || PLAN._centerImportMessagePatched) return;
+
+    const oldImport = PLAN.importFromPaste.bind(PLAN);
+    PLAN.importFromPaste = function(){
+      const c = activeCenter();
+      const ret = oldImport();
+      const msg = document.getElementById('plan-import-msg');
+      if (msg && msg.textContent && msg.textContent.includes('✅')) {
+        msg.textContent = `✅ ${c.name}：${msg.textContent.replace(/^✅\s*/, '')}`;
+      }
+      updateImportTarget(c.id);
+      return ret;
+    };
+
+    PLAN.clear = function(){
+      const c = activeCenter();
+      const ok = confirm(`${c.name} の計画データだけを削除しますか？\n※他センターの計画データは削除しません。`);
+      if (!ok) return;
+      this._data = {};
+      this._saveToStorage();
+      this._updateBadge();
+      const msg = document.getElementById('plan-import-msg');
+      if (msg) msg.textContent = `${c.name} の計画データを削除しました`;
+    };
+
+    PLAN._centerImportMessagePatched = true;
+  }
+
+  function boot(){
+    if (!ready()) { setTimeout(boot, 300); return; }
+    patchNav();
+    patchCenter();
+    patchPlanMessages();
+    reloadPlanForCurrentCenter()
+      .then(() => { renderCommon(); updateImportTarget(activeCenter().id); })
+      .catch(() => {});
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
 })();
 </script>
