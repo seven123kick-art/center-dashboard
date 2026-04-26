@@ -3519,7 +3519,7 @@ async clearStore(storeName) {
           if (!lastView || lastView === 'dashboard') {
             const btn = document.querySelector('.nav-item[data-view="dashboard"]');
             if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem('kitasaitama_last_view') || localStorage.getItem('kitasaitama_last_view');
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 200);
         }
@@ -3941,7 +3941,7 @@ const CLOUD = {
       if (STATE.currentYM) {
         const btn = document.querySelector('.nav-item[data-view="dashboard"]');
         if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem('kitasaitama_last_view') || localStorage.getItem('kitasaitama_last_view');
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 200);
         }
@@ -4245,7 +4245,7 @@ const CENTER = {
       if (STATE.currentYM) {
         const btn = document.querySelector('.nav-item[data-view="dashboard"]');
         if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem('kitasaitama_last_view') || localStorage.getItem('kitasaitama_last_view');
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 200);
         }
@@ -4296,7 +4296,7 @@ CENTER._restoreFromIndexedDB = async function() {
   if (STATE.currentYM) {
     const btn = document.querySelector('.nav-item[data-view="dashboard"]');
     if (btn) {
-        const _lv = sessionStorage.getItem('kitasaitama_last_view');
+        const _lv = sessionStorage.getItem('kitasaitama_last_view') || localStorage.getItem('kitasaitama_last_view');
         if (!_lv || _lv === 'dashboard') {
           setTimeout(() => NAV.go(btn), 200);
         }
@@ -7631,78 +7631,139 @@ console.log('[PATCH4] _renderPLFromHistory 計画列対応済み');
 </script>
 
 <script>
-/* PAGE_STATE — 更新後に最後の画面を復元（F5でダッシュボード戻り防止 強化版） */
+/* PAGE_STATE — 最終整理版：F5・取込・クラウド復元後も最後の画面を維持 */
 (function(){
   'use strict';
 
   const KEY_VIEW = 'kitasaitama_last_view';
-  const bootSavedView = sessionStorage.getItem(KEY_VIEW) || '';
-  let restoring = true;
+  const START_MS = Date.now();
+  const BOOT_SAVED_VIEW = loadSavedView();
 
-  function saveActiveView(id){
+  function getActiveView(){
+    const activeNav = document.querySelector('.nav-item.active[data-view]');
+    if (activeNav && activeNav.dataset && activeNav.dataset.view) return activeNav.dataset.view;
+
+    const activeView = document.querySelector('.view.active');
+    if (activeView && activeView.id) return activeView.id.replace(/^view-/, '');
+
+    return '';
+  }
+
+  function saveView(id){
     try {
       if (!id) return;
-
-      // 読込直後に内部処理で dashboard が呼ばれても、最後の画面を上書きしない
-      if (restoring && id === 'dashboard' && bootSavedView && bootSavedView !== 'dashboard') {
-        console.log('[PAGE_STATE] 起動直後のdashboard上書きを防止:', bootSavedView);
-        return;
-      }
-
       sessionStorage.setItem(KEY_VIEW, id);
+      localStorage.setItem(KEY_VIEW, id);
     } catch(e) {}
   }
 
-  function restoreActiveView(){
-    let id = '';
-    try { id = sessionStorage.getItem(KEY_VIEW) || bootSavedView || ''; } catch(e) {}
+  function loadSavedView(){
+    try {
+      return sessionStorage.getItem(KEY_VIEW) || localStorage.getItem(KEY_VIEW) || '';
+    } catch(e) {
+      return '';
+    }
+  }
 
+  function refreshImportSideEffects(id){
+    if (id === 'import') {
+      setTimeout(function(){
+        if (typeof window.renderFieldDataList2 === 'function') window.renderFieldDataList2();
+      }, 120);
+      setTimeout(function(){
+        if (typeof window.renderFieldDataList2 === 'function') window.renderFieldDataList2();
+      }, 800);
+    }
+  }
+
+  function restoreSavedView(){
+    const id = loadSavedView() || BOOT_SAVED_VIEW;
     if (!id) return;
 
     const btn = document.querySelector('.nav-item[data-view="' + id + '"]');
     if (btn && window.NAV && typeof NAV.go === 'function') {
       NAV.go(btn);
+      refreshImportSideEffects(id);
     }
   }
 
-  if (window.NAV && typeof NAV.go === 'function' && !NAV._pageStatePatched2) {
+  function shouldBlockDashboard(id){
+    if (id !== 'dashboard') return false;
+
+    const saved = loadSavedView() || BOOT_SAVED_VIEW;
+    if (!saved || saved === 'dashboard') return false;
+
+    // 起動・F5・クラウド/IndexedDB復元直後の dashboard 強制遷移だけ止める
+    return (Date.now() - START_MS) < 8000;
+  }
+
+  // クリックされた瞬間に保存。F5前保存だけに頼らない。
+  document.addEventListener('click', function(e){
+    const nav = e.target && e.target.closest ? e.target.closest('.nav-item[data-view]') : null;
+    if (nav && nav.dataset && nav.dataset.view) {
+      saveView(nav.dataset.view);
+    }
+  }, true);
+
+  // F5・再読込・ページ離脱直前にも保存。
+  window.addEventListener('beforeunload', function(){
+    saveView(getActiveView());
+  });
+
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'hidden') saveView(getActiveView());
+  });
+
+  // NAV.goを最後に一元管理する。
+  function patchNav(){
+    if (!window.NAV || typeof NAV.go !== 'function') return false;
+    if (NAV._pageStateFinalPatched) return true;
+
     const originalGo = NAV.go.bind(NAV);
 
     NAV.go = function(btn){
       const id = btn && btn.dataset ? btn.dataset.view : '';
 
-      saveActiveView(id);
+      if (shouldBlockDashboard(id)) {
+        const keep = loadSavedView() || BOOT_SAVED_VIEW;
+        console.log('[PAGE_STATE] dashboard強制遷移をブロック:', keep);
 
-      if (id === 'import') {
-        setTimeout(function(){
-          if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
-        }, 100);
+        const keepBtn = document.querySelector('.nav-item[data-view="' + keep + '"]');
+        if (keepBtn) {
+          setTimeout(function(){
+            originalGo(keepBtn);
+            refreshImportSideEffects(keep);
+          }, 30);
+        }
+        return;
       }
 
-      return originalGo(btn);
+      saveView(id);
+      const result = originalGo(btn);
+      refreshImportSideEffects(id);
+      return result;
     };
 
-    NAV._pageStatePatched2 = true;
+    NAV._pageStateFinalPatched = true;
+    return true;
   }
-/* PATCH — F5直前に現在画面を保存（最重要） */
-window.addEventListener('beforeunload', function(){
-  try {
-    const activeNav = document.querySelector('.nav-item.active');
-    if (activeNav && activeNav.dataset && activeNav.dataset.view) {
-      sessionStorage.setItem('kitasaitama_last_view', activeNav.dataset.view);
-      console.log('[PATCH] F5前に画面保存:', activeNav.dataset.view);
-    }
-  } catch(e){}
-});
-  document.addEventListener('DOMContentLoaded', function(){
-    setTimeout(restoreActiveView, 300);
-    setTimeout(restoreActiveView, 900);
-    setTimeout(restoreActiveView, 1800);
 
-    setTimeout(function(){
-      restoring = false;
-    }, 2500);
+  if (!patchNav()) {
+    document.addEventListener('DOMContentLoaded', patchNav);
+    setTimeout(patchNav, 300);
+    setTimeout(patchNav, 1000);
+  }
+
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(restoreSavedView, 100);
+    setTimeout(restoreSavedView, 700);
+    setTimeout(restoreSavedView, 1500);
+    setTimeout(restoreSavedView, 3000);
   });
+
+  // scriptが末尾で実行されるため、DOMContentLoaded済みでも復元する。
+  setTimeout(restoreSavedView, 200);
+  setTimeout(restoreSavedView, 1200);
 })();
 </script>
 
@@ -8231,54 +8292,7 @@ setTimeout(renderFieldDataList2, 600);
 setTimeout(renderFieldDataList2, 1500);
 setTimeout(renderFieldDataList2, 3000); // 復元が遅い場合のフォールバック
 
-/* PATCH — データ取込後にダッシュボードへ勝手に移動しない */
-(function(){
-  'use strict';
-
-  function currentView(){
-    return document.querySelector('.nav-item.active')?.dataset?.view || '';
-  }
-
-  function blockDashboardJumpDuring(fnName, obj){
-    if (!obj || typeof obj[fnName] !== 'function') return;
-    if (obj[fnName]._noDashboardJumpPatched) return;
-
-    const original = obj[fnName].bind(obj);
-
-    obj[fnName] = async function(){
-      const beforeView = currentView() || sessionStorage.getItem('kitasaitama_last_view') || 'import';
-      const realNavGo = NAV.go.bind(NAV);
-
-      NAV.go = function(btn){
-        const target = btn && btn.dataset ? btn.dataset.view : '';
-        if (target === 'dashboard' && (beforeView === 'import' || beforeView === 'field')) {
-          sessionStorage.setItem('kitasaitama_last_view', beforeView);
-          console.log('[PATCH] 取込後のダッシュボード強制遷移をブロック:', beforeView);
-          return;
-        }
-        return realNavGo(btn);
-      };
-
-      try {
-        return await original.apply(this, arguments);
-      } finally {
-        setTimeout(function(){
-          NAV.go = realNavGo;
-          sessionStorage.setItem('kitasaitama_last_view', beforeView);
-          const keepBtn = document.querySelector('.nav-item[data-view="' + beforeView + '"]');
-          if (keepBtn) realNavGo(keepBtn);
-        }, 300);
-      }
-    };
-
-    obj[fnName]._noDashboardJumpPatched = true;
-  }
-
-  blockDashboardJumpDuring('_processFilesWithYM', EVENTS);
-  blockDashboardJumpDuring('_processFiles', FIELD_EVENTS);
-
-  console.log('[PATCH] データ取込後のダッシュボード遷移防止 適用済み');
-})();
+/* PATCH整理済み — 取込後の画面維持は PAGE_STATE 最終整理版で一元管理 */
 
 /* PATCH削除済み — 過去実績の貼付欄は年度選択時の表示にも使うため、取込後クリアしない */
 
