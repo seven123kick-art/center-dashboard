@@ -6920,8 +6920,6 @@ const CLOUD_DEBUG = {
     // 2. Supabase REST API疎通確認
     try {
       add('⏳', 'REST API接続テスト中...');
-      // PostgREST のルート (/rest/v1/) は環境により 401 になるため、
-      // 実際に使う public.center_realtime_state を読めるかで判定する。
       const r = await fetch(`${url}/rest/v1/center_realtime_state?select=center_key,state_key&limit=1`, {
         method: 'GET',
         headers: {
@@ -6931,8 +6929,12 @@ const CLOUD_DEBUG = {
           'Content-Type': 'application/json'
         }
       });
-      const body = await r.text().catch(()=> '');
-      add(r.ok ? '✅' : '❌', r.ok ? `REST API: OK (${r.status})` : `REST API: HTTP ${r.status} → ${body.slice(0,120)}`);
+      const body = await r.text();
+      if (r.ok) {
+        add('✅', `REST API: OK（center_realtime_state 読込OK / HTTP ${r.status}）`);
+      } else {
+        add('❌', `REST API: HTTP ${r.status} → ${body.slice(0,160)}`);
+      }
     } catch(e) {
       add('❌', `REST API接続失敗: ${e.message}`);
     }
@@ -11519,12 +11521,12 @@ const SHARE_SYNC = {
     CLOUD._shareSyncRestorePatched=true;
   },
   boot(){
-    this.injectButton();a
+    this.injectButton();
     this.patchSaves();
     this.patchCloudRestore();
     setTimeout(()=>this.injectButton(),800);
     setTimeout(()=>this.autoMigrateOnce().catch(e=>console.warn('共有データ初回移行失敗',e)),1800);
-  }a
+  }
 };
 
 (function(){
@@ -11795,7 +11797,11 @@ const REALTIME_TABLE_SYNC = {
       return;
     }
     try{
-      this.client=window.supabase.createClient(url,key,{auth:{persistSession:false},realtime:{params:{eventsPerSecond:5}}});
+      this.client=window.supabase.createClient(url,key,{
+        auth:{persistSession:false},
+        global:{headers:{apikey:key, Authorization:`Bearer ${key}`}},
+        realtime:{params:{eventsPerSecond:5}}
+      });
       this.enabled=true;
       this.patchSaveHooks();
       await this.loadInitial();
