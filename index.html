@@ -11741,13 +11741,13 @@ const SHARE_SYNC = {
     };
     CLOUD._shareSyncRestorePatched=true;
   },
-  boot(){
-    this.injectButton();a
+   boot(){
+    this.injectButton();
     this.patchSaves();
     this.patchCloudRestore();
     setTimeout(()=>this.injectButton(),800);
     setTimeout(()=>this.autoMigrateOnce().catch(e=>console.warn('共有データ初回移行失敗',e)),1800);
-  }a
+  }
 };
 
 (function(){
