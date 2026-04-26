@@ -8050,132 +8050,140 @@ const FIELD_IMPORT2 = {
    field-data-list2 の描画（データ取込タブ用）
    FIELD_UI.renderDataList() の後に呼ぶ
 ══════════════════════════════════════════════════════ */
-window.renderFieldDataList2 = function renderFieldDataList2() {
-  const el    = document.getElementById('field-data-list2');
-  const badge = document.getElementById('field-import-badge');
+/* ══════════════════════════════════════════════════════
+   renderFieldDataList2 — IndexedDB直接読み込み版
+   FIELD_STATEに依存せず、北埼玉センター_v1.fieldを直接参照
+══════════════════════════════════════════════════════ */
+window.renderFieldDataList2 = async function() {
+  const el     = document.getElementById('field-data-list2');
+  const badge  = document.getElementById('field-import-badge');
   const delRow = document.getElementById('field-delete-all-row');
   if (!el) return;
 
-  const datasets = window.FIELD_STATE?.datasets || [];
+  const prefix = localStorage.getItem('_last_center') || 'kitasaitama';
 
-  // バッジ更新
-  if (badge) {
-    if (datasets.length === 0) {
-      badge.textContent = '未読込';
-      badge.className = 'badge badge-warn';
+  try {
+    // ① 北埼玉センター_v1.field を直接読む
+    const db = await new Promise((res, rej) => {
+      const r = indexedDB.open('北埼玉センター_v1');
+      r.onsuccess = e => res(e.target.result);
+      r.onerror   = e => rej(e.target.error);
+    });
+
+    let records = [];
+    if (Array.from(db.objectStoreNames).includes('field')) {
+      records = await new Promise((res, rej) => {
+        const r = db.transaction('field','readonly').objectStore('field').getAll();
+        r.onsuccess = e => res(e.target.result || []);
+        r.onerror   = e => rej(e.target.error);
+      });
+    }
+    db.close();
+
+    // ② このセンターのデータのみ
+    const recs = records.filter(r => r && r.ym && r.type);
+
+    // ③ FIELD_STATEのデータとマージ（インポート直後はDBにない場合あり）
+    const stateRecs = (window.FIELD_STATE?.datasets || []);
+    // stateRecsのうちDBに存在しないものを追加
+    stateRecs.forEach(ds => {
+      if (!recs.some(r => r.ym === ds.ym && r.type === ds.type)) {
+        recs.push(ds);
+      }
+    });
+
+    // ④ バッジ更新
+    if (badge) {
+      badge.textContent = recs.length > 0 ? `${recs.length}ファイル読込済` : '未読込';
+      badge.className   = recs.length > 0 ? 'badge badge-ok' : 'badge badge-warn';
+    }
+    if (delRow) delRow.style.display = recs.length > 0 ? 'flex' : 'none';
+
+    // ⑤ 一覧HTML生成
+    if (recs.length === 0) {
+      el.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">まだデータがありません</div>';
+      return;
+    }
+
+    const sorted = [...recs].sort((a, b) => (a.ym || '').localeCompare(b.ym || ''));
+    el.innerHTML = sorted.map((r, si) => {
+      const typeBadge = r.type === 'csv'
+        ? '<span class="badge badge-ok" style="font-size:10px">CSV</span>'
+        : '<span class="badge badge-info" style="font-size:10px">PDF</span>';
+      const rowCount = r.type === 'csv'
+        ? `${(r.rows?.length || 0).toLocaleString()}行`
+        : `${(r.areas?.length || 0).toLocaleString()}件`;
+      return `<div class="data-item" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border)">
+        <div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px">${r.file || (r.ym + '_' + r.type)}</div>
+        <div style="width:90px;flex-shrink:0;font-size:12px;color:var(--text2)">${window.UI?.fmtYM ? UI.fmtYM(r.ym) : r.ym}</div>
+        <div style="width:55px;flex-shrink:0;font-size:11px;color:var(--text2);text-align:right">${rowCount}</div>
+        <div style="width:40px;flex-shrink:0;text-align:center">${typeBadge}</div>
+        <button onclick="FIELD_IMPORT2.deleteOne('${r.ym}','${r.type}')"
+          style="flex-shrink:0;padding:2px 10px;font-size:12px;color:#b91c1c;background:#fff1f2;border:1px solid #fca5a5;border-radius:6px;cursor:pointer;font-family:inherit">
+          削除
+        </button>
+      </div>`;
+    }).join('');
+
+  } catch(e) {
+    console.warn('[renderFieldDataList2]', e);
+    el.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--red)">一覧の取得に失敗しました</div>';
+  }
+};
+
+/* 個別削除（ym + type で特定） */
+FIELD_IMPORT2.deleteOne = async function(ym, type) {
+  if (!confirm(`${window.UI?.fmtYM ? UI.fmtYM(ym) : ym} の${type === 'csv' ? '作業者別CSV' : 'エリアPDF'}を削除しますか？`)) return;
+
+  const prefix = localStorage.getItem('_last_center') || 'kitasaitama';
+
+  // FIELD_STATEから削除
+  if (window.FIELD_STATE) {
+    FIELD_STATE.datasets = FIELD_STATE.datasets.filter(d => !(d.ym === ym && d.type === type));
+    if (FIELD_STATE.datasets.length > 0) {
+      FIELD_STATE.currentYM = FIELD_STATE.datasets[FIELD_STATE.datasets.length - 1].ym;
     } else {
-      badge.textContent = `${datasets.length}ファイル読込済`;
-      badge.className = 'badge badge-ok';
+      FIELD_STATE.currentYM = null;
     }
   }
 
-  // 全件削除ボタン表示切替
-  if (delRow) delRow.style.display = datasets.length > 0 ? 'flex' : 'none';
-
-  if (datasets.length === 0) {
-    el.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">まだデータがありません</div>';
-    return;
-  }
-
-  const sorted = [...datasets].sort((a, b) => (a.ym || '').localeCompare(b.ym || ''));
-
-  el.innerHTML = sorted.map((d, si) => {
-    const origIdx = datasets.indexOf(d);
-    const typeBadge = d.type === 'csv'
-      ? '<span class="badge badge-ok">CSV</span>'
-      : '<span class="badge badge-info">PDF</span>';
-    const rowCount = d.type === 'csv'
-      ? `${(d.rows?.length || 0).toLocaleString()}行`
-      : `${(d.areas?.length || 0).toLocaleString()}件`;
-    const isCur = d.ym === FIELD_STATE.currentYM;
-    return `<div class="data-item${isCur ? ' current' : ''}" style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border)">
-      <div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:${isCur ? 700 : 400}">${d.file}</div>
-      <div style="width:90px;flex-shrink:0;font-size:12px;color:var(--text2)">${UI.fmtYM(d.ym)}</div>
-      <div style="width:60px;flex-shrink:0;font-size:12px;color:var(--text2);text-align:right">${rowCount}</div>
-      <div style="width:45px;flex-shrink:0;text-align:center">${typeBadge}</div>
-      <button onclick="FIELD_IMPORT2.deleteOne(${origIdx})"
-        style="flex-shrink:0;padding:2px 10px;font-size:12px;color:#b91c1c;background:#fff1f2;border:1px solid #fca5a5;border-radius:6px;cursor:pointer;font-family:inherit">
-        削除
-      </button>
-    </div>`;
-  }).join('');
-}
-
-/* 個別削除 */
-FIELD_IMPORT2.deleteOne = function(idx) {
-  const ds = FIELD_STATE.datasets[idx];
-  if (!ds) return;
-  if (!confirm(`「${ds.file}」（${UI.fmtYM(ds.ym)}）を削除しますか？`)) return;
-
-  // メモリから削除
-  FIELD_STATE.datasets.splice(idx, 1);
-  if (FIELD_STATE.datasets.length > 0) {
-    FIELD_STATE.currentYM = FIELD_STATE.datasets[FIELD_STATE.datasets.length - 1].ym;
-  } else {
-    FIELD_STATE.currentYM = null;
-  }
-
-  // IndexedDB から削除（北埼玉センター_v1.field）
-  const prefix = localStorage.getItem('_last_center') || 'kitasaitama';
-  const idbKey = `${prefix}_${ds.ym}_${ds.type}`;
-  new Promise((res, rej) => {
+  // 北埼玉センター_v1.field から削除
+  const idbKey = `${prefix}_${ym}_${type}`;
+  await new Promise((res, rej) => {
     const req = indexedDB.open('北埼玉センター_v1');
     req.onsuccess = e => {
       const db = e.target.result;
-      if (db.objectStoreNames.contains('field')) {
-        const tx = db.transaction('field', 'readwrite');
-        tx.objectStore('field').delete(idbKey);
-        tx.oncomplete = () => { db.close(); res(); };
-        tx.onerror = () => { db.close(); rej(tx.error); };
-      } else { db.close(); res(); }
+      if (!Array.from(db.objectStoreNames).includes('field')) { db.close(); res(); return; }
+      const tx = db.transaction('field', 'readwrite');
+      tx.objectStore('field').delete(idbKey);
+      tx.oncomplete = () => { db.close(); res(); };
+      tx.onerror = () => { db.close(); rej(tx.error); };
     };
     req.onerror = e => rej(e.target.error);
   }).catch(e => console.warn('field削除:', e));
 
   // EslineCenter_v2 から削除
-  const simpleKey = `${prefix}_field_${ds.ym}_${ds.type}`;
-  new Promise((res, rej) => {
+  const simpleKey = `${prefix}_field_${ym}_${type}`;
+  await new Promise((res, rej) => {
     const req = indexedDB.open('EslineCenter_v2');
     req.onsuccess = e => {
       const db = e.target.result;
-      if (db.objectStoreNames.contains('data')) {
-        const tx = db.transaction('data', 'readwrite');
-        tx.objectStore('data').delete(simpleKey);
-        tx.oncomplete = () => { db.close(); res(); };
-        tx.onerror = () => { db.close(); rej(tx.error); };
-      } else { db.close(); res(); }
+      if (!Array.from(db.objectStoreNames).includes('data')) { db.close(); res(); return; }
+      const tx = db.transaction('data', 'readwrite');
+      tx.objectStore('data').delete(simpleKey);
+      tx.oncomplete = () => { db.close(); res(); };
+      tx.onerror = () => { db.close(); rej(tx.error); };
     };
     req.onerror = e => rej(e.target.error);
   }).catch(e => console.warn('simpleStore削除:', e));
 
   // UI更新
-  renderFieldDataList2();
+  await window.renderFieldDataList2();
   if (window.FIELD_UI) {
     if (typeof FIELD_UI.updatePeriodBadge === 'function') FIELD_UI.updatePeriodBadge();
     if (typeof FIELD_UI.renderDataList    === 'function') FIELD_UI.renderDataList();
-      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
   }
 };
-
-/* ══════════════════════════════════════════════════════
-   FIELD_UI.renderDataList を拡張して両方を更新
-══════════════════════════════════════════════════════ */
-(function hookFieldRenderDataList() {
-  // 遅延してフック（他パッチによる上書き後に確実に適用）
-  // 即時フック（FIELD_IMPORT2は最後のscriptなので全パッチ適用済み）
-  (function() {
-    const _orig = FIELD_UI.renderDataList?.bind(FIELD_UI);
-    FIELD_UI.renderDataList = function() {
-      if (_orig) _orig.call(this);
-      renderFieldDataList2();
-    };
-  }, 100);
-})();
-
-/* ══════════════════════════════════════════════════════
-   FIELD_EVENTS._processFiles 完了後に両方更新
-══════════════════════════════════════════════════════ */
-// hookFieldProcessFiles は下部の遅延版に統合
 
 /* 初期描画（DOMContentLoadedは既に発火済みなのでsetTimeoutで対応） */
 setTimeout(renderFieldDataList2, 600);
