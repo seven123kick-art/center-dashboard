@@ -9029,3 +9029,233 @@ setTimeout(renderFieldDataList2, 3000); // 復元が遅い場合のフォール�
 console.log('[FIELD_IMPORT2] データ取込タブ現場明細セクション 読み込み完了');
 </script>
 </html>
+
+<script>
+/* PATCH FINAL — 前年実績をHISTORY/localStorageから確実に補完する最終版 */
+(function(){
+  'use strict';
+
+  function ready(){ return window.UI && window.CALC && window.STATE && window.CONFIG; }
+
+  function getCenterPrefix(){
+    try {
+      if (typeof CENTER !== 'undefined' && CENTER && CENTER.pathPrefix) return CENTER.pathPrefix;
+      return localStorage.getItem('_last_center') || 'kitasaitama';
+    } catch(e) { return 'kitasaitama'; }
+  }
+
+  function getHistoryMapDirect(ym){
+    if (!ym) return null;
+
+    try {
+      if (typeof HISTORY !== 'undefined' && HISTORY && typeof HISTORY.getMonthMap === 'function') {
+        const hm = HISTORY.getMonthMap(ym);
+        if (hm && Object.keys(hm).length > 0) return hm;
+      }
+    } catch(e) {}
+
+    try {
+      const key = 'history_' + getCenterPrefix();
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data && data[ym] && Object.keys(data[ym]).length > 0) return data[ym];
+      }
+    } catch(e) {}
+
+    return null;
+  }
+
+  function getMapAny(ym){
+    if (!ym || !ready()) return null;
+
+    try {
+      const ds = STATE.dsForYM ? STATE.dsForYM(ym) : null;
+      if (ds && Array.isArray(ds.rows) && ds.rows.length > 0) {
+        const m = CALC.buildMap(ds.rows);
+        if (m && Object.keys(m).length > 0) return m;
+      }
+    } catch(e) {}
+
+    return getHistoryMapDirect(ym);
+  }
+
+  function fmtK(v){ return v == null ? '--' : CALC.toK(v).toLocaleString(); }
+
+  function sum(m, keys){
+    if (!m) return null;
+    const v = CALC.sum(m, [].concat(keys || []));
+    return v || 0;
+  }
+
+  function planMap(ym){
+    try { return (typeof PLAN !== 'undefined' && PLAN.getMonthMap) ? PLAN.getMonthMap(ym) : null; }
+    catch(e) { return null; }
+  }
+
+  function planSum(pm, keys){
+    if (!pm) return null;
+    const v = [].concat(keys || []).reduce((s,k)=>s+(pm[k]||0),0);
+    return v || null;
+  }
+
+  function planCells(actual, planVal){
+    if (planVal == null) {
+      return '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+             '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>' +
+             '<td class="r" style="background:#fffdf0;color:var(--text3)">--</td>';
+    }
+    const diff = CALC.toK(actual) - CALC.toK(planVal);
+    const cls = diff > 0 ? 'cell-up' : diff < 0 ? 'cell-down' : 'cell-flat';
+    const diffTxt = diff > 0 ? '+' + diff.toLocaleString() : diff.toLocaleString();
+    const ach = planVal !== 0 ? (actual / planVal * 100).toFixed(1) + '%' : '--';
+    const achCls = planVal !== 0 && actual / planVal >= 1 ? 'cell-up' : 'cell-down';
+    return '<td class="r" style="background:#fffdf0">' + CALC.toK(planVal).toLocaleString() + '</td>' +
+           '<td class="r ' + cls + '" style="background:#fffdf0">' + diffTxt + '</td>' +
+           '<td class="r ' + achCls + '" style="background:#fffdf0">' + ach + '</td>';
+  }
+
+  function row(label, val, refVal, prevVal, prevYrVal, planVal, cls, indent){
+    val = val || 0;
+    cls = cls || '';
+    indent = indent || 0;
+    const df1 = prevVal != null ? CALC.diff(val, prevVal) : { txt:'--', cls:'cell-flat' };
+    const rt1 = prevVal != null ? CALC.ratio(val, prevVal) : { txt:'--', cls:'cell-flat' };
+    const df2 = prevYrVal != null ? CALC.diff(val, prevYrVal) : { txt:'--', cls:'cell-flat' };
+    const rt2 = prevYrVal != null ? CALC.ratio(val, prevYrVal) : { txt:'--', cls:'cell-flat' };
+    const iStyle = indent > 0 ? 'style="padding-left:' + (indent*14+8) + 'px;font-size:11px;color:var(--text2)"' : '';
+
+    return '<tr class="' + cls + '">' +
+      '<td ' + iStyle + '>' + label + '</td>' +
+      '<td class="r">' + fmtK(val) + '</td>' +
+      '<td class="r">' + CALC.pct(val, refVal) + '</td>' +
+      planCells(val, planVal) +
+      '<td class="r vs-col">' + fmtK(prevVal) + '</td>' +
+      '<td class="r vs-col ' + df1.cls + '">' + df1.txt + '</td>' +
+      '<td class="r vs-col ' + rt1.cls + '">' + rt1.txt + '</td>' +
+      '<td class="r vs-col">' + fmtK(prevYrVal) + '</td>' +
+      '<td class="r vs-col ' + df2.cls + '">' + df2.txt + '</td>' +
+      '<td class="r vs-col ' + rt2.cls + '">' + rt2.txt + '</td>' +
+    '</tr>';
+  }
+
+  function renderPLUnified(){
+    if (!ready()) return;
+    const ym = STATE.currentYM;
+    const tbody = document.getElementById('pl-tbody');
+    if (!ym || !tbody) return;
+
+    const curM = getMapAny(ym);
+    if (!curM) {
+      tbody.innerHTML = '<tr><td colspan="12" style="padding:20px;color:var(--text3);text-align:center">データがありません</td></tr>';
+      return;
+    }
+
+    const prevYM = STATE.prevYM ? STATE.prevYM(ym) : null;
+    const prevYrYM = STATE.prevYearYM ? STATE.prevYearYM(ym) : (String(parseInt(ym.slice(0,4))-1) + ym.slice(4));
+    const prevM = getMapAny(prevYM);
+    const prevYrM = getMapAny(prevYrYM);
+    const pm = planMap(ym);
+
+    const inc = CALC.income(curM);
+    const exp = CALC.expense(curM);
+    const title = document.getElementById('pl-card-title');
+    const isHist = !STATE.dsForYM || !STATE.dsForYM(ym);
+    if (title) title.textContent = '月次収支表 — ' + UI.fmtYM(ym) + (isHist ? '（過去実績・集計値）' : '');
+
+    const header = l => '<tr class="row-h"><td colspan="12">' + l + '</td></tr>';
+    const getPlan = keys => planSum(pm, keys);
+    let html = '';
+
+    CONFIG.PL_DEF.forEach(def => {
+      if (def.t === 'h') { html += header(def.l); return; }
+
+      if (def.t === 'i') {
+        const v = sum(curM, def.k);
+        const pv = sum(prevM, def.k);
+        const pyv = sum(prevYrM, def.k);
+        const pl = getPlan(def.k);
+        if (v || pv || pyv || pl) html += row(def.l, v, inc, pv, pyv, pl, '', 0);
+        return;
+      }
+
+      if (def.t === 'st') {
+        const v = def.k === 'inc' ? inc : exp;
+        const pv = prevM ? (def.k === 'inc' ? CALC.income(prevM) : CALC.expense(prevM)) : null;
+        const pyv = prevYrM ? (def.k === 'inc' ? CALC.income(prevYrM) : CALC.expense(prevYrM)) : null;
+        const pl = def.k === 'inc' ? getPlan(['営業収益','営業収益計']) : getPlan(['売上原価']);
+        html += row(def.l, v, inc, pv, pyv, pl, 'row-sub', 0);
+        return;
+      }
+
+      if (def.t === 'g') {
+        const v = sum(curM, def.k);
+        const pv = sum(prevM, def.k);
+        const pyv = sum(prevYrM, def.k);
+        if (def.s) {
+          def.s.forEach(s => {
+            const sv = sum(curM, s.k);
+            const spv = sum(prevM, s.k);
+            const spyv = sum(prevYrM, s.k);
+            const spl = getPlan(s.k);
+            if (sv || spv || spyv || spl) html += row(s.l, sv, inc, spv, spyv, spl, '', 1);
+          });
+        }
+        const pl = getPlan(def.k);
+        if (v || pv || pyv || pl) html += row(def.l, v, inc, pv, pyv, pl, 'row-sub', 0);
+        return;
+      }
+
+      if (def.t === 'tot') {
+        const pv = prevM ? CALC.expense(prevM) : null;
+        const pyv = prevYrM ? CALC.expense(prevYrM) : null;
+        html += row(def.l, exp, inc, pv, pyv, getPlan(['売上原価']), 'row-total', 0);
+        return;
+      }
+
+      if (def.t === 'prf') {
+        const prf = inc - exp;
+        const pv = prevM ? CALC.profit(prevM) : null;
+        const pyv = prevYrM ? CALC.profit(prevYrM) : null;
+        const pl = pm ? (pm['粗利益'] || pm['営業利益'] || pm['経常利益'] || null) : null;
+        html += row(def.l, prf, inc, pv, pyv, pl, prf >= 0 ? 'row-profit' : 'row-loss', 0);
+      }
+    });
+
+    tbody.innerHTML = html;
+
+    const note = document.getElementById('pl-notice');
+    if (note && prevYrYM && !prevYrM) {
+      note.innerHTML = '<div class="msg msg-warn">前年実績（' + UI.fmtYM(prevYrYM) + '）が未登録です。過去実績補完データで該当年度を取り込むと表示されます。</div>';
+    } else if (note) {
+      note.innerHTML = '';
+    }
+  }
+
+  function apply(){
+    if (!ready()) { setTimeout(apply, 300); return; }
+    UI.renderPL = renderPLUnified;
+    UI._renderPLFromHistory = function(){ renderPLUnified(); };
+
+    const origRenderCurrentView = UI.renderCurrentView ? UI.renderCurrentView.bind(UI) : null;
+    if (origRenderCurrentView && !UI._finalHistoryComparePatched) {
+      UI.renderCurrentView = function(){
+        const active = document.querySelector('.view.active');
+        const id = active && active.id ? active.id.replace('view-','') : '';
+        const r = origRenderCurrentView();
+        if (id === 'pl' || (document.getElementById('view-pl')||{}).classList?.contains('active')) {
+          setTimeout(renderPLUnified, 0);
+        }
+        return r;
+      };
+      UI._finalHistoryComparePatched = true;
+    }
+
+    setTimeout(renderPLUnified, 0);
+    setTimeout(renderPLUnified, 800);
+    console.log('[PATCH FINAL] 前年実績HISTORY補完 最終版を適用しました');
+  }
+
+  apply();
+})();
+</script>
