@@ -4457,6 +4457,13 @@ const CENTER = {
     }
 
     this._current = c;
+
+// センター切替時にIndexedDBの表示も完全リセット
+try {
+  await DB.clearAll(); // ← 全消し（センター切替時のみ）
+} catch(e) {
+  console.warn('DBクリア失敗', e);
+}
     localStorage.setItem('active_center', centerId);
 
     // STATE をクリア
@@ -4477,7 +4484,16 @@ const CENTER = {
     // 新しいセンターのデータをクラウド/DBから復元
     const msgEl = document.getElementById('session-msg');
     if (msgEl) msgEl.textContent = `${c.name} のデータを読み込み中...`;
-    await CLOUD.initRestore();
+   // まず従来処理
+await CLOUD.initRestore();
+
+// 強制クラウド復元（確実にセンター切替後のデータを取得）
+try {
+  await CLOUD.restoreFromCloud();
+} catch(e) {
+  console.warn('強制クラウド復元失敗', e);
+}
+     
   },
 
   // センター切替UIをレンダリング
