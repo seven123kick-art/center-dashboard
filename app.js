@@ -426,40 +426,61 @@ const MODAL = {
 /* ════════ §9 CLOUD（Supabase — 取込時のみ自動実行） ═══════════ */
 const CLOUD = {
   _sb: null,
+  _LSKEY: 'mgmt5_cloud_cfg', // localStorage key（センター横断共通）
+
+  // 保存済みの接続設定を読む（なければCONFIGのデフォルト）
+  _cfg() {
+    try {
+      const s = localStorage.getItem(this._LSKEY);
+      if (s) return JSON.parse(s);
+    } catch(e) {}
+    return { url: CONFIG.SUPABASE_URL, key: CONFIG.SUPABASE_KEY, bucket: CONFIG.SUPABASE_BUCKET };
+  },
+
+  // 接続設定を保存してクライアントをリセット
+  _saveCfg(url, key, bucket) {
+    try { localStorage.setItem(this._LSKEY, JSON.stringify({ url, key, bucket })); } catch(e) {}
+    this._sb = null; // 次回 _client() で再生成
+  },
 
   _client() {
     if (this._sb) return this._sb;
     try {
       if (!window.supabase) return null;
-      this._sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
+      const cfg = this._cfg();
+      if (!cfg.url || !cfg.key) return null;
+      this._sb = window.supabase.createClient(cfg.url, cfg.key);
       return this._sb;
     } catch(e) { return null; }
   },
 
-  _key: () => `${CENTER.id}/data_v5.json`,
+  _key() { return `${CENTER.id}/data_v5.json`; },
+  _bucket() { return this._cfg().bucket || CONFIG.SUPABASE_BUCKET; },
 
   async push() {
-    const sb = this._client(); if (!sb) return {ok:false};
+    const sb = this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
     try {
       const blob = new Blob([JSON.stringify({
-        center:CENTER.id, savedAt:new Date().toISOString(),
-        datasets:STATE.datasets, fieldData:STATE.fieldData, capacity:STATE.capacity,
-      })],{type:'application/json'});
-      const {error} = await sb.storage.from(CONFIG.SUPABASE_BUCKET)
-        .upload(this._key(), blob, {upsert:true,contentType:'application/json'});
+        center: CENTER.id, savedAt: new Date().toISOString(),
+        datasets: STATE.datasets, fieldData: STATE.fieldData, capacity: STATE.capacity,
+      })], { type:'application/json' });
+      const { error } = await sb.storage.from(this._bucket())
+        .upload(this._key(), blob, { upsert:true, contentType:'application/json' });
       if (error) throw error;
       UI.updateCloudBadge('ok');
-      return {ok:true};
+      return { ok:true };
     } catch(e) {
       UI.updateCloudBadge('error');
-      return {ok:false, error:e.message};
+      return { ok:false, error: e.message };
     }
   },
 
   async pull() {
-    const sb = this._client(); if (!sb) return {ok:false,error:'未接続'};
+    const sb = this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
     try {
-      const {data,error} = await sb.storage.from(CONFIG.SUPABASE_BUCKET).download(this._key());
+      const { data, error } = await sb.storage.from(this._bucket()).download(this._key());
       if (error) throw error;
       const j = JSON.parse(await data.text());
       if (j.datasets)  STATE.datasets  = j.datasets;
@@ -467,21 +488,59 @@ const CLOUD = {
       if (j.capacity)  STATE.capacity  = j.capacity;
       STORE.save();
       UI.updateCloudBadge('ok');
-      return {ok:true};
+      return { ok:true };
     } catch(e) {
       UI.updateCloudBadge('error');
-      return {ok:false,error:e.message};
+      return { ok:false, error: e.message };
     }
   },
 
-  async syncNow() {
-    UI.toast('クラウドから取得中...');
-    const r = await this.pull();
-    if (r.ok) { NAV.refresh(); UI.toast('クラウドからデータを取得しました'); }
-    else UI.toast('取得失敗: '+(r.error||'不明'),'error');
+  // 「再接続テスト」ボタン — フォームの値を保存してから接続テスト
+  async saveConfig() {
+    const urlEl    = document.getElementById('sb-url');
+    const keyEl    = document.getElementById('sb-key');
+    const bucketEl = document.getElementById('sb-bucket');
+    const msgEl    = document.getElementById('cloud-test-msg');
+
+    const url    = urlEl?.value?.trim()    || CONFIG.SUPABASE_URL;
+    const key    = keyEl?.value?.trim()    || CONFIG.SUPABASE_KEY;
+    const bucket = bucketEl?.value?.trim() || CONFIG.SUPABASE_BUCKET;
+
+    // キーが省略表示（...付き）だったら既存を維持
+    const finalKey = key.includes('...') ? this._cfg().key : key;
+
+    this._saveCfg(url, finalKey, bucket);
+    if (msgEl) msgEl.textContent = '接続テスト中...';
+
+    const r = await this.push();
+    if (msgEl) msgEl.textContent = r.ok ? '✅ 接続OK・同期完了' : '❌ ' + (r.error||'接続失敗');
+    UI.toast(r.ok ? '☁ クラウド接続OK・同期しました' : 'エラー: ' + (r.error||''), r.ok ? 'ok' : 'error');
   },
 
-  saveConfig() { this.push().then(r=>UI.toast(r.ok?'☁ クラウド接続OK':'エラー: '+(r.error||''))); },
+  async syncNow() {
+    const msgEl = document.getElementById('cloud-test-msg');
+    if (msgEl) msgEl.textContent = 'クラウドから取得中...';
+    UI.toast('クラウドから取得中...');
+    const r = await this.pull();
+    if (msgEl) msgEl.textContent = r.ok ? '✅ 取得完了' : '❌ ' + (r.error||'');
+    if (r.ok) { NAV.refresh(); UI.toast('クラウドからデータを取得しました'); }
+    else UI.toast('取得失敗: ' + (r.error||'不明'), 'error');
+  },
+
+  // インポート画面のフォームにクラウド設定を反映
+  renderForm() {
+    const cfg = this._cfg();
+    const urlEl    = document.getElementById('sb-url');
+    const keyEl    = document.getElementById('sb-key');
+    const bucketEl = document.getElementById('sb-bucket');
+    if (urlEl)    { urlEl.value = cfg.url || ''; urlEl.readOnly = false; }
+    if (keyEl)    { keyEl.value = cfg.key ? cfg.key.slice(0,40)+'...' : ''; keyEl.readOnly = false; }
+    if (bucketEl) { bucketEl.value = cfg.bucket || CONFIG.SUPABASE_BUCKET; }
+
+    // バッジ更新
+    const hasCfg = !!(cfg.url && cfg.key);
+    UI.updateCloudBadge(hasCfg ? 'configured' : 'none');
+  },
 };
 
 /* ════════ §10 フォーマットヘルパー ════════════════════════════ */
@@ -1186,15 +1245,19 @@ function renderImport() {
     storageEl.innerHTML = `使用容量: <strong>${info.kb} KB</strong>（センター: ${CENTER.name}）`;
   }
 
-  // 接続情報をフォームに反映
-  const urlEl = document.getElementById('sb-url');
-  const keyEl = document.getElementById('sb-key');
-  if (urlEl) urlEl.value = CONFIG.SUPABASE_URL;
-  if (keyEl) keyEl.value = CONFIG.SUPABASE_KEY.slice(0,40)+'...';
+  // クラウド設定フォームを更新（URL/Key/バッジ）
+  CLOUD.renderForm();
 
   // センター情報
   const descEl = document.getElementById('import-target-desc');
   if (descEl) descEl.textContent = `取込先: ${CENTER.name}（${CENTER.id}）`;
+
+  // 計画バッジ
+  const planBadge = document.getElementById('plan-badge');
+  if (planBadge) {
+    planBadge.textContent = STATE.planData ? '登録済' : '未登録';
+    planBadge.className = STATE.planData ? 'badge badge-ok' : 'badge badge-warn';
+  }
 }
 
 /* ════════ §21 MEMO ════════════════════════════════════════════ */
@@ -1412,12 +1475,23 @@ const UI = {
   updateCloudBadge(status) {
     const label = document.getElementById('cloud-label');
     const dot   = document.getElementById('cloud-dot');
+    const badge = document.getElementById('cloud-status-badge');
     if (status==='ok') {
       if (label) label.textContent = 'クラウド: 同期済';
       if (dot)   dot.style.background = '#16a34a';
+      if (badge) { badge.textContent='接続OK'; badge.className='badge badge-ok'; }
     } else if (status==='error') {
       if (label) label.textContent = 'クラウド: エラー';
       if (dot)   dot.style.background = '#dc2626';
+      if (badge) { badge.textContent='エラー'; badge.className='badge badge-warn'; }
+    } else if (status==='configured') {
+      if (label) label.textContent = 'クラウド: 設定済';
+      if (dot)   dot.style.background = '#4d9fea';
+      if (badge) { badge.textContent='設定済（未同期）'; badge.className='badge badge-info'; }
+    } else {
+      if (label) label.textContent = 'クラウド: 未設定';
+      if (dot)   dot.style.background = '#607d9a';
+      if (badge) { badge.textContent='未設定'; badge.className='badge badge-warn'; }
     }
   },
 
@@ -1650,12 +1724,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // 8. ダッシュボードを初期表示
   NAV.go('dashboard');
 
-  // 9. ステータス更新
+  // 9. クラウド設定フォームとバッジを初期化（sidebar + import画面）
+  CLOUD.renderForm();
+
+  // 10. ステータス更新
   UI.updateSaveStatus();
   UI.updateTopbar('dashboard');
-
-  // 10. 接続情報をフォームに反映（インポート画面用）
-  const urlEl=document.getElementById('sb-url'), keyEl=document.getElementById('sb-key');
-  if (urlEl) urlEl.value = CONFIG.SUPABASE_URL;
-  if (keyEl) keyEl.value = CONFIG.SUPABASE_KEY.slice(0,40)+'...';
 });
