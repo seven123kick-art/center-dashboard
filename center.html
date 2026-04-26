@@ -90,6 +90,10 @@
   <div class="nav-item" data-view="field" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="4"/><line x1="10" y1="10" x2="15" y2="15"/></svg>作業者・エリア分析
   </div>
+  <div class="nav-item" data-view="capacity" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 11V8M8 11V5M11 11V7"/></svg>キャパ分析
+  </div>
+
   <div class="sidebar-divider"></div>
   <div class="sidebar-section">データ管理</div>
   <div class="nav-item" data-view="import" onclick="NAV.go(this)">
@@ -821,6 +825,82 @@
         <div class="card">
           <div class="card-header"><span class="card-title">読み込み済み現場データ</span></div>
           <div id="field-data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ▼ キャパ分析 -->
+    <div class="view" id="view-capacity">
+      <div class="card" style="margin-bottom:14px;border-top:3px solid var(--navy)">
+        <div class="card-header">
+          <span class="card-title">キャパ分析（地区別）</span>
+          <span style="font-size:11px;color:var(--text3)">キャパExcelと配送エリアPDFを突合し、地区別の空き・超過・荷主内訳を確認します</span>
+        </div>
+        <div class="card-body">
+          <div class="grid3" style="margin-bottom:12px">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">対象年月</label>
+              <select id="capacity-ym" onchange="CAPACITY_UI.render()" style="width:100%"></select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">月間稼働日数（平均換算）</label>
+              <input id="capacity-days" type="number" min="1" max="31" value="26" onchange="CAPACITY_UI.saveSettings();CAPACITY_UI.render()" style="width:100%;font-size:12px;padding:5px 8px;border-radius:5px;border:1px solid var(--border2)">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">比較基準</label>
+              <select id="capacity-base" onchange="CAPACITY_UI.saveSettings();CAPACITY_UI.render()" style="width:100%">
+                <option value="weekday">平日キャパ</option>
+                <option value="weekend">土日キャパ</option>
+                <option value="max">平日/土日の大きい方</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn btn-primary" onclick="document.getElementById('capacity-master-input').click()" style="font-size:12px">キャパExcel取込</button>
+            <input type="file" id="capacity-master-input" accept=".xlsx,.xls" style="display:none" onchange="CAPACITY_UI.importCapacityExcel(this.files[0])">
+            <button class="btn" onclick="document.getElementById('capacity-pdf-input').click()" style="font-size:12px">配送エリアPDF取込</button>
+            <input type="file" id="capacity-pdf-input" accept=".pdf" multiple style="display:none" onchange="CAPACITY_UI.importAreaPdf(this.files)">
+            <button class="btn" onclick="CAPACITY_UI.render()" style="font-size:12px">再集計</button>
+            <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()" style="font-size:12px">キャパマスタ削除</button>
+            <span id="capacity-msg" style="font-size:11px;color:var(--text2)"></span>
+          </div>
+          <div style="font-size:11px;color:var(--text3);line-height:1.7">
+            ※ 配送エリアPDFは「データ取込＞現場明細データ」で入れたPDFも使います。PDFは月間件数のため、日別比較は「月間件数 ÷ 稼働日数」の平均で判定します。時間区分はPDF側にないため、時間帯キャパは地区ごとに合計して比較します。
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-row kpi-row-4" id="capacity-kpi"></div>
+
+      <div class="grid2" style="align-items:start">
+        <div class="card">
+          <div class="card-header"><span class="card-title">地区別キャパ使用状況</span><span style="font-size:11px;color:var(--text3)">平均件数 / 日</span></div>
+          <div class="scroll-x">
+            <table class="tbl" id="capacity-area-table">
+              <thead><tr><th>地区</th><th class="r">月間件数</th><th class="r">平均/日</th><th class="r">キャパ</th><th class="r">差分</th><th class="r">使用率</th><th>状態</th></tr></thead>
+              <tbody id="capacity-area-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">荷主別キャパ使用内訳</span><span id="capacity-detail-title" style="font-size:11px;color:var(--text3)">地区をクリック</span></div>
+          <div class="scroll-x">
+            <table class="tbl">
+              <thead><tr><th>荷主</th><th class="r">件数</th><th class="r">構成比</th></tr></thead>
+              <tbody id="capacity-shipper-tbody"><tr><td colspan="3" style="padding:16px;color:var(--text3);text-align:center">左の地区をクリックしてください</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">未分類住所・郵便番号</span><span style="font-size:11px;color:var(--text3)">地区マスタ追加候補</span></div>
+        <div class="scroll-x">
+          <table class="tbl">
+            <thead><tr><th>住所</th><th>荷主</th><th class="r">件数</th></tr></thead>
+            <tbody id="capacity-unmatched-tbody"></tbody>
+          </table>
         </div>
       </div>
     </div>
