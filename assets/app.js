@@ -2089,13 +2089,8 @@ const SESSION = {
       setTimeout(() => { msgEl.textContent = `保存日時: ${savedAt}`; }, 2000);
 
       // ダッシュボードが表示中なら再描画
-      if (STATE.currentYM) {
-        const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-        if (btn) {
-        const _lv150 = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
-        if (!_lv150 || _lv150 === 'dashboard') setTimeout(() => NAV.go(btn), 150);
-      }
-      }
+    // 復元後は現在表示中の画面だけ再描画。dashboard自動遷移は禁止。
+    try { if (UI.renderCurrentView) UI.renderCurrentView(); } catch(e){}
 
     } catch(e) {
       msgEl.textContent = `❌ ${e.message}`;
@@ -3783,56 +3778,7 @@ const PLAN = {
   },
 
 };
-/* ─── 起動時に現在選択中センターのクラウドデータを自動復元 ─── */
-(function bootCloudRestoreOnOpen(){
-  let done = false;
-
-  async function run(){
-    if (done) return;
-
-    try {
-      if (!window.CENTER || !window.CLOUD || typeof CLOUD.restoreFromCloud !== 'function') {
-        setTimeout(run, 800);
-        return;
-      }
-
-      const msgEl = document.getElementById('session-msg');
-      if (msgEl) msgEl.textContent = `${CENTER.current.name} のクラウドデータを起動時に確認中...`;
-
-      if (typeof CLOUD.initRestore === 'function') {
-        try {
-          await CLOUD.initRestore();
-        } catch(e) {
-          console.warn('起動時 initRestore 失敗', e);
-        }
-      }
-
-      await CLOUD.restoreFromCloud();
-
-      UI.renderDataList();
-      UI.updateTopbar();
-      FIELD_UI.updatePeriodBadge();
-      FIELD_UI.renderDataList();
-      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
-
-      done = true;
-
-      if (msgEl) msgEl.textContent = `${CENTER.current.name} のクラウドデータを復元しました`;
-    } catch(e) {
-      console.warn('起動時クラウド自動復元失敗', e);
-      setTimeout(run, 1200);
-    }
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(run, 1200));
-  } else {
-    setTimeout(run, 1200);
-  }
-
-  setTimeout(run, 2500);
-  setTimeout(run, 5000);
-})();
+/* REMOVED: old bootCloudRestoreOnOpen */
 /* ═══════════════════════════════════════════════════════════
    MEMO — 月次メモ管理
 ═══════════════════════════════════════════════════════════ */
@@ -4371,13 +4317,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msgEl) msgEl.textContent = 'データなし（CSVを読み込んでください）';
     }
 
-    if (STATE.currentYM) {
-      const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-      if (btn) {
-        const _lv150 = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
-        if (!_lv150 || _lv150 === 'dashboard') setTimeout(() => NAV.go(btn), 60);
-      }
-    }
+    // 復元後は現在表示中の画面だけ再描画。dashboard自動遷移は禁止。
+    try { if (UI.renderCurrentView) UI.renderCurrentView(); } catch(e){}
   };
 
   const doRestore = async () => {
@@ -4448,100 +4389,32 @@ window.addEventListener('beforeunload', () => {
   };
 })();
 
-// センター切替後にも復元
-(function patchSimpleCenterSwitch() {
+// センター切替処理（最適化版）
+(function optimizedCenterSwitchCore(){
   CENTER.switchTo = async function(centerId) {
-    if (this._current?.id === centerId) return;
-
-    // ① 即座にSTATEをクリア + グラフ・DOM初期化
-    STATE.datasets = []; STATE.currentYM = null;
-    FIELD_STATE.datasets = []; FIELD_STATE.currentYM = null;
-    // Chart.jsのインスタンスを全破棄（前センターのグラフを消す）
-    CHARTS.destroyAll();
-    // KPI・グラフエリアのDOMをクリア
-    const kpiEl = document.getElementById('kpi-area');
-    if (kpiEl) kpiEl.innerHTML = '';
-    const expEl = document.getElementById('exp-bars-area');
-    if (expEl) expEl.innerHTML = '';
-    const shipEl = document.getElementById('shipper-bars-area');
-    if (shipEl) shipEl.innerHTML = '';
-    const lgEl = document.getElementById('inc-donut-legend');
-    if (lgEl) lgEl.innerHTML = '';
-
-    // ② センター変更
-    this._current = CONFIG.CENTERS.find(c => c.id === centerId) || CONFIG.CENTERS[0];
-    localStorage.setItem('active_center', centerId);
-    CENTER.renderSwitcher();
-    CENTER._updateHeaderColor(CENTER.current);
-
-    // ③ 空の状態でUIを即更新（前センターのデータを消す）
-    UI.renderDataList();
-    UI.updateTopbar();
-    UI.renderDashboard();   // ← ダッシュボードを「データなし」状態に
-    FIELD_UI.updatePeriodBadge();
-    FIELD_UI.renderDataList();
-      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
-
-    const msgEl = document.getElementById('session-msg');
-    if (msgEl) msgEl.textContent = `${CENTER.current.name} のデータを読み込み中...`;
-
-    // ④ 新センターのデータを復元（別PC反映を優先するためクラウド優先）
-    let restored = 0;
-    if (CLOUD.isConfigured()) {
-      try {
-        const cloudResult = await CLOUD.restoreFromCloud();
-        restored = cloudResult ? ((cloudResult.skdl || 0) + (cloudResult.field || 0)) : 0;
-      } catch(e) {
-        console.warn('[CENTER] cloud restore failed:', e);
-      }
-    }
-    if (restored === 0) {
-      restored = await SIMPLE_STORE.restoreAll().catch(() => 0);
-    }
-
-    // ⑤ 復元後にUIを再更新
-    UI.renderDataList();
-    UI.updateTopbar();
-    FIELD_UI.updatePeriodBadge();
-    FIELD_UI.renderDataList();
-      if (typeof window.renderFieldDataList2 === "function") window.renderFieldDataList2();
-    PLAN._loadFromStorage().catch(()=>{});
-    MEMO._loadFromStorage().catch(()=>{});
-
-    if (msgEl) {
-      msgEl.innerHTML = restored > 0
-        ? `✅ ${CENTER.current.name}: ${restored}件復元済み`
-        : `${CENTER.current.name}: データなし<br><span style="font-size:10px;color:#4d6a88">CSVを読み込んでください</span>`;
-    }
-
-    if (restored > 0 && STATE.currentYM) {
-      const lastView = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
-      if (!lastView || lastView === 'dashboard') {
-        const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-        if (btn) {
-        const _lv = sessionStorage.getItem(((window.APP_FORCE_CENTER || 'kitasaitama') + '_last_view'));
-        if (!_lv || _lv === 'dashboard') {
-          setTimeout(() => NAV.go(btn), 100);
-        }
-      }
-      }
-    } else {
-      // データなしの場合はダッシュボードを空表示
-      const btn = document.querySelector('.nav-item[data-view="dashboard"]');
-      if (btn) {
-        document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
-        document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
-        document.getElementById('view-dashboard').classList.add('active');
-        btn.classList.add('active');
-        document.getElementById('page-title').textContent = 'ダッシュボード';
-        UI.renderDashboard();
-      }
-    }
+    const next = CONFIG.CENTERS.find(c => c.id === centerId) || CONFIG.CENTERS[0];
+    if (!next || this._current?.id === next.id) return;
+    const keepView = (document.querySelector('.view.active')?.id || 'view-dashboard').replace('view-','');
+    window.APP_FORCE_CENTER = next.id;
+    try { localStorage.setItem('active_center', next.id); } catch(e){}
+    this._current = next;
+    try { this.renderSwitcher && this.renderSwitcher(); } catch(e){}
+    try { this._updateHeaderColor && this._updateHeaderColor(this.current); } catch(e){}
+    try { STATE.datasets = []; STATE.currentYM = null; STATE.__summaryCache = {}; } catch(e){}
+    try { FIELD_STATE.datasets = []; FIELD_STATE.currentYM = null; } catch(e){}
+    try { CHARTS.destroyAll && CHARTS.destroyAll(); } catch(e){}
+    ['kpi-area','exp-bars-area','shipper-bars-area','inc-donut-legend','data-list','trend-tbody','shipper-group-tbody','shipper-detail-tbody'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='';});
+    function setView(view){const b=document.querySelector('.nav-item[data-view="'+view+'"]'),p=document.getElementById('view-'+view);if(!b||!p)return;document.querySelectorAll('.nav-item[data-view]').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x===p));const t=document.getElementById('page-title');if(t)t.textContent=(NAV.titles&&NAV.titles[view])||view;}
+    function render(){try{UI.renderDataList&&UI.renderDataList();}catch(e){}try{UI.updateTopbar&&UI.updateTopbar();}catch(e){}try{FIELD_UI.updatePeriodBadge&&FIELD_UI.updatePeriodBadge();FIELD_UI.renderDataList&&FIELD_UI.renderDataList();}catch(e){}try{if(typeof window.renderFieldDataList2==='function')window.renderFieldDataList2();}catch(e){}try{UI.renderCurrentView&&UI.renderCurrentView();}catch(e){}}
+    setView(keepView); render();
+    const msg=document.getElementById('session-msg'); if(msg)msg.innerHTML=`${next.name} のデータを確認中...`;
+    let restored=0;
+    try{restored=await SIMPLE_STORE.restoreAll();}catch(e){console.warn('[CENTER optimized] local restore failed',e);}
+    if(msg)msg.innerHTML=restored?`✅ ${next.name}: ローカル ${restored}件表示中`:`${next.name}: データなし`;
+    setView(keepView); render();
+    if(window.CLOUD&&CLOUD.isConfigured&&CLOUD.isConfigured())setTimeout(async()=>{try{const r=await CLOUD.restoreFromCloud('center-background');const c=r?((r.skdl||0)+(r.field||0)):0;if(msg)msg.innerHTML=c?`✅ ${next.name}: クラウド ${c}件反映`:(restored?`✅ ${next.name}: ${restored}件表示中`:`${next.name}: データなし`);setView(keepView);render();}catch(e){console.warn('[CENTER optimized] cloud failed',e);}},restored?800:150);
   };
 })();
-
-
-
 /* PATCH — 前年実績もHISTORYから取得する修正版（window.HISTORY不使用） */
 (function(){
   'use strict';
@@ -12234,383 +12107,31 @@ const REALTIME_TABLE_SYNC = {
 })();
 
 
-/* FINAL STABILITY + FAST BOOT PATCH */
-(function(){
-  const LABEL='[FINAL FAST STABLE]';
-  const bootAt=Date.now();
-  const LIBS={};
-  function loadScriptOnce(name,url){
-    if(LIBS[name]) return LIBS[name];
-    LIBS[name]=new Promise((resolve,reject)=>{
-      try{
-        if([...document.scripts].some(s=>s.src && s.src.indexOf(url)>=0)) return resolve();
-        const sc=document.createElement('script');sc.src=url;sc.async=true;
-        sc.onload=()=>resolve();sc.onerror=()=>reject(new Error(name+' の読込に失敗しました'));
-        document.head.appendChild(sc);
-      }catch(e){reject(e);}
-    });
-    return LIBS[name];
-  }
-  window.ensurePdfLib=function(){if(window.pdfjsLib || window['pdfjs-dist/build/pdf']) return Promise.resolve();return loadScriptOnce('PDF.js','https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js');};
-  window.ensureXlsxLib=function(){if(window.XLSX) return Promise.resolve();return loadScriptOnce('XLSX','https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');};
-  window.ensureLeafletLib=function(){if(window.L) return Promise.resolve();return loadScriptOnce('Leaflet','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');};
-
-  function patchNavGuard(){
-    if(!window.NAV || !NAV.go || NAV.__finalNoAutoJump) return false;
-    let lastUserNavAt=0;
-    document.addEventListener('pointerdown',e=>{if(e.target&&e.target.closest&&e.target.closest('.nav-item'))lastUserNavAt=Date.now();},true);
-    document.addEventListener('click',e=>{if(e.target&&e.target.closest&&e.target.closest('.nav-item'))lastUserNavAt=Date.now();},true);
-    const realGo=NAV.go.bind(NAV);
-    NAV.go=function(btn,opts){
-      const view=btn&&btn.dataset?btn.dataset.view:'';
-      const active=document.querySelector('.nav-item.active');
-      const activeView=active&&active.dataset?active.dataset.view:'';
-      const userNav=(Date.now()-lastUserNavAt)<1200;
-      const explicit=opts&&opts.allowAuto===true;
-      if(!userNav&&!explicit&&activeView&&view&&view!==activeView){
-        console.warn(LABEL,'auto navigation blocked:',activeView,'->',view);
-        try{if(window.UI&&UI.renderCurrentView)UI.renderCurrentView();}catch(e){}
-        return;
-      }
-      return realGo(btn);
-    };
-    NAV.__finalNoAutoJump=true;return true;
-  }
-
-  function patchCloudRestore(){
-    if(!window.CLOUD||!CLOUD.restoreFromCloud||CLOUD.__finalFastStableRestore)return false;
-    const realRestore=CLOUD.restoreFromCloud.bind(CLOUD);
-    let bgTimer=null,bgRunning=false,restorePromise=null;
-    function scheduleBackground(){
-      if(bgTimer||bgRunning)return;
-      bgTimer=setTimeout(async()=>{bgTimer=null;bgRunning=true;try{window.__FINAL_BG_CLOUD_RESTORE__=true;await realRestore('background-delayed');}catch(e){console.warn(LABEL,'background cloud skipped:',e);}finally{window.__FINAL_BG_CLOUD_RESTORE__=false;bgRunning=false;}},4500);
-    }
-    CLOUD.restoreFromCloud=async function(reason){
-      const r=String(reason||'');
-      const manual=window.__FINAL_MANUAL_SYNC__||/manual|sync|button|user/i.test(r);
-      const duringBoot=(Date.now()-bootAt)<6000;
-      if(!manual&&duringBoot){scheduleBackground();return{skdl:0,field:0,skipped:true,reason:'fast-boot-local-first'};}
-      if(restorePromise&&!manual)return restorePromise;
-      restorePromise=(async()=>realRestore.apply(CLOUD,arguments))();
-      try{return await restorePromise;}finally{setTimeout(()=>{restorePromise=null;},1000);}
-    };
-    if(CLOUD.syncNow&&!CLOUD.__finalSyncNowWrapped){const realSync=CLOUD.syncNow.bind(CLOUD);CLOUD.syncNow=async function(){window.__FINAL_MANUAL_SYNC__=true;try{return await realSync();}finally{window.__FINAL_MANUAL_SYNC__=false;}};CLOUD.__finalSyncNowWrapped=true;}
-    CLOUD.__finalFastStableRestore=true;return true;
-  }
-
-  function patchDeferredLibraries(){
-    try{
-      if(window.PDF_FIELD&&PDF_FIELD.parse&&!PDF_FIELD.__finalDeferred){const real=PDF_FIELD.parse.bind(PDF_FIELD);PDF_FIELD.parse=async function(file){await window.ensurePdfLib();return real(file);};PDF_FIELD.__finalDeferred=true;}
-      if(window.PAST_LIBRARY&&!PAST_LIBRARY.__finalDeferred){
-        if(PAST_LIBRARY.extractPdf){const realPdf=PAST_LIBRARY.extractPdf.bind(PAST_LIBRARY);PAST_LIBRARY.extractPdf=async function(file){await window.ensurePdfLib();return realPdf(file);};}
-        if(PAST_LIBRARY.extractExcel){const realX=PAST_LIBRARY.extractExcel.bind(PAST_LIBRARY);PAST_LIBRARY.extractExcel=async function(file){await window.ensureXlsxLib();return realX(file);};}
-        PAST_LIBRARY.__finalDeferred=true;
-      }
-      if(window.CAPACITY_UI&&!CAPACITY_UI.__finalDeferred){
-        if(CAPACITY_UI.importCapacityExcel){const realCap=CAPACITY_UI.importCapacityExcel.bind(CAPACITY_UI);CAPACITY_UI.importCapacityExcel=async function(file){await window.ensureXlsxLib();return realCap(file);};}
-        if(CAPACITY_UI.importAreaPdf){const realPdfImport=CAPACITY_UI.importAreaPdf.bind(CAPACITY_UI);CAPACITY_UI.importAreaPdf=async function(files){await window.ensurePdfLib();return realPdfImport(files);};}
-        CAPACITY_UI.__finalDeferred=true;
-      }
-      if(window.FIELD_UI&&FIELD_UI.renderMap&&!FIELD_UI.__finalLeafletDeferred){const realMap=FIELD_UI.renderMap.bind(FIELD_UI);FIELD_UI.renderMap=function(){if(window.L)return realMap();const noData=document.getElementById('map-no-data');if(noData){noData.style.display='block';noData.textContent='地図を読み込み中...';}window.ensureLeafletLib().then(()=>realMap()).catch(e=>{const nd=document.getElementById('map-no-data');if(nd){nd.style.display='block';nd.textContent='地図ライブラリの読み込みに失敗しました。';}console.warn(LABEL,e);});};FIELD_UI.__finalLeafletDeferred=true;}
-    }catch(e){console.warn(LABEL,'defer patch failed:',e);}
-  }
-
-  function patchRenderCurrentViewFast(){
-    if(!window.UI||!UI.renderCurrentView||UI.__finalFastCurrentView)return false;
-    UI.renderCurrentView=function(){
-      const active=document.querySelector('.view.active');if(!active)return;const id=active.id.replace('view-','');
-      try{switch(id){case'dashboard':return UI.renderDashboard&&UI.renderDashboard();case'pl':return UI.renderPL&&UI.renderPL();case'trend':return UI.renderTrend&&UI.renderTrend();case'shipper':return UI.renderShipper&&UI.renderShipper();case'annual':return UI.renderAnnual&&UI.renderAnnual();case'capacity':return window.CAPACITY_UI&&CAPACITY_UI.init&&CAPACITY_UI.init();case'alerts':return typeof UI.renderAlerts==='function'&&UI.renderAlerts();case'memo':return typeof UI.renderMemo==='function'&&UI.renderMemo();case'field':return window.FIELD_UI&&FIELD_UI.renderCurrent&&FIELD_UI.renderCurrent();}}catch(e){console.warn(LABEL,'renderCurrentView skipped:',id,e);}
-    };
-    UI.__finalFastCurrentView=true;return true;
-  }
-
-  function apply(){patchNavGuard();patchCloudRestore();patchDeferredLibraries();patchRenderCurrentViewFast();try{document.documentElement.classList.remove('restore-view-booting');}catch(e){}}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(apply,0));else setTimeout(apply,0);
-  setTimeout(apply,600);setTimeout(apply,1800);setTimeout(apply,3500);
-})();
-
-/* FINAL PATCH 2026-04-27 — initial dashboard render + no random auto navigation */
-(function(){
-  'use strict';
-  const LABEL = '[BOOT DASHBOARD FIX]';
-  const bootAt = Date.now();
-  let userNavAt = 0;
-
-  function centerId(){ return window.APP_FORCE_CENTER || (window.CENTER && CENTER.current && CENTER.current.id) || 'kitasaitama'; }
-  function viewBtn(id){ return document.querySelector('.nav-item[data-view="' + id + '"]'); }
-  function viewPane(id){ return document.getElementById('view-' + id); }
-  function activeView(){
-    const nav = document.querySelector('.nav-item.active[data-view]');
-    if (nav && nav.dataset && nav.dataset.view) return nav.dataset.view;
-    const pane = document.querySelector('.view.active');
-    if (pane && pane.id) return pane.id.replace(/^view-/, '');
-    return 'dashboard';
-  }
-  function setActiveView(id){
-    const btn = viewBtn(id) || viewBtn('dashboard');
-    const pane = viewPane(id) || viewPane('dashboard');
-    if (!btn || !pane) return 'dashboard';
-    document.querySelectorAll('.nav-item[data-view]').forEach(el => el.classList.toggle('active', el === btn));
-    document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el === pane));
-    const title = document.getElementById('page-title');
-    if (title && window.NAV && NAV.titles) title.textContent = NAV.titles[id] || (id === 'dashboard' ? 'ダッシュボード' : id);
-    return id;
-  }
-  function renderActive(){
-    try{
-      const id = activeView() || 'dashboard';
-      if (window.UI && typeof UI.renderCurrentView === 'function') {
-        UI.renderCurrentView();
-      } else if (id === 'dashboard' && window.UI && typeof UI.renderDashboard === 'function') {
-        UI.renderDashboard();
-      }
-      try { if (window.UI && typeof UI.updateTopbar === 'function') UI.updateTopbar(); } catch(e){}
-    }catch(e){ console.warn(LABEL, 'render failed', e); }
-  }
-  function showDashboardAndRender(){
-    setActiveView('dashboard');
-    renderActive();
-  }
-
-  // User click marker: user navigation must not be blocked.
-  document.addEventListener('pointerdown', function(e){
-    if (e.target && e.target.closest && e.target.closest('.nav-item[data-view]')) userNavAt = Date.now();
-  }, true);
-  document.addEventListener('click', function(e){
-    if (e.target && e.target.closest && e.target.closest('.nav-item[data-view]')) userNavAt = Date.now();
-  }, true);
-
-  function patchNav(){
-    if (!window.NAV || !NAV.go || NAV.__bootDashboardFixPatched) return false;
-    const realGo = NAV.go.bind(NAV);
-    NAV.go = function(btn, opts){
-      const view = btn && btn.dataset ? btn.dataset.view : '';
-      const isUser = (Date.now() - userNavAt) < 1500;
-      const allowAuto = opts && opts.allowAuto === true;
-      const inBoot = (Date.now() - bootAt) < 8000;
-
-      // During boot, block old saved-view patches from jumping to trend/shipper/etc.
-      // User clicks and explicit calls are allowed.
-      if (inBoot && !isUser && !allowAuto && view && view !== 'dashboard') {
-        console.warn(LABEL, 'blocked auto nav during boot:', view);
-        showDashboardAndRender();
-        return;
-      }
-
-      const ret = realGo(btn);
-      // Ensure clicking already-active dashboard still paints the content.
-      setTimeout(renderActive, 0);
-      return ret;
-    };
-    NAV.__bootDashboardFixPatched = true;
-    return true;
-  }
-
-  function forceDashboardSavedViewDuringBoot(){
-    try {
-      const k = centerId() + '_last_view';
-      sessionStorage.setItem(k, 'dashboard');
-      localStorage.setItem(k, 'dashboard');
-      // Some older patches used this fixed key. Neutralize it too.
-      localStorage.setItem('kitasaitama_user_last_view', 'dashboard');
-      window.__BOOT_LAST_VIEW__ = 'dashboard';
-    } catch(e) {}
-  }
-
-  function afterRestoreRender(){
-    // The app sometimes restores data after boot. Repaint dashboard when data is ready.
-    showDashboardAndRender();
-  }
-
-  function patchRestoreHooks(){
-    if (window.CLOUD && CLOUD.restoreFromCloud && !CLOUD.__bootDashboardFixRestorePatched) {
-      const real = CLOUD.restoreFromCloud.bind(CLOUD);
-      CLOUD.restoreFromCloud = async function(){
-        const result = await real.apply(CLOUD, arguments);
-        setTimeout(afterRestoreRender, 0);
-        setTimeout(afterRestoreRender, 250);
-        return result;
-      };
-      CLOUD.__bootDashboardFixRestorePatched = true;
-    }
-    if (window.SIMPLE_STORE && SIMPLE_STORE.restoreAll && !SIMPLE_STORE.__bootDashboardFixRestorePatched) {
-      const realLocal = SIMPLE_STORE.restoreAll.bind(SIMPLE_STORE);
-      SIMPLE_STORE.restoreAll = async function(){
-        const result = await realLocal.apply(SIMPLE_STORE, arguments);
-        setTimeout(afterRestoreRender, 0);
-        setTimeout(afterRestoreRender, 250);
-        return result;
-      };
-      SIMPLE_STORE.__bootDashboardFixRestorePatched = true;
-    }
-  }
-
-  function bootApply(){
-    forceDashboardSavedViewDuringBoot();
-    patchNav();
-    patchRestoreHooks();
-    showDashboardAndRender();
-    try { document.documentElement.classList.remove('restore-view-booting'); } catch(e) {}
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function(){
-      setTimeout(bootApply, 0);
-      setTimeout(bootApply, 300);
-      setTimeout(bootApply, 1200);
-      setTimeout(bootApply, 3000);
-    });
-  } else {
-    setTimeout(bootApply, 0);
-    setTimeout(bootApply, 300);
-    setTimeout(bootApply, 1200);
-    setTimeout(bootApply, 3000);
-  }
-})();
 
 /* =========================================================
-   FINAL UX PATCH: センター切替・起動中の自動ダッシュボード戻り防止
-   目的：
-   - 読み込み完了時の自動処理が、ユーザーが選んだ画面を上書きしない
-   - センター切替中に売上推移・荷主分析等を押した場合、その画面を維持する
-   - 復元完了後は現在表示中の画面だけ再描画する
+   PRO OPTIMIZED RUNTIME KERNEL 2026-04-27
 ========================================================= */
-(function stableCenterNavigationPatch(){
-  if (window.__STABLE_CENTER_NAV_PATCHED__) return;
-  window.__STABLE_CENTER_NAV_PATCHED__ = true;
-
-  window.__USER_NAV_TS__ = 0;
-  window.__USER_NAV_VIEW__ = '';
-  window.__CENTER_RESTORE_STARTED_AT__ = 0;
-  window.__CENTER_RESTORING__ = false;
-
-  document.addEventListener('click', function(e){
-    const item = e.target && e.target.closest ? e.target.closest('.nav-item[data-view]') : null;
-    if (!item) return;
-    window.__USER_NAV_TS__ = Date.now();
-    window.__USER_NAV_VIEW__ = item.dataset.view || '';
-  }, true);
-
-  function activeViewId(){
-    const active = document.querySelector('.view.active');
-    return active ? active.id.replace('view-','') : '';
-  }
-
-  function renderActiveOnly(){
-    try {
-      if (window.UI && typeof UI.updateTopbar === 'function') UI.updateTopbar();
-      if (window.UI && typeof UI.renderCurrentView === 'function') UI.renderCurrentView();
-    } catch(e) { console.warn('[STABLE NAV] render active skipped:', e); }
-  }
-
-  // 遅延処理が勝手にdashboardへ戻すのを防ぐ。
-  // ただし、ユーザー本人がdashboardを押した場合は許可する。
-  if (window.NAV && typeof NAV.go === 'function' && !NAV._stableAutoDashboardBlockPatched) {
-    const originalGo = NAV.go.bind(NAV);
-    NAV.go = function(btn){
-      const target = btn && btn.dataset ? (btn.dataset.view || '') : '';
-      const current = activeViewId();
-      const userRecentlyClickedOther =
-        target === 'dashboard' &&
-        current && current !== 'dashboard' &&
-        window.__USER_NAV_VIEW__ && window.__USER_NAV_VIEW__ !== 'dashboard' &&
-        (Date.now() - window.__USER_NAV_TS__ < 10000);
-
-      if (userRecentlyClickedOther && !window.__ALLOW_AUTO_DASHBOARD__) {
-        console.log('[STABLE NAV] blocked delayed auto-dashboard. current=', current, 'user=', window.__USER_NAV_VIEW__);
-        return;
-      }
-      return originalGo(btn);
-    };
-    NAV._stableAutoDashboardBlockPatched = true;
-  }
-
-  // センター切替は、復元後にdashboardへ強制移動しない。
-  // 現在ユーザーが見ている画面を再描画する。
-  if (window.CENTER && typeof CENTER.switchTo === 'function') {
-    CENTER.switchTo = async function(centerId){
-      const c = CONFIG.CENTERS.find(x => x.id === centerId);
-      if (!c || c.id === this._current?.id) return;
-
-      const startedAt = Date.now();
-      window.__CENTER_RESTORE_STARTED_AT__ = startedAt;
-      window.__CENTER_RESTORING__ = true;
-      window.APP_FORCE_CENTER = centerId;
-
-      try {
-        // センター情報更新
-        this._current = c;
-        try { localStorage.setItem('active_center', centerId); } catch(e) {}
-
-        // 表示データを即クリア（前センター混在防止）
-        try { STATE.datasets = []; STATE.currentYM = null; } catch(e) {}
-        try { FIELD_STATE.datasets = []; FIELD_STATE.currentYM = null; } catch(e) {}
-        try { if (window.CHARTS && typeof CHARTS.destroyAll === 'function') CHARTS.destroyAll(); } catch(e) {}
-
-        // DOM上の前センター表示を軽く消す
-        ['kpi-area','exp-bars-area','shipper-bars-area','inc-donut-legend','data-list'].forEach(id => {
-          const el = document.getElementById(id);
-          if (el) el.innerHTML = '';
-        });
-
-        try { this.renderSwitcher(); } catch(e) {}
-        try { this._updateHeaderColor(c); } catch(e) {}
-
-        const msgEl = document.getElementById('session-msg');
-        if (msgEl) msgEl.innerHTML = `${c.name} のデータを読み込み中...<br><span style="font-size:10px;color:#4d9fea">画面操作はそのまま可能です</span>`;
-
-        // 空状態を現在表示中の画面へ反映
-        try { UI.renderDataList(); UI.updateTopbar(); } catch(e) {}
-        try { FIELD_UI.updatePeriodBadge(); FIELD_UI.renderDataList(); } catch(e) {}
-        try { if (typeof window.renderFieldDataList2 === 'function') window.renderFieldDataList2(); } catch(e) {}
-
-        // まずローカル即復元。クラウドはその後。
-        let restored = 0;
-        try {
-          if (window.SIMPLE_STORE && typeof SIMPLE_STORE.restoreAll === 'function') {
-            restored = await SIMPLE_STORE.restoreAll();
-          }
-        } catch(e) { console.warn('[STABLE CENTER] local restore failed:', e); }
-
-        // ローカル復元時点で、ユーザーが見ている画面を再描画
-        renderActiveOnly();
-
-        // クラウド確認は必要だが、ユーザー画面をdashboardへ戻さない
-        if (window.CLOUD && CLOUD.isConfigured && CLOUD.isConfigured()) {
-          try {
-            const result = await CLOUD.restoreFromCloud('center-switch');
-            const cloudCount = result ? ((result.skdl || 0) + (result.field || 0)) : 0;
-            if (cloudCount > 0) restored = cloudCount;
-          } catch(e) { console.warn('[STABLE CENTER] cloud restore failed:', e); }
-        }
-
-        try { PLAN && PLAN._loadFromStorage && PLAN._loadFromStorage().catch(()=>{}); } catch(e) {}
-        try { MEMO && MEMO._loadFromStorage && MEMO._loadFromStorage().catch(()=>{}); } catch(e) {}
-
-        if (msgEl) {
-          msgEl.innerHTML = restored > 0
-            ? `✅ ${c.name}: ${restored}件復元済み`
-            : `${c.name}: データなし<br><span style="font-size:10px;color:#4d6a88">CSVを読み込んでください</span>`;
-        }
-
-        // 最後も現在の画面だけ再描画。dashboard強制遷移はしない。
-        renderActiveOnly();
-      } finally {
-        window.__CENTER_RESTORING__ = false;
-      }
-    };
-  }
-
-  // CLOUD.restoreFromCloud 完了後の再描画も、dashboard固定ではなく現在画面優先に統一
-  if (window.CLOUD && typeof CLOUD.restoreFromCloud === 'function' && !CLOUD._stableActiveViewRestorePatched) {
-    const originalRestore = CLOUD.restoreFromCloud.bind(CLOUD);
-    CLOUD.restoreFromCloud = async function(){
-      const result = await originalRestore.apply(CLOUD, arguments);
-      setTimeout(renderActiveOnly, 0);
-      return result;
-    };
-    CLOUD._stableActiveViewRestorePatched = true;
-  }
-
-  console.log('[STABLE NAV] center navigation patch applied');
+(function PRO_OPTIMIZED_RUNTIME(){
+  if (window.__PRO_OPTIMIZED_RUNTIME__) return;
+  window.__PRO_OPTIMIZED_RUNTIME__ = true;
+  const LABEL='[PRO_OPT]';
+  const CENTER_ID=()=> (window.CENTER&&CENTER.current&&CENTER.current.id)||window.APP_FORCE_CENTER||localStorage.getItem('active_center')||'kitasaitama';
+  const HOLD_MS=45000; let userView='', userAt=0, cloudPromise=null, cloudAt=0, booted=false;
+  function activeView(){return (document.querySelector('.view.active')?.id||'view-dashboard').replace('view-','');}
+  function remember(v){if(!v)return;userView=v;userAt=Date.now();try{sessionStorage.setItem(CENTER_ID()+'_last_view',v);}catch(e){}}
+  function holding(){return userView&&Date.now()-userAt<HOLD_MS;}
+  function setView(v,render){const b=document.querySelector('.nav-item[data-view="'+v+'"]'),p=document.getElementById('view-'+v);if(!b||!p)return false;document.querySelectorAll('.nav-item[data-view]').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x===p));const t=document.getElementById('page-title');if(t)t.textContent=(NAV&&NAV.titles&&NAV.titles[v])||v;if(render)renderActive();return true;}
+  function renderActive(){try{UI&&UI.updateTopbar&&UI.updateTopbar();}catch(e){}try{UI&&UI.renderCurrentView&&UI.renderCurrentView();}catch(e){console.warn(LABEL,'render',e);}}
+  document.addEventListener('pointerdown',e=>{const it=e.target?.closest?.('.nav-item[data-view]');if(it?.dataset?.view)remember(it.dataset.view);},true);
+  document.addEventListener('click',e=>{const it=e.target?.closest?.('.nav-item[data-view]');if(it?.dataset?.view)remember(it.dataset.view);},true);
+  function patchNAV(){if(!window.NAV||!NAV.go||NAV.__proOpt)return;const real=NAV.go.bind(NAV);NAV.go=function(btn){const target=btn?.dataset?.view||'';if(target==='dashboard'&&holding()&&userView&&userView!=='dashboard'&&activeView()!=='dashboard'){console.log(LABEL,'auto dashboard blocked; keep',userView);setTimeout(renderActive,0);return;}const ret=real(btn);if(target)remember(target);setTimeout(renderActive,0);return ret;};NAV.__proOpt=true;}
+  function patchRender(){if(!window.UI||!UI.renderCurrentView||UI.__proOptRender)return;UI.renderCurrentView=function(){const id=activeView();try{switch(id){case'dashboard':return UI.renderDashboard&&UI.renderDashboard();case'pl':return UI.renderPL&&UI.renderPL();case'trend':return UI.renderTrend&&UI.renderTrend();case'shipper':return UI.renderShipper&&UI.renderShipper();case'indicators':return UI.renderIndicators?UI.renderIndicators():null;case'annual':return UI.renderAnnual&&UI.renderAnnual();case'alerts':return typeof UI.renderAlerts==='function'&&UI.renderAlerts();case'memo':return typeof UI.renderMemo==='function'&&UI.renderMemo();case'field':return window.FIELD_UI&&FIELD_UI.renderCurrent?FIELD_UI.renderCurrent():null;case'report':return window.REPORT_UI&&REPORT_UI.refresh?REPORT_UI.refresh():null;case'library':return window.PAST_LIBRARY&&PAST_LIBRARY.init?PAST_LIBRARY.init():null;case'capacity':return window.CAPACITY_UI&&CAPACITY_UI.init?CAPACITY_UI.init():null;}}catch(e){console.warn(LABEL,'renderCurrentView skipped',id,e);}};UI.__proOptRender=true;}
+  function patchCloud(){if(!window.CLOUD||!CLOUD.restoreFromCloud||CLOUD.__proOptCloud)return;const real=CLOUD.restoreFromCloud.bind(CLOUD);CLOUD.restoreFromCloud=async function(reason){const now=Date.now();if(cloudPromise&&now-cloudAt<2500)return cloudPromise;const before=activeView();cloudAt=now;cloudPromise=(async()=>{try{return await real(reason);}finally{cloudPromise=null;setTimeout(()=>{if(holding()&&userView&&activeView()!==userView)setView(userView,false);else if(before&&before!=='dashboard'&&activeView()==='dashboard')setView(before,false);renderActive();},0);}})();return cloudPromise;};if(CLOUD.initRestore){CLOUD.initRestore=async function(){if(this.isConfigured&&this.isConfigured())return CLOUD.restoreFromCloud('init');return null;};}CLOUD.__proOptCloud=true;}
+  function patchCenter(){if(!window.CENTER||CENTER.__proOptSwitch)return;CENTER.switchTo=async function(id){const next=(CONFIG.CENTERS||[]).find(c=>c.id===id);if(!next||this.current?.id===next.id)return;const keep=activeView()||userView||'dashboard';window.APP_FORCE_CENTER=next.id;try{localStorage.setItem('active_center',next.id);}catch(e){}this._current=next;try{this.renderSwitcher&&this.renderSwitcher();this._updateHeaderColor&&this._updateHeaderColor(next);}catch(e){}try{STATE.datasets=[];STATE.currentYM=null;STATE.__summaryCache={};FIELD_STATE.datasets=[];FIELD_STATE.currentYM=null;CHARTS.destroyAll&&CHARTS.destroyAll();}catch(e){}setView(keep,false);renderActive();const msg=document.getElementById('session-msg');if(msg)msg.innerHTML=`${next.name} のデータを確認中...`;let n=0;try{n=await SIMPLE_STORE.restoreAll();}catch(e){}if(msg)msg.innerHTML=n?`✅ ${next.name}: ローカル ${n}件表示中`:`${next.name}: データなし`;setView(keep,false);renderActive();if(CLOUD&&CLOUD.isConfigured&&CLOUD.isConfigured())setTimeout(async()=>{try{const r=await CLOUD.restoreFromCloud('center-bg');const c=r?((r.skdl||0)+(r.field||0)):0;if(msg)msg.innerHTML=c?`✅ ${next.name}: クラウド ${c}件反映`:(n?`✅ ${next.name}: ${n}件表示中`:`${next.name}: データなし`);}catch(e){}setView(keep,false);renderActive();},n?700:120);};CENTER.__proOptSwitch=true;}
+  function loadScriptOnce(src,test){return new Promise((res,rej)=>{try{if(test&&test())return res();}catch(e){}const ex=[...document.scripts].find(s=>s.src===src);if(ex){ex.addEventListener('load',res,{once:true});ex.addEventListener('error',rej,{once:true});setTimeout(res,500);return;}const sc=document.createElement('script');sc.src=src;sc.async=true;sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});}
+  window.ensureXlsxLib=()=>loadScriptOnce('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',()=>!!window.XLSX);
+  window.ensurePdfLib=()=>loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',()=>!!window.pdfjsLib).then(()=>{try{pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}catch(e){}});
+  function patchCapacity(){if(!window.CAPACITY_UI||CAPACITY_UI.__proLazy)return;if(CAPACITY_UI.importCapacityExcel){const r=CAPACITY_UI.importCapacityExcel.bind(CAPACITY_UI);CAPACITY_UI.importCapacityExcel=async f=>{await ensureXlsxLib();return r(f);};}if(CAPACITY_UI.importAreaPdf){const r=CAPACITY_UI.importAreaPdf.bind(CAPACITY_UI);CAPACITY_UI.importAreaPdf=async files=>{await ensurePdfLib();return r(files);};}CAPACITY_UI.__proLazy=true;}
+  function boot(){if(booted)return;booted=true;patchNAV();patchRender();patchCloud();patchCenter();patchCapacity();if(!document.querySelector('.view.active'))setView('dashboard',false);try{document.documentElement.classList.remove('restore-view-booting');}catch(e){}setTimeout(async()=>{try{await SIMPLE_STORE.restoreAll();}catch(e){}renderActive();if(CLOUD&&CLOUD.isConfigured&&CLOUD.isConfigured())setTimeout(()=>CLOUD.restoreFromCloud('boot-bg').catch(e=>console.warn(LABEL,e)),700);},0);const st=Date.now();const guard=setInterval(()=>{if(holding()&&userView&&activeView()!==userView)setView(userView,true);if(Date.now()-st>60000)clearInterval(guard);},160);console.log(LABEL,'applied');}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
