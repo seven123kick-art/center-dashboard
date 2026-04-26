@@ -11513,7 +11513,19 @@ const REALTIME_TABLE_SYNC = {
     try{
       if(window.SHARE_SYNC && !SHARE_SYNC._realtimeOverride){
         SHARE_SYNC.uploadSharedBundle=function(){return self.upsertBundle();};
-        SHARE_SYNC.shareAllLocalNow=function(){self.scheduleSave(0);self.broadcastPing('manual');};
+        SHARE_SYNC.shareAllLocalNow=async function(){
+          try{
+            if(typeof SHARE_SYNC.msg==='function') SHARE_SYNC.msg('共有データをクラウドへ反映中...','#1a4d7c');
+            let datasetCount=0;
+            if(typeof SHARE_SYNC.uploadDatasets==='function') datasetCount=await SHARE_SYNC.uploadDatasets();
+            await self.upsertBundle();
+            await self.broadcastPing('manual');
+            if(typeof SHARE_SYNC.msg==='function') SHARE_SYNC.msg('✅ 共有化完了<br><span style="color:#4d6a88;font-size:10px">月次/現場データ '+datasetCount+'件をStorageへ保存し、他端末へ通知しました</span>','#15803d');
+          }catch(e){
+            console.warn('共有化失敗',e);
+            if(typeof SHARE_SYNC.msg==='function') SHARE_SYNC.msg('❌ 共有化失敗：'+(e && e.message ? e.message : String(e)),'#b91c1c');
+          }
+        };
         SHARE_SYNC._realtimeOverride=true;
       }
     }catch(e){}
