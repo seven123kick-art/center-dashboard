@@ -8130,33 +8130,35 @@ FIELD_IMPORT2.deleteOne = function(idx) {
    FIELD_UI.renderDataList を拡張して両方を更新
 ══════════════════════════════════════════════════════ */
 (function hookFieldRenderDataList() {
-  const _orig = FIELD_UI.renderDataList?.bind(FIELD_UI);
-  FIELD_UI.renderDataList = function() {
-    if (_orig) _orig.call(this);
-    renderFieldDataList2();
-  };
+  // 遅延してフック（他パッチによる上書き後に確実に適用）
+  setTimeout(() => {
+    const _orig = FIELD_UI.renderDataList?.bind(FIELD_UI);
+    FIELD_UI.renderDataList = function() {
+      if (_orig) _orig.call(this);
+      renderFieldDataList2();
+    };
+  }, 100);
 })();
 
 /* ══════════════════════════════════════════════════════
    FIELD_EVENTS._processFiles 完了後に両方更新
 ══════════════════════════════════════════════════════ */
-(function hookFieldProcessFiles() {
-  const _orig = FIELD_EVENTS._processFiles?.bind(FIELD_EVENTS);
-  if (!_orig) return;
-  FIELD_EVENTS._processFiles = async function(files, ym) {
-    await _orig.call(this, files, ym);
-    renderFieldDataList2();
-    const msg2 = document.getElementById('field-import-msg2');
-    if (msg2 && document.getElementById('field-upload-msg')?.innerHTML) {
-      msg2.innerHTML = document.getElementById('field-upload-msg').innerHTML;
-    }
-  };
-})();
+// hookFieldProcessFiles は下部の遅延版に統合
 
-/* DOMContentLoaded 後に初期描画 */
-document.addEventListener('DOMContentLoaded', () => {
-  setTimeout(renderFieldDataList2, 800);
-});
+/* 初期描画（DOMContentLoadedは既に発火済みなのでsetTimeoutで対応） */
+setTimeout(renderFieldDataList2, 600);
+setTimeout(renderFieldDataList2, 1500); // 復元完了後にも再描画
+
+/* FIELD_EVENTS._processFiles を再度フック
+   ※ 複数パッチで上書きされた最終版を確実に捕捉するため遅延実行 */
+setTimeout(() => {
+  const _latest = FIELD_EVENTS._processFiles;
+  FIELD_EVENTS._processFiles = async function(files, ym) {
+    await _latest.apply(this, arguments);
+    setTimeout(renderFieldDataList2, 200);
+  };
+  console.log('[FIELD_IMPORT2] _processFiles フック完了（遅延版）');
+}, 300);
 
 console.log('[FIELD_IMPORT2] データ取込タブ現場明細セクション 読み込み完了');
 </script>
