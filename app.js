@@ -1,4 +1,4 @@
-/* 金額単位修正版 2026-04-27\n   CSV=円、計画=千円→内部は円で統一\n════════════════════════════════════════════════════════════════\n\n/* ════════════════════════════════════════════════════════════════
+/* 取込管理強化版 2026-04-27\n   ・取込履歴を詳細表示\n   ・同月取込は確認して入替\n   ・履歴から入替/削除可能\n\n/* 金額単位修正版 2026-04-27\n   CSV=円、計画=千円→内部は円で統一\n════════════════════════════════════════════════════════════════\n\n/* ════════════════════════════════════════════════════════════════
    経営管理システム  app.js  v5.0  — Clean Rewrite
    設計方針:
    ・センターはURL固定（URLパラメータ ?c=xxx）、画面内で切替しない
@@ -394,6 +394,7 @@ function upsertDataset(ds) {
 /* ════════ §7 IMPORT ════════════════════════════════════════════ */
 const IMPORT = {
   _pending: [],
+  _replaceYM: null,
 
   handleFiles(files) {
     const arr = Array.from(files);
@@ -401,15 +402,35 @@ const IMPORT = {
     const csv  = arr.filter(f=>/\.csv$/i.test(f.name));
     const xlsx = arr.filter(f=>/\.(xlsx|xls)$/i.test(f.name));
     const pdf  = arr.filter(f=>/\.pdf$/i.test(f.name));
+
+    // 入替モード：年月選択モーダルを出さず、指定済みYMへ直接差替
+    if (csv.length && this._replaceYM) {
+      const ym = this._replaceYM;
+      this._replaceYM = null;
+      this.processCSV(csv, ym, { replace:true }).catch(e=>UI.toast(e.message,'error'));
+      return;
+    }
+
     if (csv.length)  { this._pending = csv; MODAL.openYM(csv); return; }
     if (xlsx.length) { this.importCapacityExcel(xlsx[0]).catch(e=>UI.toast(e.message,'error')); return; }
     if (pdf.length)  { UI.toast('PDF取込は現在実装中です。CSVに変換してください。','warn'); return; }
     UI.toast('対応形式：CSV（収支）・XLSX（キャパ）','warn');
   },
 
-  async processCSV(files, ym) {
+  async processCSV(files, ym, opt={}) {
     const mm = ym.slice(4,6);
     const monthCol = CONFIG.PLAN_MONTH_COLS[mm] ?? null;
+    const existing = STATE.datasets.find(d => d.ym === ym);
+
+    if (existing && !opt.replace) {
+      const label = `${ymLabel(ym)}（${existing.type==='confirmed'?'確定':'速報'} / ${existing.fileName || 'ファイル名なし'}）`;
+      const ok = confirm(`${label} は既に登録されています。\n\n新しいCSVで入れ替えますか？`);
+      if (!ok) {
+        UI.toast('取込を中止しました', 'warn');
+        return;
+      }
+    }
+
     let imported = 0;
     for (const f of files) {
       try {
@@ -421,6 +442,11 @@ const IMPORT = {
         ds.source = 'csv';
         ds.fileName = f.name;
         ds.fiscalYear = fiscalYearFromYM(ym);
+        ds.unit = '円';
+        ds.replacedAt = existing ? new Date().toISOString() : null;
+
+        // 差替時は同じYMを必ず削除してから入れる
+        STATE.datasets = STATE.datasets.filter(d => d.ym !== ym);
         upsertDataset(ds);
         imported++;
       } catch(e) { UI.toast(`${f.name}: ${e.message}`,'error'); }
@@ -459,11 +485,35 @@ const IMPORT = {
   },
 
   deleteDataset(ym) {
-    if (!confirm(`${ymLabel(ym)}のデータを削除しますか？`)) return;
+    const ds = STATE.datasets.find(d=>d.ym===ym);
+    const detail = ds ? `\n${ds.fileName || 'ファイル名なし'}\n収入 ${fmtK(ds.totalIncome)}千円` : '';
+    if (!confirm(`${ymLabel(ym)}のデータを削除しますか？${detail}`)) return;
     STATE.datasets = STATE.datasets.filter(d=>d.ym!==ym);
     STORE.save();
     NAV.refresh();
     UI.toast(`${ymLabel(ym)}を削除しました`);
+  },
+
+  replaceDataset(ym) {
+    const ds = STATE.datasets.find(d=>d.ym===ym);
+    if (!ds) { UI.toast('入替対象データが見つかりません','warn'); return; }
+
+    const ok = confirm(
+      `${ymLabel(ym)}を新しいCSVで入れ替えます。\n\n` +
+      `現在：${ds.fileName || 'ファイル名なし'}\n` +
+      `収入：${fmtK(ds.totalIncome)}千円\n\n` +
+      `続行する場合は、次にCSVを選択してください。`
+    );
+    if (!ok) return;
+
+    this._replaceYM = ym;
+    const input = document.getElementById('file-input');
+    if (input) {
+      input.value = '';
+      input.click();
+    } else {
+      UI.toast('ファイル選択欄が見つかりません','error');
+    }
   },
 
   clearAll() {
@@ -1444,18 +1494,27 @@ function renderImport() {
     if (!STATE.datasets.length) {
       listEl.innerHTML = '<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div>';
     } else {
-      listEl.innerHTML = STATE.datasets.map(ds=>{
+      const sorted = [...STATE.datasets].sort((a,b)=>b.ym.localeCompare(a.ym));
+      listEl.innerHTML = sorted.map(ds=>{
         const fy = ds.fiscalYear || fiscalYearFromYM(ds.ym);
         const sourceLabel = ds.source === 'history' ? '過去補完' : (ds.fileName ? esc(ds.fileName) : 'ファイル名なし');
+        const typeLabel = ds.type === 'confirmed' ? '確定' : '速報';
+        const unitLabel = ds.unit || (ds.source === 'history' ? '千円→円変換' : '円');
         return `
-        <div class="data-item" style="align-items:flex-start">
-          <span class="badge ${ds.type==='confirmed'?'badge-ok':'badge-warn'}">${ds.type==='confirmed'?'確定':'速報'}</span>
-          <span style="flex:1;line-height:1.6">
+        <div class="data-item" style="align-items:flex-start;gap:10px">
+          <span class="badge ${ds.type==='confirmed'?'badge-ok':'badge-warn'}">${typeLabel}</span>
+          <span style="flex:1;line-height:1.65">
             <strong>${ymLabel(ds.ym)}</strong>
-            <span style="margin-left:8px;font-size:11px;color:var(--text2)">${fy}年度</span><br>
-            <span style="font-size:11px;color:var(--text3)">${sourceLabel} ／ ${formatImportedAt(ds.importedAt)}</span>
+            <span style="margin-left:8px;font-size:11px;color:var(--text2)">${fy}年度</span>
+            <span style="margin-left:8px;font-size:10px;color:var(--text3)">単位：${unitLabel}</span><br>
+            <span style="font-size:11px;color:var(--text3)">ファイル：${sourceLabel}</span><br>
+            <span style="font-size:11px;color:var(--text3)">取込日時：${formatImportedAt(ds.importedAt)}</span>
           </span>
-          <span style="font-size:11px;color:var(--text3);margin-right:8px;white-space:nowrap">収入 ${fmtK(ds.totalIncome)}千</span>
+          <span style="font-size:11px;color:var(--text3);margin-right:8px;white-space:nowrap;text-align:right">
+            収入 ${fmtK(ds.totalIncome)}千円<br>
+            費用 ${fmtK(ds.totalExpense)}千円
+          </span>
+          <button class="btn" onclick="IMPORT.replaceDataset('${ds.ym}')" style="font-size:11px;padding:2px 8px">入替</button>
           <button class="btn btn-danger" onclick="IMPORT.deleteDataset('${ds.ym}')" style="font-size:11px;padding:2px 8px">削除</button>
         </div>`;
       }).join('');
@@ -1974,132 +2033,3 @@ document.addEventListener('DOMContentLoaded', () => {
       .catch(()=>{});
   } catch(e) {}
 });
-/* =========================================================
-   取込履歴 強化 PATCH
-   ・履歴表示（年度/ファイル名/単位）
-   ・削除（1件）
-   ・入替（同YM上書き）
-========================================================= */
-(function(){
-  'use strict';
-
-  const HISTORY_KEY = `mgmt5_${CENTER.id}_importHistory`;
-
-  function loadHistory(){
-    try{
-      return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-    }catch(e){ return []; }
-  }
-
-  function saveHistory(list){
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(list || []));
-  }
-
-  function detectUnit(v){
-    if(!v) return '不明';
-    if(v > 100000000) return '円';
-    return '千円';
-  }
-
-  function nowStr(){
-    const d = new Date();
-    return d.getFullYear() + '/' +
-      String(d.getMonth()+1).padStart(2,'0') + '/' +
-      String(d.getDate()).padStart(2,'0') + ' ' +
-      String(d.getHours()).padStart(2,'0') + ':' +
-      String(d.getMinutes()).padStart(2,'0');
-  }
-
-  function fiscalYearFromYM(ym){
-    const y = parseInt(ym.slice(0,4));
-    const m = parseInt(ym.slice(4,6));
-    return m >= 4 ? y : y - 1;
-  }
-
-  // ===== 履歴描画 =====
-  function renderHistory(){
-    const el = document.getElementById('import-history');
-    if(!el) return;
-
-    const list = loadHistory();
-
-    el.innerHTML = list.map((h,i)=>`
-      <div style="border:1px solid #ddd;padding:10px;margin:6px 0;border-radius:6px">
-        <b>${h.ym.slice(0,4)}年${h.ym.slice(4,6)}月（${h.fy}年度）</b><br>
-        ${h.fileName}<br>
-        取込：${h.at}<br>
-        単位：${h.unit}
-        <div style="margin-top:6px">
-          <button onclick="HIST.remove(${i})">削除</button>
-          <button onclick="HIST.replace('${h.ym}')">入替</button>
-        </div>
-      </div>
-    `).join('');
-  }
-
-  // ===== 操作 =====
-  window.HIST = {
-    remove(i){
-      const list = loadHistory();
-      if(!confirm('このデータを削除しますか？')) return;
-
-      const ym = list[i].ym;
-
-      // dataset削除
-      STATE.datasets = (STATE.datasets||[]).filter(d => d.ym !== ym);
-
-      list.splice(i,1);
-      saveHistory(list);
-      STORE.save();
-      NAV.refresh();
-      renderHistory();
-
-      UI.toast('削除しました');
-    },
-
-    replace(ym){
-      alert(`${ym} を再取込してください（同じ月は自動上書きされます）`);
-    },
-
-    add(ds){
-      const list = loadHistory();
-
-      // 同YMがあれば上書き確認
-      const idx = list.findIndex(x=>x.ym===ds.ym);
-      if(idx >= 0){
-        if(!confirm(`${ds.ym}は既に存在します。上書きしますか？`)) return false;
-        list.splice(idx,1);
-      }
-
-      list.unshift({
-        ym: ds.ym,
-        fy: fiscalYearFromYM(ds.ym),
-        fileName: ds.fileName || 'CSV',
-        at: nowStr(),
-        unit: detectUnit(ds.totalIncome)
-      });
-
-      saveHistory(list);
-      return true;
-    }
-  };
-
-  // ===== CSV取込フック =====
-  const _origUpsert = window.upsertDataset;
-  window.upsertDataset = function(ds){
-    if(!HIST.add(ds)) return;
-
-    // 既存上書き
-    STATE.datasets = (STATE.datasets||[]).filter(d=>d.ym !== ds.ym);
-    STATE.datasets.push(ds);
-
-    _origUpsert(ds);
-
-    renderHistory();
-  };
-
-  document.addEventListener('DOMContentLoaded', ()=>{
-    setTimeout(renderHistory,0);
-  });
-
-})();
