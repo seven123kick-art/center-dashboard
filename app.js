@@ -289,8 +289,8 @@ const CSV = {
     }
   }
 
-  return found > 0 ? result : null;
-}
+    return found > 0 ? result : null;
+},
 
   // 計画データ（貼り付けテキスト）解析
   parsePlan(text) {
