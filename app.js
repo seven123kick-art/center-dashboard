@@ -10,6 +10,33 @@
 ════════════════════════════════════════════════════════════════ */
 'use strict';
 
+
+/* ════════ ASSET LOADER（重い外部ライブラリは必要時だけ読む） ════════ */
+const ASSETS = {
+  _promises: {},
+  loadScript(key, src){
+    if (this._promises[key]) return this._promises[key];
+    if ((key === 'supabase' && window.supabase) || (key === 'xlsx' && window.XLSX)) return Promise.resolve(true);
+    this._promises[key] = new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = src;
+      el.async = true;
+      el.onload = () => resolve(true);
+      el.onerror = () => reject(new Error(key + ' の読み込みに失敗しました'));
+      document.head.appendChild(el);
+    });
+    return this._promises[key];
+  },
+  async supabase(){
+    await this.loadScript('supabase', 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');
+    return !!window.supabase;
+  },
+  async xlsx(){
+    await this.loadScript('xlsx', 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+    return !!window.XLSX;
+  }
+};
+
 /* ════════ §1 CONFIG ════════════════════════════════════════════ */
 const CONFIG = {
   SUPABASE_URL:    'https://udjibwlgscdkoheceyds.supabase.co',
@@ -339,7 +366,7 @@ const IMPORT = {
     }
     if (imported > 0) {
       STORE.save();
-      CLOUD.push().catch(()=>{}); // fire-and-forget
+      CLOUD.pushMonth(ym).catch(()=>{}); // 取込月だけ自動同期
       NAV.refresh();
       UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`);
       UI.updateSaveStatus();
@@ -348,6 +375,7 @@ const IMPORT = {
 
   async importCapacityExcel(file) {
     try {
+      await ASSETS.xlsx();
       if (!window.XLSX) { UI.toast('SheetJSが読み込まれていません','error'); return; }
       const buf = await file.arrayBuffer();
       const wb = window.XLSX.read(buf,{type:'array'});
@@ -363,6 +391,7 @@ const IMPORT = {
       if (!Object.keys(areas).length) { UI.toast('地区データが見つかりません（A列:地区名 B列:最大件数）','warn'); return; }
       STATE.capacity = { areas, updatedAt: new Date().toISOString() };
       STORE.save();
+      CLOUD.pushCapacity().catch(()=>{});
       NAV.refresh();
       UI.toast(`キャパ取込完了: ${Object.keys(areas).length}地区`);
     } catch(e) { UI.toast('Excel読込エラー: '+e.message,'error'); }
@@ -426,26 +455,18 @@ const MODAL = {
 /* ════════ §9 CLOUD（Supabase — 取込時のみ自動実行） ═══════════ */
 const CLOUD = {
   _sb: null,
-  _LSKEY: 'mgmt5_cloud_cfg', // localStorage key（センター横断共通）
+  _LSKEY: 'mgmt5_cloud_cfg',
+  _busy: false,
 
-  // 保存済みの接続設定を読む（なければCONFIGのデフォルト）
   _cfg() {
-    try {
-      const s = localStorage.getItem(this._LSKEY);
-      if (s) return JSON.parse(s);
-    } catch(e) {}
+    try { const s = localStorage.getItem(this._LSKEY); if (s) return JSON.parse(s); } catch(e) {}
     return { url: CONFIG.SUPABASE_URL, key: CONFIG.SUPABASE_KEY, bucket: CONFIG.SUPABASE_BUCKET };
   },
-
-  // 接続設定を保存してクライアントをリセット
-  _saveCfg(url, key, bucket) {
-    try { localStorage.setItem(this._LSKEY, JSON.stringify({ url, key, bucket })); } catch(e) {}
-    this._sb = null; // 次回 _client() で再生成
-  },
-
-  _client() {
+  _saveCfg(url, key, bucket) { try { localStorage.setItem(this._LSKEY, JSON.stringify({ url, key, bucket })); } catch(e) {} this._sb = null; },
+  async _client() {
     if (this._sb) return this._sb;
     try {
+      await ASSETS.supabase();
       if (!window.supabase) return null;
       const cfg = this._cfg();
       if (!cfg.url || !cfg.key) return null;
@@ -453,94 +474,140 @@ const CLOUD = {
       return this._sb;
     } catch(e) { return null; }
   },
-
-  _key() { return `${CENTER.id}/data_v5.json`; },
   _bucket() { return this._cfg().bucket || CONFIG.SUPABASE_BUCKET; },
-
-  async push() {
-    const sb = this._client();
+  _manifestKey() { return `${CENTER.id}/manifest.json`; },
+  _datasetKey(ym) { return `${CENTER.id}/skdl/${ym}.json`; },
+  _capacityKey() { return `${CENTER.id}/capacity/master.json`; },
+  _fieldKey() { return `${CENTER.id}/field/data.json`; },
+  _legacyKey() { return `${CENTER.id}/data_v5.json`; },
+  _makeManifest() {
+    return {
+      version: 6,
+      center: CENTER.id,
+      savedAt: new Date().toISOString(),
+      datasets: STATE.datasets.map(d => ({ ym:d.ym, type:d.type, importedAt:d.importedAt || null, totalIncome:d.totalIncome || 0, totalExpense:d.totalExpense || 0, profit:d.profit || 0 })),
+      hasCapacity: !!STATE.capacity,
+      hasFieldData: !!(STATE.fieldData && STATE.fieldData.length),
+    };
+  },
+  async _uploadJSON(key, value) {
+    const sb = await this._client();
     if (!sb) return { ok:false, error:'Supabase未設定' };
+    const blob = new Blob([JSON.stringify(value)], { type:'application/json' });
+    const { error } = await sb.storage.from(this._bucket()).upload(key, blob, { upsert:true, contentType:'application/json' });
+    if (error) throw error;
+    return { ok:true };
+  },
+  async _downloadJSON(key) {
+    const sb = await this._client();
+    if (!sb) return null;
+    const { data, error } = await sb.storage.from(this._bucket()).download(key);
+    if (error) return null;
+    return JSON.parse(await data.text());
+  },
+  async pushMonth(ym) {
+    if (!ym) return { ok:false, error:'対象月なし' };
+    if (this._busy) return { ok:false, error:'同期処理中' };
+    this._busy = true;
     try {
-      const blob = new Blob([JSON.stringify({
-        center: CENTER.id, savedAt: new Date().toISOString(),
-        datasets: STATE.datasets, fieldData: STATE.fieldData, capacity: STATE.capacity,
-      })], { type:'application/json' });
-      const { error } = await sb.storage.from(this._bucket())
-        .upload(this._key(), blob, { upsert:true, contentType:'application/json' });
-      if (error) throw error;
+      const ds = STATE.datasets.find(d => d.ym === ym);
+      if (!ds) return { ok:false, error:'対象月データなし' };
+      await this._uploadJSON(this._datasetKey(ym), ds);
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
       UI.updateCloudBadge('ok');
       return { ok:true };
-    } catch(e) {
-      UI.updateCloudBadge('error');
-      return { ok:false, error: e.message };
-    }
+    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
+    finally { this._busy = false; }
   },
-
+  async pushCapacity() {
+    if (!STATE.capacity) return { ok:false, error:'キャパデータなし' };
+    if (this._busy) return { ok:false, error:'同期処理中' };
+    this._busy = true;
+    try {
+      await this._uploadJSON(this._capacityKey(), STATE.capacity);
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      UI.updateCloudBadge('ok');
+      return { ok:true };
+    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
+    finally { this._busy = false; }
+  },
+  async pushAll() {
+    if (this._busy) return { ok:false, error:'同期処理中' };
+    this._busy = true;
+    try {
+      for (const ds of STATE.datasets) await this._uploadJSON(this._datasetKey(ds.ym), ds);
+      if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
+      if (STATE.fieldData && STATE.fieldData.length) await this._uploadJSON(this._fieldKey(), STATE.fieldData);
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      UI.updateCloudBadge('ok');
+      return { ok:true };
+    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
+    finally { this._busy = false; }
+  },
+  async push() { return this.pushAll(); },
+  async pullManifestAndMissing() {
+    const manifest = await this._downloadJSON(this._manifestKey());
+    if (!manifest || !Array.isArray(manifest.datasets)) return { ok:false, error:'manifestなし' };
+    let changed = 0;
+    for (const meta of manifest.datasets) {
+      if (!meta.ym) continue;
+      const local = STATE.datasets.find(d => d.ym === meta.ym);
+      if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
+        const ds = await this._downloadJSON(this._datasetKey(meta.ym));
+        if (ds && ds.ym) { upsertDataset(ds); changed++; }
+      }
+    }
+    if (manifest.hasCapacity && !STATE.capacity) {
+      const cap = await this._downloadJSON(this._capacityKey());
+      if (cap) { STATE.capacity = cap; changed++; }
+    }
+    if (changed) STORE.save();
+    UI.updateCloudBadge('ok');
+    return { ok:true, changed };
+  },
+  async pullLegacy() {
+    const j = await this._downloadJSON(this._legacyKey());
+    if (!j) return { ok:false, error:'旧形式データなし' };
+    if (j.datasets)  STATE.datasets  = j.datasets;
+    if (j.fieldData) STATE.fieldData = j.fieldData;
+    if (j.capacity)  STATE.capacity  = j.capacity;
+    STORE.save();
+    UI.updateCloudBadge('ok');
+    return { ok:true };
+  },
   async pull() {
-    const sb = this._client();
-    if (!sb) return { ok:false, error:'Supabase未設定' };
-    try {
-      const { data, error } = await sb.storage.from(this._bucket()).download(this._key());
-      if (error) throw error;
-      const j = JSON.parse(await data.text());
-      if (j.datasets)  STATE.datasets  = j.datasets;
-      if (j.fieldData) STATE.fieldData = j.fieldData;
-      if (j.capacity)  STATE.capacity  = j.capacity;
-      STORE.save();
-      UI.updateCloudBadge('ok');
-      return { ok:true };
-    } catch(e) {
-      UI.updateCloudBadge('error');
-      return { ok:false, error: e.message };
-    }
+    try { const r = await this.pullManifestAndMissing(); if (r.ok) return r; return await this.pullLegacy(); }
+    catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
   },
-
-  // 「再接続テスト」ボタン — フォームの値を保存してから接続テスト
   async saveConfig() {
-    const urlEl    = document.getElementById('sb-url');
-    const keyEl    = document.getElementById('sb-key');
-    const bucketEl = document.getElementById('sb-bucket');
-    const msgEl    = document.getElementById('cloud-test-msg');
-
-    const url    = urlEl?.value?.trim()    || CONFIG.SUPABASE_URL;
-    const key    = keyEl?.value?.trim()    || CONFIG.SUPABASE_KEY;
-    const bucket = bucketEl?.value?.trim() || CONFIG.SUPABASE_BUCKET;
-
-    // キーが省略表示（...付き）だったら既存を維持
+    const urlEl=document.getElementById('sb-url'), keyEl=document.getElementById('sb-key'), bucketEl=document.getElementById('sb-bucket'), msgEl=document.getElementById('cloud-test-msg');
+    const url=urlEl?.value?.trim()||CONFIG.SUPABASE_URL;
+    const key=keyEl?.value?.trim()||CONFIG.SUPABASE_KEY;
+    const bucket=bucketEl?.value?.trim()||CONFIG.SUPABASE_BUCKET;
     const finalKey = key.includes('...') ? this._cfg().key : key;
-
     this._saveCfg(url, finalKey, bucket);
-    if (msgEl) msgEl.textContent = '接続テスト中...';
-
-    const r = await this.push();
-    if (msgEl) msgEl.textContent = r.ok ? '✅ 接続OK・同期完了' : '❌ ' + (r.error||'接続失敗');
-    UI.toast(r.ok ? '☁ クラウド接続OK・同期しました' : 'エラー: ' + (r.error||''), r.ok ? 'ok' : 'error');
+    if (msgEl) msgEl.textContent='接続テスト中...';
+    const r=await this.pushAll();
+    if (msgEl) msgEl.textContent = r.ok ? '✅ 接続OK・同期完了' : '❌ '+(r.error||'接続失敗');
+    UI.toast(r.ok ? '☁ クラウド接続OK・同期しました' : 'エラー: '+(r.error||''), r.ok?'ok':'error');
   },
-
   async syncNow() {
-    const msgEl = document.getElementById('cloud-test-msg');
-    if (msgEl) msgEl.textContent = 'クラウドから取得中...';
+    const msgEl=document.getElementById('cloud-test-msg');
+    if (msgEl) msgEl.textContent='クラウドから取得中...';
     UI.toast('クラウドから取得中...');
-    const r = await this.pull();
-    if (msgEl) msgEl.textContent = r.ok ? '✅ 取得完了' : '❌ ' + (r.error||'');
+    const r=await this.pull();
+    if (msgEl) msgEl.textContent = r.ok ? '✅ 取得完了' : '❌ '+(r.error||'');
     if (r.ok) { NAV.refresh(); UI.toast('クラウドからデータを取得しました'); }
-    else UI.toast('取得失敗: ' + (r.error||'不明'), 'error');
+    else UI.toast('取得失敗: '+(r.error||'不明'), 'error');
   },
-
-  // インポート画面のフォームにクラウド設定を反映
   renderForm() {
-    const cfg = this._cfg();
-    const urlEl    = document.getElementById('sb-url');
-    const keyEl    = document.getElementById('sb-key');
-    const bucketEl = document.getElementById('sb-bucket');
-    if (urlEl)    { urlEl.value = cfg.url || ''; urlEl.readOnly = false; }
-    if (keyEl)    { keyEl.value = cfg.key ? cfg.key.slice(0,40)+'...' : ''; keyEl.readOnly = false; }
-    if (bucketEl) { bucketEl.value = cfg.bucket || CONFIG.SUPABASE_BUCKET; }
-
-    // バッジ更新
-    const hasCfg = !!(cfg.url && cfg.key);
-    UI.updateCloudBadge(hasCfg ? 'configured' : 'none');
-  },
+    const cfg=this._cfg();
+    const urlEl=document.getElementById('sb-url'), keyEl=document.getElementById('sb-key'), bucketEl=document.getElementById('sb-bucket');
+    if (urlEl) { urlEl.value=cfg.url||''; urlEl.readOnly=false; }
+    if (keyEl) { keyEl.value=cfg.key ? cfg.key.slice(0,40)+'...' : ''; keyEl.readOnly=false; }
+    if (bucketEl) { bucketEl.value=cfg.bucket||CONFIG.SUPABASE_BUCKET; }
+    UI.updateCloudBadge(cfg.url && cfg.key ? 'configured' : 'none');
+  }
 };
 
 /* ════════ §10 フォーマットヘルパー ════════════════════════════ */
@@ -1426,7 +1493,6 @@ const NAV = {
   // 現在の画面だけ再描画（データ更新後に呼ぶ）
   refresh() {
     this._render(STATE.view);
-    renderImport(); // import画面のリストは常に更新
     UI.updateTopbar(STATE.view);
     UI.updateSaveStatus();
   },
