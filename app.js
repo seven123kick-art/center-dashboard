@@ -1,3 +1,8 @@
+/* 年度別取込パネル統一版 2026-04-27
+   ・計画データと過去実績補完を同じ見え方に統一
+   ・二重表示を防止
+   ・年度別に登録状況/合計/更新日時/削除を表示
+
 /* 速報・確定両保持版 2026-04-27
    ・同一年月で速報値と確定値を別々に保持
    ・ダッシュボード/分析は確定優先、確定がなければ速報
@@ -2141,18 +2146,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 /* =========================================================
-   計画データ表示 統一PATCH
+   年度別 取込状況パネル統一PATCH
    追加日：2026-04-27
+   対象：
+   ・計画データ取込
+   ・過去実績補完データ
    目的：
-   ・計画データの表示欄を1つに統一
-   ・既存の二重表示を非表示
-   ・実際にPLANが参照しているデータを優先して表示
+   ・年度別に何が入っているか常時見える化
+   ・二重表示を防止
+   ・その年度だけ削除
+   ・集計値を0表示にしないよう、科目名に依存しすぎず合計を表示
 ========================================================= */
 (function(){
   'use strict';
 
-  const PLAN_YEAR_KEY = `mgmt5_${CENTER.id}_planDataByFiscalYear`;
+  const PLAN_KEY = `mgmt5_${CENTER.id}_planDataByFiscalYear`;
   const PLAN_META_KEY = `mgmt5_${CENTER.id}_planMetaByFiscalYear`;
+  const HISTORY_META_KEY = `mgmt5_${CENTER.id}_historyMetaByFiscalYear`;
 
   function loadJSON(key, fallback){
     try {
@@ -2169,9 +2179,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch(e) {}
   }
 
-  function currentFY(){
-    const sel = document.getElementById('plan-year-sel');
-    return sel && sel.value ? String(sel.value) : String(new Date().getFullYear());
+  function currentPlanFY(){
+    const el = document.getElementById('plan-year-sel');
+    return el && el.value ? String(el.value) : String(new Date().getFullYear());
+  }
+
+  function currentHistoryFY(){
+    const el = document.getElementById('tsv-year-sel-history');
+    return el && el.value ? String(el.value) : String(new Date().getFullYear());
   }
 
   function formatDateTime(iso){
@@ -2189,53 +2204,71 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function planTotal(plan, labels){
+  function monthsOfFiscalYear(fy){
+    const y = parseInt(fy, 10);
+    return [
+      `${y}04`,`${y}05`,`${y}06`,`${y}07`,`${y}08`,`${y}09`,
+      `${y}10`,`${y}11`,`${y}12`,`${y+1}01`,`${y+1}02`,`${y+1}03`
+    ];
+  }
+
+  function safeNum(v){
+    const n = Number(v || 0);
+    return isNaN(n) ? 0 : n;
+  }
+
+  function allPlanTotal(plan){
+    // どの科目名でも0にならないよう、登録済み全セルを合計する
     if (!plan) return 0;
     let total = 0;
-    labels.forEach(label => {
-      const row = plan[label];
-      if (!row) return;
-      Object.values(row).forEach(v => {
-        const n = Number(v || 0);
-        if (!isNaN(n)) total += n;
-      });
+    Object.values(plan).forEach(row => {
+      if (!row || typeof row !== 'object') return;
+      Object.values(row).forEach(v => total += safeNum(v));
     });
     return total;
   }
 
-  function getPlanForFY(fy){
-    const planMap = loadJSON(PLAN_YEAR_KEY, {});
-    if (planMap && planMap[fy]) return planMap[fy];
-
-    // 念のため、現行STATEが選択年度のものとしてセットされている場合も見る
-    if (STATE && STATE.planData && typeof STATE.planData === 'object' && !Array.isArray(STATE.planData)) {
-      return STATE.planData;
-    }
-
-    return null;
+  function planTotalByHints(plan, hints){
+    if (!plan) return 0;
+    let total = 0;
+    Object.entries(plan).forEach(([label, row]) => {
+      const hit = hints.some(h => String(label || '').includes(h));
+      if (!hit || !row || typeof row !== 'object') return;
+      Object.values(row).forEach(v => total += safeNum(v));
+    });
+    return total;
   }
 
-  function ensureSingleBox(){
-    // 以前の追加表示が残っていたら消す
-    const old1 = document.getElementById('plan-summary-box');
-    if (old1) old1.remove();
+  function historyRowsForFY(fy){
+    const months = monthsOfFiscalYear(fy);
+    return (STATE.datasets || []).filter(d => {
+      const dsFy = d.fiscalYear || fiscalYearFromYM(d.ym);
+      return d.source === 'history' && String(dsFy) === String(fy) && months.includes(d.ym);
+    }).sort((a,b)=>a.ym.localeCompare(b.ym));
+  }
 
-    const old2 = document.getElementById('plan-current-status-box');
-    if (old2) old2.remove();
-
-    // 既存の小さい状態行は二重になるため非表示
-    document.querySelectorAll('[id*="plan-summary"], [id*="plan-current-status"]').forEach(el => {
-      if (el.id !== 'plan-visible-single-box') el.remove();
+  function removeOldBoxes(){
+    [
+      'plan-summary-box',
+      'plan-current-status-box',
+      'plan-visible-single-box',
+      'plan-current-unified-box',
+      'history-current-unified-box'
+    ].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.remove();
     });
+  }
 
-    let box = document.getElementById('plan-visible-single-box');
+  function ensurePlanBox(){
+    let box = document.getElementById('plan-current-unified-box');
     if (box) return box;
 
     const textarea = document.getElementById('plan-paste-area');
     if (!textarea || !textarea.parentNode) return null;
 
     box = document.createElement('div');
-    box.id = 'plan-visible-single-box';
+    box.id = 'plan-current-unified-box';
     box.style.cssText = `
       margin:12px 0 12px;
       padding:14px;
@@ -2250,14 +2283,46 @@ document.addEventListener('DOMContentLoaded', () => {
     return box;
   }
 
-  function render(){
-    const box = ensureSingleBox();
+  function ensureHistoryBox(){
+    let box = document.getElementById('history-current-unified-box');
+    if (box) return box;
+
+    const textarea = document.getElementById('tsv-paste-area-history');
+    if (!textarea || !textarea.parentNode) return null;
+
+    box = document.createElement('div');
+    box.id = 'history-current-unified-box';
+    box.style.cssText = `
+      margin:12px 0 12px;
+      padding:14px;
+      border:2px solid #bbf7d0;
+      border-radius:14px;
+      background:#f0fdf4;
+      color:#0f172a;
+      font-size:13px;
+      line-height:1.7;
+    `;
+    textarea.parentNode.insertBefore(box, textarea);
+    return box;
+  }
+
+  function card(label, value, color){
+    return `
+      <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:10px">
+        <div style="color:#64748b;font-size:11px">${label}</div>
+        <div style="font-weight:900;font-size:16px;color:${color || '#0f172a'}">${value}</div>
+      </div>
+    `;
+  }
+
+  function renderPlanPanel(){
+    const box = ensurePlanBox();
     if (!box) return;
 
-    const fy = currentFY();
-    const plan = getPlanForFY(fy);
-    const meta = loadJSON(PLAN_META_KEY, {})[fy] || {};
-
+    const fy = currentPlanFY();
+    const planMap = loadJSON(PLAN_KEY, {});
+    const metaMap = loadJSON(PLAN_META_KEY, {});
+    const plan = planMap[fy] || null;
     const badge = document.getElementById('plan-badge');
     const msg = document.getElementById('plan-import-msg');
 
@@ -2266,7 +2331,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
           <div>
             <div style="font-weight:900;font-size:15px">${fy}年度の計画データ</div>
-            <div style="color:#64748b">この年度の計画値はまだ入っていません。</div>
+            <div style="color:#64748b">未登録です。この年度の計画値はまだ入っていません。</div>
           </div>
           <span style="padding:5px 10px;border-radius:999px;background:#fef3c7;color:#92400e;font-weight:900">未登録</span>
         </div>
@@ -2279,9 +2344,11 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const income = planTotal(plan, ['営業収益','営業収益計','営業収入','営業収入計','家電収入','一般収入','委託収入','その他収入','保管料収入','コンピュータ収入']);
-    const labor = planTotal(plan, ['人件費','人件費計','給与手当','人材派遣料','その他人件費','旅費']);
+    const allTotal = allPlanTotal(plan);
+    const income = planTotalByHints(plan, ['収益','収入']);
+    const labor = planTotalByHints(plan, ['人件費','給与','人材派遣']);
     const rows = Object.keys(plan).length;
+    const updatedAt = metaMap[fy]?.updatedAt || metaMap[fy]?.savedAt || metaMap[fy]?.importedAt || '不明';
 
     box.innerHTML = `
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
@@ -2291,28 +2358,16 @@ document.addEventListener('DOMContentLoaded', () => {
             <span style="padding:4px 9px;border-radius:999px;background:#d1fae5;color:#065f46;font-weight:900;font-size:12px">登録済</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
-            <div style="background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:10px">
-              <div style="color:#64748b;font-size:11px">年間収入計画</div>
-              <div style="font-weight:900;font-size:16px;color:#1a4d7c">${fmtK(income)}千円</div>
-            </div>
-            <div style="background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:10px">
-              <div style="color:#64748b;font-size:11px">人件費計画</div>
-              <div style="font-weight:900;font-size:16px;color:#1a7a52">${fmtK(labor)}千円</div>
-            </div>
-            <div style="background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:10px">
-              <div style="color:#64748b;font-size:11px">登録科目数</div>
-              <div style="font-weight:900;font-size:16px">${rows}科目</div>
-            </div>
-            <div style="background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:10px">
-              <div style="color:#64748b;font-size:11px">最終更新</div>
-              <div style="font-weight:900;font-size:13px">${formatDateTime(meta.updatedAt || meta.savedAt || meta.importedAt)}</div>
-            </div>
+            ${card('年間収入計画', `${fmtK(income)}千円`, '#1a4d7c')}
+            ${card('人件費計画', `${fmtK(labor)}千円`, '#1a7a52')}
+            ${card('登録科目数', `${rows}科目`, '#0f172a')}
+            ${card('最終更新', `${formatDateTime(updatedAt)}`, '#0f172a')}
           </div>
           <div style="margin-top:8px;color:#64748b;font-size:12px">
-            上書きする場合は、下の貼付欄に新しい計画データを貼り付けて「取込む」を押してください。
+            全登録値合計：${fmtK(allTotal)}千円 ／ 上書きする場合は下の貼付欄に新しい計画データを貼り付けて「取込む」を押してください。
           </div>
         </div>
-        <button class="btn btn-danger" onclick="PLAN_VISIBLE_SINGLE.deleteCurrent()" style="font-size:12px;white-space:nowrap">
+        <button class="btn btn-danger" onclick="YEARLY_IMPORT_PANEL.deletePlan()" style="font-size:12px;white-space:nowrap">
           この年度の計画を削除
         </button>
       </div>
@@ -2325,67 +2380,194 @@ document.addEventListener('DOMContentLoaded', () => {
     if (msg) msg.textContent = `${fy}年度 登録済：${rows}科目`;
   }
 
-  window.PLAN_VISIBLE_SINGLE = {
-    render,
-    markSaved(){
-      const fy = currentFY();
-      const metaMap = loadJSON(PLAN_META_KEY, {});
-      metaMap[fy] = { updatedAt: new Date().toISOString() };
-      saveJSON(PLAN_META_KEY, metaMap);
-      render();
+  function renderHistoryPanel(){
+    const box = ensureHistoryBox();
+    if (!box) return;
+
+    const fy = currentHistoryFY();
+    const rows = historyRowsForFY(fy);
+    const badge = document.getElementById('history-badge');
+    const msg = document.getElementById('tsv-import-msg-history');
+    const meta = loadJSON(HISTORY_META_KEY, {})[fy] || {};
+
+    if (!rows.length) {
+      box.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div>
+            <div style="font-weight:900;font-size:15px">${fy}年度の過去実績補完データ</div>
+            <div style="color:#64748b">未登録です。この年度の補完データはまだ入っていません。</div>
+          </div>
+          <span style="padding:5px 10px;border-radius:999px;background:#fef3c7;color:#92400e;font-weight:900">未登録</span>
+        </div>
+      `;
+      if (badge) {
+        badge.textContent = `${fy}年度 未登録`;
+        badge.className = 'badge badge-warn';
+      }
+      if (msg) msg.textContent = `${fy}年度は未登録です`;
+      return;
+    }
+
+    const income = rows.reduce((s,d)=>s+safeNum(d.totalIncome),0);
+    const expense = rows.reduce((s,d)=>s+safeNum(d.totalExpense),0);
+    const months = rows.map(d=>ymLabel(d.ym)).join('、');
+    const updatedAt = meta.updatedAt || rows.map(d=>d.importedAt).filter(Boolean).sort().pop();
+
+    box.innerHTML = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <div style="font-weight:900;font-size:15px">${fy}年度の過去実績補完データ</div>
+            <span style="padding:4px 9px;border-radius:999px;background:#d1fae5;color:#065f46;font-weight:900;font-size:12px">登録済</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
+            ${card('登録月数', `${rows.length}ヶ月`, '#0f172a')}
+            ${card('収入合計', `${fmtK(income)}千円`, '#1a4d7c')}
+            ${card('費用合計', `${fmtK(expense)}千円`, '#dc2626')}
+            ${card('最終更新', `${formatDateTime(updatedAt)}`, '#0f172a')}
+          </div>
+          <div style="margin-top:8px;color:#64748b;font-size:12px">
+            対象月：${months}
+          </div>
+        </div>
+        <button class="btn btn-danger" onclick="YEARLY_IMPORT_PANEL.deleteHistory()" style="font-size:12px;white-space:nowrap">
+          この年度の補完データを削除
+        </button>
+      </div>
+    `;
+
+    if (badge) {
+      badge.textContent = `${fy}年度 ${rows.length}ヶ月登録済`;
+      badge.className = 'badge badge-ok';
+    }
+    if (msg) msg.textContent = `${fy}年度 登録済：${rows.length}ヶ月`;
+  }
+
+  window.YEARLY_IMPORT_PANEL = {
+    renderAll(){
+      removeOldBoxes();
+      renderPlanPanel();
+      renderHistoryPanel();
     },
-    deleteCurrent(){
-      const fy = currentFY();
-      const planMap = loadJSON(PLAN_YEAR_KEY, {});
-      const metaMap = loadJSON(PLAN_META_KEY, {});
+    renderPlan: renderPlanPanel,
+    renderHistory: renderHistoryPanel,
+    markPlanSaved(){
+      const fy = currentPlanFY();
+      const meta = loadJSON(PLAN_META_KEY, {});
+      meta[fy] = { updatedAt: new Date().toISOString() };
+      saveJSON(PLAN_META_KEY, meta);
+      renderPlanPanel();
+    },
+    markHistorySaved(){
+      const fy = currentHistoryFY();
+      const meta = loadJSON(HISTORY_META_KEY, {});
+      meta[fy] = { updatedAt: new Date().toISOString() };
+      saveJSON(HISTORY_META_KEY, meta);
+      renderHistoryPanel();
+    },
+    deletePlan(){
+      const fy = currentPlanFY();
+      const planMap = loadJSON(PLAN_KEY, {});
+      const meta = loadJSON(PLAN_META_KEY, {});
 
       if (!planMap[fy]) {
         UI.toast(`${fy}年度の計画データは未登録です`, 'warn');
-        render();
+        renderPlanPanel();
         return;
       }
-
       if (!confirm(`${fy}年度の計画データを削除しますか？\n他年度の計画データは削除しません。`)) return;
 
       delete planMap[fy];
-      delete metaMap[fy];
-      saveJSON(PLAN_YEAR_KEY, planMap);
-      saveJSON(PLAN_META_KEY, metaMap);
+      delete meta[fy];
+      saveJSON(PLAN_KEY, planMap);
+      saveJSON(PLAN_META_KEY, meta);
 
-      STATE.planData = null;
+      if (String(STATE.fiscalYear || '') === String(fy)) STATE.planData = null;
       STORE.save();
       NAV.refresh();
-      render();
-
+      renderPlanPanel();
       UI.toast(`${fy}年度の計画データを削除しました`);
+    },
+    deleteHistory(){
+      const fy = currentHistoryFY();
+      const rows = historyRowsForFY(fy);
+      if (!rows.length) {
+        UI.toast(`${fy}年度の過去実績補完データは未登録です`, 'warn');
+        renderHistoryPanel();
+        return;
+      }
+      if (!confirm(`${fy}年度の過去実績補完データ ${rows.length}ヶ月分を削除しますか？\n通常CSVで取り込んだ速報・確定データは削除しません。`)) return;
+
+      STATE.datasets = (STATE.datasets || []).filter(d => {
+        const dsFy = d.fiscalYear || fiscalYearFromYM(d.ym);
+        return !(d.source === 'history' && String(dsFy) === String(fy));
+      });
+
+      const meta = loadJSON(HISTORY_META_KEY, {});
+      delete meta[fy];
+      saveJSON(HISTORY_META_KEY, meta);
+
+      STORE.save();
+      NAV.refresh();
+      renderHistoryPanel();
+      UI.toast(`${fy}年度の過去実績補完データを削除しました`);
     }
   };
 
   document.addEventListener('DOMContentLoaded', function(){
     setTimeout(function(){
-      render();
+      YEARLY_IMPORT_PANEL.renderAll();
 
-      const sel = document.getElementById('plan-year-sel');
-      if (sel && !sel.dataset.planVisibleSingleHooked) {
-        sel.dataset.planVisibleSingleHooked = '1';
-        sel.addEventListener('change', function(){
-          setTimeout(render, 0);
-          setTimeout(render, 100);
+      const planSel = document.getElementById('plan-year-sel');
+      if (planSel && !planSel.dataset.yearlyPanelHooked) {
+        planSel.dataset.yearlyPanelHooked = '1';
+        planSel.addEventListener('change', function(){
+          setTimeout(renderPlanPanel, 0);
+          setTimeout(renderPlanPanel, 100);
         });
       }
 
-      if (window.PLAN && typeof PLAN.importFromPaste === 'function' && !PLAN._visibleSingleHooked) {
-        const originalImport = PLAN.importFromPaste.bind(PLAN);
+      const histSel = document.getElementById('tsv-year-sel-history');
+      if (histSel && !histSel.dataset.yearlyPanelHooked) {
+        histSel.dataset.yearlyPanelHooked = '1';
+        histSel.addEventListener('change', function(){
+          setTimeout(renderHistoryPanel, 0);
+          setTimeout(renderHistoryPanel, 100);
+        });
+      }
+
+      if (window.PLAN && typeof PLAN.importFromPaste === 'function' && !PLAN._yearlyPanelHooked) {
+        const orig = PLAN.importFromPaste.bind(PLAN);
         PLAN.importFromPaste = function(){
-          const fy = currentFY();
-          originalImport();
+          const fy = currentPlanFY();
+          orig();
           setTimeout(function(){
-            const planMap = loadJSON(PLAN_YEAR_KEY, {});
-            if (planMap[fy]) PLAN_VISIBLE_SINGLE.markSaved();
-            else render();
+            const planMap = loadJSON(PLAN_KEY, {});
+            if (planMap[fy]) YEARLY_IMPORT_PANEL.markPlanSaved();
+            else renderPlanPanel();
           }, 150);
         };
-        PLAN._visibleSingleHooked = true;
+        PLAN._yearlyPanelHooked = true;
+      }
+
+      if (window.TSV_IMPORT && typeof TSV_IMPORT.doImportHistory === 'function' && !TSV_IMPORT._yearlyPanelHooked) {
+        const orig = TSV_IMPORT.doImportHistory.bind(TSV_IMPORT);
+        TSV_IMPORT.doImportHistory = function(){
+          orig();
+          setTimeout(function(){
+            YEARLY_IMPORT_PANEL.markHistorySaved();
+          }, 150);
+        };
+        TSV_IMPORT._yearlyPanelHooked = true;
+      }
+
+      if (window.TSV_IMPORT && typeof TSV_IMPORT.doClearHistory === 'function' && !TSV_IMPORT._yearlyPanelClearHooked) {
+        const origClear = TSV_IMPORT.doClearHistory.bind(TSV_IMPORT);
+        TSV_IMPORT.doClearHistory = function(){
+          origClear();
+          setTimeout(renderHistoryPanel, 150);
+        };
+        TSV_IMPORT._yearlyPanelClearHooked = true;
       }
     }, 0);
   });
