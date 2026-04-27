@@ -1637,6 +1637,95 @@ function storageWarnings(fy) {
   if (plan && Object.keys(plan).length && storagePlanAllTotal(plan) === 0) warnings.push('計画データは登録済みですが、数値合計が0です。貼付範囲を確認してください。');
   return warnings;
 }
+
+function storageMonthState(fy, ym) {
+  const rows = (STATE.datasets || []).filter(d => d && d.ym === ym);
+  const csvRows = rows.filter(d => !storageIsHistory(d));
+  const histRows = rows.filter(d => storageIsHistory(d));
+  const confirmed = csvRows.filter(d => (d.type || 'confirmed') === 'confirmed');
+  const daily = csvRows.filter(d => d.type === 'daily');
+  const converted = histRows.filter(d => String(d.unit || '').includes('変換'));
+  const dupMap = {};
+  rows.forEach(d => {
+    const key = `${d.ym}_${d.type || 'confirmed'}_${d.source || 'csv'}`;
+    dupMap[key] = (dupMap[key] || 0) + 1;
+  });
+  const duplicated = Object.values(dupMap).some(c => c > 1);
+  const plan = storagePlanRows(fy);
+
+  let judge = '漏れ';
+  let kind = 'danger';
+  let note = '';
+  if (converted.length || duplicated) {
+    judge = '異常';
+    kind = 'danger';
+    note = converted.length ? '旧変換データあり' : '二重データ疑い';
+  } else if (confirmed.length) {
+    judge = 'OK';
+    kind = 'ok';
+    note = daily.length ? '速報も保持・表示は確定優先' : '確定あり';
+  } else if (daily.length) {
+    judge = '注意';
+    kind = 'warn';
+    note = '速報のみ・確定待ち';
+  } else if (histRows.length) {
+    judge = '補完のみ';
+    kind = 'warn';
+    note = 'CSV未登録';
+  } else {
+    note = 'CSV・補完なし';
+  }
+
+  const csvLabel = confirmed.length && daily.length ? '確定＋速報' : confirmed.length ? '確定' : daily.length ? '速報のみ' : '未登録';
+  const csvKind = confirmed.length ? 'ok' : daily.length ? 'warn' : 'danger';
+  const histLabel = histRows.length ? 'あり' : 'なし';
+  const histKind = histRows.length ? (converted.length ? 'danger' : 'ok') : 'warn';
+  const planLabel = plan ? '登録済' : '未登録';
+  const planKind = plan ? 'ok' : 'warn';
+
+  return { ym, confirmed, daily, histRows, converted, duplicated, csvLabel, csvKind, histLabel, histKind, planLabel, planKind, judge, kind, note };
+}
+function renderMonthlyCheckTable() {
+  const fy = storageFiscalYear();
+  const months = storageFiscalMonths(fy);
+  const states = months.map(ym => storageMonthState(fy, ym));
+  const missingCount = states.filter(s => s.judge === '漏れ').length;
+  const dailyOnlyCount = states.filter(s => s.judge === '注意').length;
+  const abnormalCount = states.filter(s => s.judge === '異常').length;
+  const histOnlyCount = states.filter(s => s.judge === '補完のみ').length;
+
+  const summary = abnormalCount
+    ? storageBadge(`異常 ${abnormalCount}件`, 'danger')
+    : missingCount
+      ? storageBadge(`漏れ ${missingCount}ヶ月`, 'danger')
+      : dailyOnlyCount || histOnlyCount
+        ? storageBadge(`確認 ${dailyOnlyCount + histOnlyCount}ヶ月`, 'warn')
+        : storageBadge('12ヶ月 OK', 'ok');
+
+  return `
+    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+        <div>
+          <div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">${fy}年度：${fy}年4月 ～ ${parseInt(fy,10)+1}年3月（年度順）</div>
+        </div>
+        <div>${summary}</div>
+      </div>
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
+        ${states.map(s=>`
+          <tr>
+            <td><strong>${ymLabel(s.ym)}</strong></td>
+            <td>${storageBadge(s.csvLabel, s.csvKind)}</td>
+            <td>${storageBadge(s.histLabel, s.histKind)}</td>
+            <td>${storageBadge(s.planLabel, s.planKind)}</td>
+            <td>${storageBadge(s.judge, s.kind)}</td>
+            <td style="min-width:220px;color:var(--text2)">${esc(s.note)}</td>
+          </tr>
+        `).join('')}
+      </tbody></table></div>
+    </div>`;
+}
+
 function renderStorageMapTable() {
   const fy = storageFiscalYear();
   const rows = storageRowsForFY(fy);
@@ -1707,50 +1796,58 @@ function renderImport() {
   const listEl = document.getElementById('data-list');
   if (listEl) {
     const storageHtml = renderStorageMapTable();
-    if (!STATE.datasets.length) {
-      listEl.innerHTML = storageHtml + '<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div>';
-    } else {
-      const statusMap = {};
-      (STATE.datasets || []).forEach(d => {
-        const fy = d.fiscalYear || fiscalYearFromYM(d.ym);
-        if (!statusMap[fy]) statusMap[fy] = { confirmed:0, daily:0 };
-        if (d.type === 'daily') statusMap[fy].daily++;
-        else statusMap[fy].confirmed++;
-      });
-      const statusHtml = Object.keys(statusMap).sort().reverse().map(fy => `
-        <div style="padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;font-size:12px">
-          <strong>${fy}年度の登録状況</strong>
-          <span style="margin-left:10px;color:var(--text2)">確定 ${statusMap[fy].confirmed}ヶ月 / 速報 ${statusMap[fy].daily}ヶ月</span>
-        </div>
-      `).join('');
+    const monthlyHtml = renderMonthlyCheckTable();
+    const statusMap = {};
+    (STATE.datasets || []).forEach(d => {
+      const fy = d.fiscalYear || fiscalYearFromYM(d.ym);
+      if (!statusMap[fy]) statusMap[fy] = { confirmed:new Set(), daily:new Set() };
+      if (d.type === 'daily') statusMap[fy].daily.add(d.ym);
+      else statusMap[fy].confirmed.add(d.ym);
+    });
+    const statusHtml = Object.keys(statusMap).sort().reverse().map(fy => `
+      <div style="padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;font-size:12px">
+        <strong>${fy}年度の登録状況</strong>
+        <span style="margin-left:10px;color:var(--text2)">確定 ${statusMap[fy].confirmed.size}ヶ月 / 速報 ${statusMap[fy].daily.size}ヶ月</span>
+      </div>
+    `).join('');
 
-      const sorted = [...STATE.datasets].sort((a,b)=>b.ym.localeCompare(a.ym) || ((a.type||'confirmed')==='confirmed'?-1:1));
-      listEl.innerHTML = storageHtml + statusHtml + sorted.map(ds=>{
-        const fy = ds.fiscalYear || fiscalYearFromYM(ds.ym);
-        const sourceLabel = ds.source === 'history' ? '収支補完' : (ds.fileName ? esc(ds.fileName) : 'ファイル名なし');
-        const typeLabel = ds.type === 'confirmed' ? '確定' : '速報';
-        const unitLabel = ds.unit || (ds.source === 'history' ? '千円' : '円');
-        const incK = storageAmountK(ds,'totalIncome');
-        const expK = storageAmountK(ds,'totalExpense');
-        return `
-        <div class="data-item" style="align-items:flex-start;gap:10px">
-          <span class="badge ${ds.type==='confirmed'?'badge-ok':'badge-warn'}">${typeLabel}</span>
-          <span style="flex:1;line-height:1.65">
-            <strong>${ymLabel(ds.ym)}</strong>
-            <span style="margin-left:8px;font-size:11px;color:var(--text2)">${fy}年度</span>
-            <span style="margin-left:8px;font-size:10px;color:var(--text3)">単位：${unitLabel}</span><br>
-            <span style="font-size:11px;color:var(--text3)">ファイル：${sourceLabel}</span><br>
-            <span style="font-size:11px;color:var(--text3)">取込日時：${formatImportedAt(ds.importedAt)}</span>
-          </span>
-          <span style="font-size:11px;color:var(--text3);margin-right:8px;white-space:nowrap;text-align:right">
-            収入 ${fmt(incK)}千円<br>
-            費用 ${fmt(expK)}千円
-          </span>
-          <button class="btn" onclick="IMPORT.replaceDataset('${ds.ym}','${ds.type || 'confirmed'}')" style="font-size:11px;padding:2px 8px">入替</button>
-          <button class="btn btn-danger" onclick="IMPORT.deleteDataset('${ds.ym}','${ds.type || 'confirmed'}')" style="font-size:11px;padding:2px 8px">削除</button>
-        </div>`;
-      }).join('');
-    }
+    const sorted = [...(STATE.datasets || [])].sort((a,b)=>a.ym.localeCompare(b.ym) || ((a.type||'confirmed')==='confirmed'?-1:1));
+    const detailHtml = sorted.length ? sorted.map(ds=>{
+      const fy = ds.fiscalYear || fiscalYearFromYM(ds.ym);
+      const sourceLabel = ds.source === 'history' ? '収支補完' : (ds.fileName ? esc(ds.fileName) : 'ファイル名なし');
+      const typeLabel = ds.type === 'confirmed' ? '確定' : '速報';
+      const unitLabel = ds.unit || (ds.source === 'history' ? '千円' : '円');
+      const incK = storageAmountK(ds,'totalIncome');
+      const expK = storageAmountK(ds,'totalExpense');
+      return `
+      <div class="data-item" style="align-items:flex-start;gap:10px">
+        <span class="badge ${ds.type==='confirmed'?'badge-ok':'badge-warn'}">${typeLabel}</span>
+        <span style="flex:1;line-height:1.65">
+          <strong>${ymLabel(ds.ym)}</strong>
+          <span style="margin-left:8px;font-size:11px;color:var(--text2)">${fy}年度</span>
+          <span style="margin-left:8px;font-size:10px;color:var(--text3)">単位：${unitLabel}</span><br>
+          <span style="font-size:11px;color:var(--text3)">ファイル：${sourceLabel}</span><br>
+          <span style="font-size:11px;color:var(--text3)">取込日時：${formatImportedAt(ds.importedAt)}</span>
+        </span>
+        <span style="font-size:11px;color:var(--text3);margin-right:8px;white-space:nowrap;text-align:right">
+          収入 ${fmt(incK)}千円<br>
+          費用 ${fmt(expK)}千円
+        </span>
+        <button class="btn" onclick="IMPORT.replaceDataset('${ds.ym}','${ds.type || 'confirmed'}')" style="font-size:11px;padding:2px 8px">入替</button>
+        <button class="btn btn-danger" onclick="IMPORT.deleteDataset('${ds.ym}','${ds.type || 'confirmed'}')" style="font-size:11px;padding:2px 8px">削除</button>
+      </div>`;
+    }).join('') : '<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだ詳細履歴はありません</div>';
+
+    const historyHtml = `
+      <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
+        <summary style="cursor:pointer;padding:12px 14px;font-weight:900;background:#f8fafc;color:var(--text)">詳細履歴を表示</summary>
+        <div style="padding:10px 12px">
+          ${statusHtml || '<div style="padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;font-size:12px;color:var(--text3)">年度別登録状況はまだありません</div>'}
+          ${detailHtml}
+        </div>
+      </details>`;
+
+    listEl.innerHTML = storageHtml + monthlyHtml + historyHtml;
   }
 
   const storageEl = document.getElementById('storage-info');
