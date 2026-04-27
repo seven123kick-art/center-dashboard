@@ -1974,3 +1974,132 @@ document.addEventListener('DOMContentLoaded', () => {
       .catch(()=>{});
   } catch(e) {}
 });
+/* =========================================================
+   取込履歴 強化 PATCH
+   ・履歴表示（年度/ファイル名/単位）
+   ・削除（1件）
+   ・入替（同YM上書き）
+========================================================= */
+(function(){
+  'use strict';
+
+  const HISTORY_KEY = `mgmt5_${CENTER.id}_importHistory`;
+
+  function loadHistory(){
+    try{
+      return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    }catch(e){ return []; }
+  }
+
+  function saveHistory(list){
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list || []));
+  }
+
+  function detectUnit(v){
+    if(!v) return '不明';
+    if(v > 100000000) return '円';
+    return '千円';
+  }
+
+  function nowStr(){
+    const d = new Date();
+    return d.getFullYear() + '/' +
+      String(d.getMonth()+1).padStart(2,'0') + '/' +
+      String(d.getDate()).padStart(2,'0') + ' ' +
+      String(d.getHours()).padStart(2,'0') + ':' +
+      String(d.getMinutes()).padStart(2,'0');
+  }
+
+  function fiscalYearFromYM(ym){
+    const y = parseInt(ym.slice(0,4));
+    const m = parseInt(ym.slice(4,6));
+    return m >= 4 ? y : y - 1;
+  }
+
+  // ===== 履歴描画 =====
+  function renderHistory(){
+    const el = document.getElementById('import-history');
+    if(!el) return;
+
+    const list = loadHistory();
+
+    el.innerHTML = list.map((h,i)=>`
+      <div style="border:1px solid #ddd;padding:10px;margin:6px 0;border-radius:6px">
+        <b>${h.ym.slice(0,4)}年${h.ym.slice(4,6)}月（${h.fy}年度）</b><br>
+        ${h.fileName}<br>
+        取込：${h.at}<br>
+        単位：${h.unit}
+        <div style="margin-top:6px">
+          <button onclick="HIST.remove(${i})">削除</button>
+          <button onclick="HIST.replace('${h.ym}')">入替</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // ===== 操作 =====
+  window.HIST = {
+    remove(i){
+      const list = loadHistory();
+      if(!confirm('このデータを削除しますか？')) return;
+
+      const ym = list[i].ym;
+
+      // dataset削除
+      STATE.datasets = (STATE.datasets||[]).filter(d => d.ym !== ym);
+
+      list.splice(i,1);
+      saveHistory(list);
+      STORE.save();
+      NAV.refresh();
+      renderHistory();
+
+      UI.toast('削除しました');
+    },
+
+    replace(ym){
+      alert(`${ym} を再取込してください（同じ月は自動上書きされます）`);
+    },
+
+    add(ds){
+      const list = loadHistory();
+
+      // 同YMがあれば上書き確認
+      const idx = list.findIndex(x=>x.ym===ds.ym);
+      if(idx >= 0){
+        if(!confirm(`${ds.ym}は既に存在します。上書きしますか？`)) return false;
+        list.splice(idx,1);
+      }
+
+      list.unshift({
+        ym: ds.ym,
+        fy: fiscalYearFromYM(ds.ym),
+        fileName: ds.fileName || 'CSV',
+        at: nowStr(),
+        unit: detectUnit(ds.totalIncome)
+      });
+
+      saveHistory(list);
+      return true;
+    }
+  };
+
+  // ===== CSV取込フック =====
+  const _origUpsert = window.upsertDataset;
+  window.upsertDataset = function(ds){
+    if(!HIST.add(ds)) return;
+
+    // 既存上書き
+    STATE.datasets = (STATE.datasets||[]).filter(d=>d.ym !== ds.ym);
+    STATE.datasets.push(ds);
+
+    _origUpsert(ds);
+
+    renderHistory();
+  };
+
+  document.addEventListener('DOMContentLoaded', ()=>{
+    setTimeout(renderHistory,0);
+  });
+
+})();
