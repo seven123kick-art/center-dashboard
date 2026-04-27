@@ -1,15 +1,15 @@
-/* データ保管場所対応表版 2026-04-28
-   ・保管区分ごとの登録状況を年度別に表示
-   ・計画/収支補完は千円単位のまま保持
-   ・CSVは円単位のまま保持
-   ・二重/壊れた可能性を画面上で警告
-
 /* 速報・確定両保持版 2026-04-27
    ・同一年月で速報値と確定値を別々に保持
    ・ダッシュボード/分析は確定優先、確定がなければ速報
    ・入替/削除は年月＋区分単位
 */
-/* 完全復旧版＋取込区分手動選択 2026-04-27\n   ・取込履歴を詳細表示\n   ・同月取込は確認して入替\n   ・履歴から入替/削除可能\n\n/* 金額単位修正版 2026-04-27\n   CSV=円、計画=千円→内部は円で統一\n════════════════════════════════════════════════════════════════\n\n/* ════════════════════════════════════════════════════════════════
+/* 完全復旧版＋取込区分手動選択 2026-04-27\n   ・取込履歴を詳細表示\n   ・同月取込は確認して入替\n   ・履歴から入替/削除可能\n\n/* 金額単位修正版 2026-04-27\n   CSV=円、計画=千円→内部は円で統一\n════════════════════════════════════════════════════════════════\n\n/* データ保管場所対応表 安定版 2026-04-28
+   ・対応表を読込済みデータ欄の先頭に直接表示
+   ・計画/収支補完は千円単位のまま保持
+   ・CSVは円単位のまま保持
+   ・年度単位で完全入替
+
+/* ════════════════════════════════════════════════════════════════
    経営管理システム  app.js  v5.0  — Clean Rewrite
    設計方針:
    ・センターはURL固定（URLパラメータ ?c=xxx）、画面内で切替しない
@@ -1584,12 +1584,131 @@ const CAPACITY_UI = {
   },
 };
 
+
+/* ════════ §20A データ保管場所対応表ヘルパー ═══════════════════ */
+function storageFiscalYear() {
+  const sel = document.getElementById('storage-fy-select');
+  if (sel && sel.value) return String(sel.value);
+  const plan = document.getElementById('plan-year-sel');
+  if (plan && plan.value) return String(plan.value);
+  return STATE.fiscalYear || getDefaultFiscalYear();
+}
+function storageFiscalMonths(fy) { return monthsOfFiscalYear(String(fy)); }
+function storageRowsForFY(fy) {
+  const months = storageFiscalMonths(fy);
+  return (STATE.datasets || []).filter(d => months.includes(d.ym));
+}
+function storageIsHistory(ds) { return ds && ds.source === 'history'; }
+function storageAmountK(ds, key) {
+  if (!ds) return 0;
+  // CSVは円、収支補完は千円。表示は千円で統一。
+  if (storageIsHistory(ds) || String(ds.unit || '').includes('千円')) return n(ds[key]);
+  return n(ds[key]) / 1000;
+}
+function storageLatestAt(rows) { return rows.map(r=>r.importedAt).filter(Boolean).sort().pop() || ''; }
+function storagePlanPack(fy) { return getPlanPackForFiscalYear(String(fy)); }
+function storagePlanRows(fy) { const p = storagePlanPack(fy); return p ? p.rows : null; }
+function storagePlanAllTotal(plan) {
+  if (!plan) return 0;
+  let total = 0;
+  Object.values(plan).forEach(row => {
+    if (!row || typeof row !== 'object') return;
+    Object.values(row).forEach(v => total += n(v));
+  });
+  return total;
+}
+function storageBadge(text, kind) {
+  const bg = kind === 'ok' ? '#d1fae5' : kind === 'warn' ? '#fef3c7' : '#fee2e2';
+  const fg = kind === 'ok' ? '#065f46' : kind === 'warn' ? '#92400e' : '#991b1b';
+  return `<span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${bg};color:${fg};font-weight:900;font-size:11px">${text}</span>`;
+}
+function storageWarnings(fy) {
+  const warnings = [];
+  const rows = storageRowsForFY(fy);
+  const keyCount = {};
+  rows.forEach(d => {
+    const key = `${d.ym}_${d.type || 'confirmed'}_${d.source || 'csv'}`;
+    keyCount[key] = (keyCount[key] || 0) + 1;
+  });
+  if (Object.values(keyCount).some(c => c > 1)) warnings.push('同じ年月・区分・種別のデータが二重に残っている可能性があります。');
+  const converted = rows.filter(d => storageIsHistory(d) && String(d.unit || '').includes('変換'));
+  if (converted.length) warnings.push(`収支補完に古い「千円→円変換」表記のデータが ${converted.length}件 残っています。再取込を推奨します。`);
+  const plan = storagePlanRows(fy);
+  if (plan && Object.keys(plan).length && storagePlanAllTotal(plan) === 0) warnings.push('計画データは登録済みですが、数値合計が0です。貼付範囲を確認してください。');
+  return warnings;
+}
+function renderStorageMapTable() {
+  const fy = storageFiscalYear();
+  const rows = storageRowsForFY(fy);
+  const csvRows = rows.filter(d => !storageIsHistory(d));
+  const histRows = rows.filter(d => storageIsHistory(d));
+  const plan = storagePlanRows(fy);
+  const planPack = storagePlanPack(fy);
+  const monthsConfirmed = new Set(csvRows.filter(d => (d.type || 'confirmed') === 'confirmed').map(d=>d.ym)).size;
+  const monthsDaily = new Set(csvRows.filter(d => d.type === 'daily').map(d=>d.ym)).size;
+  const histMonths = new Set(histRows.map(d=>d.ym)).size;
+  const fieldRows = (STATE.fieldData || []).filter(d => !d.ym || storageFiscalMonths(fy).includes(d.ym));
+  const shipperRows = csvRows.filter(d => d.shippers && Object.keys(d.shippers).length);
+  const warnings = storageWarnings(fy);
+
+  const years = new Set([String(fy), getDefaultFiscalYear()]);
+  (STATE.datasets || []).forEach(d => years.add(String(d.fiscalYear || fiscalYearFromYM(d.ym))));
+  if (STATE.planData && typeof STATE.planData === 'object') {
+    Object.keys(STATE.planData).forEach(y => /^\d{4}$/.test(y) && years.add(y));
+  }
+  const yearOptions = [...years].sort().reverse().map(y => `<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('');
+
+  const tableRows = [
+    ['収支実績CSV', `${fy}年度`, (monthsConfirmed||monthsDaily)?storageBadge('登録済','ok'):storageBadge('未登録','warn'), `確定 ${monthsConfirmed}ヶ月 / 速報 ${monthsDaily}ヶ月`, '円', formatImportedAt(storageLatestAt(csvRows)), 'SKDL0001/0003。速報と確定は両方保持。表示は確定優先。', '月別一覧から入替/削除'],
+    ['計画データ', `${fy}年度`, plan?storageBadge('登録済','ok'):storageBadge('未登録','warn'), plan?`${Object.keys(plan).length}科目 / 合計 ${fmt(storagePlanAllTotal(plan))}千円`:'0科目', '千円', formatImportedAt(planPack?.importedAt), '年度単位で完全独立。取込時は年度丸ごと入替。', `<button class="btn btn-danger" onclick="DATA_STORAGE_TABLE.deletePlan('${fy}')" style="font-size:11px;padding:3px 8px">年度削除</button>`],
+    ['収支補完', `${fy}年度`, histMonths?storageBadge('登録済','ok'):storageBadge('未登録','warn'), histMonths?`${histMonths}ヶ月 / 収入 ${fmt(histRows.reduce((s,d)=>s+storageAmountK(d,'totalIncome'),0))}千円`:'0ヶ月', '千円', formatImportedAt(storageLatestAt(histRows)), 'SKKS月次収支照会の貼付。年度単位で完全入替。', `<button class="btn btn-danger" onclick="DATA_STORAGE_TABLE.deleteHistory('${fy}')" style="font-size:11px;padding:3px 8px">年度削除</button>`],
+    ['エリア補完', `${fy}年度`, fieldRows.length?storageBadge('登録済','ok'):storageBadge('未登録','warn'), fieldRows.length?`${fieldRows.length}件`:'0件', '件数', '—', '作業者別CSV・エリアPDF由来。今後、年度別保管に拡張。', '今後実装'],
+    ['荷主別データ', `${fy}年度`, shipperRows.length?storageBadge('登録済','ok'):storageBadge('未登録','warn'), shipperRows.length?`${shipperRows.length}ヶ月`:'0ヶ月', '円', formatImportedAt(storageLatestAt(shipperRows)), '荷主別CSVまたはSKDL内の荷主情報。未取込なら荷主分析は出ません。', '今後実装'],
+  ];
+
+  return `
+    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="font-weight:900;font-size:14px">データ保管場所 対応表</div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+          <span style="color:var(--text2)">対象年度</span>
+          <select id="storage-fy-select" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${yearOptions}</select>
+        </div>
+      </div>
+      ${warnings.length ? `<div style="border:1px solid #fca5a5;background:#fef2f2;color:#991b1b;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px;line-height:1.7"><strong>確認が必要なデータがあります</strong><br>${warnings.map(w=>'・'+esc(w)).join('<br>')}</div>` : `<div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px">この年度の保管状況に大きな異常は見つかりません。</div>`}
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>保管区分</th><th>対象</th><th>登録状況</th><th>件数/月数</th><th>元単位</th><th>最終更新</th><th>説明</th><th>操作</th></tr></thead><tbody>
+        ${tableRows.map(r=>`<tr><td><strong>${esc(r[0])}</strong></td><td>${esc(r[1])}</td><td>${r[2]}</td><td>${r[3]}</td><td>${esc(r[4])}</td><td>${esc(r[5])}</td><td style="min-width:260px;color:var(--text2)">${esc(r[6])}</td><td>${r[7]}</td></tr>`).join('')}
+      </tbody></table></div>
+    </div>`;
+}
+window.DATA_STORAGE_TABLE = {
+  changeFY(fy){ STATE.fiscalYear = String(fy); renderImport(); },
+  deletePlan(fy){
+    if (!STATE.planData || !STATE.planData[fy]) { UI.toast(`${fy}年度の計画データは未登録です`,'warn'); return; }
+    if (!confirm(`${fy}年度の計画データを削除しますか？\n他年度は削除しません。`)) return;
+    delete STATE.planData[fy];
+    STORE.save();
+    NAV.refresh();
+    UI.toast(`${fy}年度の計画データを削除しました`);
+  },
+  deleteHistory(fy){
+    const rows = (STATE.datasets || []).filter(d => storageIsHistory(d) && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy));
+    if (!rows.length) { UI.toast(`${fy}年度の収支補完データは未登録です`,'warn'); return; }
+    if (!confirm(`${fy}年度の収支補完データ ${rows.length}件を削除しますか？\n通常CSVは削除しません。`)) return;
+    STATE.datasets = (STATE.datasets || []).filter(d => !(storageIsHistory(d) && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy)));
+    STORE.save();
+    NAV.refresh();
+    UI.toast(`${fy}年度の収支補完データを削除しました`);
+  }
+};
+
 /* ════════ §20 RENDER — Import ═════════════════════════════════ */
 function renderImport() {
   const listEl = document.getElementById('data-list');
   if (listEl) {
+    const storageHtml = renderStorageMapTable();
     if (!STATE.datasets.length) {
-      listEl.innerHTML = '<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div>';
+      listEl.innerHTML = storageHtml + '<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div>';
     } else {
       const statusMap = {};
       (STATE.datasets || []).forEach(d => {
@@ -1606,11 +1725,13 @@ function renderImport() {
       `).join('');
 
       const sorted = [...STATE.datasets].sort((a,b)=>b.ym.localeCompare(a.ym) || ((a.type||'confirmed')==='confirmed'?-1:1));
-      listEl.innerHTML = statusHtml + sorted.map(ds=>{
+      listEl.innerHTML = storageHtml + statusHtml + sorted.map(ds=>{
         const fy = ds.fiscalYear || fiscalYearFromYM(ds.ym);
-        const sourceLabel = ds.source === 'history' ? '過去補完' : (ds.fileName ? esc(ds.fileName) : 'ファイル名なし');
+        const sourceLabel = ds.source === 'history' ? '収支補完' : (ds.fileName ? esc(ds.fileName) : 'ファイル名なし');
         const typeLabel = ds.type === 'confirmed' ? '確定' : '速報';
-        const unitLabel = ds.unit || (ds.source === 'history' ? '千円→円変換' : '円');
+        const unitLabel = ds.unit || (ds.source === 'history' ? '千円' : '円');
+        const incK = storageAmountK(ds,'totalIncome');
+        const expK = storageAmountK(ds,'totalExpense');
         return `
         <div class="data-item" style="align-items:flex-start;gap:10px">
           <span class="badge ${ds.type==='confirmed'?'badge-ok':'badge-warn'}">${typeLabel}</span>
@@ -1622,8 +1743,8 @@ function renderImport() {
             <span style="font-size:11px;color:var(--text3)">取込日時：${formatImportedAt(ds.importedAt)}</span>
           </span>
           <span style="font-size:11px;color:var(--text3);margin-right:8px;white-space:nowrap;text-align:right">
-            収入 ${fmtK(ds.totalIncome)}千円<br>
-            費用 ${fmtK(ds.totalExpense)}千円
+            収入 ${fmt(incK)}千円<br>
+            費用 ${fmt(expK)}千円
           </span>
           <button class="btn" onclick="IMPORT.replaceDataset('${ds.ym}','${ds.type || 'confirmed'}')" style="font-size:11px;padding:2px 8px">入替</button>
           <button class="btn btn-danger" onclick="IMPORT.deleteDataset('${ds.ym}','${ds.type || 'confirmed'}')" style="font-size:11px;padding:2px 8px">削除</button>
@@ -1632,21 +1753,17 @@ function renderImport() {
     }
   }
 
-  // ストレージ情報
   const storageEl = document.getElementById('storage-info');
   if (storageEl) {
     const info = STORE.storageInfo();
     storageEl.innerHTML = `使用容量: <strong>${info.kb} KB</strong>（センター: ${CENTER.name}）`;
   }
 
-  // クラウド設定フォームを更新（URL/Key/バッジ）
   CLOUD.renderForm();
 
-  // センター情報
   const descEl = document.getElementById('import-target-desc');
   if (descEl) descEl.textContent = `取込先: ${CENTER.name}（${CENTER.id}）`;
 
-  // 計画バッジ（年度別）
   const planBadge = document.getElementById('plan-badge');
   if (planBadge) {
     const fy = getSelectedFiscalYear('plan-year-sel');
@@ -1957,19 +2074,32 @@ const PLAN = {
       if (msg) msg.textContent = '解析失敗';
       return;
     }
-    if (STATE.planData[fy] && !confirm(`${fy}年度の計画データは既に登録されています。上書きしますか？`)) return;
-    STATE.planData[fy] = { rows: plan, fiscalYear: fy, importedAt: new Date().toISOString(), itemCount: Object.keys(plan).length };
+    if (STATE.planData[fy]) {
+      const ok = confirm(`${fy}年度の計画データは既に登録されています。\n\n今回の貼付データで、${fy}年度の計画データをすべて入れ替えますか？\n\n※差分追加ではありません。既存の${fy}年度計画を削除してから登録します。`);
+      if (!ok) return;
+      delete STATE.planData[fy];
+    }
+    STATE.planData[fy] = {
+      rows: plan,
+      fiscalYear: fy,
+      importedAt: new Date().toISOString(),
+      itemCount: Object.keys(plan).length,
+      unit:'千円',
+      mode:'full_replace'
+    };
     STORE.save();
+    const area = document.getElementById('plan-paste-area');
+    if (area) area.value = '';
     const count = Object.keys(plan).length;
-    if (msg) msg.textContent = `${fy}年度 取込完了: ${count}科目`;
+    if (msg) msg.textContent = `${fy}年度 完全入替完了: ${count}科目`;
     renderImport();
     NAV.refresh();
-    UI.toast(`${fy}年度 計画データ取込完了（${count}科目）`);
+    UI.toast(`${fy}年度 計画データを完全入替しました（${count}科目）`);
   },
   clear() {
     const fy = getSelectedFiscalYear('plan-year-sel');
     if (!STATE.planData[fy]) { UI.toast(`${fy}年度の計画データは未登録です`, 'warn'); return; }
-    if (!confirm(`${fy}年度の計画データを削除しますか？`)) return;
+    if (!confirm(`${fy}年度の計画データを削除しますか？\n他年度は削除しません。`)) return;
     delete STATE.planData[fy];
     STORE.save();
     const msg = document.getElementById('plan-import-msg');
@@ -1987,14 +2117,20 @@ const TSV_IMPORT = {
     const fy = getSelectedFiscalYear('tsv-year-sel-history');
     const msg = document.getElementById('tsv-import-msg-history');
     if (!text.trim()) { UI.toast('貼付欄が空です','warn'); if (msg) msg.textContent='貼付欄が空です'; return; }
-    const targetMonths = monthsOfFiscalYear(fy);
-    const existing = STATE.datasets.filter(d=>targetMonths.includes(d.ym));
-    if (existing.length && !confirm(`${fy}年度には既に${existing.length}ヶ月分のデータがあります。過去実績補完として上書きする月が出る可能性があります。続行しますか？`)) return;
 
-    // TSV → CSV変換して月ごとに処理
+    const existing = STATE.datasets.filter(d => d.source === 'history' && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy));
+    if (existing.length) {
+      const ok = confirm(`${fy}年度の収支補完データは既に${existing.length}件登録されています。\n\n今回の貼付データで、${fy}年度の収支補完データをすべて入れ替えますか？\n\n※差分追加ではありません。既存の${fy}年度補完データを削除してから登録します。\n※通常CSVの速報・確定データは削除しません。`);
+      if (!ok) return;
+    }
+
     const rows = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n')
       .filter(l=>l.trim()).map(l=>l.split(/\t/));
     if (!rows.length) { UI.toast('データが空です','warn'); return; }
+
+    // 年度の収支補完のみ全削除。通常CSVは残す。
+    STATE.datasets = STATE.datasets.filter(d => !(d.source === 'history' && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy)));
+
     const months = ['04','05','06','07','08','09','10','11','12','01','02','03'];
     let imported = 0;
     for (let mi=0; mi<months.length; mi++) {
@@ -2003,9 +2139,10 @@ const TSV_IMPORT = {
       const dsRows = {};
       for (const row of rows) {
         const label = (row[0]||'').replace(/[\s　]/g,'');
-        const ALL = new Set([...CONFIG.INCOME_KEYS,...CONFIG.EXPENSE_KEYS]);
+        const ALL = new Set([...CONFIG.INCOME_KEYS,...CONFIG.EXPENSE_KEYS, ...CONFIG.INCOME_SUB_KEYS]);
         if (!ALL.has(label)) continue;
         const v = parseFloat((row[colIdx]||'').replace(/,/g,''));
+        // 収支補完は元データが「千円」単位のため、変換せず千円のまま保持する
         if (!isNaN(v) && v!==0) dsRows[label] = v;
       }
       if (Object.keys(dsRows).length > 0) {
@@ -2013,26 +2150,32 @@ const TSV_IMPORT = {
         const ym = year+mm;
         const ds = processDataset(ym,'confirmed',dsRows);
         ds.source = 'history';
-        ds.fileName = '過去実績補完ペースト';
+        ds.fileName = '収支補完';
         ds.fiscalYear = fy;
+        ds.unit = '千円';
+        ds.importedAt = new Date().toISOString();
         upsertDataset(ds);
         imported++;
       }
     }
     STORE.save();
     NAV.refresh();
-    if (msg) msg.textContent = `${fy}年度 取込完了: ${imported}ヶ月`;
-    UI.toast(`${fy}年度 過去実績 ${imported}ヶ月を取込みました`);
+    if (msg) msg.textContent = `${fy}年度 完全入替完了: ${imported}ヶ月`;
+    UI.toast(`${fy}年度 収支補完 ${imported}ヶ月を完全入替しました`);
   },
   doClearHistory() {
     const fy = getSelectedFiscalYear('tsv-year-sel-history');
-    if (!confirm(`${fy}年度の過去実績補完データだけを削除しますか？\n※通常CSVで取り込んだデータは削除しません。`)) return;
+    const rows = STATE.datasets.filter(d => d.source === 'history' && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy));
+    if (!rows.length) { UI.toast(`${fy}年度の収支補完データは未登録です`, 'warn'); return; }
+    if (!confirm(`${fy}年度の収支補完データ ${rows.length}件を削除しますか？\n※通常CSVで取り込んだデータは削除しません。`)) return;
     const before = STATE.datasets.length;
-    STATE.datasets = STATE.datasets.filter(d => !(d.source === 'history' && (d.fiscalYear || fiscalYearFromYM(d.ym)) === fy));
+    STATE.datasets = STATE.datasets.filter(d => !(d.source === 'history' && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy)));
     STORE.save();
+    const deleted = before - STATE.datasets.length;
+    renderImport();
     NAV.refresh();
-    UI.toast(`${fy}年度の過去実績補完データを${before-STATE.datasets.length}件削除しました`);
-  },
+    UI.toast(`${fy}年度 収支補完 ${deleted}件を削除しました`);
+  }
 };
 
 // 現場データ取込2（インポート画面の2つ目のゾーン）
