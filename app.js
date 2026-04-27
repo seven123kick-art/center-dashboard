@@ -1,4 +1,4 @@
-/* ════════════════════════════════════════════════════════════════
+/* 金額単位修正版 2026-04-27\n   CSV=円、計画=千円→内部は円で統一\n════════════════════════════════════════════════════════════════\n\n/* ════════════════════════════════════════════════════════════════
    経営管理システム  app.js  v5.0  — Clean Rewrite
    設計方針:
    ・センターはURL固定（URLパラメータ ?c=xxx）、画面内で切替しない
@@ -254,45 +254,89 @@ const CSV = {
   },
 
   // SKDL形式CSVを解析
-  // monthCol: PLAN_MONTH_COLS[mm] 値。nullなら先頭数値列を採用
+  // CSVの金額は「円」で取り込む。計上日・コード・荷主コードなどを金額として拾わない。
   parseSKDL(text, monthCol) {
-  const rows = this.toRows(text);
-  const ALL = new Set([...CONFIG.INCOME_KEYS,...CONFIG.EXPENSE_KEYS,...CONFIG.INCOME_SUB_KEYS]);
-  const result = {};
-  let found = 0;
+    const rows = this.toRows(text);
+    const ALL = new Set([...CONFIG.INCOME_KEYS,...CONFIG.EXPENSE_KEYS,...CONFIG.INCOME_SUB_KEYS]);
+    const result = {};
+    let found = 0;
 
-  for (const row of rows) {
-    if (!row.length) continue;
+    if (!rows.length) return null;
 
-    // ▼科目をどの列からでも検出
-    let label = null;
-    for (let i = 0; i < row.length; i++) {
-      const v = (row[i] || '').replace(/[\s　\u3000]/g,'');
-      if (ALL.has(v)) {
-        label = v;
-        break;
+    // ヘッダーがあるCSVなら「収支科目名」「金額」を優先して読む
+    const header = rows[0].map(v => String(v || '').replace(/[\s　\u3000]/g,''));
+    const labelCol = header.findIndex(v => v === '収支科目名' || v === '経費計上先収支科目名');
+    const amountCol = header.findIndex(v => v === '金額');
+
+    function toNumber(v) {
+      const s = String(v ?? '').replace(/,/g,'').replace(/[円千]/g,'').replace(/[^\d.\-]/g,'');
+      if (!s || s === '-' || s === '.') return null;
+      const num = parseFloat(s);
+      return isNaN(num) ? null : num;
+    }
+
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row.length) continue;
+
+      let label = null;
+      let labelIndex = -1;
+
+      // 1) ヘッダー位置で科目名を読む
+      if (labelCol >= 0) {
+        const v = String(row[labelCol] || '').replace(/[\s　\u3000]/g,'');
+        if (ALL.has(v)) {
+          label = v;
+          labelIndex = labelCol;
+        }
+      }
+
+      // 2) ヘッダーがない場合は、行内から科目名を探す
+      if (!label) {
+        for (let i = 0; i < row.length; i++) {
+          const v = String(row[i] || '').replace(/[\s　\u3000]/g,'');
+          if (ALL.has(v)) {
+            label = v;
+            labelIndex = i;
+            break;
+          }
+        }
+      }
+
+      if (!label) continue;
+
+      let val = null;
+
+      // 3) ヘッダー位置の「金額」を最優先
+      if (amountCol >= 0) {
+        val = toNumber(row[amountCol]);
+      }
+
+      // 4) 計画表のような月列指定がある場合だけ、指定列を使う
+      if (val === null && monthCol != null && row[monthCol] !== undefined) {
+        val = toNumber(row[monthCol]);
+      }
+
+      // 5) 最後の保険：科目名より右側の数値だけを見る
+      //    日付・会社コード・科目コードなど、科目名より左の数字は金額として使わない
+      if (val === null) {
+        for (let i = labelIndex + 1; i < row.length; i++) {
+          const num = toNumber(row[i]);
+          if (num !== null) {
+            val = num;
+            break;
+          }
+        }
+      }
+
+      if (val !== null) {
+        result[label] = (result[label] || 0) + val;
+        found++;
       }
     }
-    if (!label) continue;
-
-    // ▼数値をどの列からでも取得
-    let val = null;
-    for (let i=0; i<row.length; i++) {
-      const num = parseFloat((row[i]||'').replace(/,/g,'').replace(/[^\d.\-]/g,''));
-      if (!isNaN(num)) {
-        val = num;
-        break;
-      }
-    }
-
-    if (val !== null) {
-      result[label] = (result[label]||0) + val;
-      found++;
-    }
-  }
 
     return found > 0 ? result : null;
-},
+  },
 
   // 計画データ（貼り付けテキスト）解析
   parsePlan(text) {
@@ -305,7 +349,8 @@ const CSV = {
       const vals = {};
       for (const [mm, col] of Object.entries(CONFIG.PLAN_MONTH_COLS)) {
         const v = parseFloat((row[col]||'').replace(/,/g,''));
-        if (!isNaN(v)) vals[mm] = v;
+        // 計画データはSKKS/Excel上では「千円」単位のため、内部保存は円に統一する
+        if (!isNaN(v)) vals[mm] = v * 1000;
       }
       if (Object.keys(vals).length > 0) plan[label] = vals;
     }
