@@ -1,3 +1,8 @@
+/* 単位修正＋重複確認版 2026-04-28
+   ・CSV=円、計画/収支補完=千円保持
+   ・収支補完は表示時だけ円換算して既存グラフ/KPIに合わせる
+   ・重複・異常データ確認表を追加
+*/
 /* 速報・確定両保持版 2026-04-27
    ・同一年月で速報値と確定値を別々に保持
    ・ダッシュボード/分析は確定優先、確定がなければ速報
@@ -803,6 +808,26 @@ function ratio(a,b) { if(!a||!b) return '—'; return pct((a/b-1)*100); }
 function ymLabel(ym) { return ym ? `${ym.slice(0,4)}年${parseInt(ym.slice(4,6))}月` : '—'; }
 function dt() { return new Date().toISOString().slice(0,10); }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function datasetStoredAsKyen(ds) {
+  if (!ds) return false;
+  return ds.source === 'history' || String(ds.unit || '').includes('千円');
+}
+function normalizeDatasetForDisplay(ds) {
+  // 画面・グラフ・PLは従来どおり「内部=円」を前提に計算しているため、
+  // 収支補完（元単位=千円）だけ表示用に円換算したコピーを返す。
+  // STATE本体は変更しない。保存データは千円のまま保持する。
+  if (!datasetStoredAsKyen(ds)) return ds;
+  const out = { ...ds, _displayNormalizedFromKyen: true };
+  ['totalIncome','totalExpense','profit','laborCost','fixedCost','varCost'].forEach(k => {
+    if (out[k] != null && !isNaN(out[k])) out[k] = n(out[k]) * 1000;
+  });
+  if (ds.rows && typeof ds.rows === 'object') {
+    out.rows = {};
+    Object.keys(ds.rows).forEach(k => { out.rows[k] = n(ds.rows[k]) * 1000; });
+  }
+  return out;
+}
 function activeDatasets() {
   // 表示・分析用：同じ年月に速報と確定がある場合は、確定を優先する
   const map = {};
@@ -821,7 +846,7 @@ function activeDatasets() {
       map[d.ym] = d;
     }
   }
-  return Object.values(map).sort((a,b)=>a.ym.localeCompare(b.ym));
+  return Object.values(map).sort((a,b)=>a.ym.localeCompare(b.ym)).map(normalizeDatasetForDisplay);
 }
 function activeDatasetByYM(ym) {
   return activeDatasets().find(d => d.ym === ym) || null;
@@ -1726,6 +1751,80 @@ function renderMonthlyCheckTable() {
     </div>`;
 }
 
+
+function storageDataQualityRows(fy) {
+  const months = storageFiscalMonths(fy);
+  const rows = (STATE.datasets || []).filter(d => d && months.includes(d.ym));
+  const out = [];
+
+  const groups = {};
+  rows.forEach(d => {
+    const source = storageIsHistory(d) ? '収支補完' : '収支CSV';
+    const type = d.type === 'daily' ? '速報' : '確定';
+    const key = `${d.ym}_${source}_${type}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(d);
+  });
+  Object.values(groups).forEach(list => {
+    if (list.length > 1) {
+      const d = list[0];
+      out.push({level:'異常', ym:d.ym, item: storageIsHistory(d) ? '収支補完' : '収支CSV', detail:`同じ年月・同じ区分が ${list.length}件あります`, action:'不要な重複データを削除または年度再取込で整理'});
+    }
+  });
+
+  rows.forEach(d => {
+    const source = storageIsHistory(d) ? '収支補完' : '収支CSV';
+    const unit = String(d.unit || '');
+    const fyActual = String(d.fiscalYear || fiscalYearFromYM(d.ym));
+    const incomeK = storageAmountK(d, 'totalIncome');
+    const expenseK = storageAmountK(d, 'totalExpense');
+
+    if (unit.includes('変換')) {
+      out.push({level:'異常', ym:d.ym, item:source, detail:`単位表記が「${unit}」です`, action:'旧変換版データのため、該当年度の収支補完を削除して再取込'});
+    }
+    if (!storageIsHistory(d) && unit && unit !== '円') {
+      out.push({level:'確認', ym:d.ym, item:source, detail:`CSVの元単位が「${unit}」になっています`, action:'SKDL CSVは円単位。取込元または過去データを確認'});
+    }
+    if (storageIsHistory(d) && unit && !unit.includes('千円')) {
+      out.push({level:'確認', ym:d.ym, item:source, detail:`収支補完の元単位が「${unit}」になっています`, action:'収支補完は千円単位。再取込を推奨'});
+    }
+    if (fyActual !== String(fy)) {
+      out.push({level:'異常', ym:d.ym, item:source, detail:`年度情報が ${fyActual}年度 になっています`, action:`${ymLabel(d.ym)}は${fiscalYearFromYM(d.ym)}年度扱い。年度ズレを確認`});
+    }
+    if ((incomeK > 0 && incomeK < 100) || (expenseK > 0 && expenseK < 100)) {
+      out.push({level:'確認', ym:d.ym, item:source, detail:`金額が小さすぎる可能性があります（収入 ${fmt(incomeK)}千円 / 費用 ${fmt(expenseK)}千円）`, action:'千円データをさらに÷1000していないか確認'});
+    }
+  });
+
+  return out.sort((a,b)=>a.ym.localeCompare(b.ym) || a.item.localeCompare(b.item,'ja'));
+}
+function renderDataQualityCheckTable() {
+  const fy = storageFiscalYear();
+  const rows = storageDataQualityRows(fy);
+  const summary = rows.length ? storageBadge(`確認 ${rows.length}件`, 'danger') : storageBadge('異常なし', 'ok');
+  return `
+    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+        <div>
+          <div style="font-weight:900;font-size:14px">重複・異常データ確認</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">同じ年月＋同じ区分の重複、単位ズレ、年度ズレ、極端に小さい金額を確認</div>
+        </div>
+        <div>${summary}</div>
+      </div>
+      ${rows.length ? `
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>区分</th><th>月</th><th>データ</th><th>確認内容</th><th>対応</th></tr></thead><tbody>
+          ${rows.map(r=>`<tr>
+            <td>${storageBadge(r.level, r.level === '異常' ? 'danger' : 'warn')}</td>
+            <td><strong>${ymLabel(r.ym)}</strong></td>
+            <td>${esc(r.item)}</td>
+            <td style="min-width:280px;color:var(--text2)">${esc(r.detail)}</td>
+            <td style="min-width:280px;color:var(--text2)">${esc(r.action)}</td>
+          </tr>`).join('')}
+        </tbody></table></div>` : `
+        <div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;font-size:12px">この年度では、同一月・同一区分の重複や単位異常は見つかりません。</div>`}
+    </div>`;
+}
+
 function renderStorageMapTable() {
   const fy = storageFiscalYear();
   const rows = storageRowsForFY(fy);
@@ -1797,6 +1896,7 @@ function renderImport() {
   if (listEl) {
     const storageHtml = renderStorageMapTable();
     const monthlyHtml = renderMonthlyCheckTable();
+    const qualityHtml = renderDataQualityCheckTable();
     const statusMap = {};
     (STATE.datasets || []).forEach(d => {
       const fy = d.fiscalYear || fiscalYearFromYM(d.ym);
@@ -1847,7 +1947,7 @@ function renderImport() {
         </div>
       </details>`;
 
-    listEl.innerHTML = storageHtml + monthlyHtml + historyHtml;
+    listEl.innerHTML = storageHtml + monthlyHtml + qualityHtml + historyHtml;
   }
 
   const storageEl = document.getElementById('storage-info');
