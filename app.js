@@ -1,3 +1,8 @@
+/* 計画データ可視化強化版 2026-04-27
+   ・年度別の計画登録状況を表示
+   ・年間収入計画/人件費計画/科目数/更新日時を表示
+   ・年度単位で削除可能
+
 /* 速報・確定両保持版 2026-04-27
    ・同一年月で速報値と確定値を別々に保持
    ・ダッシュボード/分析は確定優先、確定がなければ速報
@@ -2138,3 +2143,251 @@ document.addEventListener('DOMContentLoaded', () => {
       .catch(()=>{});
   } catch(e) {}
 });
+
+
+/* =========================================================
+   計画データ 年度別サマリー表示 PATCH
+   ・年度を変えた時に登録済み/未登録を視認
+   ・主要科目の年間合計を表示
+   ・更新日時を表示
+   ・年度単位で削除
+========================================================= */
+(function(){
+  'use strict';
+
+  const PLAN_META_KEY = `mgmt5_${CENTER.id}_planMetaByFiscalYear`;
+
+  function loadPlanMap(){
+    try {
+      const raw = localStorage.getItem(`mgmt5_${CENTER.id}_planDataByFiscalYear`);
+      return raw ? JSON.parse(raw) : {};
+    } catch(e) {
+      return {};
+    }
+  }
+
+  function savePlanMap(map){
+    try {
+      localStorage.setItem(`mgmt5_${CENTER.id}_planDataByFiscalYear`, JSON.stringify(map || {}));
+    } catch(e) {}
+  }
+
+  function loadMetaMap(){
+    try {
+      const raw = localStorage.getItem(PLAN_META_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch(e) {
+      return {};
+    }
+  }
+
+  function saveMetaMap(map){
+    try {
+      localStorage.setItem(PLAN_META_KEY, JSON.stringify(map || {}));
+    } catch(e) {}
+  }
+
+  function currentPlanFY(){
+    const el = document.getElementById('plan-year-sel');
+    return el && el.value ? String(el.value) : String(new Date().getFullYear());
+  }
+
+  function fmtDateTime(iso){
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return d.getFullYear() + '/' +
+        String(d.getMonth()+1).padStart(2,'0') + '/' +
+        String(d.getDate()).padStart(2,'0') + ' ' +
+        String(d.getHours()).padStart(2,'0') + ':' +
+        String(d.getMinutes()).padStart(2,'0');
+    } catch(e) {
+      return iso;
+    }
+  }
+
+  function planAnnualTotal(plan, labels){
+    if (!plan) return 0;
+    let total = 0;
+    labels.forEach(label => {
+      const row = plan[label];
+      if (!row) return;
+      Object.values(row).forEach(v => total += Number(v || 0));
+    });
+    return total;
+  }
+
+  function ensurePlanSummaryBox(){
+    let box = document.getElementById('plan-summary-box');
+    if (box) return box;
+
+    const textarea = document.getElementById('plan-paste-area');
+    if (!textarea || !textarea.parentNode) return null;
+
+    box = document.createElement('div');
+    box.id = 'plan-summary-box';
+    box.style.cssText = 'margin:10px 0 12px;padding:12px;border:1px solid var(--border);border-radius:12px;background:#f8fafc;font-size:12px;color:var(--text);line-height:1.7';
+    textarea.parentNode.insertBefore(box, textarea);
+
+    return box;
+  }
+
+  function renderPlanSummary(){
+    const box = ensurePlanSummaryBox();
+    if (!box) return;
+
+    const fy = currentPlanFY();
+    const planMap = loadPlanMap();
+    const metaMap = loadMetaMap();
+    const plan = planMap[fy];
+    const meta = metaMap[fy] || {};
+
+    const badge = document.getElementById('plan-badge');
+
+    if (!plan) {
+      box.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div>
+            <strong>${fy}年度の計画データ</strong>
+            <span class="badge badge-warn" style="margin-left:8px">未登録</span>
+          </div>
+          <span style="color:var(--text3)">この年度の計画値はまだ入っていません</span>
+        </div>
+      `;
+      if (badge) {
+        badge.textContent = `${fy}年度 未登録`;
+        badge.className = 'badge badge-warn';
+      }
+      return;
+    }
+
+    const income = planAnnualTotal(plan, ['営業収益','営業収益計','家電収入','一般収入','委託収入','その他収入','保管料収入','コンピュータ収入']);
+    const labor = planAnnualTotal(plan, ['人件費','人件費計','給与手当','人材派遣料','その他人件費','旅費']);
+    const expense = planAnnualTotal(plan, ['売上原価合計','費用合計','営業費用','営業費用計']);
+    const profit = income - (expense || labor);
+
+    const rows = Object.keys(plan).length;
+
+    box.innerHTML = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+        <div style="flex:1">
+          <div style="margin-bottom:6px">
+            <strong>${fy}年度の計画データ</strong>
+            <span class="badge badge-ok" style="margin-left:8px">登録済</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px">
+            <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px">
+              <div style="color:var(--text3);font-size:11px">年間収入計画</div>
+              <div style="font-weight:900;color:#1a4d7c">${fmtK(income)}千円</div>
+            </div>
+            <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px">
+              <div style="color:var(--text3);font-size:11px">人件費計画</div>
+              <div style="font-weight:900;color:#1a7a52">${fmtK(labor)}千円</div>
+            </div>
+            <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px">
+              <div style="color:var(--text3);font-size:11px">科目数</div>
+              <div style="font-weight:900">${rows}科目</div>
+            </div>
+            <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px">
+              <div style="color:var(--text3);font-size:11px">最終更新</div>
+              <div style="font-weight:900">${fmtDateTime(meta.updatedAt)}</div>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-danger" onclick="PLAN_SUMMARY.deleteCurrent()" style="font-size:12px;white-space:nowrap">この年度の計画を削除</button>
+      </div>
+    `;
+
+    if (badge) {
+      badge.textContent = `${fy}年度 登録済`;
+      badge.className = 'badge badge-ok';
+    }
+  }
+
+  window.PLAN_SUMMARY = {
+    render: renderPlanSummary,
+    markSaved(fy, count){
+      const meta = loadMetaMap();
+      meta[String(fy)] = {
+        updatedAt: new Date().toISOString(),
+        count: count || null
+      };
+      saveMetaMap(meta);
+      renderPlanSummary();
+    },
+    deleteCurrent(){
+      const fy = currentPlanFY();
+      const planMap = loadPlanMap();
+      const metaMap = loadMetaMap();
+
+      if (!planMap[fy]) {
+        UI.toast(`${fy}年度の計画データは未登録です`, 'warn');
+        renderPlanSummary();
+        return;
+      }
+
+      if (!confirm(`${fy}年度の計画データを削除しますか？\n他年度の計画データは削除しません。`)) return;
+
+      delete planMap[fy];
+      delete metaMap[fy];
+
+      savePlanMap(planMap);
+      saveMetaMap(metaMap);
+
+      if (STATE && String(STATE.fiscalYear || '') === fy) {
+        STATE.planData = null;
+      }
+
+      STORE.save();
+      renderPlanSummary();
+      NAV.refresh();
+      UI.toast(`${fy}年度の計画データを削除しました`);
+    }
+  };
+
+  // 既存PLAN.importFromPasteを包んで、保存後にサマリー更新日時を記録
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(function(){
+      renderPlanSummary();
+
+      const sel = document.getElementById('plan-year-sel');
+      if (sel && !sel.dataset.planSummaryHooked) {
+        sel.dataset.planSummaryHooked = '1';
+        sel.addEventListener('change', function(){
+          setTimeout(renderPlanSummary, 0);
+        });
+      }
+
+      if (window.PLAN && typeof PLAN.importFromPaste === 'function' && !PLAN._summaryHooked) {
+        const originalImport = PLAN.importFromPaste.bind(PLAN);
+        PLAN.importFromPaste = function(){
+          const fy = currentPlanFY();
+          originalImport();
+          setTimeout(function(){
+            const planMap = loadPlanMap();
+            if (planMap[fy]) {
+              PLAN_SUMMARY.markSaved(fy, Object.keys(planMap[fy]).length);
+            } else {
+              renderPlanSummary();
+            }
+          }, 0);
+        };
+        PLAN._summaryHooked = true;
+      }
+
+      if (window.PLAN && typeof PLAN.clear === 'function' && !PLAN._summaryClearHooked) {
+        const originalClear = PLAN.clear.bind(PLAN);
+        PLAN.clear = function(){
+          const fy = currentPlanFY();
+          originalClear();
+          const meta = loadMetaMap();
+          delete meta[fy];
+          saveMetaMap(meta);
+          setTimeout(renderPlanSummary, 0);
+        };
+        PLAN._summaryClearHooked = true;
+      }
+    }, 0);
+  });
+})();
