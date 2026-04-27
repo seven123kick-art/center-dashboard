@@ -2391,3 +2391,258 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 0);
   });
 })();
+
+
+
+/* =========================================================
+   計画データ 常時見える化 強化PATCH
+   追加日：2026-04-27
+   目的：
+   ・「登録済」だけでなく、今どの年度の計画が入っているか常時表示
+   ・年度変更時に必ず表示更新
+   ・取込前に中身を見える化
+========================================================= */
+(function(){
+  'use strict';
+
+  const PLAN_DATA_KEY = `mgmt5_${CENTER.id}_planDataByFiscalYear`;
+  const PLAN_META_KEY = `mgmt5_${CENTER.id}_planMetaByFiscalYear`;
+
+  function loadJSON(key, fallback){
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch(e) {
+      return fallback;
+    }
+  }
+
+  function saveJSON(key, value){
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch(e) {}
+  }
+
+  function currentFY(){
+    const sel = document.getElementById('plan-year-sel');
+    return sel && sel.value ? String(sel.value) : String(new Date().getFullYear());
+  }
+
+  function fmtDate(iso){
+    if (!iso) return '不明';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return d.getFullYear() + '/' +
+        String(d.getMonth()+1).padStart(2,'0') + '/' +
+        String(d.getDate()).padStart(2,'0') + ' ' +
+        String(d.getHours()).padStart(2,'0') + ':' +
+        String(d.getMinutes()).padStart(2,'0');
+    } catch(e) {
+      return iso;
+    }
+  }
+
+  function totalByLabels(plan, labels){
+    if (!plan) return 0;
+    let total = 0;
+    labels.forEach(label => {
+      const row = plan[label];
+      if (!row) return;
+      Object.values(row).forEach(v => {
+        const n = Number(v || 0);
+        if (!isNaN(n)) total += n;
+      });
+    });
+    return total;
+  }
+
+  function ensureBox(){
+    let box = document.getElementById('plan-current-status-box');
+    if (box) return box;
+
+    const textarea = document.getElementById('plan-paste-area');
+    if (!textarea) return null;
+
+    box = document.createElement('div');
+    box.id = 'plan-current-status-box';
+    box.style.cssText = `
+      margin:12px 0;
+      padding:14px;
+      border:2px solid #dbeafe;
+      border-radius:14px;
+      background:#eff6ff;
+      color:#0f172a;
+      font-size:13px;
+      line-height:1.7;
+    `;
+
+    textarea.parentNode.insertBefore(box, textarea);
+    return box;
+  }
+
+  function renderAlways(){
+    const box = ensureBox();
+    if (!box) return;
+
+    const fy = currentFY();
+    const planMap = loadJSON(PLAN_DATA_KEY, {});
+    const metaMap = loadJSON(PLAN_META_KEY, {});
+    const plan = planMap[fy];
+    const meta = metaMap[fy] || {};
+
+    const badge = document.getElementById('plan-badge');
+    const msg = document.getElementById('plan-import-msg');
+
+    if (!plan) {
+      box.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <div>
+            <div style="font-weight:900;font-size:14px;margin-bottom:4px">${fy}年度の計画データ</div>
+            <div style="color:#64748b">未登録です。この年度の計画値はまだ入っていません。</div>
+          </div>
+          <span style="display:inline-block;padding:5px 10px;border-radius:999px;background:#fef3c7;color:#92400e;font-weight:900">未登録</span>
+        </div>
+      `;
+
+      if (badge) {
+        badge.textContent = `${fy}年度 未登録`;
+        badge.className = 'badge badge-warn';
+      }
+
+      if (msg) {
+        msg.textContent = `${fy}年度は未登録です`;
+      }
+
+      return;
+    }
+
+    const income = totalByLabels(plan, [
+      '営業収益','営業収益計','営業収入','営業収入計',
+      '家電収入','一般収入','委託収入','その他収入','保管料収入','コンピュータ収入'
+    ]);
+
+    const labor = totalByLabels(plan, [
+      '人件費','人件費計','給与手当','人材派遣料','その他人件費','旅費'
+    ]);
+
+    const profit = totalByLabels(plan, [
+      '経常利益','営業利益','センター利益','利益'
+    ]);
+
+    const rows = Object.keys(plan).length;
+    const updatedAt = meta.updatedAt || meta.savedAt || meta.importedAt || '';
+
+    box.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <div style="font-weight:900;font-size:15px">${fy}年度の計画データ</div>
+            <span style="display:inline-block;padding:4px 9px;border-radius:999px;background:#d1fae5;color:#065f46;font-weight:900;font-size:12px">登録済</span>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
+            <div style="background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:10px">
+              <div style="color:#64748b;font-size:11px">年間収入計画</div>
+              <div style="font-weight:900;font-size:16px;color:#1a4d7c">${fmtK(income)}千円</div>
+            </div>
+            <div style="background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:10px">
+              <div style="color:#64748b;font-size:11px">人件費計画</div>
+              <div style="font-weight:900;font-size:16px;color:#1a7a52">${fmtK(labor)}千円</div>
+            </div>
+            <div style="background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:10px">
+              <div style="color:#64748b;font-size:11px">登録科目数</div>
+              <div style="font-weight:900;font-size:16px">${rows}科目</div>
+            </div>
+            <div style="background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:10px">
+              <div style="color:#64748b;font-size:11px">最終更新</div>
+              <div style="font-weight:900;font-size:13px">${fmtDate(updatedAt)}</div>
+            </div>
+          </div>
+
+          <div style="margin-top:8px;color:#64748b;font-size:12px">
+            ※上書きする場合のみ、下の貼付欄に新しい計画データを貼り付けて「取込む」を押してください。
+          </div>
+        </div>
+
+        <button class="btn btn-danger" onclick="PLAN_VISIBLE.deleteCurrent()" style="font-size:12px;white-space:nowrap">
+          この年度の計画を削除
+        </button>
+      </div>
+    `;
+
+    if (badge) {
+      badge.textContent = `${fy}年度 登録済`;
+      badge.className = 'badge badge-ok';
+    }
+
+    if (msg) {
+      msg.textContent = `${fy}年度 登録済：${rows}科目`;
+    }
+  }
+
+  window.PLAN_VISIBLE = {
+    render: renderAlways,
+    markSaved(){
+      const fy = currentFY();
+      const meta = loadJSON(PLAN_META_KEY, {});
+      meta[fy] = {
+        updatedAt: new Date().toISOString()
+      };
+      saveJSON(PLAN_META_KEY, meta);
+      renderAlways();
+    },
+    deleteCurrent(){
+      const fy = currentFY();
+      const planMap = loadJSON(PLAN_DATA_KEY, {});
+      const metaMap = loadJSON(PLAN_META_KEY, {});
+
+      if (!planMap[fy]) {
+        UI.toast(`${fy}年度の計画データは未登録です`, 'warn');
+        renderAlways();
+        return;
+      }
+
+      if (!confirm(`${fy}年度の計画データを削除しますか？\n他年度の計画データは削除しません。`)) return;
+
+      delete planMap[fy];
+      delete metaMap[fy];
+
+      saveJSON(PLAN_DATA_KEY, planMap);
+      saveJSON(PLAN_META_KEY, metaMap);
+
+      STATE.planData = planMap[fy] || null;
+      STORE.save();
+      NAV.refresh();
+      renderAlways();
+
+      UI.toast(`${fy}年度の計画データを削除しました`);
+    }
+  };
+
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(function(){
+      renderAlways();
+
+      const sel = document.getElementById('plan-year-sel');
+      if (sel && !sel.dataset.planVisibleHooked) {
+        sel.dataset.planVisibleHooked = '1';
+        sel.addEventListener('change', function(){
+          setTimeout(renderAlways, 0);
+          setTimeout(renderAlways, 100);
+        });
+      }
+
+      if (window.PLAN && typeof PLAN.importFromPaste === 'function' && !PLAN._visibleHooked) {
+        const originalImport = PLAN.importFromPaste.bind(PLAN);
+        PLAN.importFromPaste = function(){
+          originalImport();
+          setTimeout(function(){
+            PLAN_VISIBLE.markSaved();
+          }, 100);
+        };
+        PLAN._visibleHooked = true;
+      }
+    }, 0);
+  });
+})();
