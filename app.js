@@ -1,3 +1,8 @@
+/* 速報・確定両保持版 2026-04-27
+   ・同一年月で速報値と確定値を別々に保持
+   ・ダッシュボード/分析は確定優先、確定がなければ速報
+   ・入替/削除は年月＋区分単位
+*/
 /* 完全復旧版＋取込区分手動選択 2026-04-27\n   ・取込履歴を詳細表示\n   ・同月取込は確認して入替\n   ・履歴から入替/削除可能\n\n/* 金額単位修正版 2026-04-27\n   CSV=円、計画=千円→内部は円で統一\n════════════════════════════════════════════════════════════════\n\n/* ════════════════════════════════════════════════════════════════
    経営管理システム  app.js  v5.0  — Clean Rewrite
    設計方針:
@@ -381,20 +386,33 @@ function processDataset(ym, type, rows) {
 }
 
 function upsertDataset(ds) {
-  const idx = STATE.datasets.findIndex(d=>d.ym===ds.ym);
-  if (idx>=0) {
-    if (STATE.datasets[idx].type==='confirmed' && ds.type==='daily') return; // 確定値を優先
+  // 同じ年月でも「速報値」と「確定値」は別データとして保持する
+  // ただし同じ年月＋同じ区分は入替（上書き）する
+  const type = ds.type || 'confirmed';
+  ds.type = type;
+
+  const idx = STATE.datasets.findIndex(d => d.ym === ds.ym && (d.type || 'confirmed') === type);
+  if (idx >= 0) {
     STATE.datasets[idx] = ds;
   } else {
     STATE.datasets.push(ds);
   }
-  STATE.datasets.sort((a,b)=>a.ym.localeCompare(b.ym));
+
+  STATE.datasets.sort((a,b) => {
+    const y = a.ym.localeCompare(b.ym);
+    if (y !== 0) return y;
+    // 同じ月は速報→確定の順で並べる
+    const at = (a.type || 'confirmed') === 'daily' ? 0 : 1;
+    const bt = (b.type || 'confirmed') === 'daily' ? 0 : 1;
+    return at - bt;
+  });
 }
 
 /* ════════ §7 IMPORT ════════════════════════════════════════════ */
 const IMPORT = {
   _pending: [],
   _replaceYM: null,
+  _replaceType: null,
 
   handleFiles(files) {
     const arr = Array.from(files);
@@ -406,7 +424,11 @@ const IMPORT = {
     // 入替モード：年月選択モーダルを出さず、指定済みYMへ直接差替
     if (csv.length && this._replaceYM) {
       const ym = this._replaceYM;
+      const type = this._replaceType || 'confirmed';
       this._replaceYM = null;
+      this._replaceType = null;
+      // 入替時は元の区分を維持する
+      document.querySelectorAll('input[name="manual-import-type"]').forEach(r => { r.checked = (r.value === type); });
       this.processCSV(csv, ym, { replace:true }).catch(e=>UI.toast(e.message,'error'));
       return;
     }
@@ -420,10 +442,12 @@ const IMPORT = {
   async processCSV(files, ym, opt={}) {
     const mm = ym.slice(4,6);
     const monthCol = CONFIG.PLAN_MONTH_COLS[mm] ?? null;
-    const existing = STATE.datasets.find(d => d.ym === ym);
+    const selectedType = document.querySelector('input[name="manual-import-type"]:checked')?.value;
+    const importType = selectedType === 'daily' ? 'daily' : 'confirmed';
+    const existing = STATE.datasets.find(d => d.ym === ym && (d.type || 'confirmed') === importType);
 
     if (existing && !opt.replace) {
-      const label = `${ymLabel(ym)}（${existing.type==='confirmed'?'確定':'速報'} / ${existing.fileName || 'ファイル名なし'}）`;
+      const label = `${ymLabel(ym)}（${importType==='confirmed'?'確定':'速報'} / ${existing.fileName || 'ファイル名なし'}）`;
       const ok = confirm(`${label} は既に登録されています。\n\n新しいCSVで入れ替えますか？`);
       if (!ok) {
         UI.toast('取込を中止しました', 'warn');
@@ -437,8 +461,7 @@ const IMPORT = {
         const text = await CSV.read(f);
         const rows = CSV.parseSKDL(text, monthCol);
         if (!rows) { UI.toast(`${f.name}: データ行が見つかりません`,'warn'); continue; }
-        const selectedType = document.querySelector('input[name="manual-import-type"]:checked')?.value;
-        const type = selectedType === 'daily' ? 'daily' : 'confirmed';
+        const type = importType;
         const ds = processDataset(ym, type, rows);
         ds.source = 'csv';
         ds.fileName = f.name;
@@ -446,8 +469,8 @@ const IMPORT = {
         ds.unit = '円';
         ds.replacedAt = existing ? new Date().toISOString() : null;
 
-        // 差替時は同じYMを必ず削除してから入れる
-        STATE.datasets = STATE.datasets.filter(d => d.ym !== ym);
+        // 差替時は同じ年月＋同じ区分だけ削除してから入れる（速報と確定は両方保持）
+        STATE.datasets = STATE.datasets.filter(d => !(d.ym === ym && (d.type || 'confirmed') === type));
         upsertDataset(ds);
         imported++;
       } catch(e) { UI.toast(`${f.name}: ${e.message}`,'error'); }
@@ -485,22 +508,26 @@ const IMPORT = {
     } catch(e) { UI.toast('Excel読込エラー: '+e.message,'error'); }
   },
 
-  deleteDataset(ym) {
-    const ds = STATE.datasets.find(d=>d.ym===ym);
-    const detail = ds ? `\n${ds.fileName || 'ファイル名なし'}\n収入 ${fmtK(ds.totalIncome)}千円` : '';
-    if (!confirm(`${ymLabel(ym)}のデータを削除しますか？${detail}`)) return;
-    STATE.datasets = STATE.datasets.filter(d=>d.ym!==ym);
+  deleteDataset(ym, type) {
+    type = type || 'confirmed';
+    const ds = STATE.datasets.find(d=>d.ym===ym && (d.type || 'confirmed') === type);
+    const typeLabel = type === 'daily' ? '速報' : '確定';
+    const detail = ds ? `\n区分：${typeLabel}\n${ds.fileName || 'ファイル名なし'}\n収入 ${fmtK(ds.totalIncome)}千円` : '';
+    if (!confirm(`${ymLabel(ym)}の${typeLabel}データを削除しますか？${detail}`)) return;
+    STATE.datasets = STATE.datasets.filter(d=>!(d.ym===ym && (d.type || 'confirmed') === type));
     STORE.save();
     NAV.refresh();
-    UI.toast(`${ymLabel(ym)}を削除しました`);
+    UI.toast(`${ymLabel(ym)}の${typeLabel}データを削除しました`);
   },
 
-  replaceDataset(ym) {
-    const ds = STATE.datasets.find(d=>d.ym===ym);
+  replaceDataset(ym, type) {
+    type = type || 'confirmed';
+    const ds = STATE.datasets.find(d=>d.ym===ym && (d.type || 'confirmed') === type);
     if (!ds) { UI.toast('入替対象データが見つかりません','warn'); return; }
 
+    const typeLabel = type === 'daily' ? '速報' : '確定';
     const ok = confirm(
-      `${ymLabel(ym)}を新しいCSVで入れ替えます。\n\n` +
+      `${ymLabel(ym)}の${typeLabel}データを新しいCSVで入れ替えます。\n\n` +
       `現在：${ds.fileName || 'ファイル名なし'}\n` +
       `収入：${fmtK(ds.totalIncome)}千円\n\n` +
       `続行する場合は、次にCSVを選択してください。`
@@ -508,6 +535,7 @@ const IMPORT = {
     if (!ok) return;
 
     this._replaceYM = ym;
+    this._replaceType = type;
     const input = document.getElementById('file-input');
     if (input) {
       input.value = '';
@@ -619,7 +647,7 @@ const CLOUD = {
   },
   _bucket() { return this._cfg().bucket || CONFIG.SUPABASE_BUCKET; },
   _manifestKey() { return `${CENTER.id}/manifest.json`; },
-  _datasetKey(ym) { return `${CENTER.id}/skdl/${ym}.json`; },
+  _datasetKey(ym, type='confirmed') { return `${CENTER.id}/skdl/${ym}_${type || 'confirmed'}.json`; },
   _capacityKey() { return `${CENTER.id}/capacity/master.json`; },
   _fieldKey() { return `${CENTER.id}/field/data.json`; },
   _legacyKey() { return `${CENTER.id}/data_v5.json`; },
@@ -653,9 +681,9 @@ const CLOUD = {
     if (this._busy) return { ok:false, error:'同期処理中' };
     this._busy = true;
     try {
-      const ds = STATE.datasets.find(d => d.ym === ym);
-      if (!ds) return { ok:false, error:'対象月データなし' };
-      await this._uploadJSON(this._datasetKey(ym), ds);
+      const targets = STATE.datasets.filter(d => d.ym === ym);
+      if (!targets.length) return { ok:false, error:'対象月データなし' };
+      for (const ds of targets) await this._uploadJSON(this._datasetKey(ym, ds.type || 'confirmed'), ds);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
       UI.updateCloudBadge('ok');
       return { ok:true };
@@ -678,7 +706,7 @@ const CLOUD = {
     if (this._busy) return { ok:false, error:'同期処理中' };
     this._busy = true;
     try {
-      for (const ds of STATE.datasets) await this._uploadJSON(this._datasetKey(ds.ym), ds);
+      for (const ds of STATE.datasets) await this._uploadJSON(this._datasetKey(ds.ym, ds.type || 'confirmed'), ds);
       if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
       if (STATE.fieldData && STATE.fieldData.length) await this._uploadJSON(this._fieldKey(), STATE.fieldData);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
@@ -694,9 +722,10 @@ const CLOUD = {
     let changed = 0;
     for (const meta of manifest.datasets) {
       if (!meta.ym) continue;
-      const local = STATE.datasets.find(d => d.ym === meta.ym);
+      const metaType = meta.type || 'confirmed';
+      const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
       if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
-        const ds = await this._downloadJSON(this._datasetKey(meta.ym));
+        const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
         if (ds && ds.ym) { upsertDataset(ds); changed++; }
       }
     }
@@ -768,12 +797,42 @@ function ratio(a,b) { if(!a||!b) return '—'; return pct((a/b-1)*100); }
 function ymLabel(ym) { return ym ? `${ym.slice(0,4)}年${parseInt(ym.slice(4,6))}月` : '—'; }
 function dt() { return new Date().toISOString().slice(0,10); }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function latestDS() { return STATE.datasets.length ? STATE.datasets[STATE.datasets.length-1] : null; }
-function prevDS(ym) { const i=STATE.datasets.findIndex(d=>d.ym===ym); return i>0?STATE.datasets[i-1]:null; }
+function activeDatasets() {
+  // 表示・分析用：同じ年月に速報と確定がある場合は、確定を優先する
+  const map = {};
+  for (const d of STATE.datasets || []) {
+    if (!d || !d.ym) continue;
+    const current = map[d.ym];
+    if (!current) {
+      map[d.ym] = d;
+      continue;
+    }
+    const curType = current.type || 'confirmed';
+    const newType = d.type || 'confirmed';
+    if (curType !== 'confirmed' && newType === 'confirmed') {
+      map[d.ym] = d;
+    } else if (curType === newType && String(d.importedAt || '') > String(current.importedAt || '')) {
+      map[d.ym] = d;
+    }
+  }
+  return Object.values(map).sort((a,b)=>a.ym.localeCompare(b.ym));
+}
+function activeDatasetByYM(ym) {
+  return activeDatasets().find(d => d.ym === ym) || null;
+}
+function latestDS() {
+  const list = activeDatasets();
+  return list.length ? list[list.length-1] : null;
+}
+function prevDS(ym) {
+  const list = activeDatasets();
+  const i = list.findIndex(d=>d.ym===ym);
+  return i>0 ? list[i-1] : null;
+}
 function sameMonthLastYear(ym) {
   if (!ym) return null;
   const py = String(parseInt(ym.slice(0,4))-1)+ym.slice(4);
-  return STATE.datasets.find(d=>d.ym===py)||null;
+  return activeDatasetByYM(py);
 }
 
 function getDefaultFiscalYear() {
@@ -932,10 +991,10 @@ function renderDashboard() {
     </div>`;
 
   // メインチャート（月次収支推移）
-  const labels = STATE.datasets.map(d=>ymLabel(d.ym));
-  const inc  = STATE.datasets.map(d=>d.totalIncome/1000);
-  const exp  = STATE.datasets.map(d=>d.totalExpense/1000);
-  const prof = STATE.datasets.map(d=>d.profit/1000);
+  const labels = activeDatasets().map(d=>ymLabel(d.ym));
+  const inc  = activeDatasets().map(d=>d.totalIncome/1000);
+  const exp  = activeDatasets().map(d=>d.totalExpense/1000);
+  const prof = activeDatasets().map(d=>d.profit/1000);
 
   CHART_MGR.make('c-main-trend', {
     type:'bar',
@@ -1136,10 +1195,10 @@ function renderTrend() {
     return;
   }
   if (notice) notice.innerHTML = '';
-  const labels = STATE.datasets.map(d=>ymLabel(d.ym));
-  const inc = STATE.datasets.map(d=>d.totalIncome/1000);
-  const exp = STATE.datasets.map(d=>d.totalExpense/1000);
-  const prf = STATE.datasets.map(d=>d.profit/1000);
+  const labels = activeDatasets().map(d=>ymLabel(d.ym));
+  const inc = activeDatasets().map(d=>d.totalIncome/1000);
+  const exp = activeDatasets().map(d=>d.totalExpense/1000);
+  const prf = activeDatasets().map(d=>d.profit/1000);
 
   CHART_MGR.make('c-trend-main', {
     type:'bar', data:{labels,
@@ -1157,7 +1216,7 @@ function renderTrend() {
   // 月次表
   const tbody = document.getElementById('trend-tbody');
   if (tbody) {
-    const rows = [...STATE.datasets].reverse().map((d,i,arr)=>{
+    const rows = [...activeDatasets()].reverse().map((d,i,arr)=>{
       const prev = i<arr.length-1 ? arr[i+1] : null;
       return `<tr>
         <td>${ymLabel(d.ym)} ${d.type==='daily'?'<span class="badge badge-warn" style="font-size:9px">速報</span>':''}</td>
@@ -1286,11 +1345,11 @@ function renderIndicators() {
   CHART_MGR.make('c-ind-trend', {
     type:'line',
     data:{
-      labels: STATE.datasets.map(d=>ymLabel(d.ym)),
+      labels: activeDatasets().map(d=>ymLabel(d.ym)),
       datasets:[
-        {label:'みなし人件費率(%)',data:STATE.datasets.map(d=>+d.pseudoLaborRate.toFixed(1)),borderColor:'#1a4d7c',fill:false,tension:.3,pointRadius:3},
-        {label:'変動費率(%)',      data:STATE.datasets.map(d=>+d.variableRate.toFixed(1)),   borderColor:'#e05b4d',fill:false,tension:.3,pointRadius:3},
-        {label:'利益率(%)',        data:STATE.datasets.map(d=>+d.profitRate.toFixed(1)),      borderColor:'#16a34a',fill:false,tension:.3,pointRadius:3},
+        {label:'みなし人件費率(%)',data:activeDatasets().map(d=>+d.pseudoLaborRate.toFixed(1)),borderColor:'#1a4d7c',fill:false,tension:.3,pointRadius:3},
+        {label:'変動費率(%)',      data:activeDatasets().map(d=>+d.variableRate.toFixed(1)),   borderColor:'#e05b4d',fill:false,tension:.3,pointRadius:3},
+        {label:'利益率(%)',        data:activeDatasets().map(d=>+d.profitRate.toFixed(1)),      borderColor:'#16a34a',fill:false,tension:.3,pointRadius:3},
       ]
     },
     options:{responsive:true,maintainAspectRatio:false,
@@ -1317,7 +1376,7 @@ function renderAnnual() {
     return m >= CONFIG.FISCAL_START ? y : y-1;
   }
   const fyMap = {};
-  for (const ds of STATE.datasets) {
+  for (const ds of activeDatasets()) {
     const fy = getFY(ds.ym);
     if (!fyMap[fy]) fyMap[fy] = {fy, datasets:[], inc:0, exp:0, prf:0};
     fyMap[fy].datasets.push(ds);
@@ -1340,7 +1399,7 @@ function renderAnnual() {
         <div class="kpi-sub-row"><span class="pill ${cur.prf>=0?'up':'down'}">${pct(cur.prf/cur.inc*100)} 利益率</span></div></div>`;
   }
 
-  const rows = [...STATE.datasets].reverse().map(ds=>{
+  const rows = [...activeDatasets()].reverse().map(ds=>{
     const prev = prevDS(ds.ym);
     const py   = sameMonthLastYear(ds.ym);
     return `<tr>
@@ -1360,10 +1419,10 @@ function renderAnnual() {
   CHART_MGR.make('c-annual-trend', {
     type:'bar',
     data:{
-      labels: STATE.datasets.map(d=>ymLabel(d.ym)),
+      labels: activeDatasets().map(d=>ymLabel(d.ym)),
       datasets:[
-        {label:'収入', data:STATE.datasets.map(d=>d.totalIncome/1000), backgroundColor:'rgba(26,77,124,.7)'},
-        {label:'費用', data:STATE.datasets.map(d=>d.totalExpense/1000),backgroundColor:'rgba(224,91,77,.7)'},
+        {label:'収入', data:activeDatasets().map(d=>d.totalIncome/1000), backgroundColor:'rgba(26,77,124,.7)'},
+        {label:'費用', data:activeDatasets().map(d=>d.totalExpense/1000),backgroundColor:'rgba(224,91,77,.7)'},
       ]
     },
     options:{responsive:true,maintainAspectRatio:false,
@@ -1397,7 +1456,7 @@ function renderAlerts() {
     alerts.push({level:'warn', title:`利益率 低水準`, msg:`${pct(ds.profitRate)}（要注意ライン: ${T.safetyMarginWarn}%）`});
 
   // 連続前月比低下チェック
-  const last3 = STATE.datasets.slice(-3);
+  const last3 = activeDatasets().slice(-3);
   if (last3.length===3 && last3[0].totalIncome>last3[1].totalIncome && last3[1].totalIncome>last3[2].totalIncome)
     /* skip - already reversed above */;
   if (last3.length===3 && last3[2].totalIncome<last3[1].totalIncome && last3[1].totalIncome<last3[0].totalIncome)
@@ -1540,7 +1599,7 @@ function renderImport() {
         </div>
       `).join('');
 
-      const sorted = [...STATE.datasets].sort((a,b)=>b.ym.localeCompare(a.ym));
+      const sorted = [...STATE.datasets].sort((a,b)=>b.ym.localeCompare(a.ym) || ((a.type||'confirmed')==='confirmed'?-1:1));
       listEl.innerHTML = statusHtml + sorted.map(ds=>{
         const fy = ds.fiscalYear || fiscalYearFromYM(ds.ym);
         const sourceLabel = ds.source === 'history' ? '過去補完' : (ds.fileName ? esc(ds.fileName) : 'ファイル名なし');
@@ -1560,8 +1619,8 @@ function renderImport() {
             収入 ${fmtK(ds.totalIncome)}千円<br>
             費用 ${fmtK(ds.totalExpense)}千円
           </span>
-          <button class="btn" onclick="IMPORT.replaceDataset('${ds.ym}')" style="font-size:11px;padding:2px 8px">入替</button>
-          <button class="btn btn-danger" onclick="IMPORT.deleteDataset('${ds.ym}')" style="font-size:11px;padding:2px 8px">削除</button>
+          <button class="btn" onclick="IMPORT.replaceDataset('${ds.ym}','${ds.type || 'confirmed'}')" style="font-size:11px;padding:2px 8px">入替</button>
+          <button class="btn btn-danger" onclick="IMPORT.deleteDataset('${ds.ym}','${ds.type || 'confirmed'}')" style="font-size:11px;padding:2px 8px">削除</button>
         </div>`;
       }).join('');
     }
@@ -1622,7 +1681,7 @@ function renderMemo() {
   const sel = document.getElementById('memo-ym-sel');
   const text = document.getElementById('memo-textarea');
   if (!sel) return;
-  const yms = STATE.datasets.map(d=>d.ym);
+  const yms = activeDatasets().map(d=>d.ym);
   sel.innerHTML = yms.length
     ? yms.map(ym=>`<option value="${ym}">${ymLabel(ym)}</option>`).join('')
     : '<option value="">データなし</option>';
