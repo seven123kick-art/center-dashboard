@@ -2144,3 +2144,292 @@ document.addEventListener('DOMContentLoaded', () => {
       .catch(()=>{});
   } catch(e) {}
 });
+
+
+/* =========================================================
+   年度単位 完全入替 PATCH
+   追加日：2026-04-28
+   対象：
+   ・計画データ
+   ・過去実績補完データ
+   仕様：
+   ・既存データがある年度は「年度丸ごと入替」
+   ・差分更新しない
+   ・残骸を残さない
+========================================================= */
+(function(){
+  'use strict';
+
+  const PLAN_KEY = `mgmt5_${CENTER.id}_planDataByFiscalYear`;
+  const PLAN_META_KEY = `mgmt5_${CENTER.id}_planMetaByFiscalYear`;
+  const HISTORY_META_KEY = `mgmt5_${CENTER.id}_historyMetaByFiscalYear`;
+
+  function loadJSON(key, fallback){
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch(e) {
+      return fallback;
+    }
+  }
+
+  function saveJSON(key, value){
+    try {
+      localStorage.setItem(key, JSON.stringify(value || {}));
+    } catch(e) {}
+  }
+
+  function nowISO(){
+    return new Date().toISOString();
+  }
+
+  function currentPlanFY(){
+    const el = document.getElementById('plan-year-sel');
+    return el && el.value ? String(el.value) : String(new Date().getFullYear());
+  }
+
+  function currentHistoryFY(){
+    const el = document.getElementById('tsv-year-sel-history');
+    return el && el.value ? String(el.value) : String(new Date().getFullYear());
+  }
+
+  function monthsOfFiscalYear(fy){
+    const y = parseInt(fy, 10);
+    return [
+      `${y}04`,`${y}05`,`${y}06`,`${y}07`,`${y}08`,`${y}09`,
+      `${y}10`,`${y}11`,`${y}12`,`${y+1}01`,`${y+1}02`,`${y+1}03`
+    ];
+  }
+
+  function refreshAfterImport(){
+    try { STORE.save(); } catch(e) {}
+    try { NAV.refresh(); } catch(e) {}
+    try {
+      if (window.STABLE_YEAR_DATA && typeof STABLE_YEAR_DATA.renderAll === 'function') {
+        STABLE_YEAR_DATA.renderAll();
+      }
+    } catch(e) {}
+  }
+
+  // 計画データ：年度丸ごと完全入替
+  if (window.PLAN) {
+    PLAN.importFromPaste = function(){
+      const fy = currentPlanFY();
+      const text = document.getElementById('plan-paste-area')?.value || '';
+      const msg  = document.getElementById('plan-import-msg');
+
+      if (!text.trim()) {
+        UI.toast('計画データの貼付欄が空です', 'warn');
+        if (msg) msg.textContent = '貼付欄が空です';
+        return;
+      }
+
+      const plan = CSV.parsePlan(text);
+      if (!plan) {
+        UI.toast('計画データを解析できませんでした。タブ区切りでペーストしてください。', 'warn');
+        if (msg) msg.textContent = '解析失敗';
+        return;
+      }
+
+      const map = loadJSON(PLAN_KEY, {});
+      const meta = loadJSON(PLAN_META_KEY, {});
+      const exists = !!map[fy];
+
+      if (exists) {
+        const ok = confirm(
+          `${fy}年度の計画データは既に登録されています。\n\n` +
+          `今回の貼付データで、${fy}年度の計画データをすべて入れ替えますか？\n\n` +
+          `※差分追加ではありません。既存の${fy}年度計画を削除してから登録します。`
+        );
+        if (!ok) return;
+      }
+
+      // 年度丸ごと削除 → 新規登録
+      delete map[fy];
+      delete meta[fy];
+
+      map[fy] = plan;
+      meta[fy] = {
+        updatedAt: nowISO(),
+        replaceMode: exists ? 'full_replace' : 'new',
+        rows: Object.keys(plan || {}).length
+      };
+
+      saveJSON(PLAN_KEY, map);
+      saveJSON(PLAN_META_KEY, meta);
+
+      STATE.planData = plan;
+      STATE.fiscalYear = fy;
+
+      const area = document.getElementById('plan-paste-area');
+      if (area) area.value = '';
+
+      refreshAfterImport();
+
+      const count = Object.keys(plan || {}).length;
+      if (msg) msg.textContent = `${fy}年度 完全入替完了：${count}科目`;
+      UI.toast(`${fy}年度の計画データを完全入替しました（${count}科目）`);
+    };
+
+    PLAN.clear = function(){
+      const fy = currentPlanFY();
+      const map = loadJSON(PLAN_KEY, {});
+      const meta = loadJSON(PLAN_META_KEY, {});
+
+      if (!map[fy]) {
+        UI.toast(`${fy}年度の計画データは未登録です`, 'warn');
+        refreshAfterImport();
+        return;
+      }
+
+      if (!confirm(`${fy}年度の計画データを削除しますか？\n他年度の計画データは削除しません。`)) return;
+
+      delete map[fy];
+      delete meta[fy];
+
+      saveJSON(PLAN_KEY, map);
+      saveJSON(PLAN_META_KEY, meta);
+
+      STATE.planData = null;
+
+      const area = document.getElementById('plan-paste-area');
+      if (area) area.value = '';
+
+      refreshAfterImport();
+      UI.toast(`${fy}年度の計画データを削除しました`);
+    };
+  }
+
+  // 過去実績補完：年度丸ごと完全入替
+  if (window.TSV_IMPORT) {
+    TSV_IMPORT.doImportHistory = function(){
+      const fy = currentHistoryFY();
+      const text = document.getElementById('tsv-paste-area-history')?.value || '';
+      const msg  = document.getElementById('tsv-import-msg-history');
+
+      if (!text.trim()) {
+        UI.toast('過去実績補完の貼付欄が空です', 'warn');
+        if (msg) msg.textContent = '貼付欄が空です';
+        return;
+      }
+
+      const months = monthsOfFiscalYear(fy);
+      const existing = (STATE.datasets || []).filter(d => {
+        const dsFy = d.fiscalYear || fiscalYearFromYM(d.ym);
+        return d.source === 'history' && String(dsFy) === String(fy);
+      });
+
+      if (existing.length > 0) {
+        const ok = confirm(
+          `${fy}年度の過去実績補完データは既に${existing.length}ヶ月分登録されています。\n\n` +
+          `今回の貼付データで、${fy}年度の補完データをすべて入れ替えますか？\n\n` +
+          `※差分追加ではありません。既存の${fy}年度補完データを削除してから登録します。\n` +
+          `※通常CSVで取り込んだ速報・確定データは削除しません。`
+        );
+        if (!ok) return;
+      }
+
+      const rows = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n')
+        .filter(l => l.trim())
+        .map(l => l.split(/\t/));
+
+      if (!rows.length) {
+        UI.toast('データが空です', 'warn');
+        if (msg) msg.textContent = 'データが空です';
+        return;
+      }
+
+      // 先にその年度の補完データを全削除
+      STATE.datasets = (STATE.datasets || []).filter(d => {
+        const dsFy = d.fiscalYear || fiscalYearFromYM(d.ym);
+        return !(d.source === 'history' && String(dsFy) === String(fy));
+      });
+
+      const ALL = new Set([...CONFIG.INCOME_KEYS, ...CONFIG.EXPENSE_KEYS, ...CONFIG.INCOME_SUB_KEYS]);
+      let imported = 0;
+
+      for (const mm of ['04','05','06','07','08','09','10','11','12','01','02','03']) {
+        const colIdx = CONFIG.PLAN_MONTH_COLS[mm];
+        const dsRows = {};
+
+        for (const row of rows) {
+          const label = (row[0] || '').replace(/[\s　]/g,'');
+          if (!ALL.has(label)) continue;
+
+          const raw = row[colIdx] || '';
+          const v = parseFloat(String(raw).replace(/,/g,'').replace(/[^\d.\-]/g,''));
+
+          // 過去実績補完はSKKS貼付の千円想定 → 内部は円で統一
+          if (!isNaN(v) && v !== 0) {
+            dsRows[label] = v * 1000;
+          }
+        }
+
+        if (Object.keys(dsRows).length > 0) {
+          const year = parseInt(mm, 10) >= 4 ? fy : String(parseInt(fy, 10) + 1);
+          const ym = year + mm;
+
+          const ds = processDataset(ym, 'confirmed', dsRows);
+          ds.source = 'history';
+          ds.fileName = '過去実績補完ペースト';
+          ds.fiscalYear = fy;
+          ds.unit = '千円→円変換';
+          ds.importedAt = nowISO();
+
+          // 念のため同一YMのhistoryのみ削除してから追加
+          STATE.datasets = (STATE.datasets || []).filter(d => !(d.source === 'history' && d.ym === ym));
+          upsertDataset(ds);
+          imported++;
+        }
+      }
+
+      const meta = loadJSON(HISTORY_META_KEY, {});
+      meta[fy] = {
+        updatedAt: nowISO(),
+        replaceMode: existing.length > 0 ? 'full_replace' : 'new',
+        months: imported
+      };
+      saveJSON(HISTORY_META_KEY, meta);
+
+      const area = document.getElementById('tsv-paste-area-history');
+      if (area) area.value = '';
+
+      refreshAfterImport();
+
+      if (msg) msg.textContent = `${fy}年度 完全入替完了：${imported}ヶ月`;
+      UI.toast(`${fy}年度の過去実績補完データを完全入替しました（${imported}ヶ月）`);
+    };
+
+    TSV_IMPORT.doClearHistory = function(){
+      const fy = currentHistoryFY();
+      const existing = (STATE.datasets || []).filter(d => {
+        const dsFy = d.fiscalYear || fiscalYearFromYM(d.ym);
+        return d.source === 'history' && String(dsFy) === String(fy);
+      });
+
+      if (!existing.length) {
+        UI.toast(`${fy}年度の過去実績補完データは未登録です`, 'warn');
+        refreshAfterImport();
+        return;
+      }
+
+      if (!confirm(`${fy}年度の過去実績補完データ ${existing.length}ヶ月分を削除しますか？\n通常CSVで取り込んだ速報・確定データは削除しません。`)) return;
+
+      STATE.datasets = (STATE.datasets || []).filter(d => {
+        const dsFy = d.fiscalYear || fiscalYearFromYM(d.ym);
+        return !(d.source === 'history' && String(dsFy) === String(fy));
+      });
+
+      const meta = loadJSON(HISTORY_META_KEY, {});
+      delete meta[fy];
+      saveJSON(HISTORY_META_KEY, meta);
+
+      const area = document.getElementById('tsv-paste-area-history');
+      if (area) area.value = '';
+
+      refreshAfterImport();
+      UI.toast(`${fy}年度の過去実績補完データを削除しました`);
+    };
+  }
+
+})();
