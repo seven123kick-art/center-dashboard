@@ -254,33 +254,43 @@ const CSV = {
   // SKDL形式CSVを解析
   // monthCol: PLAN_MONTH_COLS[mm] 値。nullなら先頭数値列を採用
   parseSKDL(text, monthCol) {
-    const rows = this.toRows(text);
-    const ALL = new Set([...CONFIG.INCOME_KEYS,...CONFIG.EXPENSE_KEYS,...CONFIG.INCOME_SUB_KEYS]);
-    const result = {};
-    let found = 0;
+  const rows = this.toRows(text);
+  const ALL = new Set([...CONFIG.INCOME_KEYS,...CONFIG.EXPENSE_KEYS,...CONFIG.INCOME_SUB_KEYS]);
+  const result = {};
+  let found = 0;
 
-    for (const row of rows) {
-      if (!row[0]) continue;
-      const label = row[0].replace(/[\s　\u3000]/g,'');
-      if (!ALL.has(label)) continue;
+  for (const row of rows) {
+    if (!row.length) continue;
 
-      let val = null;
-      // 指定列が有効なら優先
-      if (monthCol != null && row[monthCol] !== undefined) {
-        const v = parseFloat((row[monthCol]||'').replace(/,/g,'').replace(/[^\d.\-]/g,''));
-        if (!isNaN(v)) val = v;
+    // ▼科目をどの列からでも検出
+    let label = null;
+    for (let i = 0; i < row.length; i++) {
+      const v = (row[i] || '').replace(/[\s　\u3000]/g,'');
+      if (ALL.has(v)) {
+        label = v;
+        break;
       }
-      // フォールバック：最初の数値列
-      if (val === null) {
-        for (let i=1; i<row.length; i++) {
-          const v = parseFloat((row[i]||'').replace(/,/g,'').replace(/[^\d.\-]/g,''));
-          if (!isNaN(v)) { val = v; break; }
-        }
-      }
-      if (val !== null) { result[label] = (result[label]||0) + val; found++; }
     }
-    return found > 0 ? result : null;
-  },
+    if (!label) continue;
+
+    // ▼数値をどの列からでも取得
+    let val = null;
+    for (let i=0; i<row.length; i++) {
+      const num = parseFloat((row[i]||'').replace(/,/g,'').replace(/[^\d.\-]/g,''));
+      if (!isNaN(num)) {
+        val = num;
+        break;
+      }
+    }
+
+    if (val !== null) {
+      result[label] = (result[label]||0) + val;
+      found++;
+    }
+  }
+
+  return found > 0 ? result : null;
+}
 
   // 計画データ（貼り付けテキスト）解析
   parsePlan(text) {
