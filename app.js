@@ -88,73 +88,236 @@ const CONFIG = {
   FISCAL_START: 4,
 
   INCOME_KEYS: [
-    '家電収入','委託収入','その他収入','一般収入',
-    'コンピュータ収入','保管料収入','保険手数料','特積収入',
+    '特積収入','一般収入','家電収入','その他収入','その他収入（産廃）','その他収入（産廃',
+    '保管料収入','加工収入','委託収入','保険手数料','車両修繕収入',
+    'コンピュータ収入','不動産賃貸収入','バス収入','売電収入','賃貸収入'
   ],
-  INCOME_SUB_KEYS: ['集荷収入','配達収入','リサイクル収入'],
+  INCOME_SUB_KEYS: [
+    '集荷収入','配達収入','中継収入','リサイクル収入','工事収入'
+  ],
   EXPENSE_KEYS: [
-    '給与手当','人材派遣料','その他人件費','旅費',
-    'ガソリン費','軽油費',
+    '給与手当','人材派遣料','その他人件費','運行旅費',
+    'ガソリン費','軽油費','ガス費','油脂費',
     '車両修繕費','タイヤ費','その他修繕費',
-    '車両償却費','その他償却費',
-    '自賠責保険料','任意保険料','運送保険料','その他保険料',
+    'リース原価計','車両償却費','その他償却費',
+    '自賠責保険料','運送保険料','任意保険料','その他保険料',
     '借地借家料','その他施設費',
     '重量税','自動車税','取得税','その他税',
-    '集配傭車','路線備車','路線傭車','委託費','社内外注費',
+    '事故費計',
+    '路線傭車','路線備車','集配傭車','委託費','社内外注費',
+    '中継料計',
     '道路利用料','その他利用料',
     '水道光熱費','備消品費','図書印刷費','通信運搬費','電算関連費',
-    '被服費','交際費','負担金','教育求人費','雑費','環境衛生費','経営指導料',
+    '旅費','被服費','会議費','交際費','宣伝広告費','諸手数料','負担金','寄付金',
+    '教育求人費','環境衛生費','経営指導料','雑費','業務委託収入','貸倒損失'
   ],
   FIXED_KEYS: [
     '給与手当','人材派遣料','その他人件費',
     '借地借家料','その他施設費',
     '車両償却費','その他償却費',
-    '自賠責保険料','任意保険料','運送保険料','その他保険料',
+    '自賠責保険料','運送保険料','任意保険料','その他保険料',
     '重量税','自動車税','取得税','その他税',
-    '水道光熱費','電算関連費','経営指導料','図書印刷費','通信運搬費',
+    '水道光熱費','電算関連費','経営指導料','図書印刷費','通信運搬費'
   ],
   VARIABLE_KEYS: [
-    '集配傭車','路線備車','路線傭車','委託費','社内外注費',
-    'ガソリン費','軽油費',
+    '路線傭車','路線備車','集配傭車','委託費','社内外注費',
+    'ガソリン費','軽油費','ガス費','油脂費',
     '車両修繕費','タイヤ費','その他修繕費',
     '道路利用料','その他利用料',
-    '備消品費','旅費','被服費','環境衛生費','交際費','負担金','教育求人費','雑費',
+    '備消品費','旅費','運行旅費','被服費','会議費','交際費','宣伝広告費','諸手数料',
+    '負担金','寄付金','教育求人費','環境衛生費','雑費','貸倒損失'
   ],
   LABOR_KEYS:  ['給与手当','人材派遣料','その他人件費'],
-  YOSHA_KEYS:  ['集配傭車','路線備車','路線傭車'],
+  YOSHA_KEYS:  ['路線傭車','路線備車','集配傭車','委託費','社内外注費'],
 
   PL_DEF: [
-    {t:'h',  l:'■ 営業収益の部'},
-    {t:'i',  l:'一般収入',        k:['一般収入']},
-    {t:'i',  l:'家電収入',        k:['家電収入'],
-      sub:[{l:'集荷収入',k:'集荷収入'},{l:'配達収入',k:'配達収入'},{l:'リサイクル収入',k:'リサイクル収入'}]},
-    {t:'i',  l:'委託収入',        k:['委託収入']},
-    {t:'i',  l:'その他収入',      k:['その他収入']},
-    {t:'i',  l:'保管料収入',      k:['保管料収入']},
-    {t:'i',  l:'コンピュータ収入',k:['コンピュータ収入']},
-    {t:'st', l:'▶ 営業収益計',   k:'inc'},
-    {t:'h',  l:'■ 費用の部'},
-    {t:'g',  l:'人件費計',        k:['給与手当','人材派遣料','その他人件費','旅費'],
-      s:[{l:'給与手当',k:['給与手当']},{l:'人材派遣料',k:['人材派遣料']},{l:'その他人件費',k:['その他人件費']},{l:'旅費',k:['旅費']}]},
-    {t:'g',  l:'燃料費計',        k:['ガソリン費','軽油費'],
-      s:[{l:'軽油費',k:['軽油費']},{l:'ガソリン費',k:['ガソリン費']}]},
-    {t:'g',  l:'修繕費計',        k:['車両修繕費','タイヤ費','その他修繕費'],
-      s:[{l:'車両修繕費',k:['車両修繕費']},{l:'タイヤ費',k:['タイヤ費']}]},
-    {t:'g',  l:'償却費計',        k:['車両償却費','その他償却費'],
-      s:[{l:'車両償却費',k:['車両償却費']}]},
-    {t:'g',  l:'保険料計',        k:['自賠責保険料','任意保険料','運送保険料','その他保険料'],
-      s:[{l:'任意保険料',k:['任意保険料']}]},
-    {t:'g',  l:'施設費計',        k:['借地借家料','その他施設費'],
-      s:[{l:'借地借家料',k:['借地借家料']},{l:'その他施設費',k:['その他施設費']}]},
-    {t:'g',  l:'租税公課計',      k:['重量税','自動車税','取得税','その他税'], s:[]},
-    {t:'g',  l:'備車費計',        k:['集配傭車','路線備車','路線傭車','委託費','社内外注費'],
-      s:[{l:'集配傭車',k:['集配傭車']},{l:'路線傭車',k:['路線備車','路線傭車']},{l:'委託費',k:['委託費']}]},
-    {t:'g',  l:'道路費計',        k:['道路利用料','その他利用料'], s:[]},
-    {t:'g',  l:'営業費計',        k:['水道光熱費','備消品費','図書印刷費','通信運搬費','電算関連費'],
-      s:[{l:'水道光熱費',k:['水道光熱費']}]},
-    {t:'g',  l:'その他費用計',    k:['被服費','交際費','負担金','教育求人費','雑費','環境衛生費','経営指導料'], s:[]},
-    {t:'tot',l:'▶ 売上原価合計'},
-    {t:'prf',l:'◆ センター利益（粗利）'},
+    {
+      id:'revenue',
+      label:'営業収益',
+      type:'group',
+      keys:['特積収入','一般収入','家電収入','その他収入','その他収入（産廃）','その他収入（産廃','保管料収入','加工収入','委託収入','保険手数料','車両修繕収入','コンピュータ収入','不動産賃貸収入','バス収入','売電収入','賃貸収入'],
+      children:[
+        {label:'特積収入', keys:['特積収入']},
+        {label:'一般収入', keys:['一般収入']},
+        {label:'家電収入', keys:['家電収入']},
+        {label:'その他収入（産廃）', keys:['その他収入（産廃）','その他収入（産廃','その他収入']},
+        {label:'保管料収入', keys:['保管料収入']},
+        {label:'加工収入', keys:['加工収入']},
+        {label:'委託収入', keys:['委託収入']},
+        {label:'保険手数料', keys:['保険手数料']},
+        {label:'車両修繕収入', keys:['車両修繕収入']},
+        {label:'コンピュータ収入', keys:['コンピュータ収入']},
+        {label:'不動産賃貸収入', keys:['不動産賃貸収入']},
+        {label:'バス収入', keys:['バス収入']},
+        {label:'売電収入', keys:['売電収入']},
+        {label:'賃貸収入', keys:['賃貸収入']}
+      ]
+    },
+    {
+      id:'labor',
+      label:'人件費',
+      type:'group',
+      keys:['給与手当','人材派遣料','その他人件費','運行旅費'],
+      children:[
+        {label:'給与手当', keys:['給与手当']},
+        {label:'人材派遣料', keys:['人材派遣料']},
+        {label:'その他人件費', keys:['その他人件費']},
+        {label:'運行旅費', keys:['運行旅費']}
+      ]
+    },
+    {
+      id:'fuel',
+      label:'燃料費',
+      type:'group',
+      keys:['ガソリン費','軽油費','ガス費','油脂費'],
+      children:[
+        {label:'ガソリン費', keys:['ガソリン費']},
+        {label:'軽油費', keys:['軽油費']},
+        {label:'ガス費', keys:['ガス費']},
+        {label:'油脂費', keys:['油脂費']}
+      ]
+    },
+    {
+      id:'repair',
+      label:'修繕費',
+      type:'group',
+      keys:['車両修繕費','タイヤ費','その他修繕費'],
+      children:[
+        {label:'車両修繕費', keys:['車両修繕費']},
+        {label:'タイヤ費', keys:['タイヤ費']},
+        {label:'その他修繕費', keys:['その他修繕費']}
+      ]
+    },
+    {
+      id:'lease',
+      label:'リース原価',
+      type:'group',
+      keys:['リース原価計'],
+      children:[
+        {label:'リース原価計', keys:['リース原価計']}
+      ]
+    },
+    {
+      id:'depreciation',
+      label:'減価償却費',
+      type:'group',
+      keys:['車両償却費','その他償却費'],
+      children:[
+        {label:'車両償却費', keys:['車両償却費']},
+        {label:'その他償却費', keys:['その他償却費']}
+      ]
+    },
+    {
+      id:'insurance',
+      label:'保険料',
+      type:'group',
+      keys:['自賠責保険料','運送保険料','任意保険料','その他保険料'],
+      children:[
+        {label:'自賠責保険料', keys:['自賠責保険料']},
+        {label:'運送保険料', keys:['運送保険料']},
+        {label:'任意保険料', keys:['任意保険料']},
+        {label:'その他保険料', keys:['その他保険料']}
+      ]
+    },
+    {
+      id:'facility',
+      label:'施設費',
+      type:'group',
+      keys:['借地借家料','その他施設費'],
+      children:[
+        {label:'借地借家料', keys:['借地借家料']},
+        {label:'その他施設費', keys:['その他施設費']}
+      ]
+    },
+    {
+      id:'tax',
+      label:'租税公課',
+      type:'group',
+      keys:['重量税','自動車税','取得税','その他税'],
+      children:[
+        {label:'重量税', keys:['重量税']},
+        {label:'自動車税', keys:['自動車税']},
+        {label:'取得税', keys:['取得税']},
+        {label:'その他税', keys:['その他税']}
+      ]
+    },
+    {
+      id:'accident',
+      label:'事故費',
+      type:'group',
+      keys:['事故費計'],
+      children:[
+        {label:'事故費計', keys:['事故費計']}
+      ]
+    },
+    {
+      id:'yosha',
+      label:'傭車費',
+      type:'group',
+      keys:['路線傭車','路線備車','集配傭車','委託費','社内外注費'],
+      children:[
+        {label:'路線傭車', keys:['路線傭車','路線備車']},
+        {label:'集配傭車', keys:['集配傭車']},
+        {label:'委託費', keys:['委託費']},
+        {label:'社内外注費', keys:['社内外注費']}
+      ]
+    },
+    {
+      id:'relay',
+      label:'中継料',
+      type:'group',
+      keys:['中継料計'],
+      children:[
+        {label:'中継料計', keys:['中継料計']}
+      ]
+    },
+    {
+      id:'road',
+      label:'道路費',
+      type:'group',
+      keys:['道路利用料','その他利用料'],
+      children:[
+        {label:'道路利用料', keys:['道路利用料']},
+        {label:'その他利用料', keys:['その他利用料']}
+      ]
+    },
+    {
+      id:'sales_cost',
+      label:'営業費',
+      type:'group',
+      keys:['水道光熱費','備消品費','図書印刷費','通信運搬費','電算関連費'],
+      children:[
+        {label:'水道光熱費', keys:['水道光熱費']},
+        {label:'備消品費', keys:['備消品費']},
+        {label:'図書印刷費', keys:['図書印刷費']},
+        {label:'通信運搬費', keys:['通信運搬費']},
+        {label:'電算関連費', keys:['電算関連費']}
+      ]
+    },
+    {
+      id:'other_cost',
+      label:'その他費用',
+      type:'group',
+      keys:['旅費','被服費','会議費','交際費','宣伝広告費','諸手数料','負担金','寄付金','教育求人費','環境衛生費','経営指導料','雑費','業務委託収入','貸倒損失'],
+      children:[
+        {label:'旅費', keys:['旅費']},
+        {label:'被服費', keys:['被服費']},
+        {label:'会議費', keys:['会議費']},
+        {label:'交際費', keys:['交際費']},
+        {label:'宣伝広告費', keys:['宣伝広告費']},
+        {label:'諸手数料', keys:['諸手数料']},
+        {label:'負担金', keys:['負担金']},
+        {label:'寄付金', keys:['寄付金']},
+        {label:'教育求人費', keys:['教育求人費']},
+        {label:'環境衛生費', keys:['環境衛生費']},
+        {label:'経営指導料', keys:['経営指導料']},
+        {label:'雑費', keys:['雑費']},
+        {label:'業務委託収入', keys:['業務委託収入']},
+        {label:'貸倒損失', keys:['貸倒損失']}
+      ]
+    },
+    { id:'cost_total', label:'売上原価', type:'total-cost' },
+    { id:'gross_profit', label:'粗利益', type:'gross-profit' }
   ],
 
   PLAN_MONTH_COLS: {
@@ -1484,12 +1647,58 @@ function renderDashboard() {
 }
 
 /* ════════ §13 RENDER — P&L ════════════════════════════════════ */
+const PL_TOGGLE = {
+  _open: {},
+  isOpen(id) {
+    return !!this._open[id];
+  },
+  toggle(id) {
+    this._open[id] = !this._open[id];
+    renderPL();
+  }
+};
+
+function ensurePLStyle() {
+  if (document.getElementById('pl-fold-style')) return;
+  const style = document.createElement('style');
+  style.id = 'pl-fold-style';
+  style.textContent = `
+    #pl-tbl .col-current { background:#eef6ff; }
+    #pl-tbl .col-plan { background:#fff8e1; }
+    #pl-tbl .col-prev { background:#f5f6f8; border-left:4px solid #94a3b8; }
+    #pl-tbl .col-lastyear { background:#fff1f7; border-left:4px solid #d946ef; }
+    #pl-tbl .pl-group-row td { background:#f8fafc; border-top:1px solid #cbd5e1; }
+    #pl-tbl .pl-child-row td { font-size:12px; color:#475569; }
+    #pl-tbl .pl-total-row td { background:#eef2f7; font-weight:900; border-top:2px solid #94a3b8; }
+    #pl-tbl .pl-profit-row td { background:#ecfdf5; font-weight:900; border-top:2px solid #16a34a; }
+    #pl-tbl .pl-fold-btn {
+      width:22px;
+      height:22px;
+      border:1px solid #94a3b8;
+      border-radius:6px;
+      background:#fff;
+      color:#1a4d7c;
+      font-weight:900;
+      line-height:18px;
+      margin-right:7px;
+      cursor:pointer;
+      box-shadow:0 1px 2px rgba(15,23,42,.08);
+    }
+    #pl-tbl .pl-fold-spacer { display:inline-block; width:32px; }
+    #pl-tbl .pl-child-label { color:#475569; }
+  `;
+  document.head.appendChild(style);
+}
+
 function renderPL() {
+  ensurePLStyle();
+
   const notice = document.getElementById('pl-notice');
   const tbody  = document.getElementById('pl-tbody');
   if (!tbody) return;
 
   renderPLPeriodSelector();
+
   const ds = selectedDashboardDS();
   if (!ds) {
     if (notice) notice.innerHTML = '<div class="msg msg-info">データがありません</div>';
@@ -1500,134 +1709,179 @@ function renderPL() {
 
   const prev = prevDS(ds.ym);
   const py   = sameMonthLastYear(ds.ym);
-  const plan = getPlanRowsForFiscalYear(fiscalYearFromYM(ds.ym));
+  const fy   = fiscalYearFromYM(ds.ym);
   const mm   = ds.ym.slice(4,6);
+  const plan = getPlanRowsForFiscalYear(fy);
 
-  function getVal(ds, keys) {
-    if (!ds) return null;
+  function valueFromRows(dataSet, keys) {
+    if (!dataSet) return null;
     const arr = Array.isArray(keys) ? keys : [keys];
-    return arr.reduce((s,k)=>s+n(ds.rows?.[k]??ds.rows?.[k]??0),0);
+    return arr.reduce((sum, key) => sum + n(dataSet.rows?.[key] ?? 0), 0);
   }
-  function getPlan(label, fallbackLabels) {
+
+  function planValue(label, keys) {
     if (!plan) return null;
 
-    // 親項目は直接値を拾わず、原則として子科目から再計算する。
-    // 計画データの単位は千円なので、ここでは千円のまま返す。
-    if (label === '営業収益計' || label === '営業収益の部') {
-      return getPlanValueK(plan, label, mm, CONFIG.INCOME_KEYS);
-    }
-    if (label === '売上原価合計') {
-      const expenseTotal = getPlanValueK(plan, label, mm, CONFIG.EXPENSE_KEYS);
-      if (expenseTotal != null) return expenseTotal;
-      return readPlanValueByLabel(plan, '売上原価', mm);
-    }
-    if (label === 'センター利益（粗利）' || label === '粗利益') {
-      const sales = getPlanValueK(plan, '営業収益計', mm, CONFIG.INCOME_KEYS);
-      const expense = getPlanValueK(plan, '売上原価合計', mm, CONFIG.EXPENSE_KEYS);
-      if (sales != null && expense != null) return sales - expense;
-      return readPlanValueByLabel(plan, '粗利益', mm);
+    if (label === '売上原価') {
+      const direct = readPlanValueByLabel(plan, '売上原価', mm);
+      if (direct != null) return direct;
+      return CONFIG.PL_DEF
+        .filter(d => d.type === 'group' && d.id !== 'revenue')
+        .reduce((sum, d) => sum + (getPlanValueK(plan, d.label, mm, d.keys) || 0), 0);
     }
 
-    return getPlanValueK(plan, label, mm, fallbackLabels);
+    if (label === '粗利益') {
+      const direct = readPlanValueByLabel(plan, '粗利益', mm);
+      if (direct != null) return direct;
+      const revenue = getPlanValueK(plan, '営業収益', mm, CONFIG.PL_DEF.find(d=>d.id==='revenue')?.keys || CONFIG.INCOME_KEYS) || 0;
+      const cost = CONFIG.PL_DEF
+        .filter(d => d.type === 'group' && d.id !== 'revenue')
+        .reduce((sum, d) => sum + (getPlanValueK(plan, d.label, mm, d.keys) || 0), 0);
+      return revenue - cost;
+    }
+
+    return getPlanValueK(plan, label, mm, keys);
   }
+
+  const totalRevenue = ds.totalIncome || valueFromRows(ds, CONFIG.INCOME_KEYS) || 0;
+  const totalCost    = ds.totalExpense || valueFromRows(ds, CONFIG.EXPENSE_KEYS) || 0;
+  const totalGross   = totalRevenue - totalCost;
+
+  const prevRevenue = prev ? (prev.totalIncome || valueFromRows(prev, CONFIG.INCOME_KEYS) || 0) : null;
+  const prevCost    = prev ? (prev.totalExpense || valueFromRows(prev, CONFIG.EXPENSE_KEYS) || 0) : null;
+  const prevGross   = prev ? (prevRevenue - prevCost) : null;
+
+  const pyRevenue = py ? (py.totalIncome || valueFromRows(py, CONFIG.INCOME_KEYS) || 0) : null;
+  const pyCost    = py ? (py.totalExpense || valueFromRows(py, CONFIG.EXPENSE_KEYS) || 0) : null;
+  const pyGross   = py ? (pyRevenue - pyCost) : null;
 
   const rows = [];
+
   for (const def of CONFIG.PL_DEF) {
-    if (def.t==='h') {
-      rows.push(`<tr class="row-h"><td colspan="12">${esc(def.l)}</td></tr>`);
-      continue;
-    }
-    if (def.t==='st') { // 収益計
-      const v = ds.totalIncome; const pv=plan?getPlan('営業収益計', CONFIG.INCOME_KEYS):null;
-      rows.push(makeRow(def.l, v, null, pv, prev?prev.totalIncome:null, py?py.totalIncome:null, true));
-      continue;
-    }
-    if (def.t==='tot') { // 費用合計
-      const v = ds.totalExpense;
-      const pv = plan ? getPlan('売上原価合計', CONFIG.EXPENSE_KEYS) : null;
-      rows.push(makeRow(def.l, v, ds.totalIncome, pv, prev?prev.totalExpense:null, py?py.totalExpense:null, true));
-      continue;
-    }
-    if (def.t==='prf') { // 利益
-      const v = ds.profit;
-      const pv = plan ? getPlan('粗利益') : null;
-      const planY = pv != null ? pv * 1000 : null;
-      rows.push(`<tr class="${v>=0?'row-profit':'row-loss'}">
-        <td><strong>${esc(def.l)}</strong></td>
-        <td class="r"><strong>${fmtK(v)}</strong></td>
-        <td class="r">${pct(ds.profitRate)}</td>
-        <td class="r" style="background:#fff9e6">${pv!=null?fmt(pv):'—'}</td>
-        <td class="r ${planY!=null?(v>=planY?'cell-up':'cell-down'):''}">${planY!=null?diff(v,planY):'—'}</td>
-        <td class="r">${planY!=null?ratio(v,planY):'—'}</td>
-        <td class="r vs-col">${prev?fmtK(prev.profit):'—'}</td>
-        <td class="r vs-col">${diff(v,prev?.profit)}</td>
-        <td class="r vs-col">${ratio(v,prev?.profit)}</td>
-        <td class="r vs-col">${py?fmtK(py.profit):'—'}</td>
-        <td class="r vs-col">${diff(v,py?.profit)}</td>
-        <td class="r vs-col">${ratio(v,py?.profit)}</td>
-      </tr>`);
-      continue;
-    }
-    if (def.t==='i') { // 収入行
-      const v = getVal(ds,def.k);
-      rows.push(makeRow(def.l, v, ds.totalIncome, getPlan(def.l, def.k), getVal(prev,def.k), getVal(py,def.k), false));
-      if (def.sub) {
-        for (const sub of def.sub) {
-          const sv = n(ds.rows?.[sub.k]);
-          if (sv) rows.push(`<tr class="row-indent"><td>${esc(sub.l)}</td><td class="r">${fmtK(sv)}</td><td colspan="10"></td></tr>`);
+    if (def.type === 'group') {
+      const actual = def.id === 'revenue' ? totalRevenue : valueFromRows(ds, def.keys);
+      const prevV  = def.id === 'revenue' ? prevRevenue : valueFromRows(prev, def.keys);
+      const pyV    = def.id === 'revenue' ? pyRevenue : valueFromRows(py, def.keys);
+      const planV  = planValue(def.label, def.keys);
+      const open   = PL_TOGGLE.isOpen(def.id);
+
+      rows.push(makePLRow({
+        label: def.label,
+        value: actual,
+        base: totalRevenue,
+        planV,
+        prevV,
+        pyV,
+        bold: true,
+        groupId: def.id,
+        open,
+        rowClass: 'pl-group-row'
+      }));
+
+      if (open && Array.isArray(def.children)) {
+        for (const child of def.children) {
+          const childActual = valueFromRows(ds, child.keys);
+          const childPrev   = valueFromRows(prev, child.keys);
+          const childPy     = valueFromRows(py, child.keys);
+          const childPlan   = planValue(child.label, child.keys);
+
+          if (!childActual && !childPrev && !childPy && !childPlan) continue;
+
+          rows.push(makePLRow({
+            label: child.label,
+            value: childActual,
+            base: totalRevenue,
+            planV: childPlan,
+            prevV: childPrev,
+            pyV: childPy,
+            bold: false,
+            child: true,
+            rowClass: 'pl-child-row'
+          }));
         }
       }
+
       continue;
     }
-    if (def.t==='g') { // 費用グループ
-      const v = getVal(ds,def.k);
-      const planK = plan ? getPlan(def.l, def.k) : null;
-      const planY = planK != null ? planK * 1000 : null;
-      rows.push(`<tr class="row-sub">`+
-        `<td><strong>${esc(def.l)}</strong></td>`+
-        `<td class="r"><strong>${fmtK(v)}</strong></td>`+
-        `<td class="r">${ds.totalIncome>0?pct(v/ds.totalIncome*100):'—'}</td>`+
-        `<td class="r">${planK!=null?fmt(planK):'—'}</td>`+
-        `<td class="r ${planY!=null?(v<=planY?'cell-up':'cell-down'):''}">${planY!=null?diff(v,planY):'—'}</td>`+
-        `<td class="r">${planY!=null?ratio(v,planY):'—'}</td>`+
-        `<td class="r vs-col">${prev?fmtK(getVal(prev,def.k)):'—'}</td>`+
-        `<td class="r vs-col">${diff(v,getVal(prev,def.k))}</td>`+
-        `<td class="r vs-col">${ratio(v,getVal(prev,def.k))}</td>`+
-        `<td class="r vs-col">${py?fmtK(getVal(py,def.k)):'—'}</td>`+
-        `<td class="r vs-col">${diff(v,getVal(py,def.k))}</td>`+
-        `<td class="r vs-col">${ratio(v,getVal(py,def.k))}</td>`+
-        `</tr>`);
-      for (const sub of (def.s||[])) {
-        const sv = getVal(ds,sub.k);
-        if (n(sv)) rows.push(`<tr class="row-indent"><td>${esc(sub.l)}</td><td class="r">${fmtK(sv)}</td><td colspan="10"></td></tr>`);
-      }
+
+    if (def.type === 'total-cost') {
+      rows.push(makePLRow({
+        label: def.label,
+        value: totalCost,
+        base: totalRevenue,
+        planV: planValue('売上原価', CONFIG.EXPENSE_KEYS),
+        prevV: prevCost,
+        pyV: pyCost,
+        bold: true,
+        total: true,
+        rowClass: 'pl-total-row'
+      }));
+      continue;
+    }
+
+    if (def.type === 'gross-profit') {
+      rows.push(makePLRow({
+        label: def.label,
+        value: totalGross,
+        base: totalRevenue,
+        planV: planValue('粗利益', []),
+        prevV: prevGross,
+        pyV: pyGross,
+        bold: true,
+        total: true,
+        rowClass: 'pl-profit-row'
+      }));
+      continue;
     }
   }
+
   tbody.innerHTML = rows.join('');
 
-  // サブタイトル
   const title = document.getElementById('pl-card-title');
   if (title) title.textContent = `月次収支表（${ymLabel(ds.ym)}・${datasetKindLabel(ds)}）`;
 }
 
-function makeRow(label, v, base, planV, prevV, pyV, bold) {
-  const vk = v/1000; const b = bold ? 'font-weight:700' : '';
-  const rat = base && base>0 ? pct(v/base*100) : '—';
-  const planK = planV!=null ? planV : null; // 計画は千円単位で保存
-  return `<tr>
- <td class="r col-current" style="${b}">${fmtK(v)}</td>
-<td class="r col-current">${rat}</td>
-<td class="r col-plan">${planK!=null?fmt(planK):'—'}</td>
-<td class="r col-plan ${planK!=null?(v>=planK*1000?'cell-up':'cell-down'):''}">${planK!=null?diff(v,planK*1000):'—'}</td>
-<td class="r col-plan">${planK!=null?ratio(v,planK*1000):'—'}</td>
-<td class="r col-prev">${prevV!=null?fmtK(prevV):'—'}</td>
-<td class="r col-prev ${prevV!=null?(v>=prevV?'cell-up':'cell-down'):''}">${diff(v,prevV)}</td>
-<td class="r col-prev">${ratio(v,prevV)}</td>
-<td class="r col-lastyear">${pyV!=null?fmtK(pyV):'—'}</td>
-<td class="r col-lastyear ${pyV!=null?(v>=pyV?'cell-up':'cell-down'):''}">${diff(v,pyV)}</td>
-<td class="r col-lastyear">${ratio(v,pyV)}</td>
+function makePLRow(opt) {
+  const label = opt.label || '';
+  const v = n(opt.value);
+  const base = n(opt.base);
+  const planK = opt.planV != null ? opt.planV : null;
+  const prevV = opt.prevV != null ? opt.prevV : null;
+  const pyV = opt.pyV != null ? opt.pyV : null;
+  const boldStyle = opt.bold ? 'font-weight:900' : '';
+  const rowClass = opt.rowClass || '';
+  const rat = base && base > 0 ? pct(v / base * 100) : '—';
+
+  let labelHtml = esc(label);
+  if (opt.groupId) {
+    const mark = opt.open ? '－' : '＋';
+    labelHtml = `<button class="pl-fold-btn" onclick="PL_TOGGLE.toggle('${esc(opt.groupId)}')">${mark}</button>${esc(label)}`;
+  } else if (opt.child) {
+    labelHtml = `<span class="pl-fold-spacer"></span><span class="pl-child-label">└ ${esc(label)}</span>`;
+  } else if (opt.total) {
+    labelHtml = `<span class="pl-fold-spacer"></span>${esc(label)}`;
+  }
+
+  const planDiffClass = planK != null ? (v >= planK * 1000 ? 'cell-up' : 'cell-down') : '';
+  const prevDiffClass = prevV != null ? (v >= prevV ? 'cell-up' : 'cell-down') : '';
+  const pyDiffClass   = pyV != null ? (v >= pyV ? 'cell-up' : 'cell-down') : '';
+
+  return `<tr class="${rowClass}">
+    <td style="${boldStyle}">${labelHtml}</td>
+    <td class="r col-current" style="${boldStyle}">${fmtK(v)}</td>
+    <td class="r col-current">${rat}</td>
+    <td class="r col-plan">${planK!=null?fmt(planK):'—'}</td>
+    <td class="r col-plan ${planDiffClass}">${planK!=null?diff(v,planK*1000):'—'}</td>
+    <td class="r col-plan">${planK!=null?ratio(v,planK*1000):'—'}</td>
+    <td class="r col-prev">${prevV!=null?fmtK(prevV):'—'}</td>
+    <td class="r col-prev ${prevDiffClass}">${prevV!=null?diff(v,prevV):'—'}</td>
+    <td class="r col-prev">${prevV!=null?ratio(v,prevV):'—'}</td>
+    <td class="r col-lastyear">${pyV!=null?fmtK(pyV):'—'}</td>
+    <td class="r col-lastyear ${pyDiffClass}">${pyV!=null?diff(v,pyV):'—'}</td>
+    <td class="r col-lastyear">${pyV!=null?ratio(v,pyV):'—'}</td>
   </tr>`;
 }
+
 
 /* ════════ §14 RENDER — Trend ══════════════════════════════════ */
 function renderTrend() {
