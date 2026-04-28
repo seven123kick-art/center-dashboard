@@ -6,6 +6,27 @@
 
 <link rel="stylesheet" href="app.css">
 
+<style>
+/* ===== PL 見やすさ改善 ===== */
+
+/* 当月 */
+.col-current { background:#eef6ff; }
+
+/* 計画 */
+.col-plan { background:#fff8e1; }
+
+/* 前月 */
+.col-prev {
+  background:#f5f5f5;
+  border-left:4px solid #9ca3af;
+}
+
+/* 前年 */
+.col-lastyear {
+  background:#fff1f7;
+  border-left:4px solid #d946ef;
+}
+</style>
 </head>
 <body>
 <div id="js-error-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:10px 16px;font-size:12px;font-family:monospace;max-height:40vh;overflow-y:auto"></div>
@@ -180,7 +201,7 @@
             <thead>
               <tr>
                 <th style="min-width:140px">科目</th>
-                <th class="r" style="min-width:80px">実績</th>
+               <th class="r col-current" style="min-width:80px">実績</th>
                 <th class="r" style="min-width:60px">収入比</th>
                 <th class="r" style="min-width:80px;background:#fff9e6;color:#7a5800">計画</th>
                 <th class="r" style="min-width:70px;background:#fff9e6;color:#7a5800">計画差異</th>
