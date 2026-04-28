@@ -690,7 +690,7 @@ const IMPORT = {
 
     if (csv.length)  { this._pending = csv; MODAL.openYM(csv); return; }
     if (xlsx.length) { this.importCapacityExcel(xlsx[0]).catch(e=>UI.toast(e.message,'error')); return; }
-    if (pdf.length)  { UI.toast('PDF取込は現在実装中です。CSVに変換してください。','warn'); return; }
+    if (pdf.length)  { AREA_PDF_IMPORT.handleFiles(pdf); return; }
     UI.toast('対応形式：CSV（収支）・XLSX（キャパ）','warn');
   },
 
@@ -2623,7 +2623,9 @@ const CAPACITY_UI = {
   async importCapacityExcel(file) { await IMPORT.importCapacityExcel(file); this.render(); },
 
   async importAreaPdf(files) {
-    UI.toast('PDF解析は実装中です。CSVで代用してください。','warn');
+    await AREA_PDF_IMPORT.handleFiles(files);
+    this.populateYMSel();
+    this.render();
   },
 
   clearMaster() {
@@ -3692,6 +3694,7 @@ const AREA_PDF_IMPORT = {
 
   parseDetailLine(line, ym, shipperCode, shipperName) {
     if (!/^(UNKNOWN|\d{7})\s+/.test(line)) return null;
+    if (/^合計[:：]/.test(line)) return null;
 
     const tokens = line.split(/\s+/);
     if (tokens.length < 14) return null;
@@ -3753,6 +3756,7 @@ const AREA_PDF_IMPORT = {
     this.rebuildFieldDataFromAreaData(parsed.ym);
     STORE.save();
     renderFieldDataList2();
+    FIELD_UI.updatePeriodBadge && FIELD_UI.updatePeriodBadge();
   },
 
   rebuildFieldDataFromAreaData(ym) {
