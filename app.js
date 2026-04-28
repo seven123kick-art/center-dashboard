@@ -915,7 +915,7 @@ const CLOUD = {
   },
   _makeFullState() {
     return {
-      version: 14,
+      version: 15,
       center: CENTER.id,
       savedAt: new Date().toISOString(),
       datasets: STATE.datasets || [],
@@ -1081,6 +1081,33 @@ const CLOUD = {
     }
     catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
   },
+  async syncSmart() {
+    if (this._busy) return { ok:false, error:'同期処理中' };
+    this._busy = true;
+    try {
+      const cloudFull = await this._downloadJSON(this._fullStateKey());
+      const localFull = this._makeFullState();
+      const merged = cloudFull && typeof cloudFull === 'object'
+        ? mergeFullState(localFull, cloudFull)
+        : localFull;
+
+      await this._uploadJSON(this._fullStateKey(), merged);
+      this._applyFullState(merged);
+
+      if (STATE.planData && Object.keys(STATE.planData).length) await this._uploadJSON(this._planKey(), STATE.planData);
+      if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
+      if (STATE.fieldData && STATE.fieldData.length) await this._uploadJSON(this._fieldKey(), STATE.fieldData);
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
+
+      UI.updateCloudBadge('ok');
+      return { ok:true, changed:true, source:'smart' };
+    } catch(e) {
+      UI.updateCloudBadge('error');
+      return { ok:false, error:e.message };
+    } finally {
+      this._busy = false;
+    }
+  },
   async saveConfig() {
     const urlEl=document.getElementById('sb-url'), keyEl=document.getElementById('sb-key'), bucketEl=document.getElementById('sb-bucket'), msgEl=document.getElementById('cloud-test-msg');
     const url=urlEl?.value?.trim()||CONFIG.SUPABASE_URL;
@@ -1095,12 +1122,17 @@ const CLOUD = {
   },
   async syncNow() {
     const msgEl=document.getElementById('cloud-test-msg');
-    if (msgEl) msgEl.textContent='クラウドから取得中...';
-    UI.toast('クラウドから取得中...');
-    const r=await this.pull();
-    if (msgEl) msgEl.textContent = r.ok ? '✅ 取得完了' : '❌ '+(r.error||'');
-    if (r.ok) { NAV.refresh(); UI.toast('クラウドからデータを取得しました'); }
-    else UI.toast('取得失敗: '+(r.error||'不明'), 'error');
+    if (msgEl) msgEl.textContent='クラウドと双方向同期中...';
+    UI.toast('クラウドと双方向同期中...');
+    const r = await this.syncSmart();
+    if (msgEl) msgEl.textContent = r.ok ? '✅ 双方向同期完了' : '❌ '+(r.error||'同期失敗');
+    if (r.ok) {
+      NAV.refresh();
+      UI.updateTopbar(STATE.view || 'dashboard');
+      UI.toast('クラウドと双方向同期しました');
+    } else {
+      UI.toast('同期失敗: '+(r.error||'不明'), 'error');
+    }
   },
   renderForm() {
     const cfg=this._cfg();
@@ -1419,6 +1451,66 @@ function getPlanRowsForFiscalYear(fy) {
   const pack = getPlanPackForFiscalYear(fy);
   return pack ? pack.rows : null;
 }
+
+
+function latestPlanUpdatedAt() {
+  if (!STATE.planData || typeof STATE.planData !== 'object') return null;
+  let latest = null;
+  Object.values(STATE.planData).forEach(pack => {
+    const t = pack && (pack.importedAt || pack.updatedAt || pack.savedAt);
+    if (t && (!latest || String(t) > String(latest))) latest = t;
+  });
+  return latest;
+}
+
+function mergePlanDataByUpdatedAt(localRaw, cloudRaw) {
+  const local = normalizePlanData(localRaw);
+  const cloud = normalizePlanData(cloudRaw);
+  const out = { ...local };
+  Object.keys(cloud).forEach(fy => {
+    const c = cloud[fy];
+    const l = out[fy];
+    const ct = c && (c.importedAt || c.updatedAt || c.savedAt || '');
+    const lt = l && (l.importedAt || l.updatedAt || l.savedAt || '');
+    if (!l || String(ct) >= String(lt)) out[fy] = c;
+  });
+  return out;
+}
+
+function mergeDatasetsByImportedAt(localList, cloudList) {
+  const map = {};
+  [...(localList || []), ...(cloudList || [])].forEach(d => {
+    if (!d || !d.ym) return;
+    const key = `${d.ym}_${d.type || 'confirmed'}`;
+    const old = map[key];
+    if (!old || String(d.importedAt || d.updatedAt || '') >= String(old.importedAt || old.updatedAt || '')) {
+      map[key] = d;
+    }
+  });
+  return Object.values(map).sort((a,b) => {
+    const ym = String(a.ym || '').localeCompare(String(b.ym || ''));
+    if (ym !== 0) return ym;
+    return String(a.type || '').localeCompare(String(b.type || ''));
+  });
+}
+
+function mergeFullState(localFull, cloudFull) {
+  const local = localFull || {};
+  const cloud = cloudFull || {};
+  return {
+    version: 15,
+    center: CENTER.id,
+    savedAt: new Date().toISOString(),
+    datasets: mergeDatasetsByImportedAt(local.datasets || [], cloud.datasets || []),
+    fieldData: (cloud.fieldData && cloud.fieldData.length) ? cloud.fieldData : (local.fieldData || []),
+    capacity: cloud.capacity || local.capacity || null,
+    planData: mergePlanDataByUpdatedAt(local.planData || {}, cloud.planData || {}),
+    fiscalYear: local.fiscalYear || cloud.fiscalYear || null,
+    memos: { ...(local.memos || {}), ...(cloud.memos || {}) },
+    library: (cloud.library && cloud.library.length) ? cloud.library : (local.library || []),
+  };
+}
+
 
 
 function latestPlanUpdatedAt() {
@@ -3072,8 +3164,8 @@ const PLAN = {
     if (msg) msg.textContent = `${fy}年度 完全入替完了: ${count}科目`;
     renderImport();
     NAV.refresh();
-    CLOUD.pushAll().then(r => {
-      if (r && r.ok) UI.toast(`${fy}年度 計画データを完全入替・クラウド同期しました（${count}科目）`);
+    CLOUD.syncSmart().then(r => {
+      if (r && r.ok) UI.toast(`${fy}年度 計画データを完全入替し、クラウド同期しました（${count}科目）`);
       else UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`, 'warn');
     }).catch(() => UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`, 'warn'));
   },
@@ -3254,13 +3346,13 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.updateSaveStatus();
   UI.updateTopbar('dashboard');
 
-  // 11. full_state.json から全データを取得して再描画
+  // 11. 起動時はクラウドから取得だけ行う
   CLOUD.pull()
     .then(r => {
-      if (r && r.ok) {
+      if (r && r.ok && r.changed) {
         NAV.refresh();
         UI.updateTopbar(STATE.view || 'dashboard');
-        if (r.changed) UI.toast('クラウドの最新データを反映しました');
+        UI.toast('クラウドの最新データを反映しました');
       }
     })
     .catch(() => {});
