@@ -10,6 +10,11 @@
    ・年度順（4月→翌年3月）で月を管理
    ・今回の対象はダッシュボードのみ
 */
+/* 計画データ横持ち形式・科目マッピング修正版 v9 2026-04-28
+   ・計画データは『科目名＋年度合計＋4月〜9月＋上期計＋10月〜3月＋下期計』形式を前提
+   ・システム側の科目名を計画データ側へ寄せる
+   ・月次収支表の計画/差異/達成率を千円基準で整合
+*/
 /* 速報・確定両保持版 2026-04-27
    ・同一年月で速報値と確定値を別々に保持
    ・ダッシュボード/分析は確定優先、確定がなければ速報
@@ -362,19 +367,31 @@ const CSV = {
   },
 
   // 計画データ（貼り付けテキスト）解析
+  // 前提：科目名 + 年間合計 + 4月〜9月 + 上期計 + 10月〜3月 + 下期計
+  // 単位：千円。保存時に円変換しない。
   parsePlan(text) {
     const rows = this.toRows(text.replace(/\t/g,','));
     const plan = {};
+
+    function toNum(v) {
+      const s = String(v ?? '').replace(/,/g,'').replace(/[千円]/g,'').replace(/[^\d.\-]/g,'');
+      if (!s || s === '-' || s === '.') return null;
+      const num = parseFloat(s);
+      return isNaN(num) ? null : num;
+    }
+
     for (const row of rows) {
       if (!row[0]) continue;
-      const label = row[0].replace(/[\s　]/g,'');
-      // 全12列分（月ごと）を抽出
+      const label = normalizePlanLabel(row[0]);
+      if (!label) continue;
+
       const vals = {};
-      for (const [mm, col] of Object.entries(CONFIG.PLAN_MONTH_COLS)) {
-        const v = parseFloat((row[col]||'').replace(/,/g,''));
-        // 計画データは元データが「千円」単位のため、変換せず千円のまま保持する
-        if (!isNaN(v)) vals[mm] = v;
+      for (const mm of ['04','05','06','07','08','09','10','11','12','01','02','03']) {
+        const col = planMonthCol(mm);
+        const v = toNum(row[col]);
+        if (v != null) vals[mm] = v;
       }
+
       if (Object.keys(vals).length > 0) plan[label] = vals;
     }
     return Object.keys(plan).length > 0 ? plan : null;
@@ -1107,6 +1124,135 @@ function getPlanRowsForFiscalYear(fy) {
   const pack = getPlanPackForFiscalYear(fy);
   return pack ? pack.rows : null;
 }
+
+
+/* 計画データ科目マッピング
+   元データ側の科目名を優先し、画面表示側の名称をここで吸収する。
+   計画データの単位は千円。比較時だけ円へ換算する。 */
+const PLAN_LABEL_ALIASES = {
+  '営業収益計': ['営業収益計','営業収益'],
+  '営業収益の部': ['営業収益計','営業収益'],
+  '売上原価合計': ['売上原価','売上原価合計'],
+  'センター利益（粗利）': ['粗利益','営業利益','経常利益'],
+  '粗利益': ['粗利益','営業利益','経常利益'],
+
+  '家電収入': ['家電収入'],
+  '一般収入': ['一般収入'],
+  '委託収入': ['委託収入'],
+  'その他収入': ['その他収入'],
+  '保管料収入': ['保管料収入'],
+  'コンピュータ収入': ['コンピュータ収入'],
+
+  '人件費計': ['人件費計','人件費'],
+  '燃料費計': ['燃料費計','燃料費'],
+  '修繕費計': ['修繕費計'],
+  '償却費計': ['償却費計','減価償却費計'],
+  '保険料計': ['保険料計'],
+  '施設費計': ['施設費計','施設計'],
+  '租税公課計': ['租税公課計'],
+  '備車費計': ['備車費計','傭車費計','傭車費'],
+  '道路費計': ['道路費計','道路計'],
+  '営業費計': ['営業費計'],
+  'その他費用計': ['その他費用計','その他経費'],
+
+  '給与手当': ['給与手当'],
+  '人材派遣料': ['人材派遣料'],
+  'その他人件費': ['その他人件費'],
+  '旅費': ['旅費','運行旅費'],
+  '軽油費': ['軽油費'],
+  'ガソリン費': ['ガソリン費'],
+  '車両修繕費': ['車両修繕費'],
+  'タイヤ費': ['タイヤ費'],
+  'その他修繕費': ['その他修繕費'],
+  '車両償却費': ['車両償却費'],
+  'その他償却費': ['その他償却費'],
+  '自賠責保険料': ['自賠責保険料'],
+  '任意保険料': ['任意保険料'],
+  '運送保険料': ['運送保険料'],
+  'その他保険料': ['その他保険料'],
+  '借地借家料': ['借地借家料'],
+  'その他施設費': ['その他施設費'],
+  '重量税': ['重量税'],
+  '自動車税': ['自動車税'],
+  '取得税': ['取得税'],
+  'その他税': ['その他税'],
+  '集配傭車': ['集配傭車'],
+  '路線傭車': ['路線傭車'],
+  '路線備車': ['路線備車'],
+  '委託費': ['委託費'],
+  '社内外注費': ['社内外注費'],
+  '道路利用料': ['道路利用料'],
+  'その他利用料': ['その他利用料'],
+  '水道光熱費': ['水道光熱費'],
+  '備消品費': ['備消品費'],
+  '図書印刷費': ['図書印刷費'],
+  '通信運搬費': ['通信運搬費'],
+  '電算関連費': ['電算関連費'],
+  '被服費': ['被服費'],
+  '交際費': ['交際費'],
+  '負担金': ['負担金'],
+  '教育求人費': ['教育求人費'],
+  '雑費': ['雑費'],
+  '環境衛生費': ['環境衛生費'],
+  '経営指導料': ['経営指導料'],
+};
+
+function normalizePlanLabel(label) {
+  return String(label || '')
+    .replace(/[\s　\u3000]/g,'')
+    .replace(/[()（）]/g,'')
+    .replace(/％/g,'%')
+    .trim();
+}
+
+function planMonthCol(mm) {
+  // 計画貼付データは 0:科目名 1:年間合計 2:4月 ... 7:9月 8:上期計 9:10月 ... 14:3月 15:下期計
+  const map = { '04':2,'05':3,'06':4,'07':5,'08':6,'09':7,'10':9,'11':10,'12':11,'01':12,'02':13,'03':14 };
+  return map[String(mm).padStart(2,'0')];
+}
+
+function readPlanValueByLabel(planRows, label, mm) {
+  if (!planRows || !label || !mm) return null;
+  const colKey = String(mm).padStart(2,'0');
+  const candidates = [label, ...(PLAN_LABEL_ALIASES[label] || [])].map(normalizePlanLabel);
+
+  for (const key of candidates) {
+    if (planRows[key] && planRows[key][colKey] != null) return n(planRows[key][colKey]);
+  }
+
+  // 最後の保険：表示名が少し違っても、正規化後に一致すれば拾う
+  const normalizedEntries = Object.entries(planRows);
+  for (const [storedLabel, vals] of normalizedEntries) {
+    if (!vals || vals[colKey] == null) continue;
+    const sLabel = normalizePlanLabel(storedLabel);
+    if (candidates.includes(sLabel)) return n(vals[colKey]);
+  }
+
+  return null;
+}
+
+function sumPlanValues(planRows, labels, mm) {
+  let sum = 0;
+  let found = false;
+  for (const label of labels || []) {
+    const v = readPlanValueByLabel(planRows, label, mm);
+    if (v != null) { sum += v; found = true; }
+  }
+  return found ? sum : null;
+}
+
+function getPlanValueK(planRows, label, mm, fallbackLabels) {
+  // 1) 元データ側の親行・別名を最優先
+  let v = readPlanValueByLabel(planRows, label, mm);
+  if (v != null) return v;
+
+  // 2) 親行が無い場合のみ、画面側の子科目合計で補完
+  if (fallbackLabels && fallbackLabels.length) {
+    v = sumPlanValues(planRows, fallbackLabels, mm);
+    if (v != null) return v;
+  }
+  return null;
+}
 function formatImportedAt(iso) {
   if (!iso) return '取込日時なし';
   try { return new Date(iso).toLocaleString('ja-JP'); } catch(e) { return String(iso); }
@@ -1312,10 +1458,9 @@ function renderPL() {
     const arr = Array.isArray(keys) ? keys : [keys];
     return arr.reduce((s,k)=>s+n(ds.rows?.[k]??ds.rows?.[k]??0),0);
   }
-  function getPlan(label) {
+  function getPlan(label, fallbackLabels) {
     if (!plan) return null;
-    const v = plan[label]?.[mm];
-    return v != null ? v : null;
+    return getPlanValueK(plan, label, mm, fallbackLabels);
   }
 
   const rows = [];
@@ -1325,22 +1470,27 @@ function renderPL() {
       continue;
     }
     if (def.t==='st') { // 収益計
-      const v = ds.totalIncome; const pv=plan?getPlan('営業収益計'):null;
+      const v = ds.totalIncome; const pv=plan?getPlan('営業収益計', CONFIG.INCOME_KEYS):null;
       rows.push(makeRow(def.l, v, null, pv, prev?prev.totalIncome:null, py?py.totalIncome:null, true));
       continue;
     }
     if (def.t==='tot') { // 費用合計
       const v = ds.totalExpense;
-      rows.push(makeRow(def.l, v, ds.totalIncome, null, prev?prev.totalExpense:null, py?py.totalExpense:null, true));
+      const pv = plan ? getPlan('売上原価合計', CONFIG.EXPENSE_KEYS) : null;
+      rows.push(makeRow(def.l, v, ds.totalIncome, pv, prev?prev.totalExpense:null, py?py.totalExpense:null, true));
       continue;
     }
     if (def.t==='prf') { // 利益
       const v = ds.profit;
+      const pv = plan ? getPlan('粗利益') : null;
+      const planY = pv != null ? pv * 1000 : null;
       rows.push(`<tr class="${v>=0?'row-profit':'row-loss'}">
         <td><strong>${esc(def.l)}</strong></td>
         <td class="r"><strong>${fmtK(v)}</strong></td>
         <td class="r">${pct(ds.profitRate)}</td>
-        <td class="r" colspan="3">—</td>
+        <td class="r" style="background:#fff9e6">${pv!=null?fmt(pv):'—'}</td>
+        <td class="r ${planY!=null?(v>=planY?'cell-up':'cell-down'):''}">${planY!=null?diff(v,planY):'—'}</td>
+        <td class="r">${planY!=null?ratio(v,planY):'—'}</td>
         <td class="r vs-col">${prev?fmtK(prev.profit):'—'}</td>
         <td class="r vs-col">${diff(v,prev?.profit)}</td>
         <td class="r vs-col">${ratio(v,prev?.profit)}</td>
@@ -1352,7 +1502,7 @@ function renderPL() {
     }
     if (def.t==='i') { // 収入行
       const v = getVal(ds,def.k);
-      rows.push(makeRow(def.l, v, ds.totalIncome, getPlan(def.l), getVal(prev,def.k), getVal(py,def.k), false));
+      rows.push(makeRow(def.l, v, ds.totalIncome, getPlan(def.l, def.k), getVal(prev,def.k), getVal(py,def.k), false));
       if (def.sub) {
         for (const sub of def.sub) {
           const sv = n(ds.rows?.[sub.k]);
@@ -1363,13 +1513,15 @@ function renderPL() {
     }
     if (def.t==='g') { // 費用グループ
       const v = getVal(ds,def.k);
+      const planK = plan ? getPlan(def.l, def.k) : null;
+      const planY = planK != null ? planK * 1000 : null;
       rows.push(`<tr class="row-sub">`+
         `<td><strong>${esc(def.l)}</strong></td>`+
         `<td class="r"><strong>${fmtK(v)}</strong></td>`+
         `<td class="r">${ds.totalIncome>0?pct(v/ds.totalIncome*100):'—'}</td>`+
-        `<td class="r">${plan&&getPlan(def.l)?fmt(getPlan(def.l)):'—'}</td>`+
-        `<td class="r">${plan&&getPlan(def.l)?diff(v,getPlan(def.l)*1000):'—'}</td>`+
-        `<td class="r">${plan&&getPlan(def.l)?ratio(v,getPlan(def.l)*1000):'—'}</td>`+
+        `<td class="r">${planK!=null?fmt(planK):'—'}</td>`+
+        `<td class="r ${planY!=null?(v<=planY?'cell-up':'cell-down'):''}">${planY!=null?diff(v,planY):'—'}</td>`+
+        `<td class="r">${planY!=null?ratio(v,planY):'—'}</td>`+
         `<td class="r vs-col">${prev?fmtK(getVal(prev,def.k)):'—'}</td>`+
         `<td class="r vs-col">${diff(v,getVal(prev,def.k))}</td>`+
         `<td class="r vs-col">${ratio(v,getVal(prev,def.k))}</td>`+
@@ -2526,7 +2678,7 @@ const TSV_IMPORT = {
     let imported = 0;
     for (let mi=0; mi<months.length; mi++) {
       const mm = months[mi];
-      const colIdx = CONFIG.PLAN_MONTH_COLS[mm];
+      const colIdx = planMonthCol(mm);
       const dsRows = {};
       for (const row of rows) {
         const label = (row[0]||'').replace(/[\s　]/g,'');
