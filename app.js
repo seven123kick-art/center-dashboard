@@ -1,3 +1,7 @@
+/* 計画親項目集計修正版 v10 2026-04-28
+   ・計画の親項目は子科目合計を優先
+   ・同名科目のゼロ行上書きを防止
+*/
 /* 単位修正＋重複確認版 2026-04-28
    ・CSV=円、計画/収支補完=千円保持
    ・収支補完は表示時だけ円換算して既存グラフ/KPIに合わせる
@@ -392,7 +396,23 @@ const CSV = {
         if (v != null) vals[mm] = v;
       }
 
-      if (Object.keys(vals).length > 0) plan[label] = vals;
+      if (Object.keys(vals).length > 0) {
+        // 同じ科目名が複数回出る場合がある（例：その他収入）。
+        // 後ろにある営業外収入側のゼロ行で、先に出た営業収益側の値を上書きしない。
+        if (plan[label]) {
+          const oldVals = plan[label];
+          const oldTotal = Object.values(oldVals).reduce((a,b)=>a+n(b),0);
+          const newTotal = Object.values(vals).reduce((a,b)=>a+n(b),0);
+          if (oldTotal === 0 && newTotal !== 0) {
+            plan[label] = vals;
+          } else if (oldTotal !== 0 && newTotal !== 0) {
+            // 両方に値がある場合は、原則として先に出た行を優先する。
+            // 元データは上から営業収益・費用・利益の順であり、同名の後続行は別区分の可能性が高い。
+          }
+        } else {
+          plan[label] = vals;
+        }
+      }
     }
     return Object.keys(plan).length > 0 ? plan : null;
   },
@@ -1242,15 +1262,19 @@ function sumPlanValues(planRows, labels, mm) {
 }
 
 function getPlanValueK(planRows, label, mm, fallbackLabels) {
-  // 1) 元データ側の親行・別名を最優先
-  let v = readPlanValueByLabel(planRows, label, mm);
-  if (v != null) return v;
+  // v10方針：親項目は、可能な限り画面側の子科目合計を優先する。
+  // 理由：元データには「営業収益」「営業収益計」「人件費」「人件費計」など親行が複数あり、
+  //      さらに同名行もあるため、親を直接拾うとズレることがある。
+  let v = null;
 
-  // 2) 親行が無い場合のみ、画面側の子科目合計で補完
   if (fallbackLabels && fallbackLabels.length) {
     v = sumPlanValues(planRows, fallbackLabels, mm);
     if (v != null) return v;
   }
+
+  v = readPlanValueByLabel(planRows, label, mm);
+  if (v != null) return v;
+
   return null;
 }
 function formatImportedAt(iso) {
@@ -1460,6 +1484,24 @@ function renderPL() {
   }
   function getPlan(label, fallbackLabels) {
     if (!plan) return null;
+
+    // 親項目は直接値を拾わず、原則として子科目から再計算する。
+    // 計画データの単位は千円なので、ここでは千円のまま返す。
+    if (label === '営業収益計' || label === '営業収益の部') {
+      return getPlanValueK(plan, label, mm, CONFIG.INCOME_KEYS);
+    }
+    if (label === '売上原価合計') {
+      const expenseTotal = getPlanValueK(plan, label, mm, CONFIG.EXPENSE_KEYS);
+      if (expenseTotal != null) return expenseTotal;
+      return readPlanValueByLabel(plan, '売上原価', mm);
+    }
+    if (label === 'センター利益（粗利）' || label === '粗利益') {
+      const sales = getPlanValueK(plan, '営業収益計', mm, CONFIG.INCOME_KEYS);
+      const expense = getPlanValueK(plan, '売上原価合計', mm, CONFIG.EXPENSE_KEYS);
+      if (sales != null && expense != null) return sales - expense;
+      return readPlanValueByLabel(plan, '粗利益', mm);
+    }
+
     return getPlanValueK(plan, label, mm, fallbackLabels);
   }
 
