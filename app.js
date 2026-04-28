@@ -894,6 +894,7 @@ const CLOUD = {
   _datasetKey(ym, type='confirmed') { return `${CENTER.id}/skdl/${ym}_${type || 'confirmed'}.json`; },
   _capacityKey() { return `${CENTER.id}/capacity/master.json`; },
   _fieldKey() { return `${CENTER.id}/field/data.json`; },
+  _fullStateKey() { return `${CENTER.id}/full_state.json`; },
   _planKey() { return `${CENTER.id}/plan/data.json`; },
   _memosKey() { return `${CENTER.id}/memos/data.json`; },
   _libraryKey() { return `${CENTER.id}/library/data.json`; },
@@ -911,6 +912,33 @@ const CLOUD = {
       hasMemos: !!(STATE.memos && Object.keys(STATE.memos).length),
       hasLibrary: !!(STATE.library && STATE.library.length),
     };
+  },
+  _makeFullState() {
+    return {
+      version: 14,
+      center: CENTER.id,
+      savedAt: new Date().toISOString(),
+      datasets: STATE.datasets || [],
+      fieldData: STATE.fieldData || [],
+      capacity: STATE.capacity || null,
+      planData: STATE.planData || {},
+      fiscalYear: STATE.fiscalYear || null,
+      memos: STATE.memos || {},
+      library: STATE.library || [],
+    };
+  },
+  _applyFullState(full) {
+    if (!full || typeof full !== 'object') return false;
+    if (full.center && full.center !== CENTER.id) return false;
+    if (Array.isArray(full.datasets)) STATE.datasets = full.datasets;
+    if (Array.isArray(full.fieldData)) STATE.fieldData = full.fieldData;
+    if ('capacity' in full) STATE.capacity = full.capacity || null;
+    if (full.planData) STATE.planData = normalizePlanData(full.planData);
+    if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
+    if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
+    if (Array.isArray(full.library)) STATE.library = full.library;
+    STORE.save();
+    return true;
   },
   async _uploadJSON(key, value) {
     const sb = await this._client();
@@ -936,6 +964,7 @@ const CLOUD = {
       if (!targets.length) return { ok:false, error:'対象月データなし' };
       for (const ds of targets) await this._uploadJSON(this._datasetKey(ym, ds.type || 'confirmed'), ds);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
       UI.updateCloudBadge('ok');
       return { ok:true };
     } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
@@ -948,6 +977,7 @@ const CLOUD = {
     try {
       await this._uploadJSON(this._capacityKey(), STATE.capacity);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
       UI.updateCloudBadge('ok');
       return { ok:true };
     } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
@@ -964,6 +994,7 @@ const CLOUD = {
       if (STATE.memos && Object.keys(STATE.memos).length) await this._uploadJSON(this._memosKey(), STATE.memos);
       if (STATE.library && STATE.library.length) await this._uploadJSON(this._libraryKey(), STATE.library);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
       UI.updateCloudBadge('ok');
       return { ok:true };
     } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
@@ -1028,8 +1059,26 @@ const CLOUD = {
     UI.updateCloudBadge('ok');
     return { ok:true };
   },
+  async pullFullState() {
+    try {
+      const full = await this._downloadJSON(this._fullStateKey());
+      if (!full) return { ok:false, error:'full_stateなし' };
+      const ok = this._applyFullState(full);
+      if (!ok) return { ok:false, error:'full_state適用失敗' };
+      UI.updateCloudBadge('ok');
+      return { ok:true, changed:true, source:'full_state' };
+    } catch(e) {
+      return { ok:false, error:e.message };
+    }
+  },
   async pull() {
-    try { const r = await this.pullManifestAndMissing(); if (r.ok) return r; return await this.pullLegacy(); }
+    try {
+      const full = await this.pullFullState();
+      if (full.ok) return full;
+      const r = await this.pullManifestAndMissing();
+      if (r.ok) return r;
+      return await this.pullLegacy();
+    }
     catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
   },
   async saveConfig() {
@@ -3171,7 +3220,7 @@ function setupPlanImport() {
 
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', () => {
-  // 1. ローカルストレージから読込（同期処理のみ）
+  // 1. ローカルストレージから読込
   STORE.load();
 
   // 2. センター情報を画面に反映
@@ -3198,18 +3247,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // 8. ダッシュボードを初期表示
   NAV.go('dashboard');
 
-  // 9. クラウド設定フォームとバッジを初期化（sidebar + import画面）
+  // 9. クラウド設定フォームとバッジを初期化
   CLOUD.renderForm();
 
   // 10. ステータス更新
   UI.updateSaveStatus();
   UI.updateTopbar('dashboard');
 
-  // 11. クラウドから最新データを取得して再描画
+  // 11. full_state.json から全データを取得して再描画
   CLOUD.pull()
     .then(r => {
       if (r && r.ok) {
-        STORE.save();
         NAV.refresh();
         UI.updateTopbar(STATE.view || 'dashboard');
         if (r.changed) UI.toast('クラウドの最新データを反映しました');
