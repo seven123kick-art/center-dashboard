@@ -937,7 +937,11 @@ const CLOUD = {
     if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
     if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
     if (Array.isArray(full.library)) STATE.library = full.library;
-    STORE.save();
+    if (typeof AUTO_SYNC !== 'undefined') {
+      AUTO_SYNC.withoutSync(() => STORE.save());
+    } else {
+      STORE.save();
+    }
     return true;
   },
   async _uploadJSON(key, value) {
@@ -3304,6 +3308,63 @@ function setupDropZone(zoneId, inputId, handler) {
   };
 }
 
+
+/* ════════ §29-A AUTO SYNC（保存・更新時に自動クラウド同期） ════════ */
+const AUTO_SYNC = {
+  _timer: null,
+  _installed: false,
+  _suppress: false,
+
+  install() {
+    if (this._installed || !window.STORE && typeof STORE === 'undefined') return;
+    if (STORE._autoSyncInstalled) return;
+
+    const originalSave = STORE.save.bind(STORE);
+
+    STORE.save = (...args) => {
+      const result = originalSave(...args);
+
+      // クラウドから取得してローカル反映している最中は、再同期ループを防ぐ
+      if (!AUTO_SYNC._suppress) {
+        AUTO_SYNC.queue();
+      }
+
+      return result;
+    };
+
+    STORE._autoSyncInstalled = true;
+    this._installed = true;
+  },
+
+  queue() {
+    if (!window.CLOUD && typeof CLOUD === 'undefined') return;
+    if (!CLOUD || typeof CLOUD.syncSmart !== 'function') return;
+
+    clearTimeout(this._timer);
+    this._timer = setTimeout(() => {
+      if (AUTO_SYNC._suppress) return;
+
+      CLOUD.syncSmart()
+        .then(r => {
+          if (r && r.ok) {
+            UI.updateSaveStatus();
+            UI.updateCloudBadge && UI.updateCloudBadge('ok');
+          }
+        })
+        .catch(() => {});
+    }, 1200);
+  },
+
+  withoutSync(fn) {
+    this._suppress = true;
+    try {
+      return fn();
+    } finally {
+      this._suppress = false;
+    }
+  }
+};
+
 /* ════════ §29 計画データ取込 ══════════════════════════════════ */
 function setupPlanImport() {
   const btn = document.getElementById('plan-import-btn');
@@ -3314,6 +3375,9 @@ function setupPlanImport() {
 document.addEventListener('DOMContentLoaded', () => {
   // 1. ローカルストレージから読込
   STORE.load();
+
+  // 1.5 保存・取込・更新時の自動同期を有効化
+  AUTO_SYNC.install();
 
   // 2. センター情報を画面に反映
   document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
@@ -3346,13 +3410,16 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.updateSaveStatus();
   UI.updateTopbar('dashboard');
 
-  // 11. 起動時はクラウドから取得だけ行う
-  CLOUD.pull()
+  // 11. 起動時に自動で双方向同期
+  // 別PCで開いた場合も、クラウド側の full_state.json を取得して画面へ反映する。
+  // 計画・実績・補完・メモ・過去資料をまとめて同期する。
+  CLOUD.syncSmart()
     .then(r => {
-      if (r && r.ok && r.changed) {
+      if (r && r.ok) {
         NAV.refresh();
         UI.updateTopbar(STATE.view || 'dashboard');
-        UI.toast('クラウドの最新データを反映しました');
+        UI.updateSaveStatus();
+        if (r.changed) UI.toast('クラウド同期が完了しました');
       }
     })
     .catch(() => {});
