@@ -3201,21 +3201,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // 9. クラウド設定フォームとバッジを初期化（sidebar + import画面）
   CLOUD.renderForm();
 
-   // 10. ステータス更新
+  // 10. ステータス更新
   UI.updateSaveStatus();
   UI.updateTopbar('dashboard');
-});
 
-// ===== 自動同期パッチ（起動時にクラウド確認） =====
-document.addEventListener('DOMContentLoaded', () => {
-  try {
-    CLOUD.pullManifestAndMissing()
-      .then(r => {
-        if (r && r.ok && r.changed) {
-          NAV.refresh();
-          UI.toast("クラウドの最新データを自動反映しました");
-        }
-      })
-      .catch(()=>{});
-  } catch(e) {}
+  // 11. クラウドから最新データを取得して再描画
+  CLOUD.pull()
+    .then(r => {
+      if (r && r.ok) {
+        STORE.save();
+        NAV.refresh();
+        UI.updateTopbar(STATE.view || 'dashboard');
+        if (r.changed) UI.toast('クラウドの最新データを反映しました');
+      }
+    })
+    .catch(() => {});
 });
