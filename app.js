@@ -980,6 +980,66 @@ function renderDashboardSelector() {
     UI.updateTopbar('dashboard');
   };
 }
+function renderPLPeriodSelector() {
+  const tbody = document.getElementById('pl-tbody');
+  if (!tbody) return;
+
+  const tableCard = tbody.closest('.card') || tbody.closest('section') || tbody.parentElement?.parentElement;
+  if (!tableCard || !tableCard.parentNode) return;
+
+  let box = document.getElementById('pl-period-selector');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'pl-period-selector';
+    tableCard.parentNode.insertBefore(box, tableCard);
+  }
+
+  const years = dashboardAvailableFiscalYears();
+  const fy = dashboardSelectedFiscalYear();
+  const months = monthsOfFiscalYear(fy);
+  const selectedYM = dashboardSelectedYM();
+  const monthOptions = months.map(ym => {
+    const ds = activeDatasetByYM(ym);
+    const label = ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`;
+    return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${ds?'':'disabled'}>${label}</option>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
+      <div>
+        <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
+        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / 月次収支表を切替</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
+          <select id="pl-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
+            ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
+          </select>
+        </label>
+        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
+          <select id="pl-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:190px">
+            ${monthOptions || '<option value="">データなし</option>'}
+          </select>
+        </label>
+      </div>
+    </div>`;
+
+  const fySel = document.getElementById('pl-fy-select');
+  const ymSel = document.getElementById('pl-ym-select');
+  if (fySel) fySel.onchange = () => {
+    STATE.fiscalYear = fySel.value;
+    const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => activeDatasetByYM(ym));
+    STATE.selYM = list.length ? list[list.length - 1] : null;
+    renderPL();
+    UI.updateTopbar('pl');
+  };
+  if (ymSel) ymSel.onchange = () => {
+    if (ymSel.value) STATE.selYM = ymSel.value;
+    renderPL();
+    UI.updateTopbar('pl');
+  };
+}
+
 function latestDS() {
   const list = activeDatasets();
   return list.length ? list[list.length-1] : null;
@@ -1124,7 +1184,7 @@ function renderDashboard() {
       <div class="kpi-label">営業収益（当月）</div>
       <div class="kpi-value navy">${fmtK(ds.totalIncome)}<span style="font-size:13px;font-weight:400">千円</span></div>
       <div class="kpi-sub-row">
-        <span class="kpi-sub">${ymLabel(ds.ym)}</span>
+        <span class="kpi-sub">${ymLabel(ds.ym)}（${datasetKindLabel(ds)}）</span>
         ${prevDs ? `<span class="pill ${ds.totalIncome>=prevDs.totalIncome?'up':'down'}">${ratio(ds.totalIncome,prevDs.totalIncome)} 前月比</span>` : ''}
       </div>
     </div>
@@ -1233,7 +1293,8 @@ function renderPL() {
   const tbody  = document.getElementById('pl-tbody');
   if (!tbody) return;
 
-  const ds = latestDS();
+  renderPLPeriodSelector();
+  const ds = selectedDashboardDS();
   if (!ds) {
     if (notice) notice.innerHTML = '<div class="msg msg-info">データがありません</div>';
     tbody.innerHTML = '';
@@ -1306,7 +1367,7 @@ function renderPL() {
         `<td><strong>${esc(def.l)}</strong></td>`+
         `<td class="r"><strong>${fmtK(v)}</strong></td>`+
         `<td class="r">${ds.totalIncome>0?pct(v/ds.totalIncome*100):'—'}</td>`+
-        `<td class="r">${plan&&getPlan(def.l)?fmtK(getPlan(def.l)):'—'}</td>`+
+        `<td class="r">${plan&&getPlan(def.l)?fmt(getPlan(def.l)):'—'}</td>`+
         `<td class="r">${plan&&getPlan(def.l)?diff(v,getPlan(def.l)*1000):'—'}</td>`+
         `<td class="r">${plan&&getPlan(def.l)?ratio(v,getPlan(def.l)*1000):'—'}</td>`+
         `<td class="r vs-col">${prev?fmtK(getVal(prev,def.k)):'—'}</td>`+
@@ -1326,7 +1387,7 @@ function renderPL() {
 
   // サブタイトル
   const title = document.getElementById('pl-card-title');
-  if (title) title.textContent = `月次収支表（${ymLabel(ds.ym)}）`;
+  if (title) title.textContent = `月次収支表（${ymLabel(ds.ym)}・${datasetKindLabel(ds)}）`;
 }
 
 function makeRow(label, v, base, planV, prevV, pyV, bold) {
@@ -1338,8 +1399,8 @@ function makeRow(label, v, base, planV, prevV, pyV, bold) {
     <td class="r" style="${b}">${fmtK(v)}</td>
     <td class="r">${rat}</td>
     <td class="r" style="background:#fff9e6">${planK!=null?fmt(planK):'—'}</td>
-    <td class="r ${planK!=null?(v/1000>=planK?'cell-up':'cell-down'):''}">${planK!=null?diff(v/1000,planK):'—'}</td>
-    <td class="r">${planK!=null?ratio(v/1000,planK):'—'}</td>
+    <td class="r ${planK!=null?(v>=planK*1000?'cell-up':'cell-down'):''}">${planK!=null?diff(v,planK*1000):'—'}</td>
+    <td class="r">${planK!=null?ratio(v,planK*1000):'—'}</td>
     <td class="r vs-col">${prevV!=null?fmtK(prevV):'—'}</td>
     <td class="r vs-col ${prevV!=null?(v>=prevV?'cell-up':'cell-down'):''}">${diff(v,prevV)}</td>
     <td class="r vs-col">${ratio(v,prevV)}</td>
@@ -2297,8 +2358,8 @@ const UI = {
     const sub   = document.getElementById('page-sub');
     if (title) title.textContent = CONFIG.VIEW_TITLES[view] || view;
     if (sub) {
-      const ds = view === 'dashboard' ? selectedDashboardDS() : latestDS();
-      const prefix = view === 'dashboard' ? '表示データ' : '最終データ';
+      const ds = (view === 'dashboard' || view === 'pl') ? selectedDashboardDS() : latestDS();
+      const prefix = (view === 'dashboard' || view === 'pl') ? '表示データ' : '最終データ';
       const label = ds ? `（${datasetKindLabel(ds)}）` : '';
       sub.textContent = ds ? `${prefix}: ${ymLabel(ds.ym)}${label} / ${CENTER.name}` : `データなし — ${CENTER.name}`;
     }
