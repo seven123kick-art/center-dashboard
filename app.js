@@ -3,6 +3,12 @@
    ・収支補完は表示時だけ円換算して既存グラフ/KPIに合わせる
    ・重複・異常データ確認表を追加
 */
+/* ダッシュボード年度・月選択追加版 2026-04-28
+   ・ダッシュボードに対象年度/対象月プルダウンを追加
+   ・初期表示は最新月
+   ・年度順（4月→翌年3月）で月を管理
+   ・今回の対象はダッシュボードのみ
+*/
 /* 速報・確定両保持版 2026-04-27
    ・同一年月で速報値と確定値を別々に保持
    ・ダッシュボード/分析は確定優先、確定がなければ速報
@@ -851,6 +857,105 @@ function activeDatasets() {
 function activeDatasetByYM(ym) {
   return activeDatasets().find(d => d.ym === ym) || null;
 }
+
+function dashboardAvailableFiscalYears() {
+  const set = new Set();
+  for (const d of activeDatasets()) {
+    if (d && d.ym) set.add(fiscalYearFromYM(d.ym));
+  }
+  const latest = latestDS();
+  if (latest && latest.ym) set.add(fiscalYearFromYM(latest.ym));
+  set.add(getDefaultFiscalYear());
+  return [...set].sort((a,b)=>parseInt(b,10)-parseInt(a,10));
+}
+function dashboardSelectedFiscalYear() {
+  if (STATE.fiscalYear) return String(STATE.fiscalYear);
+  const latest = latestDS();
+  return latest && latest.ym ? fiscalYearFromYM(latest.ym) : getDefaultFiscalYear();
+}
+function dashboardSelectedYM() {
+  const fy = dashboardSelectedFiscalYear();
+  const months = monthsOfFiscalYear(fy);
+  const validMonths = months.filter(ym => activeDatasetByYM(ym));
+  if (STATE.selYM && months.includes(STATE.selYM) && activeDatasetByYM(STATE.selYM)) return STATE.selYM;
+  const latestInFY = validMonths.length ? validMonths[validMonths.length - 1] : null;
+  if (latestInFY) {
+    STATE.selYM = latestInFY;
+    return latestInFY;
+  }
+  const latest = latestDS();
+  if (latest && latest.ym) {
+    STATE.fiscalYear = fiscalYearFromYM(latest.ym);
+    STATE.selYM = latest.ym;
+    return latest.ym;
+  }
+  return null;
+}
+function selectedDashboardDS() {
+  const ym = dashboardSelectedYM();
+  return ym ? activeDatasetByYM(ym) : latestDS();
+}
+function dashboardDatasetsForSelectedFiscalYear() {
+  const fy = dashboardSelectedFiscalYear();
+  const months = monthsOfFiscalYear(fy);
+  return months.map(ym => activeDatasetByYM(ym)).filter(Boolean);
+}
+function renderDashboardSelector() {
+  const area = document.getElementById('kpi-area');
+  if (!area || !area.parentNode) return;
+
+  let box = document.getElementById('dashboard-period-selector');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'dashboard-period-selector';
+    area.parentNode.insertBefore(box, area);
+  }
+
+  const years = dashboardAvailableFiscalYears();
+  const fy = dashboardSelectedFiscalYear();
+  const months = monthsOfFiscalYear(fy);
+  const selectedYM = dashboardSelectedYM();
+  const monthOptions = months.map(ym => {
+    const ds = activeDatasetByYM(ym);
+    const label = ds ? `${ymLabel(ym)}${(ds.type || 'confirmed') === 'daily' ? '（速報）' : '（確定）'}` : `${ymLabel(ym)}（未登録）`;
+    return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${ds?'':'disabled'}>${label}</option>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
+      <div>
+        <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
+        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / ダッシュボードのみ切替</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
+          <select id="dashboard-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
+            ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
+          </select>
+        </label>
+        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
+          <select id="dashboard-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:190px">
+            ${monthOptions || '<option value="">データなし</option>'}
+          </select>
+        </label>
+      </div>
+    </div>`;
+
+  const fySel = document.getElementById('dashboard-fy-select');
+  const ymSel = document.getElementById('dashboard-ym-select');
+  if (fySel) fySel.onchange = () => {
+    STATE.fiscalYear = fySel.value;
+    const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => activeDatasetByYM(ym));
+    STATE.selYM = list.length ? list[list.length - 1] : null;
+    renderDashboard();
+    UI.updateTopbar('dashboard');
+  };
+  if (ymSel) ymSel.onchange = () => {
+    if (ymSel.value) STATE.selYM = ymSel.value;
+    renderDashboard();
+    UI.updateTopbar('dashboard');
+  };
+}
 function latestDS() {
   const list = activeDatasets();
   return list.length ? list[list.length-1] : null;
@@ -971,9 +1076,10 @@ const CHART_MGR = {
 
 /* ════════ §12 RENDER — Dashboard ══════════════════════════════ */
 function renderDashboard() {
-  const ds = latestDS();
   const area = document.getElementById('kpi-area');
   if (!area) return;
+  renderDashboardSelector();
+  const ds = selectedDashboardDS();
 
   if (!ds) {
     area.innerHTML = `<div style="grid-column:1/-1" class="msg msg-info">データがありません。左メニューの「データ取込」からCSVを読み込んでください。</div>`;
@@ -1022,10 +1128,11 @@ function renderDashboard() {
     </div>`;
 
   // メインチャート（月次収支推移）
-  const labels = activeDatasets().map(d=>ymLabel(d.ym));
-  const inc  = activeDatasets().map(d=>d.totalIncome/1000);
-  const exp  = activeDatasets().map(d=>d.totalExpense/1000);
-  const prof = activeDatasets().map(d=>d.profit/1000);
+  const dashboardTrendList = dashboardDatasetsForSelectedFiscalYear();
+  const labels = dashboardTrendList.map(d=>ymLabel(d.ym));
+  const inc  = dashboardTrendList.map(d=>d.totalIncome/1000);
+  const exp  = dashboardTrendList.map(d=>d.totalExpense/1000);
+  const prof = dashboardTrendList.map(d=>d.profit/1000);
 
   CHART_MGR.make('c-main-trend', {
     type:'bar',
@@ -2166,8 +2273,9 @@ const UI = {
     const sub   = document.getElementById('page-sub');
     if (title) title.textContent = CONFIG.VIEW_TITLES[view] || view;
     if (sub) {
-      const ds = latestDS();
-      sub.textContent = ds ? `最終データ: ${ymLabel(ds.ym)} / ${CENTER.name}` : `データなし — ${CENTER.name}`;
+      const ds = view === 'dashboard' ? selectedDashboardDS() : latestDS();
+      const prefix = view === 'dashboard' ? '表示データ' : '最終データ';
+      sub.textContent = ds ? `${prefix}: ${ymLabel(ds.ym)} / ${CENTER.name}` : `データなし — ${CENTER.name}`;
     }
     // センター名を全要素に反映
     document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
