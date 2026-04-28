@@ -1615,18 +1615,17 @@ function makeRow(label, v, base, planV, prevV, pyV, bold) {
   const rat = base && base>0 ? pct(v/base*100) : '—';
   const planK = planV!=null ? planV : null; // 計画は千円単位で保存
   return `<tr>
-    <td style="${b}">${esc(label)}</td>
-    <td class="r" style="${b}">${fmtK(v)}</td>
-    <td class="r">${rat}</td>
-    <td class="r" style="background:#fff9e6">${planK!=null?fmt(planK):'—'}</td>
-    <td class="r ${planK!=null?(v>=planK*1000?'cell-up':'cell-down'):''}">${planK!=null?diff(v,planK*1000):'—'}</td>
-    <td class="r">${planK!=null?ratio(v,planK*1000):'—'}</td>
-    <td class="r vs-col">${prevV!=null?fmtK(prevV):'—'}</td>
-    <td class="r vs-col ${prevV!=null?(v>=prevV?'cell-up':'cell-down'):''}">${diff(v,prevV)}</td>
-    <td class="r vs-col">${ratio(v,prevV)}</td>
-    <td class="r vs-col">${pyV!=null?fmtK(pyV):'—'}</td>
-    <td class="r vs-col ${pyV!=null?(v>=pyV?'cell-up':'cell-down'):''}">${diff(v,pyV)}</td>
-    <td class="r vs-col">${ratio(v,pyV)}</td>
+ <td class="r col-current" style="${b}">${fmtK(v)}</td>
+<td class="r col-current">${rat}</td>
+<td class="r col-plan">${planK!=null?fmt(planK):'—'}</td>
+<td class="r col-plan ${planK!=null?(v>=planK*1000?'cell-up':'cell-down'):''}">${planK!=null?diff(v,planK*1000):'—'}</td>
+<td class="r col-plan">${planK!=null?ratio(v,planK*1000):'—'}</td>
+<td class="r col-prev">${prevV!=null?fmtK(prevV):'—'}</td>
+<td class="r col-prev ${prevV!=null?(v>=prevV?'cell-up':'cell-down'):''}">${diff(v,prevV)}</td>
+<td class="r col-prev">${ratio(v,prevV)}</td>
+<td class="r col-lastyear">${pyV!=null?fmtK(pyV):'—'}</td>
+<td class="r col-lastyear ${pyV!=null?(v>=pyV?'cell-up':'cell-down'):''}">${diff(v,pyV)}</td>
+<td class="r col-lastyear">${ratio(v,pyV)}</td>
   </tr>`;
 }
 
