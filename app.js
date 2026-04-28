@@ -1,3 +1,8 @@
+/* 計画データTSV読取修正版 v11 2026-04-28
+   ・計画貼付データをCSVではなくタブ区切りで解析
+   ・17,356 のカンマを列分割しない
+   ・計画データは千円保持のまま
+*/
 /* 計画親項目集計修正版 v10 2026-04-28
    ・計画の親項目は子科目合計を優先
    ・同名科目のゼロ行上書きを防止
@@ -373,19 +378,42 @@ const CSV = {
   // 計画データ（貼り付けテキスト）解析
   // 前提：科目名 + 年間合計 + 4月〜9月 + 上期計 + 10月〜3月 + 下期計
   // 単位：千円。保存時に円変換しない。
+  // 重要：数値内カンマ（17,356）を列区切りとして扱わないため、CSVではなくタブ区切りとして読む。
   parsePlan(text) {
-    const rows = this.toRows(text.replace(/\t/g,','));
     const plan = {};
 
+    function splitPlanLine(line) {
+      const clean = String(line || '').replace(/\r/g, '').trim();
+      if (!clean) return [];
+
+      // Excel貼付は原則タブ区切り。数値内のカンマは絶対に区切りにしない。
+      if (clean.includes('\t')) {
+        return clean.split('\t').map(v => String(v || '').trim());
+      }
+
+      // 保険：タブが消えた場合のみ、連続スペースで分割する。
+      // 単一スペースで分割すると科目名が壊れる可能性があるため使わない。
+      return clean.split(/\s{2,}/).map(v => String(v || '').trim());
+    }
+
     function toNum(v) {
-      const s = String(v ?? '').replace(/,/g,'').replace(/[千円]/g,'').replace(/[^\d.\-]/g,'');
+      const s = String(v ?? '')
+        .replace(/,/g,'')
+        .replace(/[千円]/g,'')
+        .replace(/[^\d.\-]/g,'');
       if (!s || s === '-' || s === '.') return null;
       const num = parseFloat(s);
       return isNaN(num) ? null : num;
     }
 
+    const rows = String(text || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map(splitPlanLine)
+      .filter(row => row.length >= 2 && String(row[0] || '').trim());
+
     for (const row of rows) {
-      if (!row[0]) continue;
       const label = normalizePlanLabel(row[0]);
       if (!label) continue;
 
@@ -407,7 +435,6 @@ const CSV = {
             plan[label] = vals;
           } else if (oldTotal !== 0 && newTotal !== 0) {
             // 両方に値がある場合は、原則として先に出た行を優先する。
-            // 元データは上から営業収益・費用・利益の順であり、同名の後続行は別区分の可能性が高い。
           }
         } else {
           plan[label] = vals;
@@ -415,8 +442,7 @@ const CSV = {
       }
     }
     return Object.keys(plan).length > 0 ? plan : null;
-  },
-};
+  },};
 
 /* ════════ §6 PROCESS（CSV生データ→データセット） ══════════════ */
 function n(v) { return typeof v==='number' ? v : (parseFloat(v)||0); }
