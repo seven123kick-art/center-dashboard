@@ -1,3 +1,8 @@
+/* 計画データクラウド同期修正版 v12 2026-04-28
+   ・計画データ(planData)をSupabase Storageへ同期
+   ・別PCの『今すぐ同期』で計画データも取得
+   ・計画取込/削除時にクラウドへ自動反映
+*/
 /* 計画データTSV読取修正版 v11 2026-04-28
    ・計画貼付データをCSVではなくタブ区切りで解析
    ・17,356 のカンマを列分割しない
@@ -867,6 +872,16 @@ const MODAL = {
   },
 };
 
+
+function getPlanLatestImportedAt() {
+  if (!STATE.planData || typeof STATE.planData !== 'object') return null;
+  const dates = Object.values(STATE.planData)
+    .map(v => v && v.importedAt ? String(v.importedAt) : '')
+    .filter(Boolean)
+    .sort();
+  return dates.length ? dates[dates.length - 1] : null;
+}
+
 /* ════════ §9 CLOUD（Supabase — 取込時のみ自動実行） ═══════════ */
 const CLOUD = {
   _sb: null,
@@ -894,6 +909,7 @@ const CLOUD = {
   _datasetKey(ym, type='confirmed') { return `${CENTER.id}/skdl/${ym}_${type || 'confirmed'}.json`; },
   _capacityKey() { return `${CENTER.id}/capacity/master.json`; },
   _fieldKey() { return `${CENTER.id}/field/data.json`; },
+  _planKey() { return `${CENTER.id}/plan/data.json`; },
   _legacyKey() { return `${CENTER.id}/data_v5.json`; },
   _makeManifest() {
     return {
@@ -903,6 +919,8 @@ const CLOUD = {
       datasets: STATE.datasets.map(d => ({ ym:d.ym, type:d.type, importedAt:d.importedAt || null, totalIncome:d.totalIncome || 0, totalExpense:d.totalExpense || 0, profit:d.profit || 0 })),
       hasCapacity: !!STATE.capacity,
       hasFieldData: !!(STATE.fieldData && STATE.fieldData.length),
+      hasPlanData: !!(STATE.planData && Object.keys(STATE.planData).length),
+      planUpdatedAt: getPlanLatestImportedAt(),
     };
   },
   async _uploadJSON(key, value) {
@@ -919,6 +937,13 @@ const CLOUD = {
     const { data, error } = await sb.storage.from(this._bucket()).download(key);
     if (error) return null;
     return JSON.parse(await data.text());
+  },
+  async _removeJSON(key) {
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
+    const { error } = await sb.storage.from(this._bucket()).remove([key]);
+    if (error) return { ok:false, error:error.message };
+    return { ok:true };
   },
   async pushMonth(ym) {
     if (!ym) return { ok:false, error:'対象月なし' };
@@ -946,6 +971,17 @@ const CLOUD = {
     } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
     finally { this._busy = false; }
   },
+  async pushPlan() {
+    if (this._busy) return { ok:false, error:'同期処理中' };
+    this._busy = true;
+    try {
+      await this._uploadJSON(this._planKey(), STATE.planData || {});
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      UI.updateCloudBadge('ok');
+      return { ok:true };
+    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
+    finally { this._busy = false; }
+  },
   async pushAll() {
     if (this._busy) return { ok:false, error:'同期処理中' };
     this._busy = true;
@@ -953,6 +989,7 @@ const CLOUD = {
       for (const ds of STATE.datasets) await this._uploadJSON(this._datasetKey(ds.ym, ds.type || 'confirmed'), ds);
       if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
       if (STATE.fieldData && STATE.fieldData.length) await this._uploadJSON(this._fieldKey(), STATE.fieldData);
+      await this._uploadJSON(this._planKey(), STATE.planData || {});
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
       UI.updateCloudBadge('ok');
       return { ok:true };
@@ -977,6 +1014,17 @@ const CLOUD = {
       const cap = await this._downloadJSON(this._capacityKey());
       if (cap) { STATE.capacity = cap; changed++; }
     }
+    if (manifest.hasPlanData) {
+      const remotePlanUpdatedAt = String(manifest.planUpdatedAt || '');
+      const localPlanUpdatedAt = String(getPlanLatestImportedAt() || '');
+      if (!localPlanUpdatedAt || remotePlanUpdatedAt >= localPlanUpdatedAt) {
+        const plan = await this._downloadJSON(this._planKey());
+        if (plan && typeof plan === 'object') {
+          STATE.planData = normalizePlanData(plan);
+          changed++;
+        }
+      }
+    }
     if (changed) STORE.save();
     UI.updateCloudBadge('ok');
     return { ok:true, changed };
@@ -987,6 +1035,7 @@ const CLOUD = {
     if (j.datasets)  STATE.datasets  = j.datasets;
     if (j.fieldData) STATE.fieldData = j.fieldData;
     if (j.capacity)  STATE.capacity  = j.capacity;
+    if (j.planData)  STATE.planData  = normalizePlanData(j.planData);
     STORE.save();
     UI.updateCloudBadge('ok');
     return { ok:true };
@@ -2952,6 +3001,7 @@ const PLAN = {
       mode:'full_replace'
     };
     STORE.save();
+    CLOUD.pushPlan().catch(()=>{});
     const area = document.getElementById('plan-paste-area');
     if (area) area.value = '';
     const count = Object.keys(plan).length;
@@ -2966,6 +3016,7 @@ const PLAN = {
     if (!confirm(`${fy}年度の計画データを削除しますか？\n他年度は削除しません。`)) return;
     delete STATE.planData[fy];
     STORE.save();
+    CLOUD.pushPlan().catch(()=>{});
     const msg = document.getElementById('plan-import-msg');
     if (msg) msg.textContent = `${fy}年度の計画データを削除しました`;
     renderImport();
