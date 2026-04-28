@@ -1328,6 +1328,102 @@ function dashboardDatasetsForSelectedFiscalYear() {
   const months = monthsOfFiscalYear(fy);
   return months.map(ym => activeDatasetByYM(ym)).filter(Boolean);
 }
+
+function datasetsForSelectedFiscalYear() {
+  const fy = dashboardSelectedFiscalYear();
+  const months = monthsOfFiscalYear(fy);
+  return months.map(ym => activeDatasetByYM(ym)).filter(Boolean);
+}
+
+function latestDatasetInSelectedFiscalYear() {
+  const list = datasetsForSelectedFiscalYear();
+  return list.length ? list[list.length - 1] : null;
+}
+
+function selectedDatasetInSelectedFiscalYear() {
+  const ym = dashboardSelectedYM();
+  return ym ? activeDatasetByYM(ym) : latestDatasetInSelectedFiscalYear();
+}
+
+function fieldDataForSelectedFiscalYear() {
+  const fy = dashboardSelectedFiscalYear();
+  const months = monthsOfFiscalYear(fy);
+  return (STATE.fieldData || []).filter(d => d && months.includes(d.ym));
+}
+
+function selectedFieldDataInSelectedFiscalYear() {
+  const ym = dashboardSelectedYM();
+  const list = fieldDataForSelectedFiscalYear();
+  return list.find(d => d.ym === ym) || (list.length ? list[list.length - 1] : null);
+}
+
+function renderCommonPeriodSelector(viewKey, opt={}) {
+  const view = document.getElementById('view-' + viewKey);
+  if (!view) return;
+
+  const useMonth = opt.useMonth !== false;
+  const boxId = `${viewKey}-period-selector`;
+  let box = document.getElementById(boxId);
+  if (!box) {
+    box = document.createElement('div');
+    box.id = boxId;
+    view.prepend(box);
+  }
+
+  const years = dashboardAvailableFiscalYears();
+  const fy = dashboardSelectedFiscalYear();
+  const months = monthsOfFiscalYear(fy);
+  const selectedYM = dashboardSelectedYM();
+
+  const monthOptions = months.map(ym => {
+    const ds = activeDatasetByYM(ym);
+    const fds = (STATE.fieldData || []).find(d => d.ym === ym);
+    const hasData = viewKey === 'field' ? !!fds : !!ds;
+    const label = viewKey === 'field'
+      ? (fds ? `${ymLabel(ym)}（現場明細あり）` : `${ymLabel(ym)}（未登録）`)
+      : (ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`);
+    return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${hasData?'':'disabled'}>${label}</option>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
+      <div>
+        <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
+        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / ${useMonth?'年度・月を共通管理':'年度累計表示'}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
+          <select id="${viewKey}-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
+            ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
+          </select>
+        </label>
+        ${useMonth ? `
+        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
+          <select id="${viewKey}-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:190px">
+            ${monthOptions || '<option value="">データなし</option>'}
+          </select>
+        </label>` : ''}
+      </div>
+    </div>`;
+
+  const fySel = document.getElementById(`${viewKey}-fy-select`);
+  const ymSel = document.getElementById(`${viewKey}-ym-select`);
+
+  if (fySel) fySel.onchange = () => {
+    STATE.fiscalYear = fySel.value;
+    const monthsInFY = monthsOfFiscalYear(STATE.fiscalYear);
+    const list = viewKey === 'field'
+      ? monthsInFY.filter(ym => (STATE.fieldData || []).some(d => d.ym === ym))
+      : monthsInFY.filter(ym => activeDatasetByYM(ym));
+    STATE.selYM = list.length ? list[list.length - 1] : null;
+    NAV.refresh();
+  };
+
+  if (ymSel) ymSel.onchange = () => {
+    if (ymSel.value) STATE.selYM = ymSel.value;
+    NAV.refresh();
+  };
+}
 function renderDashboardSelector() {
   const area = document.getElementById('kpi-area');
   if (!area || !area.parentNode) return;
@@ -2152,15 +2248,19 @@ function makePLRow(opt) {
 /* ════════ §14 RENDER — Trend ══════════════════════════════════ */
 function renderTrend() {
   const notice = document.getElementById('trend-notice');
-  if (!STATE.datasets.length) {
-    if (notice) notice.innerHTML = '<div class="msg msg-info">データがありません</div>';
+  renderCommonPeriodSelector('trend');
+
+  const list = datasetsForSelectedFiscalYear();
+  if (!list.length) {
+    if (notice) notice.innerHTML = '<div class="msg msg-info">選択年度のデータがありません</div>';
     return;
   }
   if (notice) notice.innerHTML = '';
-  const labels = activeDatasets().map(d=>ymLabel(d.ym));
-  const inc = activeDatasets().map(d=>d.totalIncome/1000);
-  const exp = activeDatasets().map(d=>d.totalExpense/1000);
-  const prf = activeDatasets().map(d=>d.profit/1000);
+
+  const labels = list.map(d=>ymLabel(d.ym));
+  const inc = list.map(d=>d.totalIncome/1000);
+  const exp = list.map(d=>d.totalExpense/1000);
+  const prf = list.map(d=>d.profit/1000);
 
   CHART_MGR.make('c-trend-main', {
     type:'bar', data:{labels,
@@ -2175,10 +2275,9 @@ function renderTrend() {
       scales:{y:{title:{display:true,text:'千円'},grid:{color:'#f0f0f0'}}}}
   });
 
-  // 月次表
   const tbody = document.getElementById('trend-tbody');
   if (tbody) {
-    const rows = [...activeDatasets()].reverse().map((d,i,arr)=>{
+    const rows = [...list].reverse().map((d,i,arr)=>{
       const prev = i<arr.length-1 ? arr[i+1] : null;
       return `<tr>
         <td>${ymLabel(d.ym)} ${d.type==='daily'?'<span class="badge badge-warn" style="font-size:9px">速報</span>':''}</td>
@@ -2187,6 +2286,7 @@ function renderTrend() {
         <td class="r">${pct(d.profitRate)}</td>
         <td class="r">—</td>
         <td class="r">${ratio(d.totalIncome,prev?.totalIncome)}</td>
+        <td class="r">${ratio(d.totalIncome,sameMonthLastYear(d.ym)?.totalIncome)}</td>
       </tr>`;
     });
     tbody.innerHTML = rows.join('');
@@ -2195,11 +2295,12 @@ function renderTrend() {
 
 /* ════════ §15 RENDER — Shipper ════════════════════════════════ */
 function renderShipper() {
-  const ds = latestDS();
+  renderCommonPeriodSelector('shipper');
+
+  const ds = selectedDatasetInSelectedFiscalYear();
   const chartEl = document.getElementById('c-shipper-bar');
   const hasShippers = ds && ds.shippers && Object.keys(ds.shippers).length > 0;
 
-  // シンプル：荷主データが別途ない場合の案内
   const noticeId = 'shipper-notice';
   let noticeEl = document.getElementById(noticeId);
   if (!noticeEl) {
@@ -2207,7 +2308,7 @@ function renderShipper() {
     if (view) { noticeEl=document.createElement('div'); noticeEl.id=noticeId; view.prepend(noticeEl); }
   }
   if (!hasShippers && noticeEl) {
-    noticeEl.innerHTML = '<div class="msg msg-info" style="margin-bottom:14px">荷主別データがありません。荷主コード付きCSVを取り込むと荷主分析が表示されます。</div>';
+    noticeEl.innerHTML = '<div class="msg msg-info" style="margin-bottom:14px">選択月の荷主別データがありません。荷主コード付きCSVを取り込むと荷主分析が表示されます。</div>';
     return;
   }
   if (noticeEl) noticeEl.innerHTML = '';
@@ -2231,9 +2332,12 @@ function renderShipper() {
 function renderIndicators() {
   const view = document.getElementById('view-indicators');
   if (!view) return;
-  const ds = latestDS();
+
+  const ds = selectedDatasetInSelectedFiscalYear();
+  const fyList = datasetsForSelectedFiscalYear();
+
   if (!ds) {
-    view.innerHTML = '<div class="msg msg-info">データがありません</div>';
+    view.innerHTML = '<div class="msg msg-info">選択年度のデータがありません</div>';
     return;
   }
 
@@ -2262,12 +2366,12 @@ function renderIndicators() {
   view.innerHTML = `
     <div class="kpi-row kpi-row-3" style="margin-bottom:16px">
       <div class="kpi-card ${laborOk?'accent-green':'accent-red'}">
-        <div class="kpi-label">みなし人件費率</div>
+        <div class="kpi-label">みなし人件費率（${ymLabel(ds.ym)}）</div>
         <div class="kpi-value ${laborOk?'green':'red'}">${pct(ds.pseudoLaborRate)}</div>
         <div class="kpi-sub-row"><span class="pill ${laborOk?'up':'down'}">${laborOk?'✓ 達成':'⚠ 超過'} 目標${T.pseudoLaborRate}%</span></div>
       </div>
       <div class="kpi-card ${varOk?'accent-green':'accent-amber'}">
-        <div class="kpi-label">変動費率</div>
+        <div class="kpi-label">変動費率（${ymLabel(ds.ym)}）</div>
         <div class="kpi-value ${varOk?'green':'amber'}">${pct(ds.variableRate)}</div>
         <div class="kpi-sub-row"><span class="pill ${varOk?'up':'flat'}">${varOk?'✓ 正常':'⚠ 高め'} 目標${T.variableRateMax}%以内</span></div>
       </div>
@@ -2277,41 +2381,42 @@ function renderIndicators() {
         <div class="kpi-sub-row"><span class="pill ${smOk?'up':smWarn?'flat':'down'}">${smOk?'✓ 安全':smWarn?'△ 要注意':'⚠ 危険'}</span></div>
       </div>
     </div>
-    <div class="grid2">
-      <div class="card">
-        <div class="card-header"><span class="card-title">固定費　内訳</span></div>
+
+    <div class="grid2" style="margin-bottom:14px">
+      <div class="card"><div class="card-header"><span class="card-title">固定費 / 変動費　構成（選択月）</span></div>
         <div class="card-body">
-          <table class="tbl"><thead><tr><th>科目</th><th class="r">金額（千円）</th><th class="r">費用比</th></tr></thead>
-          <tbody>${CONFIG.FIXED_KEYS.map(k=>{
-            const v=n(ds.rows[k]); if(!v) return '';
-            return `<tr><td>${esc(k)}</td><td class="r">${fmtK(v)}</td><td class="r">${pct(v/ds.totalExpense*100)}</td></tr>`;
-          }).join('')}</tbody></table>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header"><span class="card-title">変動費　内訳</span></div>
+          ${gauge(ds.fixedRate, 50, 65, '%', true)}
+          ${gauge(ds.variableRate, T.variableRateMax, 90, '%', true)}
+          <div style="font-size:12px;color:var(--text2);line-height:1.8">
+            固定費：${fmtK(ds.fixedCost)}千円 / 変動費：${fmtK(ds.varCost)}千円
+          </div>
+        </div></div>
+      <div class="card"><div class="card-header"><span class="card-title">損益分岐点　簡易判定（選択月）</span></div>
         <div class="card-body">
-          <table class="tbl"><thead><tr><th>科目</th><th class="r">金額（千円）</th><th class="r">費用比</th></tr></thead>
-          <tbody>${CONFIG.VARIABLE_KEYS.map(k=>{
-            const v=n(ds.rows[k]); if(!v) return '';
-            return `<tr><td>${esc(k)}</td><td class="r">${fmtK(v)}</td><td class="r">${pct(v/ds.totalExpense*100)}</td></tr>`;
-          }).join('')}</tbody></table>
-        </div>
-      </div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.9">
+            営業収益：${fmtK(ds.totalIncome)}千円<br>
+            費用合計：${fmtK(ds.totalExpense)}千円<br>
+            粗利益：${fmtK(ds.profit)}千円<br>
+            利益率：${pct(ds.profitRate)}
+          </div>
+        </div></div>
     </div>
-    <div class="card" style="margin-top:14px">
-      <div class="card-header"><span class="card-title">各指標　月次推移</span></div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><span class="card-title">各指標　月次推移（選択年度内）</span></div>
       <div class="card-body"><div class="chart-wrap" style="height:220px"><canvas id="c-ind-trend"></canvas></div></div>
     </div>`;
+
+  renderCommonPeriodSelector('indicators');
 
   CHART_MGR.make('c-ind-trend', {
     type:'line',
     data:{
-      labels: activeDatasets().map(d=>ymLabel(d.ym)),
+      labels: fyList.map(d=>ymLabel(d.ym)),
       datasets:[
-        {label:'みなし人件費率(%)',data:activeDatasets().map(d=>+d.pseudoLaborRate.toFixed(1)),borderColor:'#1a4d7c',fill:false,tension:.3,pointRadius:3},
-        {label:'変動費率(%)',      data:activeDatasets().map(d=>+d.variableRate.toFixed(1)),   borderColor:'#e05b4d',fill:false,tension:.3,pointRadius:3},
-        {label:'利益率(%)',        data:activeDatasets().map(d=>+d.profitRate.toFixed(1)),      borderColor:'#16a34a',fill:false,tension:.3,pointRadius:3},
+        {label:'みなし人件費率(%)',data:fyList.map(d=>+d.pseudoLaborRate.toFixed(1)),borderColor:'#1a4d7c',fill:false,tension:.3,pointRadius:3},
+        {label:'変動費率(%)',      data:fyList.map(d=>+d.variableRate.toFixed(1)),   borderColor:'#e05b4d',fill:false,tension:.3,pointRadius:3},
+        {label:'利益率(%)',        data:fyList.map(d=>+d.profitRate.toFixed(1)),      borderColor:'#16a34a',fill:false,tension:.3,pointRadius:3},
       ]
     },
     options:{responsive:true,maintainAspectRatio:false,
@@ -2326,71 +2431,54 @@ function renderAnnual() {
   const tbody = document.getElementById('annual-tbody');
   if (!tbody) return;
 
-  if (!STATE.datasets.length) {
+  renderCommonPeriodSelector('annual', {useMonth:false});
+
+  const fy = dashboardSelectedFiscalYear();
+  const list = datasetsForSelectedFiscalYear();
+
+  if (!list.length) {
     if (kpi) kpi.innerHTML = '';
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;color:var(--text3);text-align:center">データがありません</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;color:var(--text3);text-align:center">選択年度のデータがありません</td></tr>';
     return;
   }
 
-  // 年度ごとに集計（4月始まり）
-  function getFY(ym) {
-    const y=parseInt(ym.slice(0,4)), m=parseInt(ym.slice(4,6));
-    return m >= CONFIG.FISCAL_START ? y : y-1;
-  }
-  const fyMap = {};
-  for (const ds of activeDatasets()) {
-    const fy = getFY(ds.ym);
-    if (!fyMap[fy]) fyMap[fy] = {fy, datasets:[], inc:0, exp:0, prf:0};
-    fyMap[fy].datasets.push(ds);
-    fyMap[fy].inc += ds.totalIncome;
-    fyMap[fy].exp += ds.totalExpense;
-    fyMap[fy].prf += ds.profit;
-  }
-  const fys = Object.values(fyMap).sort((a,b)=>b.fy-a.fy);
+  const inc = list.reduce((s,d)=>s+d.totalIncome,0);
+  const exp = list.reduce((s,d)=>s+d.totalExpense,0);
+  const prf = list.reduce((s,d)=>s+d.profit,0);
 
   if (kpi) {
-    const cur = fys[0];
     kpi.innerHTML = `
-      <div class="kpi-card accent-navy"><div class="kpi-label">年度累計収入（${cur.fy}年度）</div>
-        <div class="kpi-value navy">${fmtK(cur.inc)}<span style="font-size:13px;font-weight:400">千円</span></div>
-        <div class="kpi-sub">${cur.datasets.length}ヶ月分</div></div>
+      <div class="kpi-card accent-navy"><div class="kpi-label">年度累計収入（${fy}年度）</div>
+        <div class="kpi-value navy">${fmtK(inc)}<span style="font-size:13px;font-weight:400">千円</span></div>
+        <div class="kpi-sub">${list.length}ヶ月分</div></div>
       <div class="kpi-card accent-red"><div class="kpi-label">年度累計費用</div>
-        <div class="kpi-value red">${fmtK(cur.exp)}<span style="font-size:13px;font-weight:400">千円</span></div></div>
-      <div class="kpi-card ${cur.prf>=0?'accent-green':'accent-red'}"><div class="kpi-label">年度累計利益</div>
-        <div class="kpi-value ${cur.prf>=0?'green':'red'}">${fmtK(cur.prf)}<span style="font-size:13px;font-weight:400">千円</span></div>
-        <div class="kpi-sub-row"><span class="pill ${cur.prf>=0?'up':'down'}">${pct(cur.prf/cur.inc*100)} 利益率</span></div></div>`;
+        <div class="kpi-value red">${fmtK(exp)}<span style="font-size:13px;font-weight:400">千円</span></div></div>
+      <div class="kpi-card ${prf>=0?'accent-green':'accent-red'}"><div class="kpi-label">年度累計利益</div>
+        <div class="kpi-value ${prf>=0?'green':'red'}">${fmtK(prf)}<span style="font-size:13px;font-weight:400">千円</span></div>
+        <div class="kpi-sub-row"><span class="pill ${prf>=0?'up':'down'}">${pct(prf/inc*100)} 利益率</span></div></div>`;
   }
 
-  const rows = [...activeDatasets()].reverse().map(ds=>{
-    const prev = prevDS(ds.ym);
-    const py   = sameMonthLastYear(ds.ym);
-    return `<tr>
-      <td>${ymLabel(ds.ym)}${ds.type==='daily'?' <span class="badge badge-warn" style="font-size:9px">速</span>':''}</td>
-      <td class="r">${fmtK(ds.totalIncome)}</td>
-      <td class="r">${fmtK(ds.totalExpense)}</td>
-      <td class="r ${ds.profit>=0?'cell-up':'cell-down'}">${fmtK(ds.profit)}</td>
-      <td class="r">${pct(ds.profitRate)}</td>
-      <td class="r">—</td>
-      <td class="r">${ratio(ds.totalIncome,prev?.totalIncome)}</td>
-      <td class="r">${ratio(ds.totalIncome,py?.totalIncome)}</td>
-    </tr>`;
-  });
-  tbody.innerHTML = rows.join('');
-
-  // 年度別チャート
   CHART_MGR.make('c-annual-trend', {
     type:'bar',
-    data:{
-      labels: activeDatasets().map(d=>ymLabel(d.ym)),
-      datasets:[
-        {label:'収入', data:activeDatasets().map(d=>d.totalIncome/1000), backgroundColor:'rgba(26,77,124,.7)'},
-        {label:'費用', data:activeDatasets().map(d=>d.totalExpense/1000),backgroundColor:'rgba(224,91,77,.7)'},
-      ]
-    },
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'top'}},
-      scales:{y:{title:{display:true,text:'千円'}}}}
+    data:{labels:list.map(d=>ymLabel(d.ym)), datasets:[
+      {label:'収入',data:list.map(d=>d.totalIncome/1000),backgroundColor:'rgba(26,77,124,.7)'},
+      {label:'費用',data:list.map(d=>d.totalExpense/1000),backgroundColor:'rgba(224,91,77,.7)'},
+      {label:'利益',data:list.map(d=>d.profit/1000),type:'line',borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,.1)',fill:false,tension:.3},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{y:{title:{display:true,text:'千円'}}}}
   });
+
+  tbody.innerHTML = [...list].reverse().map(d=>`
+    <tr>
+      <td>${ymLabel(d.ym)} ${d.type==='daily'?'<span class="badge badge-warn" style="font-size:9px">速報</span>':''}</td>
+      <td class="r">${fmtK(d.totalIncome)}</td>
+      <td class="r">${fmtK(d.totalExpense)}</td>
+      <td class="r ${d.profit>=0?'cell-up':'cell-down'}">${fmtK(d.profit)}</td>
+      <td class="r">${pct(d.profitRate)}</td>
+      <td class="r">—</td>
+      <td class="r">${ratio(d.totalIncome, prevDS(d.ym)?.totalIncome)}</td>
+      <td class="r">${ratio(d.totalIncome, sameMonthLastYear(d.ym)?.totalIncome)}</td>
+    </tr>`).join('');
 }
 
 /* ════════ §18 RENDER — Alerts ═════════════════════════════════ */
@@ -2953,16 +3041,19 @@ const FIELD_UI = {
   renderMap()       {},
   updatePeriodBadge() {
     const badge = document.getElementById('field-period-badge');
-    if (badge) badge.textContent = STATE.fieldData.length
-      ? `${ymLabel(STATE.fieldData[STATE.fieldData.length-1].ym)} 読込済`
+    const selected = selectedFieldDataInSelectedFiscalYear();
+    if (badge) badge.textContent = selected
+      ? `${ymLabel(selected.ym)} 読込済`
       : 'データ未読込';
   },
   renderDataList() {
+    renderCommonPeriodSelector('field');
     const list = document.getElementById('field-data-list');
     if (!list) return;
-    list.innerHTML = STATE.fieldData.length
-      ? STATE.fieldData.map(d=>`<div class="data-item">${ymLabel(d.ym)}</div>`).join('')
-      : '<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div>';
+    const rows = fieldDataForSelectedFiscalYear();
+    list.innerHTML = rows.length
+      ? rows.map(d=>`<div class="data-item">${ymLabel(d.ym)}</div>`).join('')
+      : '<div style="padding:12px 16px;font-size:12px;color:var(--text3)">選択年度の現場明細データがありません</div>';
   },
 };
 
