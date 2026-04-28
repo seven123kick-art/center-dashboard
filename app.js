@@ -71,6 +71,13 @@ const ASSETS = {
   async xlsx(){
     await this.loadScript('xlsx', 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
     return !!window.XLSX;
+  },
+  async pdfjs(){
+    await this.loadScript('pdfjs', 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    return !!window.pdfjsLib;
   }
 };
 
@@ -352,6 +359,7 @@ const CENTER = (() => {
 const STATE = {
   datasets:  [],    // [{ym,type,rows,totalIncome,totalExpense,profit,...}]
   fieldData: [],    // [{ym,areas:{name:{count,shippers:{}}}}]
+  areaData:  [],    // PDF：荷主別配送エリア別物量 [{ym,shipper,zip,address,area,count,...}]
   capacity:  null,  // {areas:{name:{max}},updatedAt}
   planData:  {},    // 年度別計画データ { "2026": { rows, importedAt, itemCount } }
   fiscalYear: null, // 現在操作中の年度
@@ -373,6 +381,7 @@ const STORE = {
   load() {
     STATE.datasets  = this._g('datasets')  || [];
     STATE.fieldData = this._g('fieldData') || [];
+    STATE.areaData  = this._g('areaData')  || [];
     STATE.capacity  = this._g('capacity')  || null;
     STATE.planData  = normalizePlanData(this._g('planData'));
     STATE.memos     = this._g('memos')     || {};
@@ -382,6 +391,7 @@ const STORE = {
   save() {
     this._s('datasets',  STATE.datasets);
     this._s('fieldData', STATE.fieldData);
+    this._s('areaData',  STATE.areaData);
     this._s('capacity',  STATE.capacity);
     this._s('planData',  STATE.planData);
     this._s('memos',     STATE.memos);
@@ -391,7 +401,7 @@ const STORE = {
   exportJSON() {
     const blob = new Blob([JSON.stringify({
       center:CENTER.id, exportedAt:new Date().toISOString(),
-      datasets:STATE.datasets, fieldData:STATE.fieldData,
+      datasets:STATE.datasets, fieldData:STATE.fieldData, areaData:STATE.areaData,
       capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos, library:STATE.library,
     },null,2)], {type:'application/json'});
     const a = document.createElement('a');
@@ -407,6 +417,7 @@ const STORE = {
           !confirm(`別センター(${d.center})のデータです。読み込みますか？`)) return;
       if (d.datasets)  STATE.datasets  = d.datasets;
       if (d.fieldData) STATE.fieldData = d.fieldData;
+      if (d.areaData)  STATE.areaData  = d.areaData;
       if (d.capacity)  STATE.capacity  = d.capacity;
       if (d.planData) STATE.planData = normalizePlanData(d.planData);
       if (d.memos)     STATE.memos     = d.memos;
@@ -924,6 +935,7 @@ const CLOUD = {
       savedAt: new Date().toISOString(),
       datasets: STATE.datasets || [],
       fieldData: STATE.fieldData || [],
+      areaData: STATE.areaData || [],
       capacity: STATE.capacity || null,
       planData: STATE.planData || {},
       fiscalYear: STATE.fiscalYear || null,
@@ -936,6 +948,7 @@ const CLOUD = {
     if (full.center && full.center !== CENTER.id) return false;
     if (Array.isArray(full.datasets)) STATE.datasets = full.datasets;
     if (Array.isArray(full.fieldData)) STATE.fieldData = full.fieldData;
+    if (Array.isArray(full.areaData)) STATE.areaData = full.areaData;
     if ('capacity' in full) STATE.capacity = full.capacity || null;
     if (full.planData) STATE.planData = normalizePlanData(full.planData);
     if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
@@ -1659,6 +1672,7 @@ function mergeFullState(localFull, cloudFull) {
     savedAt: new Date().toISOString(),
     datasets: mergeDatasetsByImportedAt(local.datasets || [], cloud.datasets || []),
     fieldData: (cloud.fieldData && cloud.fieldData.length) ? cloud.fieldData : (local.fieldData || []),
+    areaData: (cloud.areaData && cloud.areaData.length) ? cloud.areaData : (local.areaData || []),
     capacity: cloud.capacity || local.capacity || null,
     planData: mergePlanDataByUpdatedAt(local.planData || {}, cloud.planData || {}),
     fiscalYear: local.fiscalYear || cloud.fiscalYear || null,
@@ -3571,9 +3585,230 @@ const TSV_IMPORT = {
 };
 
 // 現場データ取込2（インポート画面の2つ目のゾーン）
+
+/* ════════ §27-A AREA PDF IMPORT（荷主別配送エリア別物量PDF） ════════ */
+const AREA_PDF_IMPORT = {
+  async handleFiles(files) {
+    const arr = Array.from(files || []);
+    const pdfs = arr.filter(f => /\.pdf$/i.test(f.name));
+    const others = arr.filter(f => !/\.pdf$/i.test(f.name));
+
+    for (const pdf of pdfs) {
+      await this.importPdf(pdf);
+    }
+
+    // PDF以外は従来の取込へ流す
+    if (others.length) IMPORT.handleFiles(others);
+  },
+
+  async importPdf(file) {
+    try {
+      UI.toast('PDFを解析中です...');
+      await ASSETS.pdfjs();
+      if (!window.pdfjsLib) throw new Error('PDF.jsを読み込めませんでした');
+
+      const buffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+
+      let text = '';
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        const lines = this.itemsToLines(content.items);
+        text += '\n' + lines.join('\n');
+      }
+
+      const parsed = this.parseText(text, file.name);
+      if (!parsed.records.length) {
+        UI.toast('PDFから明細行を読み取れませんでした', 'warn');
+        return;
+      }
+
+      this.saveParsed(parsed);
+      UI.toast(`${ymLabel(parsed.ym)} エリアPDF取込完了：${parsed.records.length}行 / ${fmt(parsed.totalCount)}件`);
+      NAV.refresh();
+    } catch(e) {
+      console.error(e);
+      UI.toast('PDF取込エラー: ' + e.message, 'error');
+    }
+  },
+
+  itemsToLines(items) {
+    // PDF.jsの文字要素をY座標で行にまとめ、X座標順に並べる
+    const rows = {};
+    for (const it of items || []) {
+      const y = Math.round((it.transform && it.transform[5]) || 0);
+      const key = String(y);
+      if (!rows[key]) rows[key] = [];
+      rows[key].push({
+        x: (it.transform && it.transform[4]) || 0,
+        str: String(it.str || '')
+      });
+    }
+
+    return Object.keys(rows)
+      .sort((a,b)=>Number(b)-Number(a))
+      .map(y => rows[y].sort((a,b)=>a.x-b.x).map(i=>i.str).join(' ').replace(/\s+/g,' ').trim())
+      .filter(Boolean);
+  },
+
+  parseText(text, fileName) {
+    const lines = String(text || '').split(/\n+/).map(l => l.trim()).filter(Boolean);
+
+    let ym = null;
+    let shipperCode = '';
+    let shipperName = '';
+    const records = [];
+
+    for (const line of lines) {
+      const dateMatch = line.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/\d{2}\s+(\d{4})\/(\d{2})\/\d{2}/);
+      if (dateMatch) {
+        ym = `${dateMatch[1]}${dateMatch[2]}`;
+      }
+
+      const shipperMatch = line.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+)/);
+      if (shipperMatch) {
+        shipperCode = shipperMatch[1];
+        shipperName = shipperMatch[2].trim();
+        continue;
+      }
+
+      const rec = this.parseDetailLine(line, ym, shipperCode, shipperName);
+      if (rec) records.push(rec);
+    }
+
+    if (!ym) ym = this.inferYMFromFileName(fileName) || dashboardSelectedYM() || latestDS()?.ym || (getDefaultFiscalYear() + '04');
+
+    records.forEach(r => { if (!r.ym) r.ym = ym; });
+
+    return {
+      ym,
+      fileName,
+      importedAt: new Date().toISOString(),
+      totalCount: records.reduce((s,r)=>s+n(r.count),0),
+      records
+    };
+  },
+
+  parseDetailLine(line, ym, shipperCode, shipperName) {
+    if (!/^(UNKNOWN|\d{7})\s+/.test(line)) return null;
+
+    const tokens = line.split(/\s+/);
+    if (tokens.length < 14) return null;
+
+    const zip = tokens[0];
+    const nums = [];
+    let idx = tokens.length - 1;
+
+    while (idx > 0 && nums.length < 12) {
+      const raw = tokens[idx];
+      if (!/^-?[\d,]+$/.test(raw)) break;
+      nums.unshift(toNumberSafe(raw));
+      idx--;
+    }
+
+    if (nums.length < 12) return null;
+
+    const address = tokens.slice(1, idx + 1).join('');
+    if (!address) return null;
+
+    const [count, deliveryFee, trunkFee, extraFee, s1,s2,s3,s4,s5,s6,s7,s8] = nums;
+    const area = normalizeAreaName(address);
+
+    return {
+      ym,
+      shipperCode,
+      shipperName,
+      zip,
+      address,
+      area,
+      count,
+      deliveryFee,
+      trunkFee,
+      extraFee,
+      size: [s1,s2,s3,s4,s5,s6,s7,s8],
+      importedAt: new Date().toISOString()
+    };
+  },
+
+  inferYMFromFileName(name) {
+    const m = String(name || '').match(/(20\d{2})[-_年]?([01]\d)/);
+    if (!m) return null;
+    return `${m[1]}${m[2]}`;
+  },
+
+  saveParsed(parsed) {
+    if (!Array.isArray(STATE.areaData)) STATE.areaData = [];
+
+    // 同じ年月・同じファイル名のPDFは入替
+    STATE.areaData = STATE.areaData.filter(r => !(r.ym === parsed.ym && r.sourceFileName === parsed.fileName));
+
+    parsed.records.forEach(r => {
+      STATE.areaData.push({
+        ...r,
+        sourceFileName: parsed.fileName
+      });
+    });
+
+    this.rebuildFieldDataFromAreaData(parsed.ym);
+    STORE.save();
+    renderFieldDataList2();
+  },
+
+  rebuildFieldDataFromAreaData(ym) {
+    const rows = (STATE.areaData || []).filter(r => r.ym === ym);
+    if (!rows.length) return;
+
+    const areas = {};
+    for (const r of rows) {
+      const area = r.area || '未分類';
+      if (!areas[area]) areas[area] = { count:0, amount:0, shippers:{} };
+      areas[area].count += n(r.count);
+      areas[area].amount += n(r.deliveryFee) + n(r.trunkFee) + n(r.extraFee);
+
+      const shipper = r.shipperName || r.shipperCode || '未設定';
+      if (!areas[area].shippers[shipper]) areas[area].shippers[shipper] = { count:0, amount:0 };
+      areas[area].shippers[shipper].count += n(r.count);
+      areas[area].shippers[shipper].amount += n(r.deliveryFee) + n(r.trunkFee) + n(r.extraFee);
+    }
+
+    STATE.fieldData = (STATE.fieldData || []).filter(d => d.ym !== ym);
+    STATE.fieldData.push({
+      ym,
+      source: 'area_pdf',
+      areas,
+      importedAt: new Date().toISOString()
+    });
+    STATE.fieldData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+  }
+};
+
+function toNumberSafe(v) {
+  const s = String(v ?? '').replace(/,/g,'').replace(/[^\d.-]/g,'');
+  if (!s || s === '-' || s === '.') return 0;
+  const num = Number(s);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeAreaName(address) {
+  const t = String(address || '').replace(/\s+/g,'');
+  if (!t || t.includes('郵便番号未登録') || t === 'UNKNOWN') return '郵便番号未登録';
+
+  const prefMatch = t.match(/^(東京都|北海道|(?:京都|大阪)府|.{2,3}県)/);
+  const pref = prefMatch ? prefMatch[1] : '';
+
+  const rest = pref ? t.slice(pref.length) : t;
+
+  // 市区町村・郡町村を大まかに抽出
+  const m = rest.match(/^(.+?[市区町村])/);
+  if (m) return pref + m[1];
+
+  return pref ? pref + rest : rest;
+}
+
 const FIELD_IMPORT2 = {
-  handleFiles(files) { IMPORT.handleFiles(files); },
-  handleDrop(e) { e.preventDefault(); if(e.dataTransfer.files.length) IMPORT.handleFiles(e.dataTransfer.files); },
+  handleFiles(files) { AREA_PDF_IMPORT.handleFiles(files); },
+  handleDrop(e) { e.preventDefault(); if(e.dataTransfer.files.length) AREA_PDF_IMPORT.handleFiles(e.dataTransfer.files); },
 };
 
 // 現場データリスト更新（グローバル関数として呼ばれる）
@@ -3583,11 +3818,16 @@ function renderFieldDataList2() {
   const badge = document.getElementById('field-import-badge');
   if (STATE.fieldData.length) {
     if (badge) { badge.textContent='読込済'; badge.className='badge badge-ok'; }
-    list.innerHTML = STATE.fieldData.map(d=>`
+    list.innerHTML = STATE.fieldData.map(d=>{
+      const areaRows = (STATE.areaData || []).filter(r => r.ym === d.ym);
+      const areaCount = areaRows.reduce((s,r)=>s+n(r.count),0);
+      const areaLabel = areaRows.length ? ` / PDF ${fmt(areaRows.length)}行・${fmt(areaCount)}件` : '';
+      return `
       <div class="data-item">
-        <span>${ymLabel(d.ym)}</span>
+        <span>${ymLabel(d.ym)}${areaLabel}</span>
         <button class="btn btn-danger" onclick="IMPORT.deleteFieldData && IMPORT.deleteFieldData('${d.ym}')" style="font-size:11px;padding:2px 8px">削除</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     const rowEl = document.getElementById('field-delete-all-row');
     if (rowEl) rowEl.style.display = 'flex';
   } else {
@@ -3601,6 +3841,7 @@ function renderFieldDataList2() {
 // IMPORT.deleteFieldData 追加
 IMPORT.deleteFieldData = function(ym) {
   STATE.fieldData = STATE.fieldData.filter(d=>d.ym!==ym);
+  STATE.areaData = (STATE.areaData || []).filter(d=>d.ym!==ym);
   STORE.save();
   renderFieldDataList2();
   UI.toast('現場データを削除しました');
@@ -3701,6 +3942,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 3. ドロップゾーン設定
   setupDropZone('upload-zone', 'file-input', f=>IMPORT.handleFiles(f));
   setupDropZone('field-upload-zone', 'field-file-input', f=>IMPORT.handleFiles(f));
+  setupDropZone('field-upload-zone2', 'field-file-input2', f=>FIELD_IMPORT2.handleFiles(f));
 
   // 4. ファイル復元用
   const loadInput = document.getElementById('session-load-input');
