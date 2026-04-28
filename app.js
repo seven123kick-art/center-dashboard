@@ -5,6 +5,7 @@
 */
 /* ダッシュボード年度・月選択追加版 2026-04-28
    ・ダッシュボードに対象年度/対象月プルダウンを追加
+   ・CSV確定/CSV速報/収支補完の表示ラベルを分離
    ・初期表示は最新月
    ・年度順（4月→翌年3月）で月を管理
    ・今回の対象はダッシュボードのみ
@@ -834,8 +835,31 @@ function normalizeDatasetForDisplay(ds) {
   }
   return out;
 }
+function datasetSourceKind(ds) {
+  if (!ds) return 'none';
+  if (ds.source === 'history') return 'history';
+  if (ds.type === 'daily') return 'daily';
+  if (ds.source === 'csv' || !ds.source) return 'confirmed';
+  return ds.type || ds.source || 'confirmed';
+}
+function datasetKindLabel(ds) {
+  const kind = datasetSourceKind(ds);
+  if (kind === 'history') return '補完';
+  if (kind === 'daily') return '速報';
+  if (kind === 'confirmed') return '確定';
+  return '不明';
+}
+function datasetPriority(ds) {
+  // 同じ年月では、正式CSV確定 > CSV速報 > 収支補完 の順で表示・分析に使う。
+  // 補完はCSV未登録月を埋めるための参考値であり、確定とは表示しない。
+  const kind = datasetSourceKind(ds);
+  if (kind === 'confirmed') return 30;
+  if (kind === 'daily') return 20;
+  if (kind === 'history') return 10;
+  return 0;
+}
 function activeDatasets() {
-  // 表示・分析用：同じ年月に速報と確定がある場合は、確定を優先する
+  // 表示・分析用：同じ年月に複数データがある場合は、CSV確定 > CSV速報 > 収支補完 の順で優先する
   const map = {};
   for (const d of STATE.datasets || []) {
     if (!d || !d.ym) continue;
@@ -844,11 +868,11 @@ function activeDatasets() {
       map[d.ym] = d;
       continue;
     }
-    const curType = current.type || 'confirmed';
-    const newType = d.type || 'confirmed';
-    if (curType !== 'confirmed' && newType === 'confirmed') {
+    const curPriority = datasetPriority(current);
+    const newPriority = datasetPriority(d);
+    if (newPriority > curPriority) {
       map[d.ym] = d;
-    } else if (curType === newType && String(d.importedAt || '') > String(current.importedAt || '')) {
+    } else if (newPriority === curPriority && String(d.importedAt || '') > String(current.importedAt || '')) {
       map[d.ym] = d;
     }
   }
@@ -917,7 +941,7 @@ function renderDashboardSelector() {
   const selectedYM = dashboardSelectedYM();
   const monthOptions = months.map(ym => {
     const ds = activeDatasetByYM(ym);
-    const label = ds ? `${ymLabel(ym)}${(ds.type || 'confirmed') === 'daily' ? '（速報）' : '（確定）'}` : `${ymLabel(ym)}（未登録）`;
+    const label = ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`;
     return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${ds?'':'disabled'}>${label}</option>`;
   }).join('');
 
@@ -2275,7 +2299,8 @@ const UI = {
     if (sub) {
       const ds = view === 'dashboard' ? selectedDashboardDS() : latestDS();
       const prefix = view === 'dashboard' ? '表示データ' : '最終データ';
-      sub.textContent = ds ? `${prefix}: ${ymLabel(ds.ym)} / ${CENTER.name}` : `データなし — ${CENTER.name}`;
+      const label = ds ? `（${datasetKindLabel(ds)}）` : '';
+      sub.textContent = ds ? `${prefix}: ${ymLabel(ds.ym)}${label} / ${CENTER.name}` : `データなし — ${CENTER.name}`;
     }
     // センター名を全要素に反映
     document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
