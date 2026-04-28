@@ -898,6 +898,10 @@ const CLOUD = {
   _planKey() { return `${CENTER.id}/plan/data.json`; },
   _memosKey() { return `${CENTER.id}/memos/data.json`; },
   _libraryKey() { return `${CENTER.id}/library/data.json`; },
+  _libraryFileKey(fileName, fy='unknown') {
+    const safe = String(fileName || 'file').replace(/[\\/:*?"<>|#%&{}$!@+=`' ]/g, '_');
+    return `${CENTER.id}/library_files/${fy}/${Date.now()}_${safe}`;
+  },
   _legacyKey() { return `${CENTER.id}/data_v5.json`; },
   _makeManifest() {
     return {
@@ -958,6 +962,30 @@ const CLOUD = {
     const { data, error } = await sb.storage.from(this._bucket()).download(key);
     if (error) return null;
     return JSON.parse(await data.text());
+  },
+  async uploadFile(key, file) {
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
+    const { error } = await sb.storage.from(this._bucket()).upload(key, file, {
+      upsert:true,
+      contentType: file.type || 'application/octet-stream'
+    });
+    if (error) throw error;
+    return { ok:true, key };
+  },
+  async deleteFile(key) {
+    const sb = await this._client();
+    if (!sb || !key) return { ok:false, error:'Supabase未設定またはキーなし' };
+    const { error } = await sb.storage.from(this._bucket()).remove([key]);
+    if (error) return { ok:false, error:error.message };
+    return { ok:true };
+  },
+  async createSignedUrl(key) {
+    const sb = await this._client();
+    if (!sb || !key) return null;
+    const { data, error } = await sb.storage.from(this._bucket()).createSignedUrl(key, 60 * 10);
+    if (error) return null;
+    return data?.signedUrl || null;
   },
   async pushMonth(ym) {
     if (!ym) return { ok:false, error:'対象月なし' };
@@ -1077,10 +1105,29 @@ const CLOUD = {
   },
   async pull() {
     try {
+      let changed = false;
+      let gotAny = false;
+
       const full = await this.pullFullState();
-      if (full.ok) return full;
+      if (full && full.ok) {
+        changed = true;
+        gotAny = true;
+      }
+
+      // full_state が古い場合に備え、必ず manifest / skdl 月別データも確認する。
+      // これにより、別PCで入れた確定CSVが full_state 未反映でも取得できる。
       const r = await this.pullManifestAndMissing();
-      if (r.ok) return r;
+      if (r && r.ok) {
+        changed = changed || !!r.changed;
+        gotAny = true;
+      }
+
+      if (gotAny) {
+        STORE.save();
+        UI.updateCloudBadge('ok');
+        return { ok:true, changed, source:'full_state+manifest' };
+      }
+
       return await this.pullLegacy();
     }
     catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
@@ -1091,12 +1138,21 @@ const CLOUD = {
     try {
       const cloudFull = await this._downloadJSON(this._fullStateKey());
       const localFull = this._makeFullState();
-      const merged = cloudFull && typeof cloudFull === 'object'
+
+      // 先に full_state をマージ
+      const mergedBase = cloudFull && typeof cloudFull === 'object'
         ? mergeFullState(localFull, cloudFull)
         : localFull;
 
-      await this._uploadJSON(this._fullStateKey(), merged);
-      this._applyFullState(merged);
+      // 一度適用してから、manifest/skdlの月別データも必ず取得
+      this._applyFullState(mergedBase);
+      this._busy = false;
+      const manifestResult = await this.pullManifestAndMissing();
+      this._busy = true;
+
+      // manifest取得後の最新STATEを full_state として再保存
+      const finalFull = this._makeFullState();
+      await this._uploadJSON(this._fullStateKey(), finalFull);
 
       if (STATE.planData && Object.keys(STATE.planData).length) await this._uploadJSON(this._planKey(), STATE.planData);
       if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
@@ -1104,7 +1160,7 @@ const CLOUD = {
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
 
       UI.updateCloudBadge('ok');
-      return { ok:true, changed:true, source:'smart' };
+      return { ok:true, changed:true, source:'smart+manifest', manifestChanged: !!(manifestResult && manifestResult.changed) };
     } catch(e) {
       UI.updateCloudBadge('error');
       return { ok:false, error:e.message };
@@ -2945,47 +3001,215 @@ ${note||'（入力なし）'}
   },
 };
 
-/* ════════ §24 PAST_LIBRARY（スタブ） ══════════════════════════ */
+/* ════════ §24 PAST_LIBRARY（ファイル本体はStorage、台帳はfull_state） ══════════════════════════ */
 const PAST_LIBRARY = {
-  handleBulkFiles(files) { UI.toast('一括取込: '+Array.from(files).length+'件（メモを入力して登録してください）'); },
-  saveBulkSelected() { UI.toast('一括登録完了'); },
-  clearBulk() {},
-  handleFile(file) { if(file) document.getElementById('library-file-status').textContent = '選択: '+file.name; },
-  save() {
+  _selectedFile: null,
+  _bulkFiles: [],
+
+  handleBulkFiles(files) {
+    this._bulkFiles = Array.from(files || []);
+    const msg = document.getElementById('library-bulk-msg');
+    const prev = document.getElementById('library-bulk-preview');
+    if (msg) msg.textContent = `${this._bulkFiles.length}件選択しました`;
+    if (prev) {
+      prev.style.display = this._bulkFiles.length ? 'block' : 'none';
+      prev.innerHTML = this._bulkFiles.map((f, idx) => `
+        <div style="padding:7px 10px;border-bottom:1px solid var(--border,#d9dee8);font-size:12px">
+          ${idx+1}. ${esc(f.name)} <span style="color:var(--text3)">(${fmtFileSize(f.size)})</span>
+        </div>
+      `).join('');
+    }
+  },
+
+  async saveBulkSelected() {
+    if (!this._bulkFiles.length) { UI.toast('一括登録するファイルを選択してください','warn'); return; }
+
+    const cat = document.getElementById('library-bulk-category')?.value || 'その他';
+    const fy  = document.getElementById('library-bulk-fy')?.value || getDefaultFiscalYear();
+    const mm  = document.getElementById('library-bulk-month')?.value || '';
+    const autoTitle = document.getElementById('library-bulk-auto-title')?.checked !== false;
+
+    let saved = 0;
+    for (const file of this._bulkFiles) {
+      try {
+        const storagePath = CLOUD._libraryFileKey(file.name, fy);
+        await CLOUD.uploadFile(storagePath, file);
+
+        STATE.library.push({
+          id: Date.now() + saved,
+          title: autoTitle ? file.name.replace(/\.[^.]+$/, '') : file.name,
+          category: cat,
+          fiscalYear: fy,
+          month: mm,
+          memo: '',
+          content: '',
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type || '',
+          storagePath,
+          savedAt: new Date().toISOString()
+        });
+        saved++;
+      } catch(e) {
+        UI.toast(`${file.name} のアップロードに失敗: ${e.message}`, 'error');
+      }
+    }
+
+    if (saved) {
+      STORE.save();
+      this.renderList();
+      UI.toast(`${saved}件の過去資料を保存しました`);
+    }
+    this.clearBulk();
+  },
+
+  clearBulk() {
+    this._bulkFiles = [];
+    const input = document.getElementById('library-bulk-file-input');
+    if (input) input.value = '';
+    const msg = document.getElementById('library-bulk-msg');
+    if (msg) msg.textContent = '';
+    const prev = document.getElementById('library-bulk-preview');
+    if (prev) { prev.style.display = 'none'; prev.innerHTML = ''; }
+  },
+
+  handleFile(file) {
+    this._selectedFile = file || null;
+    const st = document.getElementById('library-file-status');
+    if (st) {
+      st.textContent = file
+        ? `選択: ${file.name}（${fmtFileSize(file.size)}） ※本体はStorage、台帳はfull_stateに保存`
+        : '';
+    }
+
+    const title = document.getElementById('library-title');
+    if (file && title && !title.value) title.value = file.name.replace(/\.[^.]+$/, '');
+  },
+
+  async save() {
     const title = document.getElementById('library-title')?.value;
     const cat   = document.getElementById('library-category')?.value;
+    const fy    = document.getElementById('library-fy')?.value || getDefaultFiscalYear();
+    const mm    = document.getElementById('library-month')?.value || '';
     const memo  = document.getElementById('library-memo')?.value;
     const content = document.getElementById('library-content')?.value;
+
     if (!title) { UI.toast('資料名を入力してください','warn'); return; }
-    STATE.library.push({ id:Date.now(), title, category:cat, memo, content, savedAt:new Date().toISOString() });
+
+    let fileMeta = {};
+    if (this._selectedFile) {
+      try {
+        const file = this._selectedFile;
+        const storagePath = CLOUD._libraryFileKey(file.name, fy);
+        await CLOUD.uploadFile(storagePath, file);
+        fileMeta = {
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type || '',
+          storagePath
+        };
+      } catch(e) {
+        UI.toast('ファイル本体のアップロードに失敗しました: ' + e.message, 'error');
+        return;
+      }
+    }
+
+    STATE.library.push({
+      id: Date.now(),
+      title,
+      category: cat,
+      fiscalYear: fy,
+      month: mm,
+      memo,
+      content,
+      ...fileMeta,
+      savedAt: new Date().toISOString()
+    });
+
     STORE.save();
     this.renderList();
     UI.toast('過去資料を保存しました');
     this.clearForm();
   },
+
   clearForm() {
     ['library-title','library-memo','library-content'].forEach(id=>{
       const el=document.getElementById(id); if(el) el.value='';
     });
+    this._selectedFile = null;
+    const input = document.getElementById('library-file-input');
+    if (input) input.value = '';
+    const st = document.getElementById('library-file-status');
+    if (st) st.textContent = '';
   },
+
   renderList() {
     const list = document.getElementById('library-list');
     const filter = document.getElementById('library-filter-category')?.value||'';
     if (!list) return;
     const items = STATE.library.filter(i=>!filter||i.category===filter);
-    if (!items.length) { list.innerHTML='<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだ過去資料がありません</div>'; return; }
+    if (!items.length) {
+      list.innerHTML='<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだ過去資料がありません</div>';
+      return;
+    }
+
     list.innerHTML = items.map(i=>`
       <div class="data-item">
         <span class="badge badge-info">${esc(i.category||'—')}</span>
-        <span style="flex:1">${esc(i.title)}</span>
+        <span style="flex:1">
+          ${esc(i.title)}
+          ${i.fileName ? `<span style="font-size:10px;color:var(--text3);margin-left:6px">📎 ${esc(i.fileName)} / ${fmtFileSize(i.fileSize)}</span>` : ''}
+        </span>
         <span style="font-size:10px;color:var(--text3)">${(i.savedAt||'').slice(0,10)}</span>
+        ${i.storagePath ? `<button class="btn" onclick="PAST_LIBRARY.openFile(${i.id})" style="font-size:11px;padding:2px 8px">開く</button>` : ''}
         <button class="btn btn-danger" onclick="PAST_LIBRARY.delete(${i.id})" style="font-size:11px;padding:2px 8px">削除</button>
       </div>`).join('');
   },
-  delete(id) { STATE.library=STATE.library.filter(i=>i.id!==id); STORE.save(); this.renderList(); },
+
+  async openFile(id) {
+    const item = STATE.library.find(i => i.id === id);
+    if (!item || !item.storagePath) { UI.toast('ファイル本体がありません','warn'); return; }
+
+    const url = await CLOUD.createSignedUrl(item.storagePath);
+    if (!url) { UI.toast('ファイルURLを作成できませんでした','error'); return; }
+    window.open(url, '_blank');
+  },
+
+  async delete(id) {
+    const item = STATE.library.find(i => i.id === id);
+    if (!item) return;
+
+    if (!confirm(`過去資料「${item.title}」を削除しますか？`)) return;
+
+    if (item.storagePath) {
+      await CLOUD.deleteFile(item.storagePath).catch(()=>{});
+    }
+
+    STATE.library=STATE.library.filter(i=>i.id!==id);
+    STORE.save();
+    this.renderList();
+  },
+
   exportJSON() { STORE.exportJSON(); },
-  clearAll() { if(confirm('全過去資料を削除しますか？')){ STATE.library=[]; STORE.save(); this.renderList(); } },
+
+  clearAll() {
+    if(confirm('全過去資料を削除しますか？\n※Storage上のファイル本体も削除を試行します。')){
+      const paths = (STATE.library || []).map(i=>i.storagePath).filter(Boolean);
+      paths.forEach(p => CLOUD.deleteFile(p).catch(()=>{}));
+      STATE.library=[];
+      STORE.save();
+      this.renderList();
+    }
+  },
 };
+
+function fmtFileSize(bytes) {
+  const n = Number(bytes || 0);
+  if (!n) return '0B';
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n/1024).toFixed(1)}KB`;
+  return `${(n/1024/1024).toFixed(1)}MB`;
+}
 
 /* ════════ §25 NAV ══════════════════════════════════════════════ */
 const NAV = {
@@ -3410,16 +3634,14 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.updateSaveStatus();
   UI.updateTopbar('dashboard');
 
-  // 11. 起動時に自動で双方向同期
-  // 別PCで開いた場合も、クラウド側の full_state.json を取得して画面へ反映する。
-  // 計画・実績・補完・メモ・過去資料をまとめて同期する。
-  CLOUD.syncSmart()
+  // 11. 起動時はまず取得を優先し、full_state と月別CSVの両方を確認する
+  CLOUD.pull()
     .then(r => {
       if (r && r.ok) {
         NAV.refresh();
         UI.updateTopbar(STATE.view || 'dashboard');
         UI.updateSaveStatus();
-        if (r.changed) UI.toast('クラウド同期が完了しました');
+        if (r.changed) UI.toast('クラウドの最新データを反映しました');
       }
     })
     .catch(() => {});
