@@ -780,7 +780,7 @@
               <label style="font-size:11px;color:var(--text2)">データ種別:</label>
               <select id="map-data-sel" onchange="FIELD_UI.renderMap()" style="font-size:11px">
                 <option value="csv">作業者別CSV（住所）</option>
-                <option value="pdf">エリア別PDF（郵便番号）</option>
+                <option value="pdf">商品・住所CSV（郵便番号）</option>
               </select>
               <label style="font-size:11px;color:var(--text2)">表示:</label>
               <select id="map-metric-sel" onchange="FIELD_UI.renderMap()" style="font-size:11px">
@@ -816,9 +816,9 @@
             <div class="upload-zone no-print" id="field-upload-zone">
               <input type="file" id="field-file-input" accept=".csv,.pdf" multiple style="display:none">
               <div style="font-size:30px;color:#94a3b8;margin-bottom:10px">⬆</div>
-              <div style="font-size:14px;font-weight:700;margin-bottom:6px">CSVまたはPDFをクリック / ドロップ</div>
+              <div style="font-size:14px;font-weight:700;margin-bottom:6px">CSVをクリック / ドロップ</div>
               <div style="font-size:12px;color:var(--text2);margin-bottom:4px">作業者別売上伝票明細表（CSV）</div>
-              <div style="font-size:11px;color:var(--text3)">またはエリア別物量（PDF）— 両方まとめて選択できます</div>
+              <div style="font-size:11px;color:var(--text3)">または商品・住所・サイズ・科目CSV — 両方まとめて選択できます</div>
             </div>
             <div id="field-upload-msg"></div>
           </div>
@@ -836,7 +836,7 @@
       <div class="card" style="margin-bottom:14px;border-top:3px solid var(--navy)">
         <div class="card-header">
           <span class="card-title">キャパ分析（地区別）</span>
-          <span style="font-size:11px;color:var(--text3)">キャパExcelと配送エリアPDFを突合し、地区別の空き・超過・荷主内訳を確認します</span>
+          <span style="font-size:11px;color:var(--text3)">キャパExcelと配送エリアCSVを突合し、地区別の空き・超過・荷主内訳を確認します</span>
         </div>
         <div class="card-body">
           <div class="grid3" style="margin-bottom:12px">
@@ -860,14 +860,14 @@
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
             <button class="btn btn-primary" onclick="document.getElementById('capacity-master-input').click()" style="font-size:12px">キャパExcel取込</button>
             <input type="file" id="capacity-master-input" accept=".xlsx,.xls" style="display:none" onchange="CAPACITY_UI.importCapacityExcel(this.files[0])">
-            <button class="btn" onclick="document.getElementById('capacity-pdf-input').click()" style="font-size:12px">配送エリアPDF取込</button>
-            <input type="file" id="capacity-pdf-input" accept=".pdf" multiple style="display:none" onchange="CAPACITY_UI.importAreaPdf(this.files)">
+            <button class="btn" onclick="document.getElementById('capacity-csv-input').click()" style="font-size:12px">配送エリアCSV取込</button>
+            <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none" onchange="CAPACITY_UI.importAreaCsv(this.files)">
             <button class="btn" onclick="CAPACITY_UI.render()" style="font-size:12px">再集計</button>
             <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()" style="font-size:12px">キャパマスタ削除</button>
             <span id="capacity-msg" style="font-size:11px;color:var(--text2)"></span>
           </div>
           <div style="font-size:11px;color:var(--text3);line-height:1.7">
-            ※ 配送エリアPDFは「データ取込＞現場データ」で入れたPDFも使います。PDFは月間件数のため、日別比較は「月間件数 ÷ 稼働日数」の平均で判定します。時間区分はPDF側にないため、時間帯キャパは地区ごとに合計して比較します。
+            ※ 配送エリアCSVは「データ取込＞現場明細データ」で入れたCSVも使います。CSVは月間件数のため、日別比較は「月間件数 ÷ 稼働日数」の平均で判定します。時間区分はCSV側にないため、時間帯キャパは地区ごとに合計して比較します。
           </div>
         </div>
       </div>
@@ -930,7 +930,7 @@
               <span style="font-size:11px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;padding:2px 8px;border-radius:4px">SKDL0001 = 日報（速報値）</span>
               <span style="font-size:11px;background:#d1fae5;border:1px solid #6ee7b7;color:#064e3b;padding:2px 8px;border-radius:4px">SKDL0003 = 確定値</span>
             </div>
-            <div style="font-size:11px;color:var(--text3)">※ 作業者別CSV・荷主別配送エリア別物量PDFは下の「現場データ」セクションから取り込めます</div>
+            <div style="font-size:11px;color:var(--text3)">※ 作業者別CSV・商品住所CSVは下の「現場明細データ」セクションから取り込めます</div>
           </div>
           <div id="upload-msg"></div>
         </div>
@@ -1004,7 +1004,7 @@
       <div class="card" style="margin-bottom:14px">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
           <div style="display:flex;align-items:center;gap:8px">
-            <span class="card-title">🚚 現場データ（作業者別CSV・荷主別配送エリア別物量PDF）</span>
+            <span class="card-title">🚚 現場明細データ（作業者別CSV・商品住所CSV）</span>
             <span id="field-import-badge" class="badge badge-warn">未読込</span>
           </div>
           <button onclick="renderFieldDataList2()" title="一覧を最新状態に更新"
@@ -1023,10 +1023,10 @@
             <input type="file" id="field-file-input2" accept=".csv,.pdf" multiple style="display:none"
                    onchange="FIELD_IMPORT2.handleFiles(this.files)">
             <div style="font-size:20px;color:#94a3b8;margin-bottom:4px">⬆</div>
-            <div style="font-size:13px;font-weight:700;margin-bottom:4px">作業者別CSV または 荷主別配送エリア別物量PDFを取込</div>
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">クリックまたはCSVをドロップ</div>
             <div style="display:flex;gap:10px;justify-content:center;font-size:11px">
               <span style="background:#d1fae5;border:1px solid #6ee7b7;color:#064e3b;padding:2px 8px;border-radius:4px">作業者別CSV</span>
-              <span style="background:#dbeafe;border:1px solid #93c5fd;color:#1e3a8a;padding:2px 8px;border-radius:4px">エリア別PDF</span>
+              <span style="background:#dbeafe;border:1px solid #93c5fd;color:#1e3a8a;padding:2px 8px;border-radius:4px">商品・住所CSV</span>
             </div>
           </div>
           <div id="field-import-msg2" style="margin-bottom:8px;font-size:12px"></div>
