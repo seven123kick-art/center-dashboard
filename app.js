@@ -3600,7 +3600,12 @@ const TSV_IMPORT = {
 
 // 現場データ取込2（インポート画面の2つ目のゾーン）
 
-/* ════════ §27-A AREA PDF IMPORT（荷主別配送エリア別物量PDF） ════════ */
+/* 2026-04-29 修正：郵便番号と住所がスペース無しで抽出されるPDFに対応 */
+/* ════════ §27-A AREA PDF IMPORT（荷主別配送エリア別物量PDF） ════════
+   対象帳票：荷主別配送エリア別物量
+   取込内容：郵便番号・住所・件数・配送料・幹線料・付帯料金・サイズ①〜⑧
+   注意：作業者別CSVとは完全に別処理。PDF内の日付ではなく画面選択中の年月で保存する。
+════════════════════════════════════════════════════════════════ */
 const AREA_PDF_IMPORT = {
   async handleFiles(files) {
     const arr = Array.from(files || []);
@@ -3614,77 +3619,45 @@ const AREA_PDF_IMPORT = {
 
   async importPdf(file) {
     try {
-      UI.toast('PDFを解析中です...');
+      UI.toast('荷主別配送エリア別物量PDFを解析中です...');
       await ASSETS.pdfjs();
       if (!window.pdfjsLib) throw new Error('PDF.jsを読み込めませんでした');
+
+      const forcedYM = selectedYMForImport();
+      if (!forcedYM) {
+        UI.toast('先に取込対象の年度・月を選択してください', 'warn');
+        return;
+      }
 
       const buffer = await file.arrayBuffer();
       const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
 
       let fullText = '';
       let allRecords = [];
-      let debug = { pages: pdf.numPages, lineRecords: 0, tokenRecords: 0, rawTokens: 0 };
 
       for (let p = 1; p <= pdf.numPages; p++) {
         const page = await pdf.getPage(p);
         const content = await page.getTextContent();
-        const items = content.items || [];
-
-        const lines = this.itemsToLines(items);
-        const pageText = lines.join('\n');
+        const pageLines = this.itemsToLines(content.items);
+        const pageText = pageLines.join('\n');
         fullText += '\n' + pageText;
-
-        const meta = this.extractMetaFromText(pageText);
-        const lineRecords = this.parseLines(lines, p);
-        const tokenRecords = this.parseItemsByToken(items, meta, p);
-
-        debug.lineRecords += lineRecords.length;
-        debug.tokenRecords += tokenRecords.length;
-        debug.rawTokens += items.length;
-
-        allRecords = allRecords.concat(lineRecords, tokenRecords);
+        allRecords = allRecords.concat(this.parseLines(pageLines, p));
       }
 
-      const forcedYM = selectedYMForImport();
-      if (!forcedYM) {
-        UI.toast('取込対象の年度・月を選択してください', 'warn');
-        return;
-      }
-
-      allRecords = this.dedupeRecords(allRecords).map(r => ({
-        ...r,
-        ym: forcedYM,
-        importedAt: new Date().toISOString()
-      }));
+      allRecords = allRecords.map(r => ({ ...r, ym: forcedYM, importedAt: new Date().toISOString(), sourceFileName: file.name }));
 
       if (!allRecords.length) {
-        // 原文だけは保持。次回解析改善用。
         if (!Array.isArray(STATE.areaData)) STATE.areaData = [];
-        STATE.areaData = STATE.areaData.filter(r => !(r.ym === forcedYM && r.sourceFileName === file.name && r.rawOnly));
-        STATE.areaData.push({
-          ym: forcedYM,
-          source: 'area_pdf_raw',
-          rawOnly: true,
-          sourceFileName: file.name,
-          rawText: fullText.slice(0, 300000),
-          importedAt: new Date().toISOString(),
-          debug
-        });
+        STATE.areaData = STATE.areaData.filter(r => !(r.ym === forcedYM && r.sourceFileName === file.name));
+        STATE.areaData.push({ ym: forcedYM, sourceFileName: file.name, rawOnly: true, rawText: fullText.slice(0, 800000), importedAt: new Date().toISOString() });
         STORE.save();
         renderFieldDataList2();
-        UI.toast(`${ymLabel(forcedYM)} PDF原文は保存しましたが、明細行は読み込めませんでした（tokens:${debug.rawTokens}）`, 'warn');
+        UI.toast(`${ymLabel(forcedYM)} PDF原文は保存しましたが、明細行は読み込めませんでした`, 'warn');
         NAV.refresh();
         return;
       }
 
-      const parsed = {
-        ym: forcedYM,
-        fileName: file.name,
-        importedAt: new Date().toISOString(),
-        totalCount: allRecords.reduce((sum, r) => sum + n(r.count), 0),
-        records: allRecords
-      };
-
+      const parsed = { ym: forcedYM, fileName: file.name, importedAt: new Date().toISOString(), totalCount: allRecords.reduce((sum, r) => sum + n(r.count), 0), records: allRecords };
       this.saveParsed(parsed);
       UI.toast(`${ymLabel(parsed.ym)} エリアPDF取込完了：${fmt(parsed.records.length)}行 / ${fmt(parsed.totalCount)}件`);
       NAV.refresh();
@@ -3702,120 +3675,40 @@ const AREA_PDF_IMPORT = {
       const tr = it.transform || [];
       const x = Number(tr[4] || 0);
       const y = Number(tr[5] || 0);
-      let bucket = buckets.find(b => Math.abs(b.y - y) <= 3.5);
+      let bucket = buckets.find(b => Math.abs(b.y - y) <= 2.4);
       if (!bucket) { bucket = { y, items: [] }; buckets.push(bucket); }
       bucket.items.push({ x, str });
     }
-    return buckets
-      .sort((a,b) => b.y - a.y)
-      .map(b => b.items.sort((a,b)=>a.x-b.x).map(i=>i.str).join(' ').replace(/[　]/g,' ').replace(/\s+/g,' ').trim())
-      .filter(Boolean);
+    return buckets.sort((a,b) => b.y - a.y).map(b => b.items.sort((a,b)=>a.x-b.x).map(i=>i.str).join(' ').replace(/[　]/g,' ').replace(/\s+/g,' ').trim()).filter(Boolean);
   },
 
   parseLines(lines, pageNo) {
     const records = [];
     let currentMeta = { shipperCode:'', shipperName:'', pdfDateFrom:'', pdfDateTo:'' };
-    for (const line of lines || []) {
-      const meta = this.extractMetaFromText(line);
-      if (meta.shipperCode || meta.pdfDateFrom) currentMeta = { ...currentMeta, ...meta };
-
+    const expanded = [];
+    for (const raw of lines || []) {
+      const line = String(raw || '').trim();
+      if (!line) continue;
+      const safe = line.replace(/(\d)\s*(20\d{2}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+Page)/g, '$1\n$2').replace(/(合計[:：][^\n]*?)(?=20\d{2}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+Page)/g, '$1\n');
+      expanded.push(...safe.split(/\n+/).map(x=>x.trim()).filter(Boolean));
+    }
+    for (const line of expanded) {
+      const shipperMeta = this.extractMetaFromLine(line);
+      if (shipperMeta.shipperCode || shipperMeta.pdfDateFrom) { currentMeta = { ...currentMeta, ...shipperMeta }; continue; }
       const rec = this.parseDetailLine(line, currentMeta, pageNo);
       if (rec) records.push(rec);
     }
     return records;
   },
 
-  extractMetaFromText(text) {
-    const t = String(text || '').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();
+  extractMetaFromLine(line) {
+    const t = String(line || '').replace(/\s+/g,' ').trim();
     const meta = {};
-    const shipperMatch = t.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+?)(?:\s+配達完了日|\s+郵便番号|$)/);
-    if (shipperMatch) {
-      meta.shipperCode = shipperMatch[1];
-      meta.shipperName = shipperMatch[2].trim();
-    }
-    const dateMatch = t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})\s+(\d{4})\/(\d{2})\/(\d{2})/);
-    if (dateMatch) {
-      meta.pdfDateFrom = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
-      meta.pdfDateTo = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`;
-    }
+    const shipperMatch = t.match(/荷主[:：]\s*([0-9A-Z]{6,})\s*(.+?)(?:\s*配達完了日|$)/);
+    if (shipperMatch) { meta.shipperCode = shipperMatch[1]; meta.shipperName = shipperMatch[2].trim(); }
+    const dateMatch = t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})(?:\s*[～~\-–—]?\s*)(\d{4})\/(\d{2})\/(\d{2})/);
+    if (dateMatch) { meta.pdfDateFrom = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`; meta.pdfDateTo = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`; }
     return meta;
-  },
-
-  parseItemsByToken(items, pageMeta, pageNo) {
-    const rows = this.itemsToLines(items)
-      .flatMap(line => String(line || '').replace(/[　]/g,' ').split(/\s+/).filter(Boolean));
-
-    const records = [];
-    let meta = { ...(pageMeta || {}) };
-
-    function isZipToken(t) {
-      const s = String(t || '').replace(/\s+/g,'').toUpperCase();
-      return /^\d{7}$/.test(s) || s === 'UNKNOWN' || s === 'UNKNOWN郵便番号未登録';
-    }
-    function isStopToken(t) {
-      return /^(合計[:：]?|郵便番号|住所|件数|配送料|幹線料|付帯料金|サイズ|荷主別配送エリア別物量|支店[:：]|管理者印|担当者印|配達完了日[:：]?)/.test(String(t || ''));
-    }
-
-    for (let i = 0; i < rows.length; i++) {
-      const windowText = rows.slice(i, Math.min(i + 12, rows.length)).join(' ');
-      const m = this.extractMetaFromText(windowText);
-      if (m.shipperCode || m.pdfDateFrom) meta = { ...meta, ...m };
-
-      if (!isZipToken(rows[i])) continue;
-
-      const rowTokens = [rows[i]];
-      let j = i + 1;
-      while (j < rows.length) {
-        if (j > i + 1 && isZipToken(rows[j])) break;
-        if (isStopToken(rows[j])) break;
-        // 次ページヘッダーの混入防止
-        if (/^20\d{2}\/\d{2}\/\d{2}$/.test(rows[j]) && rows[j+1] && /^\d{2}:\d{2}:\d{2}$/.test(rows[j+1])) break;
-        rowTokens.push(rows[j]);
-        j++;
-      }
-
-      const rec = this.parseRowTokens(rowTokens, meta, pageNo);
-      if (rec) records.push(rec);
-      i = Math.max(i, j - 1);
-    }
-    return records;
-  },
-
-  parseRowTokens(tokens, meta, pageNo) {
-    if (!tokens || tokens.length < 4) return null;
-    let zip = String(tokens[0] || '').replace(/\s+/g,'').toUpperCase();
-    if (zip.includes('UNKNOWN')) zip = 'UNKNOWN';
-
-    const numericPositions = [];
-    for (let i = 1; i < tokens.length; i++) {
-      if (/^-?\d[\d,]*$/.test(String(tokens[i] || ''))) numericPositions.push(i);
-    }
-    if (numericPositions.length < 12) return null;
-
-    const tailPos = numericPositions.slice(-12);
-    const firstNum = tailPos[0];
-    const vals = tailPos.map(pos => toNumberSafe(tokens[pos]));
-    const [count, deliveryFee, trunkFee, extraFee, s1,s2,s3,s4,s5,s6,s7,s8] = vals;
-    const address = tokens.slice(1, firstNum).join('').replace(/\s+/g,'').trim();
-    if (!address || /^住所$/.test(address)) return null;
-
-    return {
-      ym: null,
-      source: 'area_pdf',
-      pageNo,
-      shipperCode: meta?.shipperCode || '',
-      shipperName: meta?.shipperName || '',
-      pdfDateFrom: meta?.pdfDateFrom || '',
-      pdfDateTo: meta?.pdfDateTo || '',
-      zip,
-      address,
-      area: normalizeAreaName(address),
-      count,
-      deliveryFee,
-      trunkFee,
-      extraFee,
-      size: [s1,s2,s3,s4,s5,s6,s7,s8]
-    };
   },
 
   parseDetailLine(line, meta, pageNo) {
@@ -3826,20 +3719,25 @@ const AREA_PDF_IMPORT = {
     if (/郵便番号\s+住所\s+件数/.test(t)) return null;
     if (/^\/?\s*\/\s*\/?/.test(t)) return null;
     if (/^合計[:：]/.test(t)) return null;
-
-    // 行をトークン化し、parseRowTokensに集約する。
-    const tokens = t.split(/\s+/).filter(Boolean);
-    return this.parseRowTokens(tokens, meta, pageNo);
-  },
-
-  dedupeRecords(records) {
-    const map = new Map();
-    for (const r of records || []) {
-      if (!r || !r.zip || !r.address) continue;
-      const key = [r.pageNo, r.shipperCode, r.zip, r.address, r.count, r.deliveryFee, r.trunkFee, r.extraFee].join('|');
-      if (!map.has(key)) map.set(key, r);
+    const head = t.match(/^((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)\s*(.+)$/i);
+    if (!head) return null;
+    let zip = head[1].replace(/\s+/g,'').toUpperCase();
+    if (zip.includes('UNKNOWN')) zip = 'UNKNOWN';
+    let rest = head[2].trim();
+    const nums = [];
+    let remain = rest;
+    while (nums.length < 20) {
+      const m = remain.match(/(?:^|\s)(-?\d[\d,]*)(?:\s*)$/);
+      if (!m) break;
+      nums.unshift(toNumberSafe(m[1]));
+      remain = remain.slice(0, m.index).trimEnd();
     }
-    return [...map.values()];
+    if (nums.length < 12) return null;
+    const tail = nums.slice(-12);
+    const [count, deliveryFee, trunkFee, extraFee, s1,s2,s3,s4,s5,s6,s7,s8] = tail;
+    let address = remain.replace(/郵便番号.*$/, '').replace(/件数.*$/, '').replace(/\s+/g, '').trim();
+    if (!address || address === '住所') return null;
+    return { ym: null, source: 'area_pdf', pageNo, shipperCode: meta.shipperCode || '', shipperName: meta.shipperName || '', pdfDateFrom: meta.pdfDateFrom || '', pdfDateTo: meta.pdfDateTo || '', zip, address, area: normalizeAreaName(address), count, deliveryFee, trunkFee, extraFee, size: [s1,s2,s3,s4,s5,s6,s7,s8] };
   },
 
   saveParsed(parsed) {
@@ -3873,7 +3771,6 @@ const AREA_PDF_IMPORT = {
     STATE.fieldData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
   }
 };
-
 function toNumberSafe(v) {
   const s = String(v ?? '').replace(/,/g,'').replace(/[^\d.-]/g,'');
   if (!s || s === '-' || s === '.') return 0;
