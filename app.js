@@ -2000,20 +2000,82 @@ function renderDashboard() {
   if (leg) leg.innerHTML = incItems.map((k,i)=>`
     <div class="legend-item"><div class="legend-dot" style="background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div>${esc(k)}</div>`).join('');
 
-  // 費用内訳ミニバー
+  // 費用内訳（当月）
+  // 収支CSV（確定/速報/補完）で保持している ds.rows の科目別金額から作成する。
+  // 以前は CONFIG.PL_DEF の古いキー名（t/l/k）を参照していたため空表示になっていた。
   const expArea = document.getElementById('exp-bars-area');
-  if (expArea && ds) {
-    const groups = CONFIG.PL_DEF.filter(d=>d.t==='g').map(d=>{
-      const v = (d.k||[]).reduce((s,k)=>s+n(ds.rows[k]),0);
-      return {l:d.l, v};
-    }).filter(g=>g.v>0).sort((a,b)=>b.v-a.v).slice(0,8);
-    const maxV = Math.max(...groups.map(g=>g.v),1);
-    expArea.innerHTML = groups.map((g,i)=>`
-      <div class="mbar-row">
-        <div class="mbar-label" title="${esc(g.l)}">${esc(g.l)}</div>
-        <div class="mbar-track"><div class="mbar-fill" style="width:${(g.v/maxV*100).toFixed(1)}%;background:${CONFIG.COLORS[(i+1)%CONFIG.COLORS.length]}"></div></div>
-        <div class="mbar-val">${fmtK(g.v)}千</div>
-      </div>`).join('');
+  if (expArea && ds && ds.rows) {
+    const expenseGroups = (CONFIG.PL_DEF || [])
+      .filter(def => def && def.type === 'group' && def.id !== 'revenue')
+      .map(def => {
+        const value = (def.keys || []).reduce((sum, key) => sum + n(ds.rows[key]), 0);
+        return { label: def.label || def.id || '未設定', value };
+      })
+      .filter(item => item.value > 0)
+      .sort((a, b) => b.value - a.value);
+
+    if (!expenseGroups.length) {
+      expArea.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">費用内訳データがありません</div>';
+    } else {
+      const topGroups = expenseGroups.slice(0, 6);
+      const otherValue = expenseGroups.slice(6).reduce((sum, item) => sum + item.value, 0);
+      const chartGroups = otherValue > 0
+        ? [...topGroups, { label: 'その他', value: otherValue }]
+        : topGroups;
+      const maxExpense = Math.max(...chartGroups.map(item => item.value), 1);
+      const totalExpenseForRatio = chartGroups.reduce((sum, item) => sum + item.value, 0) || 1;
+
+      expArea.innerHTML = `
+        <div style="display:grid;grid-template-columns:180px 1fr;gap:12px;align-items:center">
+          <div style="height:150px;position:relative">
+            <canvas id="c-exp-donut"></canvas>
+          </div>
+          <div>
+            ${chartGroups.map((item, i) => `
+              <div class="mbar-row" style="margin-bottom:8px">
+                <div class="mbar-label" title="${esc(item.label)}">${esc(item.label)}</div>
+                <div class="mbar-track">
+                  <div class="mbar-fill" style="width:${(item.value / maxExpense * 100).toFixed(1)}%;background:${CONFIG.COLORS[(i + 1) % CONFIG.COLORS.length]}"></div>
+                </div>
+                <div class="mbar-val">${fmtK(item.value)}千</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text3);line-height:1.6">
+          費用合計 ${fmtK(ds.totalExpense)}千円 / 表示内訳 ${fmtK(totalExpenseForRatio)}千円
+        </div>`;
+
+      CHART_MGR.make('c-exp-donut', {
+        type: 'doughnut',
+        data: {
+          labels: chartGroups.map(item => item.label),
+          datasets: [{
+            data: chartGroups.map(item => item.value / 1000),
+            backgroundColor: chartGroups.map((_, i) => CONFIG.COLORS[(i + 1) % CONFIG.COLORS.length]),
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '58%',
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const raw = n(ctx.raw);
+                  const yen = raw * 1000;
+                  const ratioText = totalExpenseForRatio > 0 ? ` / ${(yen / totalExpenseForRatio * 100).toFixed(1)}%` : '';
+                  return `${ctx.label}: ${fmt(raw)}千円${ratioText}`;
+                }
+              }
+            }
+          }
+        }
+      });
+    }
   }
 
   // 荷主バー（shippers存在時のみ）
