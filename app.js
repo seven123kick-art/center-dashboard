@@ -5865,3 +5865,136 @@ if (__renderMonthlyCheckTableOriginalForFieldCsv) {
     setTimeout(redrawFieldScreen, 250);
   });
 })();
+
+/* ════════════════════════════════════════════════════════════════
+   FINAL PATCH 2026-04-29 現場明細CSV 削除永続化FIX
+   ・商品住所CSVが削除後も月次登録チェック表に残る問題を修正
+   ・削除済み月マーカーをlocalStorageに保持し、クラウド同期後の復活も防止
+════════════════════════════════════════════════════════════════ */
+(function(){
+  'use strict';
+  function safe(fn){ try { return fn(); } catch(e){ console.error(e); return null; } }
+  function markerKey(){ return (typeof STORE !== 'undefined' && STORE._p ? STORE._p : 'mgmt5_field_') + 'deleted_field_months'; }
+  function readMarkers(){ try { return JSON.parse(localStorage.getItem(markerKey()) || '{}') || {}; } catch(e){ return {}; } }
+  function writeMarkers(v){ try { localStorage.setItem(markerKey(), JSON.stringify(v || {})); } catch(e){} }
+  function markDeleted(ym){ if(!ym) return; const m=readMarkers(); m[String(ym)] = new Date().toISOString(); writeMarkers(m); }
+  function unmarkDeleted(ym){ if(!ym) return; const m=readMarkers(); if (m[String(ym)]) { delete m[String(ym)]; writeMarkers(m); } }
+  function isDeletedYM(ym){ return !!readMarkers()[String(ym)]; }
+  function sameYM(v, ym){ return String(v || '') === String(ym || ''); }
+  function isProductSource(r){ return r && (r.source === 'area_csv' || r.source === 'product_address_csv' || r.importKind === 'product_address_csv' || r.importKindLabel === '商品・住所CSV'); }
+  function isWorkerSource(r){ return r && (r.source === 'worker_csv' || r.importKind === 'worker_csv' || r.importKindLabel === '作業者別CSV'); }
+  function persistLocal(){ if (typeof STORE !== 'undefined' && STORE.save) STORE.save(); }
+  function purgeDeletedMonthsFromState(){
+    const markers = readMarkers();
+    const beforeF = (STATE.fieldData || []).length;
+    const beforeA = (STATE.areaData || []).length;
+    STATE.fieldData = (STATE.fieldData || []).filter(d => d && !markers[String(d.ym || '')]);
+    STATE.areaData  = (STATE.areaData  || []).filter(r => r && !markers[String(r.ym || '')]);
+    return beforeF !== STATE.fieldData.length || beforeA !== STATE.areaData.length;
+  }
+  async function pushDeletionCloud(){
+    persistLocal();
+    if (typeof CLOUD === 'undefined') return;
+    try {
+      if (CLOUD._uploadJSON && CLOUD._fullStateKey && CLOUD._makeFullState) await CLOUD._uploadJSON(CLOUD._fullStateKey(), CLOUD._makeFullState());
+      if (CLOUD._uploadJSON && CLOUD._manifestKey && CLOUD._makeManifest) await CLOUD._uploadJSON(CLOUD._manifestKey(), CLOUD._makeManifest());
+      if (CLOUD._uploadJSON && CLOUD._fieldKey) await CLOUD._uploadJSON(CLOUD._fieldKey(), STATE.fieldData || []);
+      if (typeof UI !== 'undefined' && UI.updateCloudBadge) UI.updateCloudBadge('ok');
+    } catch(e) { console.error(e); safe(()=>UI.toast('クラウド反映に失敗しました。もう一度削除してください。','warn')); }
+  }
+  function redrawAllFieldViews(){
+    safe(()=>renderFieldDataList2 && renderFieldDataList2());
+    safe(()=>window.FIELD_UI && FIELD_UI.updatePeriodBadge && FIELD_UI.updatePeriodBadge());
+    safe(()=>window.FIELD_UI && FIELD_UI.renderMap && FIELD_UI.renderMap());
+    safe(()=>NAV && NAV.refresh && NAV.refresh());
+    safe(()=>UI && UI.updateSaveStatus && UI.updateSaveStatus());
+  }
+  function currentFieldYM(){
+    const sel = document.getElementById('field-month-sel');
+    if (sel && sel.value) return sel.value;
+    if (typeof dashboardSelectedYM === 'function') return dashboardSelectedYM();
+    return STATE && STATE.selYM ? STATE.selYM : null;
+  }
+  async function deleteFieldMonthHard(ym){
+    ym = ym || currentFieldYM();
+    if (!ym) return;
+    if (!confirm(`${ymLabel(ym)} の現場明細CSVを削除しますか？\n\n作業者CSV・商品住所CSVの両方を削除します。`)) return;
+    markDeleted(ym);
+    STATE.fieldData = (STATE.fieldData || []).filter(d => d && !sameYM(d.ym, ym));
+    STATE.areaData  = (STATE.areaData  || []).filter(r => r && !sameYM(r.ym, ym));
+    persistLocal();
+    redrawAllFieldViews();
+    await pushDeletionCloud();
+    purgeDeletedMonthsFromState();
+    persistLocal();
+    redrawAllFieldViews();
+    safe(()=>UI.toast(`${ymLabel(ym)} の現場明細CSVを削除しました`));
+  }
+  async function clearFieldAllHard(){
+    if (!confirm('現場明細データを全月削除しますか？\n\n作業者CSV・商品住所CSVをすべて削除します。')) return;
+    const m = readMarkers();
+    (STATE.fieldData || []).forEach(d=>{ if(d && d.ym) m[String(d.ym)] = new Date().toISOString(); });
+    (STATE.areaData || []).forEach(r=>{ if(r && r.ym) m[String(r.ym)] = new Date().toISOString(); });
+    writeMarkers(m);
+    STATE.fieldData = [];
+    STATE.areaData = [];
+    persistLocal();
+    redrawAllFieldViews();
+    await pushDeletionCloud();
+    redrawAllFieldViews();
+    safe(()=>UI.toast('現場明細データを全件削除しました'));
+  }
+  function unmarkFromImport(kind){
+    let ym = null;
+    if (typeof finalYMFromControls === 'function') ym = finalYMFromControls(kind);
+    if (!ym && typeof dashboardSelectedYM === 'function') ym = dashboardSelectedYM();
+    if (ym) unmarkDeleted(ym);
+  }
+  if (typeof FIELD_FINAL !== 'undefined') {
+    if (FIELD_FINAL.importProductFiles && !FIELD_FINAL.importProductFiles._deleteFixWrapped2) {
+      const oldProduct = FIELD_FINAL.importProductFiles.bind(FIELD_FINAL);
+      FIELD_FINAL.importProductFiles = async function(files){ unmarkFromImport('product'); return oldProduct(files); };
+      FIELD_FINAL.importProductFiles._deleteFixWrapped2 = true;
+    }
+    if (FIELD_FINAL.importWorkerFiles && !FIELD_FINAL.importWorkerFiles._deleteFixWrapped2) {
+      const oldWorker = FIELD_FINAL.importWorkerFiles.bind(FIELD_FINAL);
+      FIELD_FINAL.importWorkerFiles = async function(files){ unmarkFromImport('worker'); return oldWorker(files); };
+      FIELD_FINAL.importWorkerFiles._deleteFixWrapped2 = true;
+    }
+  }
+  if (typeof IMPORT !== 'undefined') IMPORT.deleteFieldData = deleteFieldMonthHard;
+  if (typeof DATA_RESET !== 'undefined') DATA_RESET.clearFieldAll = clearFieldAllHard;
+  window.deleteFieldMonthAll = deleteFieldMonthHard;
+  window.clearFieldAll = clearFieldAllHard;
+  function fieldStateForMonthly(ym, source){
+    if (isDeletedYM(ym)) return { label:'未登録', kind:'danger', note:'' };
+    const rows = (STATE.areaData || []).filter(r => r && sameYM(r.ym, ym) && (source === 'worker_csv' ? isWorkerSource(r) : isProductSource(r)));
+    if (!rows.length) return { label:'未登録', kind:'danger', note:'' };
+    if (source === 'area_csv') {
+      const meta = (STATE.fieldData || []).find(d=>d && sameYM(d.ym,ym) && d.source === 'area_csv') || {};
+      const rawLine = meta.rawLineCount || rows.reduce((s,r)=>s+n(r.rawLineCount || 1),0);
+      const dupLine = meta.duplicateExcludedLineCount || rows.reduce((s,r)=>s+n(r.duplicateExcludedLineCount || 0),0);
+      return { label:'登録済', kind:'ok', note:`商品住所 原票${fmt(rows.length)}件 / 明細${fmt(rawLine)}行 / 重複除外${fmt(dupLine)}行` };
+    }
+    const workers = new Set(rows.map(r=>r.workerName).filter(Boolean)).size;
+    return { label:'登録済', kind:'ok', note:`作業者 ${fmt(rows.length)}行 / ${fmt(workers)}名` };
+  }
+  if (typeof renderMonthlyCheckTable === 'function') {
+    renderMonthlyCheckTable = function(){
+      const fy = storageFiscalYear();
+      const states = storageFiscalMonths(fy).map(ym => storageMonthState(fy, ym));
+      const missingCount = states.filter(s => s.judge === '漏れ').length;
+      const dailyOnlyCount = states.filter(s => s.judge === '注意').length;
+      const abnormalCount = states.filter(s => s.judge === '異常').length;
+      const histOnlyCount = states.filter(s => s.judge === '補完のみ').length;
+      const summary = abnormalCount ? storageBadge(`異常 ${abnormalCount}件`, 'danger') : missingCount ? storageBadge(`漏れ ${missingCount}ヶ月`, 'danger') : dailyOnlyCount || histOnlyCount ? storageBadge(`確認 ${dailyOnlyCount + histOnlyCount}ヶ月`, 'warn') : storageBadge('12ヶ月 OK', 'ok');
+      return `<div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px"><div><div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div><div style="font-size:11px;color:var(--text3);margin-top:3px">${fy}年度：${fy}年4月 ～ ${parseInt(fy,10)+1}年3月（年度順）</div></div><div>${summary}</div></div><div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>作業者CSV</th><th>商品住所CSV</th><th>判定</th><th>確認内容</th></tr></thead><tbody>${states.map(s=>{ const worker=fieldStateForMonthly(s.ym,'worker_csv'); const detail=fieldStateForMonthly(s.ym,'area_csv'); const note=[s.note, worker.note, detail.note].filter(Boolean).join(' / '); return `<tr><td><strong>${ymLabel(s.ym)}</strong></td><td>${storageBadge(s.csvLabel,s.csvKind)}</td><td>${storageBadge(s.histLabel,s.histKind)}</td><td>${storageBadge(s.planLabel,s.planKind)}</td><td>${storageBadge(worker.label,worker.kind)}</td><td>${storageBadge(detail.label,detail.kind)}</td><td>${storageBadge(s.judge,s.kind)}</td><td style="min-width:360px;color:var(--text2)">${esc(note)}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+    };
+  }
+  if (typeof CLOUD !== 'undefined' && CLOUD._applyFullState && !CLOUD._applyFullState._deleteFixWrapped2) {
+    const oldApply = CLOUD._applyFullState.bind(CLOUD);
+    CLOUD._applyFullState = function(full){ const r = oldApply(full); if (purgeDeletedMonthsFromState()) persistLocal(); return r; };
+    CLOUD._applyFullState._deleteFixWrapped2 = true;
+  }
+  document.addEventListener('DOMContentLoaded', function(){ if (purgeDeletedMonthsFromState()) persistLocal(); setTimeout(redrawAllFieldViews, 300); });
+})();
