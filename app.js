@@ -5097,3 +5097,446 @@ if (__renderMonthlyCheckTableOriginalForFieldCsv) {
     setTimeout(()=>{ try{ hideOldCityTable(); if(STATE.view==='field') renderCleanMap(); }catch(e){} }, 300);
   });
 })();
+
+/* ════════════════════════════════════════════════════════════════
+   2026-04-29 FINAL FIX
+   ・商品・住所CSVは同一年月を必ず完全入替（読込のたびに増えない）
+   ・表示時もI列エスライン原票番号で再ユニーク化（過去の重複保存が残っていても増えない）
+   ・エリア地図は背景・バー・下部カードが重ならない1画面表示へ整理
+   ・削除は該当年月の現場CSV（作業者CSV＋商品住所CSV）を完全削除
+════════════════════════════════════════════════════════════════ */
+(function(){
+  'use strict';
+
+  function finalInjectStyle(){
+    if (document.getElementById('field-final-fix-style')) return;
+    const st = document.createElement('style');
+    st.id = 'field-final-fix-style';
+    st.textContent = `
+      #field-map{display:block;position:relative;overflow:visible;background:#fff;min-height:0;}
+      #field-map *{box-sizing:border-box;}
+      .field-final-wrap{padding:16px;background:#fff;overflow:hidden;}
+      .field-final-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px;}
+      .field-final-kpi{border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;padding:12px;min-width:0;}
+      .field-final-kpi-label{font-size:11px;color:#64748b;font-weight:800;}
+      .field-final-kpi-value{font-size:18px;font-weight:900;color:#0f172a;margin-top:4px;}
+      .field-final-row{display:grid;grid-template-columns:44px minmax(180px,300px) minmax(160px,1fr) 130px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:12px;min-width:0;}
+      .field-final-row.no-rank{grid-template-columns:minmax(180px,300px) minmax(160px,1fr) 130px;}
+      .field-final-name{font-weight:900;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+      .field-final-track{height:16px;background:#e5e7eb;border-radius:999px;overflow:hidden;min-width:0;}
+      .field-final-bar{height:100%;background:#1a4d7c;border-radius:999px;max-width:100%;}
+      .field-final-value{text-align:right;font-weight:900;color:#0f172a;white-space:nowrap;}
+      .field-final-sub{font-size:10px;color:#64748b;font-weight:700;}
+      .field-final-pref{border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.04);}
+      .field-final-pref + .field-final-pref{margin-top:10px;}
+      .field-final-pref summary{cursor:pointer;list-style:none;padding:12px 14px;background:#f8fafc;display:grid;grid-template-columns:100px minmax(140px,1fr) 110px 120px 80px;gap:10px;align-items:center;font-size:12px;}
+      .field-final-pref summary::-webkit-details-marker{display:none;}
+      .field-final-toggle{display:inline-flex;align-items:center;justify-content:center;border:1px solid #93c5fd;background:#dbeafe;color:#1e40af;border-radius:999px;padding:4px 8px;font-weight:900;white-space:nowrap;}
+      details[open] .field-final-toggle{background:#dcfce7;border-color:#86efac;color:#166534;}
+      .field-final-pref-body{padding:10px 14px 12px;background:#fff;overflow:hidden;}
+      .field-final-old-table-hidden{display:none!important;}
+      @media(max-width:900px){.field-final-summary{grid-template-columns:1fr}.field-final-row,.field-final-row.no-rank{grid-template-columns:1fr}.field-final-value{text-align:left}.field-final-pref summary{grid-template-columns:1fr}}
+    `;
+    document.head.appendChild(st);
+  }
+
+  function finalYMFromControls(kind){
+    const fyEl = document.getElementById(kind === 'worker' ? 'field-worker-fy-select' : 'field-product-fy-select');
+    const moEl = document.getElementById(kind === 'worker' ? 'field-worker-month-select' : 'field-product-month-select');
+    const fy = String(fyEl?.value || STATE.fiscalYear || dashboardSelectedFiscalYear() || getDefaultFiscalYear());
+    const mm = String(moEl?.value || STATE.selYM?.slice(4,6) || '03').padStart(2,'0');
+    const yy = ['01','02','03'].includes(mm) ? String(parseInt(fy,10)+1) : fy;
+    return yy + mm;
+  }
+
+  function finalFieldYM(){
+    const sel = document.getElementById('field-month-sel');
+    if (sel && sel.value) return sel.value;
+    return dashboardSelectedYM() || STATE.selYM || finalYMFromControls('product');
+  }
+
+  function finalNormalizeZip(v){
+    const s = String(v ?? '').replace(/[^0-9]/g,'');
+    return s.length >= 7 ? s.slice(0,7) : s;
+  }
+
+  function finalNumber(v){
+    const s = String(v ?? '').replace(/,/g,'').replace(/[円￥\s　]/g,'').replace(/[▲△]/g,'-').replace(/[^0-9.\-]/g,'');
+    if (!s || s === '-' || s === '.') return 0;
+    const x = parseFloat(s);
+    return isNaN(x) ? 0 : x;
+  }
+
+  function finalAreaName(address, destAddress, zip){
+    if (typeof normalizeAreaName === 'function') return normalizeAreaName(address || destAddress || zip || '未設定');
+    return String(address || destAddress || zip || '未設定').replace(/\s+/g,'');
+  }
+
+  function finalSplitPrefCity(areaText){
+    const raw = String(areaText || '未設定').replace(/\s+/g,'');
+    if (!raw || raw === '未設定') return { pref:'未設定', city:'未設定', area:'未設定' };
+    if (raw.includes('郵便番号未登録') || raw === 'UNKNOWN') return { pref:'未設定', city:'郵便番号未登録', area:'郵便番号未登録' };
+    const m = raw.match(/^(東京都|北海道|(?:京都|大阪)府|.{2,3}県)(.*)$/);
+    if (!m) return { pref:'未設定', city:raw, area:raw };
+    const pref = m[1] || '未設定';
+    const city = m[2] || pref;
+    return { pref, city, area: pref + (city === pref ? '' : city) };
+  }
+
+  function finalClassifyProduct(product, workContent, itemCode){
+    if (typeof classifyProductCategory === 'function') return classifyProductCategory(product, workContent, itemCode);
+    const t = String(product || workContent || itemCode || '未設定');
+    if (/冷蔵|冷凍/.test(t)) return '冷蔵庫';
+    if (/洗濯|乾燥/.test(t)) return '洗濯機';
+    if (/テレビ|TV/.test(t)) return 'テレビ';
+    if (/エアコン/.test(t)) return 'エアコン';
+    return t || '未設定';
+  }
+
+  function finalDetectSize(row){
+    const size = [];
+    for (let i=23; i<=30; i++) size.push(finalNumber(row[i]));
+    if (typeof detectMainSize === 'function') return detectMainSize(size);
+    const idx = size.findIndex(v => v > 0);
+    return idx >= 0 ? `サイズ${idx+1}` : '未設定';
+  }
+
+  function finalIsProductRow(r){
+    if (!r) return false;
+    return r.source === 'area_csv' || r.importKind === 'product_address_csv' || r.importKindLabel === '商品・住所CSV' || (!!r.slipNo && (!!r.zip || !!r.address || !!r.destAddress));
+  }
+
+  function finalRemoveProductMonth(ym){
+    STATE.areaData = (STATE.areaData || []).filter(r => !(r && r.ym === ym && finalIsProductRow(r)));
+    STATE.fieldData = (STATE.fieldData || []).filter(d => !(d && d.ym === ym && d.source === 'area_csv'));
+  }
+
+  function finalRemoveWorkerMonth(ym){
+    STATE.areaData = (STATE.areaData || []).filter(r => !(r && r.ym === ym && r.source === 'worker_csv'));
+    STATE.fieldData = (STATE.fieldData || []).filter(d => !(d && d.ym === ym && d.source === 'worker_csv'));
+  }
+
+  async function finalReadCsv(file){
+    const text = await CSV.read(file);
+    const rows = CSV.toRows(text);
+    if (!rows || rows.length < 2) throw new Error(`${file.name}: CSV明細行がありません`);
+    return rows;
+  }
+
+  function finalParseProductRows(rows, fileName, ym){
+    const header = rows[0] || [];
+    const bySlip = new Map();
+    let rawLineCount = 0;
+    let blankSlipCount = 0;
+
+    for (let r=1; r<rows.length; r++) {
+      const row = rows[r] || [];
+      if (!row.some(v => String(v || '').trim())) continue;
+      rawLineCount++;
+
+      const slipNo = String(row[8] ?? '').trim(); // I列：エスライン原票番号
+      if (!slipNo) { blankSlipCount++; continue; }
+
+      const zip = finalNormalizeZip(row[11]); // L列：郵便番号
+      const address = String(row[12] ?? '').trim();
+      const destAddress = String(row[13] ?? '').trim();
+      const product = String(row[15] ?? '').trim(); // P列：商品
+      const itemCode = String(row[16] ?? '').trim();
+      const workContent = String(row[17] ?? '').trim(); // R列：作業内容
+      const amount = finalNumber(row[20]); // U列：金額
+      const area = finalAreaName(address, destAddress, zip);
+
+      if (!bySlip.has(slipNo)) {
+        const size = [];
+        for (let i=23; i<=30; i++) size.push(finalNumber(row[i]));
+        bySlip.set(slipNo, {
+          ym,
+          source:'area_csv',
+          importKind:'product_address_csv',
+          importKindLabel:'商品・住所CSV',
+          fileName,
+          importedAt:new Date().toISOString(),
+          lineNo:r+1,
+          slipNo,
+          deliveredDate: typeof normalizeDateText === 'function' ? normalizeDateText(row[0]) : String(row[0] || ''),
+          shipperCode:String(row[1] ?? '').trim(),
+          shipperName:String(row[2] ?? '').trim(),
+          storeCode:String(row[3] ?? '').trim(),
+          storeName:String(row[4] ?? '').trim(),
+          branchCode:String(row[6] ?? '').trim(),
+          branchName:String(row[7] ?? '').trim(),
+          customerSlipNo:String(row[9] ?? '').trim(),
+          zip,
+          address,
+          destAddress,
+          customerName:String(row[14] ?? '').trim(),
+          product,
+          productCategory: finalClassifyProduct(product, workContent, itemCode),
+          itemCode,
+          workContent: workContent || '未設定',
+          account: workContent || itemCode || '未設定',
+          amount:0,
+          unitPrice:finalNumber(row[18]),
+          quantity:finalNumber(row[19]) || 1,
+          recycleTicketNo:String(row[21] ?? '').trim(),
+          recycleCompletedDate: typeof normalizeDateText === 'function' ? normalizeDateText(row[22]) : String(row[22] || ''),
+          size,
+          mainSize: finalDetectSize(row),
+          area,
+          count:1,
+          rawLineCount:0,
+          duplicateExcludedLineCount:0,
+          workDetails:[],
+          accounts:{},
+          rawHeader:header
+        });
+      }
+
+      const rec = bySlip.get(slipNo);
+      rec.rawLineCount += 1;
+      if (rec.rawLineCount > 1) rec.duplicateExcludedLineCount += 1;
+
+      // 重複行は件数・P列商品・サイズには使わない。R列作業内容とU列金額だけ原票へ紐付ける。
+      const account = workContent || itemCode || '未設定';
+      rec.amount += amount;
+      rec.accounts[account] = (rec.accounts[account] || 0) + amount;
+      rec.workDetails.push({ workContent:workContent || '未設定', account, amount, lineNo:r+1 });
+      rec.workContent = [...new Set(rec.workDetails.map(x=>x.workContent).filter(Boolean))].join(' / ') || '未設定';
+      rec.account = [...new Set(rec.workDetails.map(x=>x.account).filter(Boolean))].join(' / ') || '未設定';
+    }
+
+    const uniqueRecords = [...bySlip.values()].map(r => ({
+      ...r,
+      duplicateSlipCount:r.rawLineCount,
+      isDuplicateSlip:r.rawLineCount > 1,
+      duplicateNote:r.rawLineCount > 1 ? `同一原票内の重複${r.rawLineCount}行。件数・商品・サイズは1件扱い。R列/U列のみ集計。` : ''
+    }));
+
+    const duplicateGroups = uniqueRecords
+      .filter(r => r.rawLineCount > 1)
+      .map(r => ({ slipNo:r.slipNo, lineCount:r.rawLineCount, excludedLineCount:r.duplicateExcludedLineCount, address:r.address || r.destAddress || '', product:r.product || '', accounts:Object.keys(r.accounts || {}), amount:r.amount }))
+      .sort((a,b)=>b.lineCount-a.lineCount || String(a.slipNo).localeCompare(String(b.slipNo)));
+
+    return {
+      ym,
+      source:'area_csv',
+      fileName,
+      rawLineCount,
+      blankSlipCount,
+      uniqueSlipCount:uniqueRecords.length,
+      excludedDuplicateLineCount:uniqueRecords.reduce((s,r)=>s+n(r.duplicateExcludedLineCount),0),
+      duplicateGroups,
+      uniqueRecords
+    };
+  }
+
+  function finalRebuildProductSummary(ym, parsed){
+    const rows = finalUniqueProductRows(ym);
+    const areas = {};
+    for (const r of rows) {
+      const area = r.area || finalAreaName(r.address, r.destAddress, r.zip);
+      if (!areas[area]) areas[area] = { count:0, lineCount:0, amount:0, shippers:{}, products:{}, accounts:{}, size:[0,0,0,0,0,0,0,0], zipSet:{}, duplicateExcludedLineCount:0 };
+      areas[area].count += 1;
+      areas[area].lineCount += n(r.rawLineCount || 1);
+      areas[area].amount += n(r.amount);
+      areas[area].duplicateExcludedLineCount += n(r.duplicateExcludedLineCount);
+      if (r.zip) areas[area].zipSet[r.zip] = true;
+      (r.size || []).forEach((v,i)=>{ areas[area].size[i] += n(v); });
+      const shipper = r.shipperName || r.shipperCode || '未設定';
+      if (!areas[area].shippers[shipper]) areas[area].shippers[shipper] = { count:0, amount:0, lineCount:0 };
+      areas[area].shippers[shipper].count += 1;
+      areas[area].shippers[shipper].amount += n(r.amount);
+      areas[area].shippers[shipper].lineCount += n(r.rawLineCount || 1);
+      const product = r.productCategory || '未設定';
+      areas[area].products[product] = (areas[area].products[product] || 0) + 1;
+      for (const acc of Object.keys(r.accounts || {})) areas[area].accounts[acc] = (areas[area].accounts[acc] || 0) + n(r.accounts[acc]);
+    }
+    STATE.fieldData = (STATE.fieldData || []).filter(d => !(d && d.ym === ym && d.source === 'area_csv'));
+    STATE.fieldData.push({
+      ym,
+      source:'area_csv',
+      label:'商品・住所CSV',
+      areas,
+      importedAt:new Date().toISOString(),
+      rowCount:rows.length,
+      rawLineCount:parsed.rawLineCount,
+      uniqueSlipCount:parsed.uniqueSlipCount,
+      duplicateSlipCount:parsed.duplicateGroups.length,
+      duplicateLineCount:parsed.rawLineCount,
+      duplicateExcludedLineCount:parsed.excludedDuplicateLineCount,
+      duplicateGroups:parsed.duplicateGroups,
+      note:'件数はI列エスライン原票番号のユニーク件数。重複行は商品・サイズ判定から除外し、R列作業内容/U列金額のみ原票番号へ紐付け。'
+    });
+    STATE.fieldData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)) || String(a.source).localeCompare(String(b.source)));
+  }
+
+  function finalUniqueProductRows(ym){
+    const rows = (STATE.areaData || []).filter(r => r && r.ym === ym && finalIsProductRow(r));
+    const map = new Map();
+    for (const r of rows) {
+      const key = String(r.slipNo || '').trim();
+      if (!key) continue;
+      const old = map.get(key);
+      if (!old || String(r.importedAt || '') >= String(old.importedAt || '')) map.set(key, r);
+    }
+    return [...map.values()];
+  }
+
+  async function finalImportProductFiles(files){
+    const ym = finalYMFromControls('product');
+    const arr = Array.from(files || []).filter(f=>/\.csv$/i.test(f.name));
+    if (!arr.length) { UI.toast('商品・住所CSVを選択してください', 'warn'); return; }
+
+    // 複数ファイルを選んだ場合も、同じ年月の過去商品住所CSVを先に完全削除してから入れる。
+    finalRemoveProductMonth(ym);
+    let lastParsed = null;
+    let importedFiles = 0;
+    for (const file of arr) {
+      UI.toast(`${file.name} を商品・住所CSVとして解析中...`);
+      const parsed = finalParseProductRows(await finalReadCsv(file), file.name, ym);
+      if (!parsed.uniqueRecords.length) { UI.toast(`${file.name}: 商品・住所CSVとして読める行がありません`, 'warn'); continue; }
+      STATE.areaData.push(...parsed.uniqueRecords);
+      lastParsed = parsed;
+      importedFiles++;
+    }
+    if (!importedFiles || !lastParsed) return;
+
+    STATE.areaData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)) || String(a.source).localeCompare(String(b.source)) || String(a.slipNo || '').localeCompare(String(b.slipNo || '')));
+    finalRebuildProductSummary(ym, lastParsed);
+    finalAfterFieldImport();
+    UI.toast(`${ymLabel(ym)} 商品・住所CSVを入替完了：原票${fmt(finalUniqueProductRows(ym).length)}件 / 明細${fmt(lastParsed.rawLineCount)}行 / 重複除外${fmt(lastParsed.excludedDuplicateLineCount)}行`);
+  }
+
+  function finalAfterFieldImport(){
+    STORE.save();
+    if (typeof AUTO_SYNC !== 'undefined' && AUTO_SYNC.schedule) AUTO_SYNC.schedule();
+    if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
+    if (window.FIELD_UI && FIELD_UI.updatePeriodBadge) FIELD_UI.updatePeriodBadge();
+    if (window.FIELD_UI && FIELD_UI.renderMap) FIELD_UI.renderMap();
+    NAV.refresh();
+    if (UI.updateSaveStatus) UI.updateSaveStatus();
+  }
+
+  function finalHideOldArtifacts(){
+    const tbody = document.getElementById('f-city-tbody');
+    const card = tbody ? tbody.closest('.card') : null;
+    if (card) card.classList.add('field-final-old-table-hidden');
+    const debug = document.getElementById('map-debug-info');
+    if (debug) debug.style.display = 'none';
+  }
+
+  function finalMetric(){ return document.getElementById('map-metric-sel')?.value || 'count'; }
+  function finalMode(){ return document.getElementById('field-area-view-mode')?.value || 'overall'; }
+  function finalSort(){ return document.getElementById('field-area-sort-mode')?.value || 'count'; }
+
+  function finalBuildAgg(ym){
+    const rows = finalUniqueProductRows(ym);
+    const cityMap = new Map();
+    const prefMap = new Map();
+    let totalCount = 0;
+    let totalAmount = 0;
+    for (const r of rows) {
+      const pc = finalSplitPrefCity(r.area || finalAreaName(r.address, r.destAddress, r.zip));
+      const key = `${pc.pref}||${pc.city}`;
+      if (!cityMap.has(key)) cityMap.set(key, { pref:pc.pref, city:pc.city, area:pc.area, count:0, amount:0, rawLineCount:0 });
+      const c = cityMap.get(key);
+      c.count += 1;
+      c.amount += n(r.amount);
+      c.rawLineCount += n(r.rawLineCount || 1);
+      if (!prefMap.has(pc.pref)) prefMap.set(pc.pref, { pref:pc.pref, count:0, amount:0, rawLineCount:0, cities:[] });
+      const p = prefMap.get(pc.pref);
+      p.count += 1;
+      p.amount += n(r.amount);
+      p.rawLineCount += n(r.rawLineCount || 1);
+      totalCount += 1;
+      totalAmount += n(r.amount);
+    }
+    const cities = [...cityMap.values()];
+    for (const p of prefMap.values()) p.cities = cities.filter(c => c.pref === p.pref);
+    return { rows, cities, prefs:[...prefMap.values()], totalCount, totalAmount };
+  }
+
+  function finalSortAreas(list, metric, sortMode){
+    const arr = [...list];
+    if (sortMode === 'name') return arr.sort((a,b)=>String(a.area || a.city || a.pref).localeCompare(String(b.area || b.city || b.pref), 'ja'));
+    if (sortMode === 'amount' || metric === 'amount') return arr.sort((a,b)=>n(b.amount)-n(a.amount) || n(b.count)-n(a.count) || String(a.area || a.city).localeCompare(String(b.area || b.city),'ja'));
+    return arr.sort((a,b)=>n(b.count)-n(a.count) || n(b.amount)-n(a.amount) || String(a.area || a.city).localeCompare(String(b.area || b.city),'ja'));
+  }
+
+  function finalBarRow(item, maxVal, metric, totalCount, totalAmount, rank){
+    const val = metric === 'amount' ? n(item.amount) : n(item.count);
+    const w = Math.max(2, Math.min(100, Math.round((val / Math.max(maxVal,1)) * 100)));
+    const label = item.area || ((item.pref && item.city) ? item.pref + item.city : (item.city || item.pref || '未設定'));
+    const ratio = metric === 'amount' ? n(item.amount) / Math.max(totalAmount,1) * 100 : n(item.count) / Math.max(totalCount,1) * 100;
+    const main = metric === 'amount' ? `${fmtK(item.amount)}千円` : `${fmt(item.count)}件`;
+    const sub = metric === 'amount' ? `${fmt(item.count)}件・${pct(ratio)}` : `${fmtK(item.amount)}千円・${pct(ratio)}`;
+    return `<div class="field-final-row ${rank ? '' : 'no-rank'}">${rank ? `<div style="text-align:center;font-weight:900;color:#64748b">${rank}</div>` : ''}<div class="field-final-name" title="${esc(label)}">${esc(label)}</div><div class="field-final-track"><div class="field-final-bar" style="width:${w}%"></div></div><div class="field-final-value"><div>${main}</div><div class="field-final-sub">${sub}</div></div></div>`;
+  }
+
+  function finalSummary(agg, ym){
+    return `<div class="field-final-summary"><div class="field-final-kpi"><div class="field-final-kpi-label">対象月</div><div class="field-final-kpi-value">${ymLabel(ym)}</div></div><div class="field-final-kpi"><div class="field-final-kpi-label">原票ユニーク件数</div><div class="field-final-kpi-value">${fmt(agg.totalCount)}件</div></div><div class="field-final-kpi"><div class="field-final-kpi-label">U列金額合計</div><div class="field-final-kpi-value">${fmtK(agg.totalAmount)}千円</div></div></div>`;
+  }
+
+  function finalRenderOverall(map, agg, ym, metric, sortMode){
+    const list = finalSortAreas(agg.cities, metric, sortMode);
+    const maxVal = Math.max(...list.map(x => metric === 'amount' ? n(x.amount) : n(x.count)), 1);
+    map.innerHTML = `<div class="field-final-wrap">${finalSummary(agg, ym)}<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px"><div><div style="font-size:14px;font-weight:900;color:#0f172a">全体ランキング</div><div style="font-size:11px;color:#64748b;margin-top:3px">同一原票番号は1件化。再取込時は同年月データを入替しています。</div></div><div style="font-size:11px;color:#64748b;font-weight:800">${fmt(list.length)}地区</div></div><div style="border-top:1px solid #e5e7eb">${list.map((x,i)=>finalBarRow(x,maxVal,metric,agg.totalCount,agg.totalAmount,i+1)).join('')}</div></div>`;
+  }
+
+  function finalRenderPref(map, agg, ym, metric, sortMode){
+    const prefs = [...agg.prefs].sort((a,b)=>n(b.count)-n(a.count) || String(a.pref).localeCompare(String(b.pref),'ja'));
+    map.innerHTML = `<div class="field-final-wrap">${finalSummary(agg, ym)}<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px"><div><div style="font-size:14px;font-weight:900;color:#0f172a">都道府県別</div><div style="font-size:11px;color:#64748b;margin-top:3px">「＋ 開く」で都道府県内の市区町村を確認できます。</div></div><button type="button" id="field-final-open-all" class="btn" style="font-size:11px;padding:5px 10px">すべて開く</button></div>${prefs.map((p,idx)=>{ const cities=finalSortAreas(p.cities,metric,sortMode); const maxVal=Math.max(...cities.map(x=>metric==='amount'?n(x.amount):n(x.count)),1); const ratio=n(p.count)/Math.max(agg.totalCount,1)*100; return `<details class="field-final-pref" ${idx===0?'open':''}><summary><span class="field-final-toggle">＋ 開く</span><span style="font-weight:900;color:#0f172a;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.pref)}</span><span style="text-align:right;font-weight:900">${fmt(p.count)}件</span><span style="text-align:right;font-weight:900">${fmtK(p.amount)}千円</span><span style="text-align:right;color:#64748b;font-weight:800">${pct(ratio)}</span></summary><div class="field-final-pref-body">${cities.map(c=>finalBarRow(c,maxVal,metric,agg.totalCount,agg.totalAmount,null)).join('')}</div></details>`; }).join('')}</div>`;
+    const allBtn = document.getElementById('field-final-open-all');
+    if (allBtn) allBtn.onclick = function(){ const details=[...document.querySelectorAll('.field-final-pref')]; const shouldOpen=details.some(d=>!d.open); details.forEach(d=>d.open=shouldOpen); allBtn.textContent=shouldOpen?'すべて閉じる':'すべて開く'; };
+  }
+
+  function finalRenderMap(){
+    finalInjectStyle();
+    finalHideOldArtifacts();
+    const map = document.getElementById('field-map');
+    const noData = document.getElementById('map-no-data');
+    if (!map) return;
+    const ym = finalFieldYM();
+    const agg = finalBuildAgg(ym);
+    if (!agg.rows.length) {
+      map.innerHTML = '<div class="field-final-wrap" style="padding:36px;text-align:center;color:#94a3b8;font-weight:800">対象月の商品・住所CSVがありません。</div>';
+      if (noData) noData.style.display = 'none';
+      return;
+    }
+    if (noData) noData.style.display = 'none';
+    if (finalMode() === 'pref') finalRenderPref(map, agg, ym, finalMetric(), finalSort());
+    else finalRenderOverall(map, agg, ym, finalMetric(), finalSort());
+  }
+
+  function finalDeleteFieldData(ym){
+    if (!ym) return;
+    STATE.fieldData = (STATE.fieldData || []).filter(d => d && d.ym !== ym);
+    STATE.areaData = (STATE.areaData || []).filter(r => r && r.ym !== ym);
+    STORE.save();
+    if (typeof AUTO_SYNC !== 'undefined' && AUTO_SYNC.schedule) AUTO_SYNC.schedule();
+    if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
+    if (window.FIELD_UI && FIELD_UI.updatePeriodBadge) FIELD_UI.updatePeriodBadge();
+    finalRenderMap();
+    NAV.refresh();
+    UI.toast(`${ymLabel(ym)} の現場CSVデータを完全削除しました`);
+  }
+
+  finalInjectStyle();
+
+  window.FIELD_PRODUCT_IMPORT2 = window.FIELD_PRODUCT_IMPORT2 || {};
+  window.FIELD_PRODUCT_IMPORT2.handleFiles = function(files){ finalImportProductFiles(files).catch(err=>UI.toast(err.message,'error')); };
+  window.FIELD_PRODUCT_IMPORT2.handleDrop = function(e){ e.preventDefault(); e.currentTarget && e.currentTarget.classList.remove('drag'); finalImportProductFiles(e.dataTransfer && e.dataTransfer.files).catch(err=>UI.toast(err.message,'error')); };
+
+  if (typeof IMPORT !== 'undefined') IMPORT.deleteFieldData = finalDeleteFieldData;
+  if (window.FIELD_UI) FIELD_UI.renderMap = finalRenderMap;
+
+  document.addEventListener('change', function(e){
+    if(e.target && ['map-metric-sel','field-area-view-mode','field-area-sort-mode','map-data-sel','field-month-sel','field-fy-sel'].includes(e.target.id)){
+      try{ finalRenderMap(); }catch(err){ console.error(err); }
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(()=>{ try{ finalInjectStyle(); finalHideOldArtifacts(); if(STATE.view==='field') finalRenderMap(); }catch(e){} }, 300);
+  });
+})();
