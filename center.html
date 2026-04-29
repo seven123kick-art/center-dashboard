@@ -774,16 +774,25 @@
       <!-- エリア地図 -->
       <div class="field-pane" id="fpane-map">
         <div class="card" style="margin-bottom:14px">
-          <div class="card-header">
-            <span class="card-title">配送エリア別物量マップ</span>
-            <div style="display:flex;gap:8px;align-items:center">
-              <label style="font-size:11px;color:var(--text2)">データ種別:</label>
-              <select id="map-data-sel" onchange="FIELD_UI.renderMap()" style="font-size:11px">
-                <option value="csv">作業者別CSV（住所）</option>
-                <option value="pdf">商品・住所CSV（郵便番号）</option>
+          <div class="card-header" style="align-items:flex-start;gap:12px;flex-wrap:wrap">
+            <div>
+              <span class="card-title">配送エリア別物量</span>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px">商品・住所CSVをI列エスライン原票番号で1件化して表示します。</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <label style="font-size:11px;color:var(--text2);font-weight:700">表示形式</label>
+              <select id="field-area-view-mode" onchange="FIELD_UI.renderMap()" style="font-size:12px;font-weight:700">
+                <option value="overall">全体ランキング</option>
+                <option value="pref">都道府県別（開閉）</option>
               </select>
-              <label style="font-size:11px;color:var(--text2)">表示:</label>
-              <select id="map-metric-sel" onchange="FIELD_UI.renderMap()" style="font-size:11px">
+              <label style="font-size:11px;color:var(--text2);font-weight:700">並び</label>
+              <select id="field-area-sort-mode" onchange="FIELD_UI.renderMap()" style="font-size:12px;font-weight:700">
+                <option value="count">件数順</option>
+                <option value="amount">売上順</option>
+                <option value="name">名称順</option>
+              </select>
+              <label style="font-size:11px;color:var(--text2);font-weight:700">表示値</label>
+              <select id="map-metric-sel" onchange="FIELD_UI.renderMap()" style="font-size:12px;font-weight:700">
                 <option value="count">件数</option>
                 <option value="amount">売上</option>
               </select>
@@ -793,18 +802,6 @@
             <div id="map-debug-info" style="display:none;padding:6px 12px;font-size:11px;background:#fffbeb;border-bottom:1px solid #fcd34d;color:#78350f"></div>
             <div id="field-map"></div>
             <div id="map-no-data" style="display:none;padding:40px;text-align:center;color:var(--text3)">データを読み込んでください</div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">市区町村別明細</span></div>
-          <div class="scroll-x">
-            <table class="tbl">
-              <thead><tr>
-                <th>都道府県</th><th>市区町村</th><th class="r">件数</th>
-                <th class="r">売上（千円）</th><th class="r">構成比</th>
-              </tr></thead>
-              <tbody id="f-city-tbody"></tbody>
-            </table>
           </div>
         </div>
       </div>
