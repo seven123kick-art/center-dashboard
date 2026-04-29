@@ -2001,10 +2001,15 @@ function renderDashboard() {
     <div class="legend-item"><div class="legend-dot" style="background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div>${esc(k)}</div>`).join('');
 
   // 費用内訳（当月）
-  // 収支CSV（確定/速報/補完）で保持している ds.rows の科目別金額から作成する。
-  // 以前は CONFIG.PL_DEF の古いキー名（t/l/k）を参照していたため空表示になっていた。
+  // 確定CSV/速報CSV/収支補完に保存されている ds.rows をそのまま使用する。
+  // 画面は既存カード内に「上位費用＋構成比」を整理表示するだけにし、不要な円グラフは出さない。
   const expArea = document.getElementById('exp-bars-area');
   if (expArea && ds && ds.rows) {
+    if (STATE._charts && STATE._charts['c-exp-donut']) {
+      try { STATE._charts['c-exp-donut'].destroy(); } catch(e) {}
+      delete STATE._charts['c-exp-donut'];
+    }
+
     const expenseGroups = (CONFIG.PL_DEF || [])
       .filter(def => def && def.type === 'group' && def.id !== 'revenue')
       .map(def => {
@@ -2017,64 +2022,34 @@ function renderDashboard() {
     if (!expenseGroups.length) {
       expArea.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">費用内訳データがありません</div>';
     } else {
-      const topGroups = expenseGroups.slice(0, 6);
-      const otherValue = expenseGroups.slice(6).reduce((sum, item) => sum + item.value, 0);
-      const chartGroups = otherValue > 0
-        ? [...topGroups, { label: 'その他', value: otherValue }]
-        : topGroups;
-      const maxExpense = Math.max(...chartGroups.map(item => item.value), 1);
-      const totalExpenseForRatio = chartGroups.reduce((sum, item) => sum + item.value, 0) || 1;
+      const top = expenseGroups.slice(0, 8);
+      const otherValue = expenseGroups.slice(8).reduce((sum, item) => sum + item.value, 0);
+      const rows = otherValue > 0 ? [...top, { label:'その他', value: otherValue }] : top;
+      const maxValue = Math.max(...rows.map(item => item.value), 1);
+      const denominator = ds.totalExpense || rows.reduce((sum, item) => sum + item.value, 0) || 1;
+      const totalRowsValue = rows.reduce((sum, item) => sum + item.value, 0);
 
       expArea.innerHTML = `
-        <div style="display:grid;grid-template-columns:180px 1fr;gap:12px;align-items:center">
-          <div style="height:150px;position:relative">
-            <canvas id="c-exp-donut"></canvas>
-          </div>
-          <div>
-            ${chartGroups.map((item, i) => `
-              <div class="mbar-row" style="margin-bottom:8px">
-                <div class="mbar-label" title="${esc(item.label)}">${esc(item.label)}</div>
-                <div class="mbar-track">
-                  <div class="mbar-fill" style="width:${(item.value / maxExpense * 100).toFixed(1)}%;background:${CONFIG.COLORS[(i + 1) % CONFIG.COLORS.length]}"></div>
-                </div>
-                <div class="mbar-val">${fmtK(item.value)}千</div>
-              </div>
-            `).join('')}
-          </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;font-size:11px;color:var(--text3)">
+          <span>データ元：${datasetKindLabel(ds)}CSV / ${ymLabel(ds.ym)}</span>
+          <span>費用合計 ${fmtK(ds.totalExpense)}千円</span>
         </div>
-        <div style="margin-top:8px;font-size:11px;color:var(--text3);line-height:1.6">
-          費用合計 ${fmtK(ds.totalExpense)}千円 / 表示内訳 ${fmtK(totalExpenseForRatio)}千円
-        </div>`;
-
-      CHART_MGR.make('c-exp-donut', {
-        type: 'doughnut',
-        data: {
-          labels: chartGroups.map(item => item.label),
-          datasets: [{
-            data: chartGroups.map(item => item.value / 1000),
-            backgroundColor: chartGroups.map((_, i) => CONFIG.COLORS[(i + 1) % CONFIG.COLORS.length]),
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          cutout: '58%',
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label(ctx) {
-                  const raw = n(ctx.raw);
-                  const yen = raw * 1000;
-                  const ratioText = totalExpenseForRatio > 0 ? ` / ${(yen / totalExpenseForRatio * 100).toFixed(1)}%` : '';
-                  return `${ctx.label}: ${fmt(raw)}千円${ratioText}`;
-                }
-              }
-            }
-          }
-        }
-      });
+        <div style="display:grid;gap:7px">
+          ${rows.map((item, i) => {
+            const width = (item.value / maxValue * 100).toFixed(1);
+            const rate = denominator > 0 ? (item.value / denominator * 100) : 0;
+            return `
+              <div style="display:grid;grid-template-columns:120px 1fr 96px;gap:8px;align-items:center">
+                <div style="font-size:12px;font-weight:700;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.label)}">${esc(item.label)}</div>
+                <div style="height:14px;background:#e5e7eb;border-radius:999px;overflow:hidden">
+                  <div style="height:100%;width:${width}%;background:${CONFIG.COLORS[(i+1)%CONFIG.COLORS.length]};border-radius:999px"></div>
+                </div>
+                <div style="font-size:12px;font-weight:800;text-align:right;white-space:nowrap">${fmtK(item.value)}千 <span style="color:var(--text3);font-weight:700">${rate.toFixed(1)}%</span></div>
+              </div>`;
+          }).join('')}
+        </div>
+        ${Math.abs(totalRowsValue - denominator) > 1 ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">※ 表示内訳 ${fmtK(totalRowsValue)}千円 / 費用合計 ${fmtK(denominator)}千円</div>` : ''}
+      `;
     }
   }
 
