@@ -4179,3 +4179,368 @@ document.addEventListener('DOMContentLoaded', () => {
     })
     .catch(() => {});
 });
+
+
+/* ════════════════════════════════════════════════════════════════
+   2026-04-29 追補修正：荷主別配送エリア別物量PDF 取込安定化
+   ・作業者別CSVとは別処理
+   ・年度／月選択UIをアプリ側で自動生成
+   ・PDF.jsの行分割崩れに対応した全文正規表現解析
+   ・STATE.areaData → STATE.fieldData を再構築して画面に表示
+════════════════════════════════════════════════════════════════ */
+
+function ensureFieldImportYMControls() {
+  const zone =
+    document.getElementById('field-upload-zone2') ||
+    document.getElementById('field-upload-zone');
+
+  if (!zone) return;
+
+  let box = document.getElementById('field-pdf-period-box');
+
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'field-pdf-period-box';
+    box.style.cssText = [
+      'margin:0 0 12px',
+      'padding:12px 14px',
+      'border:1px solid #d9dee8',
+      'border-radius:12px',
+      'background:#f8fafc',
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'gap:12px',
+      'flex-wrap:wrap'
+    ].join(';');
+
+    box.innerHTML = `
+      <div>
+        <div style="font-weight:900;color:#1f2d3d;font-size:13px">荷主別配送エリア別物量PDFの取込年月</div>
+        <div id="field-import-ym-note" style="font-size:12px;color:#64748b;margin-top:4px"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <select id="field-pdf-fy-select" style="height:34px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;background:#fff;font-weight:800"></select>
+        <select id="field-pdf-month-select" style="height:34px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;background:#fff;font-weight:800">
+          <option value="04">4月</option>
+          <option value="05">5月</option>
+          <option value="06">6月</option>
+          <option value="07">7月</option>
+          <option value="08">8月</option>
+          <option value="09">9月</option>
+          <option value="10">10月</option>
+          <option value="11">11月</option>
+          <option value="12">12月</option>
+          <option value="01">1月</option>
+          <option value="02">2月</option>
+          <option value="03">3月</option>
+        </select>
+      </div>
+    `;
+
+    zone.parentNode.insertBefore(box, zone);
+  }
+
+  const fySel = document.getElementById('field-pdf-fy-select');
+  const mSel = document.getElementById('field-pdf-month-select');
+  if (!fySel || !mSel) return;
+
+  const now = new Date();
+  const defaultFY = dashboardSelectedFiscalYear ? dashboardSelectedFiscalYear() : getDefaultFiscalYear();
+  const current = fySel.value || defaultFY;
+
+  fySel.innerHTML = '';
+  for (let y = now.getFullYear() + 1; y >= 2020; y--) {
+    fySel.innerHTML += `<option value="${y}">${y}年度</option>`;
+  }
+
+  fySel.value = [...fySel.options].some(o => o.value === String(current)) ? String(current) : String(defaultFY);
+
+  const selected = STATE.selYM || (typeof dashboardSelectedYM === 'function' ? dashboardSelectedYM() : null);
+  if (selected) {
+    fySel.value = fiscalYearFromYM(selected);
+    mSel.value = selected.slice(4,6);
+  }
+
+  fySel.onchange = syncFieldImportYMFromControls;
+  mSel.onchange = syncFieldImportYMFromControls;
+
+  syncFieldImportYMFromControls();
+}
+
+selectedYMForImport = function selectedYMForImport() {
+  const fySel = document.getElementById('field-pdf-fy-select');
+  const mSel = document.getElementById('field-pdf-month-select');
+
+  if (fySel && mSel && fySel.value && mSel.value) {
+    const fy = String(fySel.value);
+    const mm = String(mSel.value).padStart(2, '0');
+    const year = ['01','02','03'].includes(mm) ? String(parseInt(fy,10) + 1) : fy;
+    STATE.fiscalYear = fy;
+    STATE.selYM = `${year}${mm}`;
+    return STATE.selYM;
+  }
+
+  return STATE.selYM || (typeof dashboardSelectedYM === 'function' ? dashboardSelectedYM() : null) || latestDS()?.ym || null;
+};
+
+if (typeof AREA_PDF_IMPORT !== 'undefined') {
+  AREA_PDF_IMPORT.handleFiles = async function(files) {
+    ensureFieldImportYMControls();
+    syncFieldImportYMFromControls();
+
+    const arr = Array.from(files || []);
+    const pdfs = arr.filter(f => /\.pdf$/i.test(f.name));
+    const others = arr.filter(f => !/\.pdf$/i.test(f.name));
+
+    for (const pdf of pdfs) await this.importPdf(pdf);
+
+    if (others.length) IMPORT.handleFiles(others);
+  };
+
+  AREA_PDF_IMPORT.importPdf = async function(file) {
+    try {
+      ensureFieldImportYMControls();
+      syncFieldImportYMFromControls();
+
+      UI.toast('荷主別配送エリア別物量PDFを解析中です...');
+      await ASSETS.pdfjs();
+      if (!window.pdfjsLib) throw new Error('PDF.jsを読み込めませんでした');
+
+      const forcedYM = selectedYMForImport();
+      if (!forcedYM) {
+        UI.toast('取込対象の年度・月を選択してください', 'warn');
+        return;
+      }
+
+      const buffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+
+      let allRecords = [];
+      let fullText = '';
+
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+
+        const lineText = this.itemsToPageText ? this.itemsToPageText(content.items) : '';
+        const rawText = (content.items || []).map(i => String(i.str || '')).join(' ');
+        const pageText = `${lineText}\n${rawText}`;
+
+        fullText += '\n' + pageText;
+        allRecords = allRecords.concat(parseAreaVolumePdfText(pageText));
+      }
+
+      allRecords = allRecords.map(r => ({
+        ...r,
+        ym: forcedYM,
+        importedAt: new Date().toISOString()
+      }));
+
+      if (!allRecords.length) {
+        if (!Array.isArray(STATE.areaData)) STATE.areaData = [];
+        STATE.areaData = STATE.areaData.filter(r => !(r.ym === forcedYM && r.sourceFileName === file.name));
+        STATE.areaData.push({
+          ym: forcedYM,
+          source: 'area_pdf',
+          sourceFileName: file.name,
+          rawOnly: true,
+          rawText: fullText.slice(0, 500000),
+          importedAt: new Date().toISOString()
+        });
+        STORE.save();
+        if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
+        NAV.refresh();
+        UI.toast(`${ymLabel(forcedYM)} PDF原文は保存しましたが、明細行は読み込めませんでした`, 'warn');
+        return;
+      }
+
+      const parsed = {
+        ym: forcedYM,
+        fileName: file.name,
+        importedAt: new Date().toISOString(),
+        totalCount: allRecords.reduce((sum, r) => sum + n(r.count), 0),
+        totalDeliveryFee: allRecords.reduce((sum, r) => sum + n(r.deliveryFee), 0),
+        totalTrunkFee: allRecords.reduce((sum, r) => sum + n(r.trunkFee), 0),
+        totalExtraFee: allRecords.reduce((sum, r) => sum + n(r.extraFee), 0),
+        shipperCount: new Set(allRecords.map(r => `${r.shipperCode}_${r.shipperName}`)).size,
+        records: allRecords
+      };
+
+      this.saveParsed(parsed);
+
+      if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
+      NAV.refresh();
+
+      UI.toast(
+        `${ymLabel(parsed.ym)} エリア物量PDF取込完了：` +
+        `${fmt(parsed.shipperCount)}荷主 / ${fmt(parsed.records.length)}行 / ${fmt(parsed.totalCount)}件`
+      );
+    } catch(e) {
+      console.error(e);
+      UI.toast('PDF取込エラー: ' + e.message, 'error');
+    }
+  };
+}
+
+function parseAreaVolumePdfText(text) {
+  const t = String(text || '')
+    .replace(/[　]/g, ' ')
+    .replace(/(\d)(202\d\/)/g, '$1 $2')
+    .replace(/(0)(荷主[:：])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!/荷主別配送エリア別物量/.test(t) && !/郵便番号\s+住所\s+件数/.test(t)) return [];
+
+  const meta = extractAreaVolumeMeta(t);
+  const records = [];
+
+  const num = '(-?\\d[\\d,]*)';
+  const rowRe = new RegExp(
+    '(?:^|\\s)' +
+    '((?:\\d{7})|UNKNOWN)' +
+    '\\s+(.+?)\\s+' +
+    Array(12).fill(num).join('\\s+') +
+    '(?=\\s+(?:\\d{7}|UNKNOWN|合計[:：]|荷主[:：]|配達完了日|郵便番号|202\\d/|$))',
+    'gi'
+  );
+
+  let m;
+  while ((m = rowRe.exec(t)) !== null) {
+    const zip = String(m[1] || '').trim().toUpperCase();
+    let address = String(m[2] || '').trim();
+
+    if (!address || /^(住所|件数)$/.test(address)) continue;
+    if (/郵便番号\s+住所\s+件数/.test(address)) continue;
+
+    address = address
+      .replace(/^住所\s*/, '')
+      .replace(/\s+/g, '')
+      .trim();
+
+    const values = m.slice(3, 15).map(toNumberSafe);
+    if (values.length !== 12) continue;
+
+    const [count, deliveryFee, trunkFee, extraFee, s1,s2,s3,s4,s5,s6,s7,s8] = values;
+    if (!Number.isFinite(count)) continue;
+
+    records.push({
+      ym: null,
+      source: 'area_pdf',
+      branchCode: meta.branchCode,
+      branchName: meta.branchName,
+      shipperCode: meta.shipperCode,
+      shipperName: meta.shipperName,
+      pdfDateFrom: meta.pdfDateFrom,
+      pdfDateTo: meta.pdfDateTo,
+      zip,
+      address,
+      area: normalizeAreaName(address),
+      count,
+      deliveryFee,
+      trunkFee,
+      extraFee,
+      totalFee: n(deliveryFee) + n(trunkFee) + n(extraFee),
+      size: [s1,s2,s3,s4,s5,s6,s7,s8]
+    });
+  }
+
+  return records;
+}
+
+function extractAreaVolumeMeta(text) {
+  const t = String(text || '').replace(/[　]/g,' ').replace(/\s+/g,' ');
+
+  let branchCode = '';
+  let branchName = '';
+  let shipperCode = '';
+  let shipperName = '';
+  let pdfDateFrom = '';
+  let pdfDateTo = '';
+
+  const branchMatch = t.match(/支店[:：]\s*([0-9A-Z]+)\s+(.+?)\s+管理者印/);
+  if (branchMatch) {
+    branchCode = branchMatch[1] || '';
+    branchName = (branchMatch[2] || '').trim();
+  }
+
+  const shipperMatch = t.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+?)\s+配達完了日/);
+  if (shipperMatch) {
+    shipperCode = shipperMatch[1] || '';
+    shipperName = (shipperMatch[2] || '').trim();
+  }
+
+  const dateMatch = t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})\s+(\d{4})\/(\d{2})\/(\d{2})/);
+  if (dateMatch) {
+    pdfDateFrom = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+    pdfDateTo = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`;
+  }
+
+  return { branchCode, branchName, shipperCode, shipperName, pdfDateFrom, pdfDateTo };
+}
+
+const __renderImportOriginalForAreaPdf = typeof renderImport === 'function' ? renderImport : null;
+if (__renderImportOriginalForAreaPdf) {
+  renderImport = function renderImportPatched() {
+    __renderImportOriginalForAreaPdf();
+    ensureFieldImportYMControls();
+    if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
+  };
+}
+
+const __renderFieldDataList2OriginalForAreaPdf = typeof renderFieldDataList2 === 'function' ? renderFieldDataList2 : null;
+if (__renderFieldDataList2OriginalForAreaPdf) {
+  renderFieldDataList2 = function renderFieldDataList2Patched() {
+    const list = document.getElementById('field-data-list2');
+    const badge = document.getElementById('field-import-badge');
+
+    const fieldRows = STATE.fieldData || [];
+    const areaRows = (STATE.areaData || []).filter(r => !r.rawOnly);
+
+    if (!list) {
+      __renderFieldDataList2OriginalForAreaPdf();
+      return;
+    }
+
+    const yms = [...new Set([
+      ...fieldRows.map(d => d.ym),
+      ...areaRows.map(r => r.ym)
+    ].filter(Boolean))].sort();
+
+    if (yms.length) {
+      if (badge) { badge.textContent='読込済'; badge.className='badge badge-ok'; }
+
+      list.innerHTML = yms.map(ym => {
+        const f = fieldRows.find(d => d.ym === ym);
+        const rows = areaRows.filter(r => r.ym === ym);
+        const totalCount = rows.reduce((s,r)=>s+n(r.count),0) || Object.values(f?.areas || {}).reduce((s,a)=>s+n(a.count),0);
+        const shipperCount = new Set(rows.map(r => `${r.shipperCode}_${r.shipperName}`)).size;
+        const rowCount = rows.length;
+
+        return `
+          <div class="data-item">
+            <span>
+              <strong>${ymLabel(ym)}</strong>
+              <span style="margin-left:8px;color:var(--text3);font-size:11px">
+                エリア物量PDF ${fmt(rowCount)}行・${fmt(totalCount)}件${shipperCount ? `・${fmt(shipperCount)}荷主` : ''}
+              </span>
+            </span>
+            <button class="btn btn-danger" onclick="IMPORT.deleteFieldData && IMPORT.deleteFieldData('${ym}')" style="font-size:11px;padding:2px 8px">削除</button>
+          </div>`;
+      }).join('');
+
+      const rowEl = document.getElementById('field-delete-all-row');
+      if (rowEl) rowEl.style.display = 'flex';
+    } else {
+      __renderFieldDataList2OriginalForAreaPdf();
+    }
+  };
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    ensureFieldImportYMControls();
+    if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
+  }, 300);
+});
