@@ -4532,3 +4532,123 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
   }, 300);
 });
+
+/* ════════ AREA PDF IMPORT v4 修正（2026-04-29）════════
+   ・PDF.js / 帳票PDFの郵便番号が「11 20 001」のように分割されるケースに対応
+   ・UNKNOWN が「UN KN OWN」のように分割されるケースに対応
+   ・1行ごとに解析し、荷主情報をページ内ヘッダーから保持
+   ・対象帳票：荷主別配送エリア別物量
+════════════════════════════════════════════════════════════════ */
+function parseAreaVolumePdfText(text) {
+  const rawLines = String(text || '')
+    .replace(/[　]/g, ' ')
+    .replace(/\u00a0/g, ' ')
+    .split(/\r?\n/);
+
+  const records = [];
+  let meta = {
+    branchCode: '',
+    branchName: '',
+    shipperCode: '',
+    shipperName: '',
+    pdfDateFrom: '',
+    pdfDateTo: ''
+  };
+
+  function cleanLine(line) {
+    return String(line || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function numValue(v) {
+    const s = String(v ?? '').replace(/,/g, '').replace(/[^\d.\-]/g, '');
+    if (!s || s === '-' || s === '.') return 0;
+    const num = parseFloat(s);
+    return Number.isFinite(num) ? num : 0;
+  }
+
+  function cleanZip(v) {
+    const s = String(v || '').replace(/\s+/g, '').toUpperCase();
+    if (s === 'UNKNOWN' || s === 'UNKNONW' || s === 'UNKNOW') return 'UNKNOWN';
+    return s;
+  }
+
+  function cleanAddress(v) {
+    return String(v || '')
+      .replace(/^住所\s*/, '')
+      .replace(/\s+/g, '')
+      .trim();
+  }
+
+  function updateMetaFromLine(line) {
+    const branch = line.match(/支店[:：]\s*([0-9A-Z]+)\s+(.+?)\s+管\s*理\s*者\s*印/i)
+      || line.match(/支店[:：]\s*([0-9A-Z]+)\s+(.+?)\s+管理者印/i);
+    if (branch) {
+      meta.branchCode = branch[1] || meta.branchCode;
+      meta.branchName = String(branch[2] || meta.branchName).replace(/\s+/g, '').trim();
+    }
+
+    const shipper = line.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+)$/i);
+    if (shipper && !/荷主別配送エリア別物量/.test(line)) {
+      meta.shipperCode = shipper[1] || '';
+      meta.shipperName = String(shipper[2] || '')
+        .replace(/配達完了日.*$/, '')
+        .replace(/\s+/g, '')
+        .trim();
+    }
+
+    const dateLine = line.replace(/\s+/g, '');
+    const date = dateLine.match(/配達完了日[:：]?([0-9]{4})\/(\d{2})\/(\d{2}).*?([0-9]{4})\/(\d{2})\/(\d{2})/);
+    if (date) {
+      meta.pdfDateFrom = `${date[1]}-${date[2]}-${date[3]}`;
+      meta.pdfDateTo = `${date[4]}-${date[5]}-${date[6]}`;
+    }
+  }
+
+  const rowRe = /^((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)\s+(.+?)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s*$/i;
+
+  for (const raw of rawLines) {
+    const line = cleanLine(raw);
+    if (!line) continue;
+
+    updateMetaFromLine(line);
+
+    if (/郵便番号\s+住所\s+件数/.test(line)) continue;
+    if (/合計[:：]/.test(line)) continue;
+    if (/Page\s+\d+\s+\/\s+\d+/i.test(line)) continue;
+    if (/荷主別配送エリア別物量|配達完了日|管理者印|担当者印/.test(line)) continue;
+
+    const m = line.match(rowRe);
+    if (!m) continue;
+
+    const zip = cleanZip(m[1]);
+    const address = cleanAddress(m[2]);
+    if (!address || /^(住所|件数)$/.test(address)) continue;
+
+    const values = m.slice(3, 15).map(numValue);
+    if (values.length !== 12) continue;
+
+    const [count, deliveryFee, trunkFee, extraFee, s1, s2, s3, s4, s5, s6, s7, s8] = values;
+
+    records.push({
+      ym: null,
+      source: 'area_pdf',
+      branchCode: meta.branchCode,
+      branchName: meta.branchName,
+      shipperCode: meta.shipperCode,
+      shipperName: meta.shipperName,
+      pdfDateFrom: meta.pdfDateFrom,
+      pdfDateTo: meta.pdfDateTo,
+      zip,
+      address,
+      area: typeof normalizeAreaName === 'function' ? normalizeAreaName(address) : address,
+      count,
+      deliveryFee,
+      trunkFee,
+      extraFee,
+      totalFee: numValue(deliveryFee) + numValue(trunkFee) + numValue(extraFee),
+      size: [s1, s2, s3, s4, s5, s6, s7, s8]
+    });
+  }
+
+  return records;
+}
