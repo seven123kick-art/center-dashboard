@@ -867,7 +867,7 @@
             <span id="capacity-msg" style="font-size:11px;color:var(--text2)"></span>
           </div>
           <div style="font-size:11px;color:var(--text3);line-height:1.7">
-            ※ 配送エリアPDFは「データ取込＞現場明細データ」で入れたPDFも使います。PDFは月間件数のため、日別比較は「月間件数 ÷ 稼働日数」の平均で判定します。時間区分はPDF側にないため、時間帯キャパは地区ごとに合計して比較します。
+            ※ 配送エリアPDFは「データ取込＞現場データ」で入れたPDFも使います。PDFは月間件数のため、日別比較は「月間件数 ÷ 稼働日数」の平均で判定します。時間区分はPDF側にないため、時間帯キャパは地区ごとに合計して比較します。
           </div>
         </div>
       </div>
@@ -930,7 +930,7 @@
               <span style="font-size:11px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;padding:2px 8px;border-radius:4px">SKDL0001 = 日報（速報値）</span>
               <span style="font-size:11px;background:#d1fae5;border:1px solid #6ee7b7;color:#064e3b;padding:2px 8px;border-radius:4px">SKDL0003 = 確定値</span>
             </div>
-            <div style="font-size:11px;color:var(--text3)">※ 作業者別CSV・PDFは下の「現場明細データ」セクションから取り込めます</div>
+            <div style="font-size:11px;color:var(--text3)">※ 作業者別CSV・荷主別配送エリア別物量PDFは下の「現場データ」セクションから取り込めます</div>
           </div>
           <div id="upload-msg"></div>
         </div>
@@ -1004,7 +1004,7 @@
       <div class="card" style="margin-bottom:14px">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
           <div style="display:flex;align-items:center;gap:8px">
-            <span class="card-title">🚚 現場明細データ（作業者別CSV・エリアPDF）</span>
+            <span class="card-title">🚚 現場データ（作業者別CSV・荷主別配送エリア別物量PDF）</span>
             <span id="field-import-badge" class="badge badge-warn">未読込</span>
           </div>
           <button onclick="renderFieldDataList2()" title="一覧を最新状態に更新"
@@ -1023,7 +1023,7 @@
             <input type="file" id="field-file-input2" accept=".csv,.pdf" multiple style="display:none"
                    onchange="FIELD_IMPORT2.handleFiles(this.files)">
             <div style="font-size:20px;color:#94a3b8;margin-bottom:4px">⬆</div>
-            <div style="font-size:13px;font-weight:700;margin-bottom:4px">クリックまたはCSV・PDFをドロップ</div>
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">作業者別CSV または 荷主別配送エリア別物量PDFを取込</div>
             <div style="display:flex;gap:10px;justify-content:center;font-size:11px">
               <span style="background:#d1fae5;border:1px solid #6ee7b7;color:#064e3b;padding:2px 8px;border-radius:4px">作業者別CSV</span>
               <span style="background:#dbeafe;border:1px solid #93c5fd;color:#1e3a8a;padding:2px 8px;border-radius:4px">エリア別PDF</span>
