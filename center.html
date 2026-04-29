@@ -28,14 +28,26 @@
 }
 
 
-/* ===== 現場明細：エリアランキング表示の背景はみ出し修正 ===== */
-#fpane-map .card,
-#fpane-map .card-body,
-#field-map{
+/* ===== 現場明細：エリアランキング表示の枠はみ出し修正 ===== */
+#fpane-map .card{
+  overflow:hidden;
+}
+#fpane-map .card-body{
   overflow:visible;
 }
+#field-map{
+  height:auto !important;
+  min-height:120px;
+  border:0 !important;
+  border-radius:0 !important;
+  overflow:visible;
+}
+#field-map > div{
+  max-width:100%;
+}
 #field-map .field-area-row{
-  display:flex;
+  display:grid;
+  grid-template-columns:minmax(220px,320px) minmax(220px,1fr) minmax(130px,170px);
   align-items:center;
   width:100%;
   gap:12px;
@@ -43,8 +55,6 @@
   min-width:0;
 }
 #field-map .field-area-label{
-  width:260px;
-  flex:0 0 260px;
   min-width:0;
   font-weight:800;
   white-space:nowrap;
@@ -52,8 +62,8 @@
   text-overflow:ellipsis;
 }
 #field-map .field-area-track{
-  flex:1 1 auto;
-  min-width:120px;
+  width:100%;
+  min-width:0;
   height:18px;
   background:#e5e7eb;
   border-radius:999px;
@@ -65,27 +75,21 @@
   border-radius:999px;
 }
 #field-map .field-area-value{
-  width:150px;
-  flex:0 0 150px;
+  min-width:0;
   text-align:right;
   font-weight:900;
   white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 #field-map .field-area-sub{
   color:var(--text3);
   font-size:11px;
 }
-@media(max-width:900px){
+@media(max-width:1100px){
   #field-map .field-area-row{
+    grid-template-columns:minmax(170px,240px) minmax(140px,1fr) minmax(100px,130px);
     gap:8px;
-  }
-  #field-map .field-area-label{
-    width:180px;
-    flex-basis:180px;
-  }
-  #field-map .field-area-value{
-    width:110px;
-    flex-basis:110px;
   }
 }
 
