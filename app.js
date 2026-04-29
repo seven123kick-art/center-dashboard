@@ -5706,3 +5706,162 @@ if (__renderMonthlyCheckTableOriginalForFieldCsv) {
     }
   });
 })();
+
+/* ════════════════════════════════════════════════════════════════
+   FINAL PATCH 2026-04-29
+   ・現場明細削除後に対象月プルダウンの「現場明細あり」が残る問題を修正
+   ・fieldDataだけでなく areaData（商品住所CSV / 作業者CSV）を基準に月ステータスを判定
+   ・削除後は月セレクト・右上バッジ・地図表示を必ず再描画
+════════════════════════════════════════════════════════════════ */
+(function(){
+  'use strict';
+
+  function safe(fn){ try { return fn(); } catch(e){ console.error(e); return null; } }
+
+  function fieldMonthStatus(ym){
+    const hasLegacyField = (STATE.fieldData || []).some(d => d && d.ym === ym);
+    const hasWorkerCsv   = (STATE.areaData || []).some(r => r && r.ym === ym && r.source === 'worker_csv');
+    const hasProductCsv  = (STATE.areaData || []).some(r => r && r.ym === ym && (r.source === 'area_csv' || r.source === 'product_address_csv'));
+
+    if (hasWorkerCsv && hasProductCsv) return { has:true, label:'作業者・商品住所あり' };
+    if (hasProductCsv) return { has:true, label:'商品住所あり' };
+    if (hasWorkerCsv || hasLegacyField) return { has:true, label:'作業者CSVあり' };
+    return { has:false, label:'未登録' };
+  }
+
+  const originalRenderCommonPeriodSelector = typeof renderCommonPeriodSelector === 'function' ? renderCommonPeriodSelector : null;
+  window.renderCommonPeriodSelector = renderCommonPeriodSelector = function(viewKey, opt={}){
+    if (viewKey !== 'field') {
+      if (originalRenderCommonPeriodSelector) return originalRenderCommonPeriodSelector(viewKey, opt);
+      return;
+    }
+
+    const view = document.getElementById('view-' + viewKey);
+    if (!view) return;
+
+    const useMonth = opt.useMonth !== false;
+    const boxId = `${viewKey}-period-selector`;
+    let box = document.getElementById(boxId);
+    if (!box) {
+      box = document.createElement('div');
+      box.id = boxId;
+      view.prepend(box);
+    }
+
+    const years = dashboardAvailableFiscalYears();
+    const fy = dashboardSelectedFiscalYear();
+    const months = monthsOfFiscalYear(fy);
+    const selectedYM = dashboardSelectedYM();
+
+    const monthOptions = months.map(ym => {
+      const st = fieldMonthStatus(ym);
+      const selected = ym === selectedYM ? 'selected' : '';
+      return `<option value="${ym}" ${selected}>${ymLabel(ym)}（${st.label}）</option>`;
+    }).join('');
+
+    box.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
+        <div>
+          <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
+          <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / 年度・月を共通管理</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
+            <select id="${viewKey}-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
+              ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
+            </select>
+          </label>
+          ${useMonth ? `
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
+            <select id="${viewKey}-month-sel" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
+              ${monthOptions}
+            </select>
+          </label>` : ''}
+        </div>
+      </div>
+    `;
+
+    const fySel = document.getElementById(`${viewKey}-fy-select`);
+    if (fySel) fySel.onchange = () => {
+      STATE.fiscalYear = fySel.value;
+      const months2 = monthsOfFiscalYear(STATE.fiscalYear);
+      STATE.selYM = months2.includes(STATE.selYM) ? STATE.selYM : months2[months2.length - 1];
+      STORE.save();
+      NAV.refresh();
+    };
+
+    const moSel = document.getElementById(`${viewKey}-month-sel`);
+    if (moSel) moSel.onchange = () => {
+      STATE.selYM = moSel.value;
+      STORE.save();
+      NAV.refresh();
+    };
+  };
+
+  function getCurrentFieldYM(){
+    const sel = document.getElementById('field-month-sel');
+    if (sel && sel.value) return sel.value;
+    if (typeof dashboardSelectedYM === 'function') return dashboardSelectedYM();
+    return STATE.selYM || null;
+  }
+
+  function redrawFieldScreen(){
+    safe(()=>renderCommonPeriodSelector('field'));
+    safe(()=>FIELD_UI && FIELD_UI.updatePeriodBadge && FIELD_UI.updatePeriodBadge());
+    safe(()=>FIELD_UI && FIELD_UI.renderMap && FIELD_UI.renderMap());
+    safe(()=>renderFieldDataList2 && renderFieldDataList2());
+    safe(()=>UI && UI.updateSaveStatus && UI.updateSaveStatus());
+  }
+
+  if (window.FIELD_UI || typeof FIELD_UI !== 'undefined') {
+    const target = window.FIELD_UI || FIELD_UI;
+    target.updatePeriodBadge = function(){
+      const badge = document.getElementById('field-period-badge');
+      if (!badge) return;
+      const ym = getCurrentFieldYM();
+      const st = ym ? fieldMonthStatus(ym) : {has:false,label:'未登録'};
+      badge.textContent = ym && st.has ? `${ymLabel(ym)} 読込済` : 'データ未読込';
+    };
+  }
+
+  async function persistFieldDelete(){
+    safe(()=>STORE.save());
+    if (typeof CLOUD !== 'undefined' && CLOUD.pushAll) {
+      try { await CLOUD.pushAll(); }
+      catch(e){ console.error(e); safe(()=>UI.toast('クラウド反映に失敗しました。今すぐ同期を押してください。','warn')); }
+    }
+  }
+
+  async function deleteFieldMonthAll(ym){
+    ym = ym || getCurrentFieldYM();
+    if (!ym) return;
+    if (!confirm(`${ymLabel(ym)} の現場明細CSVを削除しますか？\n\n作業者CSV・商品住所CSVを削除します。`)) return;
+
+    STATE.fieldData = (STATE.fieldData || []).filter(d => d && d.ym !== ym);
+    STATE.areaData = (STATE.areaData || []).filter(r => r && r.ym !== ym);
+
+    redrawFieldScreen();
+    await persistFieldDelete();
+    redrawFieldScreen();
+    safe(()=>UI.toast(`${ymLabel(ym)} の現場明細CSVを削除しました`));
+  }
+
+  async function clearFieldAll(){
+    if (!confirm('現場明細データを全月削除しますか？\n\n作業者CSV・商品住所CSVをすべて削除します。')) return;
+    STATE.fieldData = [];
+    STATE.areaData = [];
+    redrawFieldScreen();
+    await persistFieldDelete();
+    redrawFieldScreen();
+    safe(()=>UI.toast('現場明細データを全件削除しました'));
+  }
+
+  if (typeof IMPORT !== 'undefined') IMPORT.deleteFieldData = deleteFieldMonthAll;
+  if (typeof DATA_RESET !== 'undefined') DATA_RESET.clearFieldAll = clearFieldAll;
+  window.deleteFieldMonthAll = deleteFieldMonthAll;
+  window.clearFieldAll = clearFieldAll;
+
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(redrawFieldScreen, 250);
+  });
+})();
