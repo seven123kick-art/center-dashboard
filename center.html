@@ -26,6 +26,69 @@
   background:#fff1f7;
   border-left:4px solid #d946ef;
 }
+
+
+/* ===== 現場明細：エリアランキング表示の背景はみ出し修正 ===== */
+#fpane-map .card,
+#fpane-map .card-body,
+#field-map{
+  overflow:visible;
+}
+#field-map .field-area-row{
+  display:flex;
+  align-items:center;
+  width:100%;
+  gap:12px;
+  margin:8px 0;
+  min-width:0;
+}
+#field-map .field-area-label{
+  width:260px;
+  flex:0 0 260px;
+  min-width:0;
+  font-weight:800;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+#field-map .field-area-track{
+  flex:1 1 auto;
+  min-width:120px;
+  height:18px;
+  background:#e5e7eb;
+  border-radius:999px;
+  overflow:hidden;
+}
+#field-map .field-area-fill{
+  height:100%;
+  background:#1a4d7c;
+  border-radius:999px;
+}
+#field-map .field-area-value{
+  width:150px;
+  flex:0 0 150px;
+  text-align:right;
+  font-weight:900;
+  white-space:nowrap;
+}
+#field-map .field-area-sub{
+  color:var(--text3);
+  font-size:11px;
+}
+@media(max-width:900px){
+  #field-map .field-area-row{
+    gap:8px;
+  }
+  #field-map .field-area-label{
+    width:180px;
+    flex-basis:180px;
+  }
+  #field-map .field-area-value{
+    width:110px;
+    flex-basis:110px;
+  }
+}
+
 </style>
 </head>
 <body>
