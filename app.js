@@ -4928,63 +4928,51 @@ if (__renderMonthlyCheckTableOriginalForFieldCsv) {
 
 
 /* ════════════════════════════════════════════════════════════════
-   2026-04-29 現場明細CSV エリア表示改善 FINAL-2
-   ・エリア地図は、保存済みデータが行単位でも必ずI列原票番号でユニーク化して集計
-   ・全体ランキング（多い順）と都道府県別（＋開く/閉じる）を切替表示
-   ・都道府県内の市区町村は件数/売上/名称でソート可能
-   ・商品・サイズ判定は原票番号ユニーク行のみ。R列作業内容/U列金額は原票へ集約済みの値を使用
+   2026-04-29 現場明細CSV エリア表示改善 FINAL-3（表示整理版）
+   ・地図タブの重なりを解消（市区町村別明細カードを非表示）
+   ・全体ランキング / 都道府県別を切替
+   ・都道府県別は「開く」ボタンを大きく表示し、開閉状態も表示
+   ・I列エスライン原票番号でユニーク集計（念のため表示時にも再ユニーク化）
 ════════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
 
-  function fieldGetYM(){
+  function fieldGetYMClean(){
     const sel = document.getElementById('field-month-sel');
     if (sel && sel.value) return sel.value;
     return dashboardSelectedYM() || STATE.selYM || selectedYMForImport();
   }
 
-  function splitPrefCity(areaText){
-    const area = String(areaText || '未設定').replace(/\s+/g,'');
-    if (!area || area === '未設定') return { pref:'未設定', city:'未設定', area:'未設定' };
-    if (area.includes('郵便番号未登録') || area === 'UNKNOWN') return { pref:'未設定', city:'郵便番号未登録', area:'郵便番号未登録' };
-    const m = area.match(/^(東京都|北海道|(?:京都|大阪)府|.{2,3}県)(.*)$/);
-    if (!m) return { pref:'未設定', city:area, area };
+  function splitPrefCityClean(areaText){
+    const raw = String(areaText || '未設定').replace(/\s+/g,'');
+    if (!raw || raw === '未設定') return { pref:'未設定', city:'未設定', area:'未設定' };
+    if (raw.includes('郵便番号未登録') || raw === 'UNKNOWN') return { pref:'未設定', city:'郵便番号未登録', area:'郵便番号未登録' };
+    const m = raw.match(/^(東京都|北海道|(?:京都|大阪)府|.{2,3}県)(.*)$/);
+    if (!m) return { pref:'未設定', city:raw, area:raw };
     const pref = m[1] || '未設定';
-    const rest = m[2] || '';
-    return { pref, city:rest || pref, area };
+    const city = m[2] || pref;
+    return { pref, city, area: pref + (city === pref ? '' : city) };
   }
 
-  function uniqueProductRowsBySlip(ym){
+  function fieldUniqueRowsBySlip(ym){
     const src = (STATE.areaData || []).filter(r => r && r.ym === ym && r.source === 'area_csv');
     const map = new Map();
     for (const r of src) {
-      const key = String(r.slipNo || '').trim() || `__line_${r.lineNo || Math.random()}`;
-      if (!map.has(key)) {
-        map.set(key, { ...r, __rawRows: 0, __amount: 0, __accounts: {}, __workDetails: [] });
-      }
+      const key = String(r.slipNo || '').trim() || `__line_${r.lineNo || map.size + 1}`;
+      if (!map.has(key)) map.set(key, { ...r, __displayAmount: 0, __displayRawRows: 0 });
       const rec = map.get(key);
-      rec.__rawRows += n(r.rawLineCount || 1);
-      rec.__amount += n(r.amount);
-      if (r.accounts && typeof r.accounts === 'object') {
-        Object.entries(r.accounts).forEach(([k,v]) => { rec.__accounts[k || '未設定'] = (rec.__accounts[k || '未設定'] || 0) + n(v); });
-      } else {
-        const acc = r.account || r.workContent || '未設定';
-        rec.__accounts[acc] = (rec.__accounts[acc] || 0) + n(r.amount);
-      }
-      if (Array.isArray(r.workDetails)) rec.__workDetails.push(...r.workDetails);
+      rec.__displayAmount += n(r.amount);
+      rec.__displayRawRows += n(r.rawLineCount || 1);
+      if (!rec.area && r.area) rec.area = r.area;
+      if (!rec.address && r.address) rec.address = r.address;
+      if (!rec.destAddress && r.destAddress) rec.destAddress = r.destAddress;
+      if (!rec.zip && r.zip) rec.zip = r.zip;
     }
-    return [...map.values()].map(r => ({
-      ...r,
-      amount: r.__amount || n(r.amount),
-      accounts: Object.keys(r.__accounts || {}).length ? r.__accounts : (r.accounts || {}),
-      workDetails: r.__workDetails && r.__workDetails.length ? r.__workDetails : (r.workDetails || []),
-      rawLineCount: r.__rawRows || n(r.rawLineCount || 1),
-      count: 1
-    }));
+    return [...map.values()].map(r => ({ ...r, amount: r.__displayAmount || n(r.amount), rawLineCount: r.__displayRawRows || n(r.rawLineCount || 1) }));
   }
 
-  function buildAreaAgg(ym){
-    const rows = uniqueProductRowsBySlip(ym);
+  function buildAreaAggClean(ym){
+    const rows = fieldUniqueRowsBySlip(ym);
     const cityMap = new Map();
     const prefMap = new Map();
     let totalCount = 0;
@@ -4992,30 +4980,16 @@ if (__renderMonthlyCheckTableOriginalForFieldCsv) {
 
     for (const r of rows) {
       const areaName = r.area || normalizeAreaName(r.address || r.destAddress || r.zip || '未設定');
-      const pc = splitPrefCity(areaName);
+      const pc = splitPrefCityClean(areaName);
       const key = `${pc.pref}||${pc.city}`;
       if (!cityMap.has(key)) {
-        cityMap.set(key, {
-          pref: pc.pref,
-          city: pc.city,
-          area: pc.area,
-          count: 0,
-          amount: 0,
-          zips: new Set(),
-          products: {},
-          accounts: {},
-          rawLineCount: 0
-        });
+        cityMap.set(key, { pref: pc.pref, city: pc.city, area: pc.pref === '未設定' ? pc.city : pc.pref + pc.city, count:0, amount:0, rawLineCount:0, zips:new Set() });
       }
       const c = cityMap.get(key);
       c.count += 1;
       c.amount += n(r.amount);
       c.rawLineCount += n(r.rawLineCount || 1);
       if (r.zip) c.zips.add(r.zip);
-      const prod = r.productCategory || '未設定';
-      c.products[prod] = (c.products[prod] || 0) + 1;
-      const accounts = r.accounts && typeof r.accounts === 'object' ? r.accounts : { [r.account || '未設定']: n(r.amount) };
-      Object.entries(accounts).forEach(([k,v]) => { c.accounts[k || '未設定'] = (c.accounts[k || '未設定'] || 0) + n(v); });
 
       if (!prefMap.has(pc.pref)) prefMap.set(pc.pref, { pref: pc.pref, count:0, amount:0, rawLineCount:0, cities:[] });
       const p = prefMap.get(pc.pref);
@@ -5032,154 +5006,94 @@ if (__renderMonthlyCheckTableOriginalForFieldCsv) {
     return { rows, cities, prefs:[...prefMap.values()], totalCount, totalAmount };
   }
 
-  function fieldSortList(list, metric, sortMode){
+  function getAreaMetric(){ return document.getElementById('map-metric-sel')?.value || 'count'; }
+  function getAreaMode(){ return document.getElementById('field-area-view-mode')?.value || 'overall'; }
+  function getAreaSort(){ return document.getElementById('field-area-sort-mode')?.value || 'count'; }
+
+  function sortAreaList(list, metric, sortMode){
     const arr = [...list];
-    if (sortMode === 'name') {
-      return arr.sort((a,b)=>String(a.city || a.pref || a.area).localeCompare(String(b.city || b.pref || b.area), 'ja'));
-    }
-    if (metric === 'amount' || sortMode === 'amount') return arr.sort((a,b)=>n(b.amount)-n(a.amount) || n(b.count)-n(a.count));
-    return arr.sort((a,b)=>n(b.count)-n(a.count) || n(b.amount)-n(a.amount));
+    if (sortMode === 'name') return arr.sort((a,b)=>String(a.city || a.pref || a.area).localeCompare(String(b.city || b.pref || b.area), 'ja'));
+    if (sortMode === 'amount' || metric === 'amount') return arr.sort((a,b)=>n(b.amount)-n(a.amount) || n(b.count)-n(a.count) || String(a.city || a.pref).localeCompare(String(b.city || b.pref),'ja'));
+    return arr.sort((a,b)=>n(b.count)-n(a.count) || n(b.amount)-n(a.amount) || String(a.city || a.pref).localeCompare(String(b.city || b.pref),'ja'));
   }
 
-  function barRowHtml(item, maxVal, metric, totalCount, totalAmount, indent){
+  function barRow(item, maxVal, metric, totalCount, totalAmount, opt={}){
     const val = metric === 'amount' ? n(item.amount) : n(item.count);
-    const w = Math.max(3, Math.round((val / Math.max(maxVal,1)) * 100));
-    const label = item.area || ((item.pref && item.city && item.city !== item.pref) ? item.pref + item.city : (item.city || item.pref || '未設定'));
+    const w = Math.max(2, Math.round((val / Math.max(maxVal,1)) * 100));
+    const label = item.area || ((item.pref && item.city) ? item.pref + item.city : (item.city || item.pref || '未設定'));
+    const ratio = metric === 'amount' ? n(item.amount) / Math.max(totalAmount,1) * 100 : n(item.count) / Math.max(totalCount,1) * 100;
     const main = metric === 'amount' ? `${fmtK(item.amount)}千円` : `${fmt(item.count)}件`;
-    const sub = metric === 'amount'
-      ? `${fmt(item.count)}件 / 構成比 ${pct(n(item.amount) / Math.max(totalAmount,1) * 100)}`
-      : `${fmtK(item.amount)}千円 / 構成比 ${pct(n(item.count) / Math.max(totalCount,1) * 100)}`;
-    return `<div style="display:grid;grid-template-columns:${indent ? '240px' : '260px'} 1fr 110px;gap:10px;align-items:center;margin-bottom:8px;font-size:12px;${indent ? 'padding-left:22px' : ''}">
-      <div title="${esc(label)}" style="font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#0f172a">${esc(label)}</div>
-      <div style="height:17px;background:#e5e7eb;border-radius:999px;overflow:hidden"><div style="height:100%;width:${w}%;background:#1a4d7c;border-radius:999px"></div></div>
-      <div style="text-align:right;font-weight:900;color:#0f172a"><div>${main}</div><div style="font-size:10px;color:#64748b;font-weight:700">${sub}</div></div>
-    </div>`;
+    const sub = metric === 'amount' ? `${fmt(item.count)}件・${pct(ratio)}` : `${fmtK(item.amount)}千円・${pct(ratio)}`;
+    const rank = opt.rank ? `<div style="width:32px;text-align:center;font-weight:900;color:#64748b">${opt.rank}</div>` : '';
+    return `<div style="display:grid;grid-template-columns:${opt.rank?'32px ':''}260px 1fr 120px;gap:10px;align-items:center;padding:${opt.compact?'6px 0':'8px 0'};border-bottom:1px solid #f1f5f9;font-size:12px">${rank}<div title="${esc(label)}" style="font-weight:900;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(label)}</div><div style="height:16px;background:#e5e7eb;border-radius:999px;overflow:hidden"><div style="height:100%;width:${w}%;background:#1a4d7c;border-radius:999px"></div></div><div style="text-align:right;font-weight:900;color:#0f172a"><div>${main}</div><div style="font-size:10px;color:#64748b;font-weight:700">${sub}</div></div></div>`;
   }
 
-  function renderOverallMap(box, agg, metric, sortMode){
-    const list = fieldSortList(agg.cities, metric, sortMode);
+  function summaryBox(agg, ym){
+    return `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px"><div style="border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;padding:12px"><div style="font-size:11px;color:#64748b;font-weight:800">対象月</div><div style="font-size:18px;font-weight:900;color:#0f172a;margin-top:4px">${ymLabel(ym)}</div></div><div style="border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;padding:12px"><div style="font-size:11px;color:#64748b;font-weight:800">原票ユニーク件数</div><div style="font-size:18px;font-weight:900;color:#0f172a;margin-top:4px">${fmt(agg.totalCount)}件</div></div><div style="border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;padding:12px"><div style="font-size:11px;color:#64748b;font-weight:800">U列金額合計</div><div style="font-size:18px;font-weight:900;color:#0f172a;margin-top:4px">${fmtK(agg.totalAmount)}千円</div></div></div>`;
+  }
+
+  function renderOverallClean(box, agg, ym, metric, sortMode){
+    const list = sortAreaList(agg.cities, metric, sortMode);
     const maxVal = Math.max(...list.map(x => metric === 'amount' ? n(x.amount) : n(x.count)), 1);
-    box.innerHTML = `<div style="padding:16px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-        <div>
-          <div style="font-size:12px;color:#334155;font-weight:800">全体ランキング（市区町村別）</div>
-          <div style="font-size:11px;color:#64748b;margin-top:3px">I列エスライン原票番号をユニーク化。重複行は件数・商品・サイズ判定から除外済み。</div>
-        </div>
-        <div style="font-size:12px;color:#334155;font-weight:900">総件数 ${fmt(agg.totalCount)}件 / 売上 ${fmtK(agg.totalAmount)}千円</div>
-      </div>
-      ${list.map(x => barRowHtml(x, maxVal, metric, agg.totalCount, agg.totalAmount, false)).join('')}
-    </div>`;
+    box.innerHTML = `<div style="padding:16px">${summaryBox(agg, ym)}<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px"><div><div style="font-size:14px;font-weight:900;color:#0f172a">全体ランキング</div><div style="font-size:11px;color:#64748b;margin-top:3px">市区町村を全体で並べます。I列原票番号で1件化済み。</div></div><div style="font-size:11px;color:#64748b;font-weight:800">${fmt(list.length)}地区</div></div><div style="border-top:1px solid #e5e7eb">${list.map((x,i)=>barRow(x, maxVal, metric, agg.totalCount, agg.totalAmount, {rank:i+1})).join('')}</div></div>`;
   }
 
-  function renderPrefMap(box, agg, metric, sortMode){
+  function updateOnePrefToggle(detail){
+    const t = detail.querySelector('[data-pref-toggle]');
+    if (!t) return;
+    t.textContent = detail.open ? '－ 閉じる' : '＋ 開く';
+    t.style.background = detail.open ? '#dcfce7' : '#dbeafe';
+    t.style.borderColor = detail.open ? '#86efac' : '#93c5fd';
+    t.style.color = detail.open ? '#166534' : '#1e40af';
+  }
+
+  function bindPrefToggles(root){
+    root.querySelectorAll('details[data-pref-detail]').forEach(d=>{ updateOnePrefToggle(d); d.addEventListener('toggle', ()=>updateOnePrefToggle(d)); });
+  }
+
+  function renderPrefClean(box, agg, ym, metric, sortMode){
     const prefs = [...agg.prefs].sort((a,b)=>n(b.count)-n(a.count) || String(a.pref).localeCompare(String(b.pref),'ja'));
-    box.innerHTML = `<div style="padding:16px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-        <div>
-          <div style="font-size:12px;color:#334155;font-weight:800">都道府県別（＋で開閉）</div>
-          <div style="font-size:11px;color:#64748b;margin-top:3px">各都道府県を開くと、市区町村を件数順・売上順・名称順で確認できます。</div>
-        </div>
-        <div style="font-size:12px;color:#334155;font-weight:900">総件数 ${fmt(agg.totalCount)}件 / 売上 ${fmtK(agg.totalAmount)}千円</div>
-      </div>
-      ${prefs.map((p,idx)=>{
-        const cities = fieldSortList(p.cities, metric, sortMode);
-        const maxVal = Math.max(...cities.map(x => metric === 'amount' ? n(x.amount) : n(x.count)), 1);
-        const prefRatio = n(p.count) / Math.max(agg.totalCount,1) * 100;
-        return `<details ${idx < 3 ? 'open' : ''} style="border:1px solid #e5e7eb;border-radius:12px;background:#fff;margin-bottom:10px;overflow:hidden">
-          <summary style="cursor:pointer;list-style:none;padding:12px 14px;background:#f8fafc;display:grid;grid-template-columns:26px 1fr 130px 130px 90px;gap:10px;align-items:center;font-size:12px">
-            <span style="font-weight:900;color:#1a4d7c">＋</span>
-            <span style="font-weight:900;color:#0f172a">${esc(p.pref)}</span>
-            <span style="text-align:right;font-weight:900">${fmt(p.count)}件</span>
-            <span style="text-align:right;font-weight:900">${fmtK(p.amount)}千円</span>
-            <span style="text-align:right;color:#64748b;font-weight:800">${pct(prefRatio)}</span>
-          </summary>
-          <div style="padding:12px 14px">
-            ${cities.map(c => barRowHtml(c, maxVal, metric, agg.totalCount, agg.totalAmount, true)).join('')}
-          </div>
-        </details>`;
-      }).join('')}
-    </div>`;
+    box.innerHTML = `<div style="padding:16px">${summaryBox(agg, ym)}<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px"><div><div style="font-size:14px;font-weight:900;color:#0f172a">都道府県別</div><div style="font-size:11px;color:#64748b;margin-top:3px">都道府県ごとに折りたたみ表示します。左の「開く」ボタンで市区町村を確認できます。</div></div><button type="button" id="field-open-all-pref" class="btn" style="font-size:11px;padding:5px 10px">すべて開く</button></div><div style="display:grid;gap:10px">${prefs.map((p,idx)=>{ const cities=sortAreaList(p.cities,metric,sortMode); const maxVal=Math.max(...cities.map(x=>metric==='amount'?n(x.amount):n(x.count)),1); const prefRatio=n(p.count)/Math.max(agg.totalCount,1)*100; return `<details data-pref-detail ${idx===0?'open':''} style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.04)"><summary style="cursor:pointer;list-style:none;padding:12px 14px;background:#f8fafc;display:grid;grid-template-columns:92px 1fr 120px 120px 80px;gap:10px;align-items:center;font-size:12px"><span data-pref-toggle style="display:inline-flex;align-items:center;justify-content:center;border:1px solid #93c5fd;background:#dbeafe;color:#1e40af;border-radius:999px;padding:4px 8px;font-weight:900">＋ 開く</span><span style="font-weight:900;color:#0f172a;font-size:14px">${esc(p.pref)}</span><span style="text-align:right;font-weight:900">${fmt(p.count)}件</span><span style="text-align:right;font-weight:900">${fmtK(p.amount)}千円</span><span style="text-align:right;color:#64748b;font-weight:800">${pct(prefRatio)}</span></summary><div style="padding:10px 14px 12px;background:#fff">${cities.map(c=>barRow(c,maxVal,metric,agg.totalCount,agg.totalAmount,{compact:true})).join('')}</div></details>`; }).join('')}</div></div>`;
+    bindPrefToggles(box);
+    const allBtn=document.getElementById('field-open-all-pref');
+    if (allBtn) allBtn.onclick=function(){ const details=[...document.querySelectorAll('details[data-pref-detail]')]; const shouldOpen=details.some(d=>!d.open); details.forEach(d=>{ d.open=shouldOpen; updateOnePrefToggle(d); }); allBtn.textContent=shouldOpen?'すべて閉じる':'すべて開く'; };
   }
 
-  function renderCityTable(tbody, agg, metric, sortMode){
-    const list = fieldSortList(agg.cities, metric, sortMode);
-    tbody.innerHTML = list.map(x=>{
-      const ratioVal = metric === 'amount' ? n(x.amount) / Math.max(agg.totalAmount,1) * 100 : n(x.count) / Math.max(agg.totalCount,1) * 100;
-      return `<tr>
-        <td>${esc(x.pref || '-')}</td>
-        <td>${esc(x.city || x.area || '-')}</td>
-        <td class="r">${fmt(x.count)}</td>
-        <td class="r">${fmtK(x.amount)}</td>
-        <td class="r">${pct(ratioVal)}</td>
-      </tr>`;
-    }).join('');
+  function hideOldCityTable(){
+    const tbody = document.getElementById('f-city-tbody');
+    const card = tbody ? tbody.closest('.card') : null;
+    if (card) card.style.display = 'none';
   }
 
-  function currentFieldAreaMode(){
-    const el = document.getElementById('field-area-view-mode');
-    return el ? el.value : 'overall';
-  }
-  function currentFieldSortMode(){
-    const el = document.getElementById('field-area-sort-mode');
-    return el ? el.value : 'count';
-  }
-
-  if (window.FIELD_UI && FIELD_UI.renderMap) {
-    FIELD_UI.renderMap = function(){
-      const map = document.getElementById('field-map');
-      const tbody = document.getElementById('f-city-tbody');
-      const noData = document.getElementById('map-no-data');
-      const ym = fieldGetYM();
-      const metric = document.getElementById('map-metric-sel')?.value || 'count';
-      const agg = buildAreaAgg(ym);
-
-      if (!agg.rows.length) {
-        if (map) map.innerHTML = '<div style="padding:28px;color:#94a3b8;font-weight:700">対象月の商品・住所CSVがありません。</div>';
-        if (tbody) tbody.innerHTML = '';
-        if (noData) noData.style.display = 'block';
-        return;
-      }
-      if (noData) noData.style.display = 'none';
-
-      if (map) {
-        const mode = currentFieldAreaMode();
-        const sortMode = currentFieldSortMode();
-        const controls = `<div style="padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-          <div style="font-size:12px;color:#334155;font-weight:900">${ymLabel(ym)} / 商品・住所CSV / 原票番号ユニーク集計</div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <label style="font-size:11px;color:#64748b;font-weight:800">表示</label>
-            <select id="field-area-view-mode" style="font-weight:800">
-              <option value="overall" ${mode==='overall'?'selected':''}>全体ランキング</option>
-              <option value="pref" ${mode==='pref'?'selected':''}>都道府県別（開閉）</option>
-            </select>
-            <label style="font-size:11px;color:#64748b;font-weight:800">並び</label>
-            <select id="field-area-sort-mode" style="font-weight:800">
-              <option value="count" ${sortMode==='count'?'selected':''}>件数順</option>
-              <option value="amount" ${sortMode==='amount'?'selected':''}>売上順</option>
-              <option value="name" ${sortMode==='name'?'selected':''}>名称順</option>
-            </select>
-          </div>
-        </div><div id="field-area-map-body"></div>`;
-        map.innerHTML = controls;
-        const body = document.getElementById('field-area-map-body');
-        if (body) {
-          if (mode === 'pref') renderPrefMap(body, agg, metric, sortMode);
-          else renderOverallMap(body, agg, metric, sortMode);
-        }
-        const modeEl = document.getElementById('field-area-view-mode');
-        const sortEl = document.getElementById('field-area-sort-mode');
-        if (modeEl) modeEl.onchange = () => FIELD_UI.renderMap();
-        if (sortEl) sortEl.onchange = () => FIELD_UI.renderMap();
-      }
-
-      if (tbody) renderCityTable(tbody, agg, metric, currentFieldSortMode());
-    };
-  }
-
-  // map-metric-sel の変更でも即再描画
-  document.addEventListener('change', function(e){
-    if (e.target && e.target.id === 'map-metric-sel') {
-      try { if (FIELD_UI && FIELD_UI.renderMap) FIELD_UI.renderMap(); } catch(err) {}
+  function renderCleanMap(){
+    const map = document.getElementById('field-map');
+    const noData = document.getElementById('map-no-data');
+    if (!map) return;
+    hideOldCityTable();
+    const ym=fieldGetYMClean();
+    const metric=getAreaMetric();
+    const mode=getAreaMode();
+    const sortMode=getAreaSort();
+    const agg=buildAreaAggClean(ym);
+    if (!agg.rows.length){
+      map.innerHTML='<div style="padding:36px;text-align:center;color:#94a3b8;font-weight:800">対象月の商品・住所CSVがありません。</div>';
+      if(noData)noData.style.display='none';
+      return;
     }
+    if(noData)noData.style.display='none';
+    if(mode==='pref') renderPrefClean(map,agg,ym,metric,sortMode);
+    else renderOverallClean(map,agg,ym,metric,sortMode);
+  }
+
+  if (window.FIELD_UI) FIELD_UI.renderMap = renderCleanMap;
+
+  document.addEventListener('change', function(e){
+    if(e.target && ['map-metric-sel','field-area-view-mode','field-area-sort-mode','map-data-sel','field-month-sel','field-fy-sel'].includes(e.target.id)){
+      try{ renderCleanMap(); }catch(err){ console.error(err); }
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(()=>{ try{ hideOldCityTable(); if(STATE.view==='field') renderCleanMap(); }catch(e){} }, 300);
   });
 })();
