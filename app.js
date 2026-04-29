@@ -6527,19 +6527,67 @@ if (__renderMonthlyCheckTableOriginalForFieldCsv) {
     STATE.fieldData = (STATE.fieldData || []).filter(d => !(d && (d.source===PRODUCT_SOURCE || d.source===WORKER_SOURCE || d.source==='area_csv')));
     saveAndRefresh(true); UI.toast('現場明細CSVを全件削除しました');
   }
-  function updateImportSelects(){
-    const fy = currentFY();
-    const years = new Set([fy, String(parseInt(fy,10)-1), String(parseInt(fy,10)+1)]);
-    (STATE.datasets||[]).forEach(d=>{ if(d.ym){ const y=parseInt(d.ym.slice(0,4),10); const m=parseInt(d.ym.slice(4,6),10); years.add(String(m<=3?y-1:y)); }});
-    const yearOptions = [...years].sort((a,b)=>parseInt(b)-parseInt(a)).map(y=>`<option value="${y}">${y}年度</option>`).join('');
-    const monthOptions = ['04','05','06','07','08','09','10','11','12','01','02','03'].map(mm=>`<option value="${mm}">${parseInt(mm,10)}月</option>`).join('');
+  function updateImportSelects(force=false){
+    const defaultFY = currentFY();
+    const selected = String(selectedYM() || '');
+    const defaultMonth = selected.length >= 6 ? selected.slice(4,6) : '03';
+    const years = new Set([defaultFY, String(parseInt(defaultFY,10)-1), String(parseInt(defaultFY,10)+1)]);
+
+    (STATE.datasets||[]).forEach(d=>{
+      if(d && d.ym){
+        const y=parseInt(d.ym.slice(0,4),10);
+        const m=parseInt(d.ym.slice(4,6),10);
+        if(!isNaN(y) && !isNaN(m)) years.add(String(m<=3?y-1:y));
+      }
+    });
+    (STATE.areaData||[]).forEach(d=>{
+      if(d && d.ym){
+        const y=parseInt(d.ym.slice(0,4),10);
+        const m=parseInt(d.ym.slice(4,6),10);
+        if(!isNaN(y) && !isNaN(m)) years.add(String(m<=3?y-1:y));
+      }
+    });
+    (STATE.fieldData||[]).forEach(d=>{
+      if(d && d.ym){
+        const y=parseInt(d.ym.slice(0,4),10);
+        const m=parseInt(d.ym.slice(4,6),10);
+        if(!isNaN(y) && !isNaN(m)) years.add(String(m<=3?y-1:y));
+      }
+    });
+
+    const sortedYears = [...years].sort((a,b)=>parseInt(b,10)-parseInt(a,10));
+    const monthList = ['04','05','06','07','08','09','10','11','12','01','02','03'];
+
     ['worker','product'].forEach(kind=>{
       const fySel = $id(kind==='worker'?'field-worker-fy-select':'field-product-fy-select');
       const moSel = $id(kind==='worker'?'field-worker-month-select':'field-product-month-select');
-      if (fySel && !fySel.options.length) fySel.innerHTML = yearOptions;
-      if (moSel && !moSel.options.length) moSel.innerHTML = monthOptions;
-      if (fySel) fySel.value = fy;
-      if (moSel) moSel.value = String(selectedYM()).slice(4,6) || '03';
+      if (!fySel || !moSel) return;
+
+      // ユーザーが選んだ値を先に退避し、再描画しても勝手に2026年4月へ戻さない。
+      const keepFY = fySel.value || defaultFY;
+      const keepMonth = moSel.value || defaultMonth;
+
+      const yearOptions = sortedYears
+        .map(y=>`<option value="${y}" ${String(y)===String(keepFY)?'selected':''}>${y}年度</option>`)
+        .join('');
+      const monthOptions = monthList
+        .map(mm=>`<option value="${mm}" ${String(mm)===String(keepMonth)?'selected':''}>${parseInt(mm,10)}月</option>`)
+        .join('');
+
+      if (force || fySel.dataset.fieldCsvBuilt !== '1') {
+        fySel.innerHTML = yearOptions;
+        fySel.dataset.fieldCsvBuilt = '1';
+      }
+      if (force || moSel.dataset.fieldCsvBuilt !== '1') {
+        moSel.innerHTML = monthOptions;
+        moSel.dataset.fieldCsvBuilt = '1';
+      }
+
+      fySel.value = sortedYears.includes(String(keepFY)) ? String(keepFY) : String(defaultFY);
+      moSel.value = monthList.includes(String(keepMonth)) ? String(keepMonth) : String(defaultMonth);
+
+      const note = $id(kind==='worker'?'field-worker-ym-note':'field-product-ym-note');
+      if (note) note.textContent = `${fySel.value}年度 ${parseInt(moSel.value,10)}月として取り込みます`;
     });
   }
   function updateFieldPeriodSelector(){
@@ -6592,7 +6640,13 @@ if (__renderMonthlyCheckTableOriginalForFieldCsv) {
   document.addEventListener('change', e => {
     if (!e.target) return;
     if (['map-metric-sel','field-area-view-mode','field-area-sort-mode','field-ym-select','field-fy-select'].includes(e.target.id)) setTimeout(()=>{ updateFieldPeriodSelector(); renderMap(); },0);
-    if (['field-worker-fy-select','field-worker-month-select','field-product-fy-select','field-product-month-select'].includes(e.target.id)) updateImportSelects();
+    if (['field-worker-fy-select','field-worker-month-select','field-product-fy-select','field-product-month-select'].includes(e.target.id)) {
+      const kind = e.target.id.includes('worker') ? 'worker' : 'product';
+      const fySel = $id(kind==='worker'?'field-worker-fy-select':'field-product-fy-select');
+      const moSel = $id(kind==='worker'?'field-worker-month-select':'field-product-month-select');
+      const note = $id(kind==='worker'?'field-worker-ym-note':'field-product-ym-note');
+      if (note && fySel && moSel) note.textContent = `${fySel.value}年度 ${parseInt(moSel.value,10)}月として取り込みます`;
+    }
   });
   document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));
   window.FIELD_CSV_REBUILD = { init, renderMap, renderFieldDataList, updateFieldPeriodSelector, importProductFiles, importWorkerFiles, deleteProductMonth, deleteWorkerMonth, deleteMonth, clearAll, productRows, workerRows, productMeta, workerMeta };
