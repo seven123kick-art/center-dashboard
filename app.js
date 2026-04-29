@@ -3609,7 +3609,6 @@ const AREA_PDF_IMPORT = {
 
     for (const pdf of pdfs) await this.importPdf(pdf);
 
-    // PDF以外は従来の取込へ流す
     if (others.length) IMPORT.handleFiles(others);
   },
 
@@ -3622,44 +3621,56 @@ const AREA_PDF_IMPORT = {
       const buffer = await file.arrayBuffer();
       const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
 
-      let text = '';
+      let fullText = '';
+      let allRecords = [];
+
       for (let p = 1; p <= pdf.numPages; p++) {
         const page = await pdf.getPage(p);
         const content = await page.getTextContent();
-        const lines = this.itemsToLines(content.items);
-        text += '\n' + lines.join('\n');
+
+        const pageText = this.itemsToPageText(content.items);
+        fullText += '\n' + pageText;
+
+        const pageRecords = this.parsePageText(pageText);
+        allRecords = allRecords.concat(pageRecords);
       }
 
-      const parsed = this.parseText(text, file.name);
-
-      // 取込年月は画面で選択した年月を強制採用する
       const forcedYM = selectedYMForImport();
       if (!forcedYM) {
         UI.toast('取込対象の年度・月を選択してください', 'warn');
         return;
       }
-      parsed.pdfDetectedYM = parsed.ym || null;
-      parsed.ym = forcedYM;
-      parsed.records.forEach(r => { r.pdfDetectedYM = r.ym || null; r.ym = forcedYM; });
 
-      if (!parsed.records.length) {
-        // 明細が読めなくても年月付きで原文保存する。後続解析の材料を消さない。
+      allRecords = allRecords.map(r => ({
+        ...r,
+        ym: forcedYM,
+        importedAt: new Date().toISOString()
+      }));
+
+      if (!allRecords.length) {
         if (!Array.isArray(STATE.areaData)) STATE.areaData = [];
-        STATE.areaData = STATE.areaData.filter(r => !(r.ym === parsed.ym && r.sourceFileName === file.name));
+        STATE.areaData = STATE.areaData.filter(r => !(r.ym === forcedYM && r.sourceFileName === file.name));
         STATE.areaData.push({
-          ym: parsed.ym,
-          pdfDetectedYM: parsed.pdfDetectedYM || null,
+          ym: forcedYM,
           sourceFileName: file.name,
           rawOnly: true,
-          rawText: text.slice(0, 500000),
+          rawText: fullText.slice(0, 500000),
           importedAt: new Date().toISOString()
         });
         STORE.save();
         renderFieldDataList2();
-        UI.toast(`${ymLabel(parsed.ym)} PDF原文は保存しましたが、明細行は読めませんでした`, 'warn');
+        UI.toast(`${ymLabel(forcedYM)} PDF原文は保存しましたが、明細行は読めませんでした`, 'warn');
         NAV.refresh();
         return;
       }
+
+      const parsed = {
+        ym: forcedYM,
+        fileName: file.name,
+        importedAt: new Date().toISOString(),
+        totalCount: allRecords.reduce((sum, r) => sum + n(r.count), 0),
+        records: allRecords
+      };
 
       this.saveParsed(parsed);
       UI.toast(`${ymLabel(parsed.ym)} としてエリアPDF取込完了：${fmt(parsed.records.length)}行 / ${fmt(parsed.totalCount)}件`);
@@ -3670,128 +3681,131 @@ const AREA_PDF_IMPORT = {
     }
   },
 
-  itemsToLines(items) {
-    // PDF.jsの文字要素をY座標で行にまとめ、X座標順に並べる。
-    // 郵便番号が「35 60 053」、UNKNOWNが「UN KN OWN」に分割される帳票に対応する。
+  itemsToPageText(items) {
+    // y座標で行にまとめ、x座標順に並べる。
+    // この帳票はPDF内部の文字が細かく分割されるため、最終的にページ単位で再構築する。
     const rows = {};
     for (const it of items || []) {
+      const str = String(it.str || '').trim();
+      if (!str) continue;
+
       const y = Math.round((it.transform && it.transform[5]) || 0);
       const key = String(y);
       if (!rows[key]) rows[key] = [];
       rows[key].push({
         x: (it.transform && it.transform[4]) || 0,
-        str: String(it.str || '').trim()
+        str
       });
     }
 
     return Object.keys(rows)
-      .sort((a,b)=>Number(b)-Number(a))
+      .sort((a,b) => Number(b) - Number(a))
       .map(y => rows[y]
-        .filter(i => i.str)
         .sort((a,b)=>a.x-b.x)
         .map(i=>i.str)
         .join(' ')
         .replace(/\s+/g,' ')
-        .trim())
-      .filter(Boolean);
+        .trim()
+      )
+      .filter(Boolean)
+      .join('\n');
   },
 
-  parseText(text, fileName) {
-    let ym = this.inferYMFromFileName(fileName) || null;
-    let shipperCode = '';
-    let shipperName = '';
+  parsePageText(pageText) {
+    const text = String(pageText || '')
+      .replace(/\r/g, '\n')
+      .replace(/[　]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const pageMeta = this.extractPageMeta(text);
     const records = [];
 
-    const lines = String(text || '')
-      .replace(/\r/g, '\n')
-      // 行が崩れて1行になる保険。郵便番号またはUNKNOWNの手前で改行する。
-      .replace(/\s+(?=(?:\d{2}\s*\d{2}\s*\d{3}|\d{7}|UN\s*KN\s*OWN|UNKNOWN)\s+)/gi, '\n')
+    // 郵便番号・UNKNOWNを起点に明細候補へ分割。
+    // 7桁が「35 60 053」のように分割されるケースも吸収する。
+    const chunks = text
+      .replace(/\s+(?=(?:\d{7}|\d{2}\s*\d{2}\s*\d{3}|UNKNOWN|UN\s*KN\s*OWN)\s+)/gi, '\n')
       .split(/\n+/)
-      .map(l => l.trim())
+      .map(x => x.trim())
       .filter(Boolean);
 
-    for (const line of lines) {
-      const meta = this.extractMeta(line);
-      if (meta.ym) ym = meta.ym;
-      if (meta.shipperCode) {
-        shipperCode = meta.shipperCode;
-        shipperName = meta.shipperName;
-        continue;
-      }
-
-      const rec = this.parseDetailLine(line, ym, shipperCode, shipperName);
+    for (const chunk of chunks) {
+      const rec = this.parseRecordChunk(chunk, pageMeta);
       if (rec) records.push(rec);
     }
 
-    records.forEach(r => { if (!r.ym) r.ym = ym; });
-
-    return {
-      ym,
-      fileName,
-      importedAt: new Date().toISOString(),
-      totalCount: records.reduce((s,r)=>s+n(r.count),0),
-      records
-    };
+    return records;
   },
 
-  extractMeta(line) {
-    const t = String(line || '').replace(/\s+/g, ' ');
-    let ym = null;
+  extractPageMeta(text) {
+    const t = String(text || '').replace(/\s+/g,' ');
     let shipperCode = '';
     let shipperName = '';
+    let pdfDateFrom = '';
+    let pdfDateTo = '';
 
-    // 通常の 2026/03/01 と、PDF分割の 2 0 2 6/03/01 の両方に対応
-    const dateMatch = t.match(/配達完了日[:：]\s*([0-9\s]{4,})\/\s*(\d{2})\/\s*\d{2}/);
-    if (dateMatch) {
-      const y = dateMatch[1].replace(/\s+/g,'').slice(0,4);
-      if (y.length === 4) ym = `${y}${dateMatch[2]}`;
-    }
-
-    const shipperMatch = t.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+?)(?:\s+配達完了日|$)/);
+    const shipperMatch = t.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+?)\s+配達完了日/);
     if (shipperMatch) {
       shipperCode = shipperMatch[1];
-      shipperName = shipperMatch[2].replace(/\s+/g,' ').trim();
+      shipperName = shipperMatch[2].trim();
     }
 
-    return { ym, shipperCode, shipperName };
+    const dateMatch = t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})\s+(\d{4})\/(\d{2})\/(\d{2})/);
+    if (dateMatch) {
+      pdfDateFrom = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+      pdfDateTo = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`;
+    }
+
+    return { shipperCode, shipperName, pdfDateFrom, pdfDateTo };
   },
 
-  parseDetailLine(line, ym, shipperCode, shipperName) {
-    const rowText = String(line || '').replace(/\s+/g, ' ').trim();
-    if (!rowText || /郵便番号\s+住所\s+件数/.test(rowText) || /^合計[:：]/.test(rowText)) return null;
+  parseRecordChunk(chunk, meta) {
+    const line = String(chunk || '').replace(/\s+/g, ' ').trim();
+    if (!line) return null;
+    if (/郵便番号\s+住所\s+件数/.test(line)) return null;
+    if (/^合計[:：]/.test(line)) return null;
 
-    const m0 = rowText.match(/^((?:\d{2}\s*\d{2}\s*\d{3})|(?:\d{7})|(?:UN\s*KN\s*OWN)|UNKNOWN)\s+(.+)$/i);
-    if (!m0) return null;
+    const head = line.match(/^((?:\d{7})|(?:\d{2}\s*\d{2}\s*\d{3})|UNKNOWN|UN\s*KN\s*OWN)\s+(.+)$/i);
+    if (!head) return null;
 
-    let zip = m0[1].replace(/\s+/g, '').toUpperCase();
-    if (zip === 'UNKNOWN') zip = 'UNKNOWN';
+    let zip = head[1].replace(/\s+/g,'').toUpperCase();
+    if (zip === 'UNKNOWN' || zip === 'UNKNOWN') zip = 'UNKNOWN';
 
-    const rest = m0[2].trim();
+    const rest = head[2].trim();
 
-    // 最後12数値 = 件数, 配送料, 幹線料, 付帯料金, サイズ①〜⑧
+    // 後ろから12個の数値を拾う。
+    // 件数、配送料、幹線料、付帯料金、サイズ①〜⑧。
     const nums = [];
-    let idx = rest.length;
+    let cut = rest.length;
     const tailRe = /(-?[\d,]+)\s*$/;
 
     while (nums.length < 12) {
-      const part = rest.slice(0, idx).trim();
+      const part = rest.slice(0, cut).trim();
       const m = part.match(tailRe);
       if (!m) break;
       nums.unshift(toNumberSafe(m[1]));
-      idx = part.slice(0, m.index).trimEnd().length;
+      cut = part.slice(0, m.index).trimEnd().length;
     }
 
     if (nums.length < 12) return null;
 
-    const address = rest.slice(0, idx).replace(/\s+/g,'').trim();
-    if (!address) return null;
+    let address = rest.slice(0, cut).replace(/\s+/g, '').trim();
+    if (!address || address === '住所') return null;
+
+    // 住所末尾に混入する帳票ヘッダ断片を除去
+    address = address
+      .replace(/郵便番号.*$/, '')
+      .replace(/件数.*$/, '')
+      .trim();
 
     const [count, deliveryFee, trunkFee, extraFee, s1,s2,s3,s4,s5,s6,s7,s8] = nums;
 
     return {
-      ym,
-      shipperCode,
-      shipperName,
+      ym: null,
+      shipperCode: meta.shipperCode || '',
+      shipperName: meta.shipperName || '',
+      pdfDateFrom: meta.pdfDateFrom || '',
+      pdfDateTo: meta.pdfDateTo || '',
       zip,
       address,
       area: normalizeAreaName(address),
@@ -3799,15 +3813,8 @@ const AREA_PDF_IMPORT = {
       deliveryFee,
       trunkFee,
       extraFee,
-      size: [s1,s2,s3,s4,s5,s6,s7,s8],
-      importedAt: new Date().toISOString()
+      size: [s1,s2,s3,s4,s5,s6,s7,s8]
     };
-  },
-
-  inferYMFromFileName(name) {
-    const m = String(name || '').match(/(20\d{2})[-_年]?([01]\d)/);
-    if (!m) return null;
-    return `${m[1]}${m[2]}`;
   },
 
   saveParsed(parsed) {
@@ -3837,13 +3844,14 @@ const AREA_PDF_IMPORT = {
     for (const r of rows) {
       const area = r.area || '未分類';
       if (!areas[area]) areas[area] = { count:0, amount:0, shippers:{}, size:[0,0,0,0,0,0,0,0] };
+
       areas[area].count += n(r.count);
       areas[area].amount += n(r.deliveryFee) + n(r.trunkFee) + n(r.extraFee);
-
       for (let i=0;i<8;i++) areas[area].size[i] += n(r.size?.[i]);
 
       const shipper = r.shipperName || r.shipperCode || '未設定';
       if (!areas[area].shippers[shipper]) areas[area].shippers[shipper] = { count:0, amount:0, size:[0,0,0,0,0,0,0,0] };
+
       areas[area].shippers[shipper].count += n(r.count);
       areas[area].shippers[shipper].amount += n(r.deliveryFee) + n(r.trunkFee) + n(r.extraFee);
       for (let i=0;i<8;i++) areas[area].shippers[shipper].size[i] += n(r.size?.[i]);
