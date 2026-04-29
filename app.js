@@ -5540,3 +5540,169 @@ if (__renderMonthlyCheckTableOriginalForFieldCsv) {
     setTimeout(()=>{ try{ finalInjectStyle(); finalHideOldArtifacts(); if(STATE.view==='field') finalRenderMap(); }catch(e){} }, 300);
   });
 })();
+
+/* =========================================================
+   2026-04-29 現場CSV最終補正
+   ・エリア地図の白背景から文字がはみ出す問題を修正
+   ・現場明細の月別削除／全件削除を areaData まで確実に削除
+   ・削除後にクラウド full_state へ即時反映して、再読込で復活しないようにする
+========================================================= */
+(function(){
+  'use strict';
+
+  function safeCall(fn){ try { if (typeof fn === 'function') fn(); } catch(e){ console.error(e); } }
+
+  function injectFieldLayoutFix(){
+    let st = document.getElementById('field-csv-overflow-delete-fix-style');
+    if (!st) {
+      st = document.createElement('style');
+      st.id = 'field-csv-overflow-delete-fix-style';
+      document.head.appendChild(st);
+    }
+    st.textContent = `
+      /* エリア地図カードの背景・文字はみ出し防止 */
+      #field-map{
+        display:block!important;
+        position:relative!important;
+        height:auto!important;
+        min-height:0!important;
+        max-height:none!important;
+        overflow:hidden!important;
+        background:#fff!important;
+      }
+      #field-map .field-final-wrap{
+        display:block!important;
+        width:100%!important;
+        max-width:100%!important;
+        background:#fff!important;
+        overflow:hidden!important;
+        border-radius:0 0 8px 8px;
+      }
+      #field-map .field-final-row{
+        width:100%!important;
+        max-width:100%!important;
+        grid-template-columns:44px minmax(160px,280px) minmax(120px,1fr) 120px!important;
+        padding:8px 0!important;
+      }
+      #field-map .field-final-row.no-rank{
+        grid-template-columns:minmax(160px,280px) minmax(120px,1fr) 120px!important;
+      }
+      #field-map .field-final-name,
+      #field-map .field-final-value,
+      #field-map .field-final-sub{
+        min-width:0!important;
+        max-width:100%!important;
+        overflow:hidden!important;
+        text-overflow:ellipsis!important;
+      }
+      #field-map .field-final-track{
+        min-width:0!important;
+        width:100%!important;
+        max-width:100%!important;
+      }
+      #field-map .field-final-bar{
+        max-width:100%!important;
+      }
+      #field-map .field-final-pref,
+      #field-map .field-final-pref-body{
+        max-width:100%!important;
+        overflow:hidden!important;
+      }
+      #field-map .field-final-pref summary{
+        grid-template-columns:100px minmax(120px,1fr) 100px 110px 70px!important;
+        max-width:100%!important;
+        overflow:hidden!important;
+      }
+      #field-map + .card,
+      .field-final-old-table-hidden{
+        display:none!important;
+      }
+      @media(max-width:1100px){
+        #field-map .field-final-row,
+        #field-map .field-final-row.no-rank{
+          grid-template-columns:36px minmax(120px,220px) minmax(100px,1fr) 105px!important;
+        }
+      }
+    `;
+  }
+
+  function getFieldYMForDelete(){
+    const sel = document.getElementById('field-month-sel');
+    if (sel && sel.value) return sel.value;
+    if (typeof dashboardSelectedYM === 'function') return dashboardSelectedYM();
+    return (window.STATE && STATE.selYM) || null;
+  }
+
+  async function pushFieldDeletionToCloud(){
+    if (typeof STORE !== 'undefined' && STORE.save) STORE.save();
+    if (typeof CLOUD !== 'undefined' && CLOUD.pushAll) {
+      try {
+        await CLOUD.pushAll();
+        if (typeof UI !== 'undefined' && UI.updateCloudBadge) UI.updateCloudBadge('ok');
+      } catch(e) {
+        console.error(e);
+        if (typeof UI !== 'undefined' && UI.toast) UI.toast('クラウド反映に失敗しました。再度「今すぐ同期」を押してください。', 'warn');
+      }
+    }
+  }
+
+  function refreshFieldAfterDelete(){
+    safeCall(()=>renderFieldDataList2());
+    safeCall(()=>window.FIELD_UI && FIELD_UI.updatePeriodBadge && FIELD_UI.updatePeriodBadge());
+    safeCall(()=>window.FIELD_UI && FIELD_UI.renderMap && FIELD_UI.renderMap());
+    safeCall(()=>NAV && NAV.refresh && NAV.refresh());
+    safeCall(()=>UI && UI.updateSaveStatus && UI.updateSaveStatus());
+  }
+
+  async function deleteFieldMonthFixed(ym){
+    if (!ym) ym = getFieldYMForDelete();
+    if (!ym) return;
+    if (!confirm(`${ymLabel(ym)} の現場明細CSVを削除しますか？\n\n作業者CSV・商品住所CSVの両方を削除します。`)) return;
+
+    STATE.fieldData = (STATE.fieldData || []).filter(d => d && d.ym !== ym);
+    STATE.areaData  = (STATE.areaData  || []).filter(r => r && r.ym !== ym);
+
+    refreshFieldAfterDelete();
+    await pushFieldDeletionToCloud();
+    refreshFieldAfterDelete();
+
+    if (typeof UI !== 'undefined' && UI.toast) UI.toast(`${ymLabel(ym)} の現場明細CSVを削除しました`);
+  }
+
+  async function clearFieldAllFixed(){
+    if (!confirm('現場明細データを全月削除しますか？\n\n作業者CSV・商品住所CSV・エリア集計をすべて削除します。')) return;
+
+    STATE.fieldData = [];
+    STATE.areaData  = [];
+
+    refreshFieldAfterDelete();
+    await pushFieldDeletionToCloud();
+    refreshFieldAfterDelete();
+
+    if (typeof UI !== 'undefined' && UI.toast) UI.toast('現場明細データを全件削除しました');
+  }
+
+  function forceReplaceDeleteHandlers(){
+    if (typeof IMPORT !== 'undefined') IMPORT.deleteFieldData = deleteFieldMonthFixed;
+    if (typeof DATA_RESET !== 'undefined') DATA_RESET.clearFieldAll = clearFieldAllFixed;
+  }
+
+  injectFieldLayoutFix();
+  forceReplaceDeleteHandlers();
+
+  document.addEventListener('DOMContentLoaded', function(){
+    injectFieldLayoutFix();
+    forceReplaceDeleteHandlers();
+    setTimeout(function(){
+      injectFieldLayoutFix();
+      forceReplaceDeleteHandlers();
+      safeCall(()=>window.FIELD_UI && FIELD_UI.renderMap && FIELD_UI.renderMap());
+    }, 300);
+  });
+
+  document.addEventListener('change', function(e){
+    if (e.target && ['map-metric-sel','field-area-view-mode','field-area-sort-mode','map-data-sel','field-month-sel','field-fy-sel'].includes(e.target.id)) {
+      setTimeout(injectFieldLayoutFix, 0);
+    }
+  });
+})();
