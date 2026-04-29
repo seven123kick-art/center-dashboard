@@ -437,6 +437,66 @@ const STORE = {
   },
 };
 
+
+/* ════════ 荷主別売上ヘルパー（Y列=荷主コード、AA列=荷主名） ════════ */
+function shipperCode3FromCode(code) {
+  const s = String(code ?? '').replace(/[\s　]/g, '').trim();
+  if (!s) return '';
+  return s.slice(0, 3);
+}
+function normalizeShipperDisplayName(code3, name) {
+  let t = String(name ?? '')
+    .replace(/[\s　]+/g, ' ')
+    .replace(/（.*?）/g, '')
+    .replace(/\(.*?\)/g, '')
+    .trim();
+
+  // まず名称で分かるものを強制統一する。
+  // 荷主コード頭3桁で集計した後の表示名を整えるための処理。
+  if (/でんきち/.test(t)) return 'でんきち';
+  if (/コジマ/.test(t)) return 'コジマ';
+  if (/ビックカメラ|ビックカメラ/.test(t)) return 'ビックカメラ';
+
+  // よくある法人表記は表示だけ簡略化する。
+  t = t
+    .replace(/^株式会社/, '')
+    .replace(/^\(株\)/, '')
+    .replace(/^㈱/, '')
+    .replace(/株式会社$/, '')
+    .trim();
+
+  return t || code3 || '未設定';
+}
+function addShipperIncome(shipperMap, row, amount) {
+  // Y列=荷主コード、AA列=荷主名（0始まり：Y=24、AA=26）
+  const code = String(row?.[24] ?? '').trim();
+  const rawName = String(row?.[26] ?? '').trim();
+  const code3 = shipperCode3FromCode(code);
+  if (!code3 && !rawName) return;
+
+  const name = normalizeShipperDisplayName(code3, rawName);
+  const key = code3 || name;
+  if (!shipperMap[key]) {
+    shipperMap[key] = { code3:key, name, income:0, count:0, rawNames:{}, rawCodes:{} };
+  }
+  shipperMap[key].income += n(amount);
+  shipperMap[key].count += 1;
+  if (rawName) shipperMap[key].rawNames[rawName] = (shipperMap[key].rawNames[rawName] || 0) + 1;
+  if (code) shipperMap[key].rawCodes[code] = (shipperMap[key].rawCodes[code] || 0) + 1;
+}
+function finalizeShipperMap(shipperMap) {
+  const out = {};
+  Object.values(shipperMap || {}).forEach(v => {
+    const label = normalizeShipperDisplayName(v.code3, v.name);
+    if (!out[label]) out[label] = { income:0, count:0, code3:v.code3 || '', rawNames:{}, rawCodes:{} };
+    out[label].income += n(v.income);
+    out[label].count += n(v.count);
+    Object.assign(out[label].rawNames, v.rawNames || {});
+    Object.assign(out[label].rawCodes, v.rawCodes || {});
+  });
+  return out;
+}
+
 /* ════════ §5 CSV ════════════════════════════════════════════════ */
 const CSV = {
   async read(file) {
@@ -470,7 +530,7 @@ const CSV = {
     const rows = this.toRows(text);
     const ALL = new Set([...CONFIG.INCOME_KEYS,...CONFIG.EXPENSE_KEYS,...CONFIG.INCOME_SUB_KEYS]);
     const result = {};
-    const shippers = {};
+    const shipperMap = {};
     let found = 0;
 
     if (!rows.length) return null;
@@ -544,40 +604,21 @@ const CSV = {
       if (val !== null) {
         result[label] = (result[label] || 0) + val;
 
-        // 荷主別売上集計：Y列=荷主コード、AA列=荷主名。
-        // 別荷主で頭3桁が同じになることはない前提で、頭3桁単位に統合する。
-        // 売上ランキングのため、収入系科目だけを対象にする。
-        if (CONFIG.INCOME_KEYS.includes(label) || CONFIG.INCOME_SUB_KEYS.includes(label)) {
-          const shipCodeRaw = row[24]; // Y列：荷主コード
-          const shipNameRaw = row[26]; // AA列：荷主名
-          const ship = normalizeShipperGroup(shipCodeRaw, shipNameRaw);
-          if (ship.key && val > 0) {
-            if (!shippers[ship.key]) {
-              shippers[ship.key] = { code: ship.key, name: ship.name, income: 0, count: 0, details: {} };
-            }
-            shippers[ship.key].income += val;
-            shippers[ship.key].count += 1;
-
-            const detailKey = String(shipCodeRaw || ship.key).trim() + '|' + String(shipNameRaw || ship.name).trim();
-            if (!shippers[ship.key].details[detailKey]) {
-              shippers[ship.key].details[detailKey] = {
-                code: String(shipCodeRaw || '').trim(),
-                name: String(shipNameRaw || '').trim(),
-                income: 0,
-                count: 0
-              };
-            }
-            shippers[ship.key].details[detailKey].income += val;
-            shippers[ship.key].details[detailKey].count += 1;
-          }
+        // 荷主別売上：Y列（荷主コード）とAA列（荷主名）を使う。
+        // 収入科目だけを荷主別売上に集計する。
+        if ((CONFIG.INCOME_KEYS.includes(label) || CONFIG.INCOME_SUB_KEYS.includes(label))) {
+          addShipperIncome(shipperMap, row, val);
         }
 
         found++;
       }
     }
 
-    if (Object.keys(shippers).length) result._shippers = shippers;
-    return found > 0 ? result : null;
+    if (found > 0) {
+      result.__shippers = finalizeShipperMap(shipperMap);
+      return result;
+    }
+    return null;
   },
 
   // 計画データ（貼り付けテキスト）解析
@@ -652,38 +693,6 @@ const CSV = {
 /* ════════ §6 PROCESS（CSV生データ→データセット） ══════════════ */
 function n(v) { return typeof v==='number' ? v : (parseFloat(v)||0); }
 
-function normalizeShipperGroup(code, name) {
-  const rawCode = String(code || '').trim();
-  const key = rawCode.replace(/[^0-9A-Za-z]/g, '').slice(0, 3);
-  const rawName = String(name || '').trim();
-  const cleanName = rawName
-    .replace(/（[^）]*）/g, '')
-    .replace(/\([^)]*\)/g, '')
-    .replace(/[　\s]+$/g, '')
-    .trim();
-  return { key: key || cleanName || rawName, name: cleanName || rawName || key || '荷主不明' };
-}
-
-function normalizeShipperMap(map) {
-  const out = {};
-  if (!map || typeof map !== 'object') return out;
-  Object.entries(map).forEach(([key, v]) => {
-    if (!v || typeof v !== 'object') return;
-    const income = n(v.income);
-    if (income <= 0) return;
-    const name = String(v.name || key || '').trim() || '荷主不明';
-    out[name] = { code: v.code || key, name, income, count: n(v.count), details: v.details || {} };
-  });
-  return out;
-}
-
-function getDatasetShippers(ds) {
-  if (!ds) return {};
-  if (ds.shippers && Object.keys(ds.shippers).length) return normalizeShipperMap(ds.shippers);
-  if (ds.rows && ds.rows._shippers && Object.keys(ds.rows._shippers).length) return normalizeShipperMap(ds.rows._shippers);
-  return {};
-}
-
 function processDataset(ym, type, rows) {
   const totalIncome  = CONFIG.INCOME_KEYS.reduce((s,k)=>s+n(rows[k]),0);
   const totalExpense = CONFIG.EXPENSE_KEYS.reduce((s,k)=>s+n(rows[k]),0);
@@ -698,11 +707,11 @@ function processDataset(ym, type, rows) {
   const fixedRate       = totalIncome > 0 ? fixedCost/totalIncome*100 : 0;
   const profitRate      = totalIncome > 0 ? profit/totalIncome*100    : 0;
 
-  const shippers = getDatasetShippers({ rows });
+  const shippers = rows && rows.__shippers ? rows.__shippers : {};
 
-  return { ym, type, rows, totalIncome, totalExpense, profit,
+  return { ym, type, rows, shippers, totalIncome, totalExpense, profit,
     pseudoLaborRate, variableRate, fixedRate, profitRate,
-    laborCost, fixedCost, varCost, shippers, importedAt: new Date().toISOString() };
+    laborCost, fixedCost, varCost, importedAt: new Date().toISOString() };
 }
 
 function upsertDataset(ds) {
@@ -2118,12 +2127,11 @@ function renderDashboard() {
     }
   }
 
-  // 荷主バー（確定/速報CSVのY列=荷主コード、AA列=荷主名から自動集計）
+  // 荷主バー（shippers存在時のみ）
   const shipArea = document.getElementById('shipper-bars-area');
   if (shipArea) {
-    const shipMap = getDatasetShippers(ds);
-    if (Object.keys(shipMap).length) {
-      const items = Object.entries(shipMap).sort((a,b)=>b[1].income-a[1].income).slice(0,8);
+    if (ds.shippers && Object.keys(ds.shippers).length) {
+      const items = Object.entries(ds.shippers).sort((a,b)=>b[1].income-a[1].income).slice(0,8);
       const maxV = Math.max(...items.map(x=>x[1].income),1);
       shipArea.innerHTML = items.map(([name,d],i)=>`
         <div class="mbar-row">
@@ -2132,7 +2140,7 @@ function renderDashboard() {
           <div class="mbar-val">${fmtK(d.income)}千</div>
         </div>`).join('');
     } else {
-      shipArea.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">この月の収支CSVから荷主コード（Y列）・荷主名（AA列）を取得できませんでした。CSVを再取込してください。</div>';
+      shipArea.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">荷主データは別途CSV取込が必要です</div>';
     }
   }
 }
@@ -2428,8 +2436,7 @@ function renderShipper() {
 
   const ds = selectedDatasetInSelectedFiscalYear();
   const chartEl = document.getElementById('c-shipper-bar');
-  const shipMap = getDatasetShippers(ds);
-  const hasShippers = Object.keys(shipMap).length > 0;
+  const hasShippers = ds && ds.shippers && Object.keys(ds.shippers).length > 0;
 
   const noticeId = 'shipper-notice';
   let noticeEl = document.getElementById(noticeId);
@@ -2444,7 +2451,7 @@ function renderShipper() {
   if (noticeEl) noticeEl.innerHTML = '';
   if (!ds) return;
 
-  const items = Object.entries(shipMap).sort((a,b)=>b[1].income-a[1].income);
+  const items = Object.entries(ds.shippers||{}).sort((a,b)=>b[1].income-a[1].income);
   CHART_MGR.make('c-shipper-bar', {
     type:'bar',
     data:{labels:items.map(x=>x[0]), datasets:[{
