@@ -3600,7 +3600,6 @@ const TSV_IMPORT = {
 
 // 現場データ取込2（インポート画面の2つ目のゾーン）
 
-/* 2026-04-29 修正：郵便番号と住所がスペース無しで抽出されるPDFに対応 */
 /* ════════ §27-A AREA PDF IMPORT（荷主別配送エリア別物量PDF） ════════
    対象帳票：荷主別配送エリア別物量
    取込内容：郵便番号・住所・件数・配送料・幹線料・付帯料金・サイズ①〜⑧
@@ -3704,9 +3703,9 @@ const AREA_PDF_IMPORT = {
   extractMetaFromLine(line) {
     const t = String(line || '').replace(/\s+/g,' ').trim();
     const meta = {};
-    const shipperMatch = t.match(/荷主[:：]\s*([0-9A-Z]{6,})\s*(.+?)(?:\s*配達完了日|$)/);
+    const shipperMatch = t.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+?)(?:\s+配達完了日|$)/);
     if (shipperMatch) { meta.shipperCode = shipperMatch[1]; meta.shipperName = shipperMatch[2].trim(); }
-    const dateMatch = t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})(?:\s*[～~\-–—]?\s*)(\d{4})\/(\d{2})\/(\d{2})/);
+    const dateMatch = t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})\s+(\d{4})\/(\d{2})\/(\d{2})/);
     if (dateMatch) { meta.pdfDateFrom = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`; meta.pdfDateTo = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`; }
     return meta;
   },
@@ -3719,7 +3718,7 @@ const AREA_PDF_IMPORT = {
     if (/郵便番号\s+住所\s+件数/.test(t)) return null;
     if (/^\/?\s*\/\s*\/?/.test(t)) return null;
     if (/^合計[:：]/.test(t)) return null;
-    const head = t.match(/^((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)\s*(.+)$/i);
+    const head = t.match(/^((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)\s+(.+)$/i);
     if (!head) return null;
     let zip = head[1].replace(/\s+/g,'').toUpperCase();
     if (zip.includes('UNKNOWN')) zip = 'UNKNOWN';
@@ -4491,3 +4490,99 @@ function parseAreaVolumePdfText(text) {
 
   return records;
 }
+/* DEBUG_APPEND_START_20260429
+   app.jsのみ：PDF取込デバッグ表示版
+   center.html / app.css / index / toda / kitasaitama は変更不要
+*/
+(function(){
+  'use strict';
+  function escDebug(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function numDebug(v){var n=Number(String(v==null?'':v).replace(/,/g,'').replace(/[^0-9.-]/g,''));return Number.isFinite(n)?n:0;}
+  function toastDebug(msg,type){if(typeof UI!=='undefined'&&UI.toast)UI.toast(msg,type||'ok');else alert(msg);}
+  function ymLabelDebug(ym){if(typeof ymLabel==='function')return ymLabel(ym);return ym?ym.slice(0,4)+'年'+parseInt(ym.slice(4,6),10)+'月':'対象月未選択';}
+  function fmtDebug(v){if(typeof fmt==='function')return fmt(v);return new Intl.NumberFormat('ja-JP').format(Number(v||0));}
+  function areaNameDebug(address){
+    if(typeof normalizeAreaName==='function')return normalizeAreaName(address);
+    var t=String(address||'').replace(/\s+/g,'');
+    if(!t||t.indexOf('郵便番号未登録')>=0||t==='UNKNOWN')return '郵便番号未登録';
+    var pref=(t.match(/^(東京都|北海道|(?:京都|大阪)府|.{2,3}県)/)||['',''])[1];
+    var rest=pref?t.slice(pref.length):t;
+    var m=rest.match(/^(.+?[市区町村])/);
+    return m?pref+m[1]:(pref?pref+rest:rest);
+  }
+  var PDF_IMPORT_DEBUG={
+    lastReport:null,
+    getYM:function(){
+      try{
+        var fySel=document.getElementById('field-pdf-fy-select');
+        var mSel=document.getElementById('field-pdf-month-select');
+        if(fySel&&mSel&&fySel.value&&mSel.value){
+          var fy=String(fySel.value);var mm=String(mSel.value).padStart(2,'0');
+          var yyyy=(['01','02','03'].indexOf(mm)>=0)?String(parseInt(fy,10)+1):fy;
+          if(typeof STATE!=='undefined'){STATE.fiscalYear=fy;STATE.selYM=yyyy+mm;}
+          return yyyy+mm;
+        }
+        if(typeof selectedYMForImport==='function')return selectedYMForImport();
+        if(typeof STATE!=='undefined'&&STATE.selYM)return STATE.selYM;
+      }catch(e){}
+      return null;
+    },
+    showPanel:function(report){
+      this.lastReport=report;window.PDF_IMPORT_DEBUG_REPORT=report;console.log('PDF_IMPORT_DEBUG_REPORT',report);
+      var html=''+
+      '<div style="margin:12px 0;padding:14px;border:2px solid #f59e0b;border-radius:10px;background:#fff7ed;color:#7c2d12;font-size:12px;line-height:1.7">'+
+      '<div style="font-weight:900;font-size:14px;margin-bottom:8px">PDF取込デバッグ結果</div>'+
+      '<div><b>結論：</b>'+(report.records.length?'明細行を取得できました。保存処理まで実行しています。':'まだ明細行を取得できていません。下の候補行・文字部品・PDF生文字を確認します。')+'</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0">'+
+      '<div style="background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:8px"><b>対象月</b><br>'+escDebug(ymLabelDebug(report.ym))+'</div>'+
+      '<div style="background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:8px"><b>ページ数</b><br>'+escDebug(report.numPages)+'</div>'+
+      '<div style="background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:8px"><b>PDF文字部品</b><br>'+escDebug(report.totalItems)+'</div>'+
+      '<div style="background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:8px"><b>取得明細</b><br>'+escDebug(report.records.length)+' 行</div></div>'+
+      '<details open style="margin-top:8px"><summary style="cursor:pointer;font-weight:900">候補行サンプル（最大80行）</summary><textarea readonly style="width:100%;height:180px;margin-top:6px;font-family:Consolas,monospace;font-size:11px;border:1px solid #fdba74;border-radius:6px;padding:8px;background:#fff">'+escDebug(report.candidateLines.slice(0,80).join('\n'))+'</textarea></details>'+
+      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:900">PDF.js 文字部品サンプル（座標付き・最大120件）</summary><textarea readonly style="width:100%;height:180px;margin-top:6px;font-family:Consolas,monospace;font-size:11px;border:1px solid #fdba74;border-radius:6px;padding:8px;background:#fff">'+escDebug(report.itemSamples.slice(0,120).join('\n'))+'</textarea></details>'+
+      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:900">PDF生文字サンプル（先頭8000字）</summary><textarea readonly style="width:100%;height:220px;margin-top:6px;font-family:Consolas,monospace;font-size:11px;border:1px solid #fdba74;border-radius:6px;padding:8px;background:#fff">'+escDebug(report.fullText.slice(0,8000))+'</textarea></details>'+
+      '<div style="margin-top:8px;color:#92400e">※ この内容をスクショ、またはテキストコピーして送ってください。</div></div>';
+      var msg=document.getElementById('field-import-msg2')||document.getElementById('upload-msg');
+      if(msg)msg.innerHTML=html;else{var box=document.getElementById('pdf-import-debug-floating');if(!box){box=document.createElement('div');box.id='pdf-import-debug-floating';box.style.cssText='position:fixed;left:220px;right:20px;bottom:20px;z-index:999999;max-height:70vh;overflow:auto;background:#fff;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.25);padding:10px';document.body.appendChild(box);}box.innerHTML=html;}
+    },
+    itemsToRows:function(items,pageNo){
+      var rows=[];(items||[]).forEach(function(it){var str=String(it.str||'').trim();if(!str)return;var tr=it.transform||[];var x=Number(tr[4]||0);var y=Number(tr[5]||0);var row=rows.find(function(r){return Math.abs(r.y-y)<=2.8;});if(!row){row={pageNo:pageNo,y:y,items:[]};rows.push(row);}row.items.push({x:x,y:y,str:str});});
+      rows.sort(function(a,b){return b.y-a.y;});rows.forEach(function(r){r.items.sort(function(a,b){return a.x-b.x;});});return rows;
+    },
+    buildCandidateLines:function(rows,rawJoined){
+      var lines=[];rows.forEach(function(r){var spaced=r.items.map(function(i){return i.str;}).join(' ').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();var compact=r.items.map(function(i){return i.str;}).join('').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();if(spaced)lines.push(spaced);if(compact&&compact!==spaced)lines.push(compact);});
+      var raw=String(rawJoined||'').replace(/(20\d{2}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+Page)/g,'\n$1').replace(/((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)(?=\s*[\u3040-\u30ff\u3400-\u9fffA-Za-z])/gi,'\n$1').replace(/(合計[:：])/g,'\n$1');
+      raw.split(/\n+/).forEach(function(x){var s=x.replace(/[　]/g,' ').replace(/\s+/g,' ').trim();if(s)lines.push(s);});
+      return Array.from(new Set(lines)).filter(Boolean);
+    },
+    parseLine:function(line,meta,pageNo){
+      var t=String(line||'').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();if(!t)return null;
+      if(/荷主別配送エリア別物量|郵便番号\s*住所\s*件数|配達完了日|管理者印|担当者印|^合計[:：]|^\/?\s*\/?\s*\/?/.test(t))return null;
+      var head=t.match(/((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)\s*(.+)$/i);if(!head)return null;
+      var zip=head[1].replace(/\s+/g,'').toUpperCase();if(/UNKNOWN/.test(zip))zip='UNKNOWN';var rest=head[2].trim();
+      var nums=[];var remain=rest;while(nums.length<12){var m=remain.match(/(?:^|\s)(-?\d[\d,]*)(?:\s*)$/);if(!m)break;nums.unshift(numDebug(m[1]));remain=remain.slice(0,m.index).trimEnd();}
+      if(nums.length<12)return null;var tail=nums.slice(-12);var address=remain.replace(/\s+/g,'').trim();if(!address||address==='住所')return null;
+      return {ym:null,source:'area_pdf',pageNo:pageNo,shipperCode:meta.shipperCode||'',shipperName:meta.shipperName||'',pdfDateFrom:meta.pdfDateFrom||'',pdfDateTo:meta.pdfDateTo||'',zip:zip,address:address,area:areaNameDebug(address),count:tail[0],deliveryFee:tail[1],trunkFee:tail[2],extraFee:tail[3],size:tail.slice(4,12)};
+    },
+    updateMeta:function(line,meta){
+      var t=String(line||'').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();var s=t.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+?)(?:\s+配達完了日|$)/);if(s){meta.shipperCode=s[1];meta.shipperName=s[2].trim();}
+      var d=t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})\s+(\d{4})\/(\d{2})\/(\d{2})/);if(d){meta.pdfDateFrom=d[1]+'-'+d[2]+'-'+d[3];meta.pdfDateTo=d[4]+'-'+d[5]+'-'+d[6];}
+    },
+    saveParsed:function(ym,fileName,records){
+      if(typeof STATE==='undefined')return;if(!Array.isArray(STATE.areaData))STATE.areaData=[];STATE.areaData=STATE.areaData.filter(function(r){return !(r.ym===ym&&r.sourceFileName===fileName);});records.forEach(function(r){STATE.areaData.push(Object.assign({},r,{ym:ym,sourceFileName:fileName,importedAt:new Date().toISOString()}));});
+      var areas={};records.forEach(function(r){var area=r.area||'未分類';if(!areas[area])areas[area]={count:0,amount:0,shippers:{},size:[0,0,0,0,0,0,0,0]};areas[area].count+=Number(r.count||0);areas[area].amount+=Number(r.deliveryFee||0)+Number(r.trunkFee||0)+Number(r.extraFee||0);for(var i=0;i<8;i++)areas[area].size[i]+=Number((r.size||[])[i]||0);var shipper=r.shipperName||r.shipperCode||'未設定';if(!areas[area].shippers[shipper])areas[area].shippers[shipper]={count:0,amount:0,size:[0,0,0,0,0,0,0,0]};areas[area].shippers[shipper].count+=Number(r.count||0);areas[area].shippers[shipper].amount+=Number(r.deliveryFee||0)+Number(r.trunkFee||0)+Number(r.extraFee||0);for(var j=0;j<8;j++)areas[area].shippers[shipper].size[j]+=Number((r.size||[])[j]||0);});
+      if(!Array.isArray(STATE.fieldData))STATE.fieldData=[];STATE.fieldData=STATE.fieldData.filter(function(d){return d.ym!==ym;});STATE.fieldData.push({ym:ym,source:'area_pdf',areas:areas,importedAt:new Date().toISOString()});STATE.fieldData.sort(function(a,b){return String(a.ym).localeCompare(String(b.ym));});if(typeof STORE!=='undefined'&&STORE.save)STORE.save();if(typeof renderFieldDataList2==='function')renderFieldDataList2();if(typeof NAV!=='undefined'&&NAV.refresh)NAV.refresh();
+    }
+  };
+  window.PDF_IMPORT_DEBUG=PDF_IMPORT_DEBUG;
+  function installDebugOverride(){
+    if(typeof AREA_PDF_IMPORT==='undefined'){console.warn('AREA_PDF_IMPORT が未定義です');return;}
+    AREA_PDF_IMPORT.handleFiles=async function(files){try{if(typeof ensureFieldImportYMControls==='function')ensureFieldImportYMControls();}catch(e){}try{if(typeof syncFieldImportYMFromControls==='function')syncFieldImportYMFromControls();}catch(e){}var arr=Array.from(files||[]);var pdfs=arr.filter(function(f){return /\.pdf$/i.test(f.name);});var others=arr.filter(function(f){return !/\.pdf$/i.test(f.name);});for(var i=0;i<pdfs.length;i++)await this.importPdf(pdfs[i]);if(others.length&&typeof IMPORT!=='undefined'&&IMPORT.handleFiles)IMPORT.handleFiles(others);};
+    AREA_PDF_IMPORT.importPdf=async function(file){
+      var report={fileName:file?file.name:'',ym:PDF_IMPORT_DEBUG.getYM(),numPages:0,totalItems:0,candidateLines:[],itemSamples:[],fullText:'',records:[],errors:[]};
+      try{toastDebug('PDFデバッグ解析中です...');if(typeof ASSETS==='undefined'||!ASSETS.pdfjs)throw new Error('ASSETS.pdfjs が見つかりません');await ASSETS.pdfjs();if(!window.pdfjsLib)throw new Error('PDF.jsを読み込めませんでした');if(!file)throw new Error('PDFファイルが渡っていません');if(!report.ym)throw new Error('対象年月が取得できません');var buffer=await file.arrayBuffer();var pdf=await window.pdfjsLib.getDocument({data:buffer}).promise;report.numPages=pdf.numPages;var meta={shipperCode:'',shipperName:'',pdfDateFrom:'',pdfDateTo:''};var allCandidateLines=[];for(var p=1;p<=pdf.numPages;p++){var page=await pdf.getPage(p);var content=await page.getTextContent();var items=content.items||[];report.totalItems+=items.length;items.slice(0,120).forEach(function(it){var tr=it.transform||[];report.itemSamples.push('p'+p+' x='+Number(tr[4]||0).toFixed(1)+' y='+Number(tr[5]||0).toFixed(1)+' : '+String(it.str||''));});var rows=PDF_IMPORT_DEBUG.itemsToRows(items,p);var rawJoined=items.map(function(i){return String(i.str||'');}).join(' ');var rawCompact=items.map(function(i){return String(i.str||'');}).join('');report.fullText+='\n--- PAGE '+p+' RAW_JOINED ---\n'+rawJoined+'\n--- PAGE '+p+' RAW_COMPACT ---\n'+rawCompact+'\n';var candidates=PDF_IMPORT_DEBUG.buildCandidateLines(rows,rawJoined+'\n'+rawCompact);allCandidateLines=allCandidateLines.concat(candidates);candidates.forEach(function(line){PDF_IMPORT_DEBUG.updateMeta(line,meta);var rec=PDF_IMPORT_DEBUG.parseLine(line,meta,p);if(rec)report.records.push(rec);});}report.candidateLines=Array.from(new Set(allCandidateLines)).slice(0,500);if(report.records.length){PDF_IMPORT_DEBUG.saveParsed(report.ym,file.name,report.records);toastDebug(ymLabelDebug(report.ym)+' PDF取込成功：'+fmtDebug(report.records.length)+'行 / '+fmtDebug(report.records.reduce(function(s,r){return s+Number(r.count||0);},0))+'件');}else{if(typeof STATE!=='undefined'){if(!Array.isArray(STATE.areaData))STATE.areaData=[];STATE.areaData=STATE.areaData.filter(function(r){return !(r.ym===report.ym&&r.sourceFileName===file.name);});STATE.areaData.push({ym:report.ym,source:'area_pdf',sourceFileName:file.name,rawOnly:true,rawText:report.fullText.slice(0,500000),importedAt:new Date().toISOString()});if(typeof STORE!=='undefined'&&STORE.save)STORE.save();}toastDebug(ymLabelDebug(report.ym)+' 明細行は未取得。デバッグ結果を表示しました','warn');}PDF_IMPORT_DEBUG.showPanel(report);}catch(e){report.errors.push(e.message||String(e));PDF_IMPORT_DEBUG.showPanel(report);console.error(e);toastDebug('PDFデバッグ解析エラー: '+(e.message||e),'error');}
+    };
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installDebugOverride);else installDebugOverride();
+})();
+/* DEBUG_APPEND_END_20260429 */
