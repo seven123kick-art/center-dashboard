@@ -4909,10 +4909,10 @@ function parseAreaVolumePdfText(text) {
       const val = Number(r[valueKey]||0);
       const pct = Math.max(2, Math.round(val/max*100));
       const sub = valueKey === 'amount' ? `${Math.round(val/1000).toLocaleString()}千円` : `${val.toLocaleString()}件`;
-      return `<div style="display:grid;grid-template-columns:260px 1fr 110px;gap:12px;align-items:center;margin:8px 0">
-        <div style="font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i+1}. ${esc2(r.label)}</div>
-        <div style="height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden"><div style="width:${pct}%;height:100%;background:#1a4d7c;border-radius:999px"></div></div>
-        <div style="text-align:right;font-weight:900">${sub}</div>
+      return `<div class="field-area-row">
+        <div class="field-area-label" title="${esc2(r.label)}">${i+1}. ${esc2(r.label)}</div>
+        <div class="field-area-track"><div class="field-area-fill" style="width:${pct}%"></div></div>
+        <div class="field-area-value">${sub}</div>
       </div>`;
     }).join('');
   }
@@ -4977,10 +4977,10 @@ function parseAreaVolumePdfText(text) {
       const val = Number(r[key] || 0);
       const w = Math.max(2, Math.round(val/max*100));
       const amount = Math.round((r.amount||0)/1000).toLocaleString();
-      return `<div style="display:grid;grid-template-columns:260px 1fr 150px;gap:12px;align-items:center;margin:7px 0;min-width:0">
-        <div style="font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i+1}. ${esc2(r.label)}</div>
-        <div style="height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden;min-width:120px"><div style="width:${w}%;height:100%;background:#1a4d7c;border-radius:999px"></div></div>
-        <div style="text-align:right;font-weight:900">${r.count.toLocaleString()}件 <span style="color:var(--text3);font-size:11px">/ ${amount}千円</span></div>
+      return `<div class="field-area-row">
+        <div class="field-area-label" title="${esc2(r.label)}">${i+1}. ${esc2(r.label)}</div>
+        <div class="field-area-track"><div class="field-area-fill" style="width:${w}%"></div></div>
+        <div class="field-area-value">${r.count.toLocaleString()}件 <span class="field-area-sub">/ ${amount}千円</span></div>
       </div>`;
     }).join('');
   }
