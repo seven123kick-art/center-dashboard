@@ -4695,13 +4695,13 @@ function parseAreaVolumePdfText(text) {
     const body = rows.slice(1).filter(r => r && r.some(c => clean(c)));
 
     // 商品・住所CSVは列位置を固定する。
-    // I列：エスライン原票番号、L列：郵便番号、M列：住所、P列：商品、R列：作業内容、U列：金額
+    // I列：エスライン原票番号、L列：郵便番号、N列：住所、P列：商品、R列：作業内容、U列：金額
     // 重要：I列原票番号が重複する前提。
     // 件数・商品・サイズ・エリアは、I列原票番号ごとに1件だけ採用する。
     // R列作業内容とU列金額だけは、重複行を原票番号へ紐づけて集計する。
     const idxSlip    = 8;   // I列 エスライン原票番号
     const idxZip     = 11;  // L列 郵便番号
-    const idxAddress = 12;  // M列 住所
+    const idxAddress = 13;  // N列 住所
     const idxProduct = 15;  // P列 商品
     const idxWork    = 17;  // R列 作業内容
     const idxAmount  = 20;  // U列 金額
@@ -4747,7 +4747,7 @@ function parseAreaVolumePdfText(text) {
       const g = slipMap.get(slip);
       g.rowCount++;
 
-      // 代表行のL/M/Pが空だった場合だけ、後続行の値で補完する。
+      // 代表行のL/N/Pが空だった場合だけ、後続行の値で補完する。
       // 値が入った後は上書きしない。
       if (!g.zip && zip) g.zip = zip;
       if (!g.address && address) g.address = address;
