@@ -4690,50 +4690,119 @@ function parseAreaVolumePdfText(text) {
   }
 
   function parseProductAddressRows(rows, fileName){
-    if (!rows.length) return { rawRows:0, detailRows:0, uniqueCount:0, tickets:[] };
+    if (!rows.length) return { rawRows:0, detailRows:0, uniqueCount:0, tickets:[], multiAddressSlipCount:0, multiZipSlipCount:0 };
+
     const header = rows[0] || [];
     const body = rows.slice(1).filter(r => r && r.some(c => clean(c)));
-    const idxSlip = headerIndex(header, ['エスライン原票番号','原票番号'], 8);     // I列
-    const idxZip = headerIndex(header, ['お届け先郵便番号','郵便番号'], 11);       // L列
-    const idxAddress = headerIndex(header, ['住所','お届け先住所'], 12);          // M列優先
-    const idxProduct = headerIndex(header, ['商品名型番','商品名','商品'], 15);    // P列
-    const idxWork = headerIndex(header, ['作業内容'], 17);                       // R列
-    const idxAmount = headerIndex(header, ['金額'], 20);                         // U列
 
-    const map = new Map();
+    // 列定義（0始まり）
+    // I列：エスライン原票番号、L列：郵便番号、M列：住所、P列：商品、R列：作業内容、U列：金額
+    const idxSlip    = headerIndex(header, ['エスライン原票番号','原票番号'], 8);
+    const idxZip     = headerIndex(header, ['お届け先郵便番号','郵便番号'], 11);
+    const idxAddress = headerIndex(header, ['住所','お届け先住所'], 12);
+    const idxProduct = headerIndex(header, ['商品名型番','商品名','商品'], 15);
+    const idxWork    = headerIndex(header, ['作業内容'], 17);
+    const idxAmount  = headerIndex(header, ['金額'], 20);
+
+    // まずI列原票番号で完全にグループ化する。
+    // 件数・商品・サイズ・エリアはこのグループから1件だけ作る。
+    // R列作業内容とU列金額だけは原票番号へ紐づけて集計する。
+    const slipMap = new Map();
     let detailRows = 0;
-    for (const row of body) {
+
+    for (let rowIndex = 0; rowIndex < body.length; rowIndex++) {
+      const row = body[rowIndex];
       const slip = clean(row[idxSlip]);
       if (!slip) continue;
       detailRows++;
-      if (!map.has(slip)) {
-        const address = clean(row[idxAddress]) || clean(row[13]);
-        const product = clean(row[idxProduct]);
-        const area = areaFromAddress(address);
-        map.set(slip, {
+
+      if (!slipMap.has(slip)) {
+        slipMap.set(slip, {
           slip,
-          zip: clean(row[idxZip]),
-          address,
-          product,
-          category: productCategory(product),
-          sizeBucket: sizeBucketFromProduct(product),
-          pref: area.pref,
-          city: area.city,
-          area: area.area,
+          rows: [],
+          firstRowOrder: rowIndex,
           amount: 0,
           works: {},
           workDetails: [],
-          firstRow: row
+          zipCounts: new Map(),
+          addressCounts: new Map(),
+          productCounts: new Map(),
+          firstZip: '',
+          firstAddress: '',
+          firstProduct: ''
         });
       }
-      const ticket = map.get(slip);
+
+      const g = slipMap.get(slip);
+      g.rows.push(row);
+
+      const zip = clean(row[idxZip]).replace(/[〒\s　-]/g, '');
+      const address = clean(row[idxAddress]) || clean(row[12]) || clean(row[13]);
+      const product = clean(row[idxProduct]);
       const work = clean(row[idxWork]) || '未設定';
       const amount = yen(row[idxAmount]);
-      ticket.amount += amount;
-      ticket.works[work] = (ticket.works[work] || 0) + amount;
-      ticket.workDetails.push({ work, amount });
+
+      if (zip) {
+        if (!g.firstZip) g.firstZip = zip;
+        g.zipCounts.set(zip, (g.zipCounts.get(zip) || 0) + 1);
+      }
+      if (address) {
+        if (!g.firstAddress) g.firstAddress = address;
+        g.addressCounts.set(address, (g.addressCounts.get(address) || 0) + 1);
+      }
+      if (product) {
+        if (!g.firstProduct) g.firstProduct = product;
+        g.productCounts.set(product, (g.productCounts.get(product) || 0) + 1);
+      }
+
+      // R列・U列は重複除外せず原票へ紐づける
+      g.amount += amount;
+      g.works[work] = (g.works[work] || 0) + amount;
+      g.workDetails.push({ work, amount });
     }
-    const tickets = [...map.values()];
+
+    function bestFromCounter(counter, fallback){
+      if (!counter || !counter.size) return fallback || '';
+      return [...counter.entries()].sort((a,b)=>{
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return String(a[0]).localeCompare(String(b[0]), 'ja');
+      })[0][0] || fallback || '';
+    }
+
+    const tickets = [...slipMap.values()].map(g => {
+      const zip = bestFromCounter(g.zipCounts, g.firstZip);
+      let address = bestFromCounter(g.addressCounts, g.firstAddress);
+
+      // 代表住所は、代表郵便番号と同じ行にある住所を優先する。
+      // これにより同一原票内に複数行があっても、エリアは1つに固定される。
+      if (zip) {
+        const sameZipRow = g.rows.find(r => clean(r[idxZip]).replace(/[〒\s　-]/g, '') === zip && (clean(r[idxAddress]) || clean(r[12]) || clean(r[13])));
+        if (sameZipRow) address = clean(sameZipRow[idxAddress]) || clean(sameZipRow[12]) || clean(sameZipRow[13]) || address;
+      }
+
+      const product = bestFromCounter(g.productCounts, g.firstProduct);
+      const area = areaFromAddress(address);
+
+      return {
+        slip: g.slip,
+        zip,
+        address,
+        product,
+        category: productCategory(product),
+        sizeBucket: sizeBucketFromProduct(product),
+        pref: area.pref,
+        city: area.city,
+        area: area.area,
+        amount: yen(g.amount),
+        works: g.works,
+        workDetails: g.workDetails,
+        rowCount: g.rows.length,
+        hasMultipleZip: g.zipCounts.size > 1,
+        hasMultipleAddress: g.addressCounts.size > 1,
+        firstRow: g.rows[0]
+      };
+    });
+
     return {
       sourceFileName: fileName,
       rawRows: body.length,
@@ -4745,6 +4814,8 @@ function parseAreaVolumePdfText(text) {
       productCategoryCount: new Set(tickets.map(t => t.category).filter(Boolean)).size,
       workTypeCount: new Set(tickets.flatMap(t => Object.keys(t.works || {}))).size,
       amount: tickets.reduce((s,t)=>s+yen(t.amount),0),
+      multiAddressSlipCount: tickets.filter(t => t.hasMultipleAddress).length,
+      multiZipSlipCount: tickets.filter(t => t.hasMultipleZip).length,
       tickets
     };
   }
