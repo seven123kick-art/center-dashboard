@@ -470,7 +470,6 @@ const CSV = {
     const rows = this.toRows(text);
     const ALL = new Set([...CONFIG.INCOME_KEYS,...CONFIG.EXPENSE_KEYS,...CONFIG.INCOME_SUB_KEYS]);
     const result = {};
-    const shipperMap = {};
     let found = 0;
 
     if (!rows.length) return null;
@@ -544,19 +543,121 @@ const CSV = {
       if (val !== null) {
         result[label] = (result[label] || 0) + val;
         found++;
-
-        // 荷主別売上：Y列=荷主コード（index24）、AA列=荷主名（index26）
-        // 金額はCSVヘッダーの「金額」列、または既存ロジックで取得したvalを使用。
-        addShipperSale(shipperMap, row[24], row[26], label, val);
       }
     }
 
-    const shippers = finalizeShipperSalesMap(shipperMap);
-    if (Object.keys(shippers).length) {
-      Object.defineProperty(result, '__shippers', { value: shippers, enumerable: false });
+    return found > 0 ? result : null;
+  },
+
+
+  // 収支CSVから荷主別売上・原票件数を抽出
+  // X列=原票番号、Y列=荷主コード、AA列=荷主名を使用する。
+  // 荷主別売上は、売上系科目だけを金額列で集計する。
+  parseShipperMetrics(text) {
+    const rows = this.toRows(text);
+    const result = { shippers:{}, invoiceCount:0, invoiceNos:[] };
+    if (!rows.length) return result;
+
+    const header = rows[0].map(v => String(v || '').replace(/[\s　\u3000]/g,''));
+    const labelCol = header.findIndex(v => v === '収支科目名' || v === '経費計上先収支科目名');
+    const amountCol = header.findIndex(v => v === '金額');
+    const incomeSet = new Set([...(CONFIG.INCOME_KEYS || []), ...(CONFIG.INCOME_SUB_KEYS || [])].map(v => String(v || '').replace(/[\s　\u3000]/g,'')));
+
+    function toNumber(v) {
+      const s = String(v ?? '').replace(/,/g,'').replace(/[円千]/g,'').replace(/[^\d.\-]/g,'');
+      if (!s || s === '-' || s === '.') return 0;
+      const num = parseFloat(s);
+      return isNaN(num) ? 0 : num;
+    }
+    function normCode(v) {
+      return String(v || '').replace(/[\s　\u3000]/g,'').trim();
+    }
+    function cleanName(v) {
+      return String(v || '')
+        .replace(/[\s　\u3000]+/g,' ')
+        .replace(/[（(].*?[）)]/g,'')
+        .replace(/株式会社/g,'')
+        .replace(/㈱/g,'')
+        .replace(/有限会社/g,'')
+        .replace(/\s+/g,' ')
+        .trim();
+    }
+    function knownName(raw) {
+      const name = String(raw || '');
+      if (name.includes('でんきち')) return 'でんきち';
+      if (name.includes('コジマ')) return 'コジマ';
+      if (name.includes('ビックカメラ') || name.includes('ビック')) return 'ビックカメラ';
+      return '';
+    }
+    function pickDisplayName(rawNames) {
+      const joined = rawNames.join(' ');
+      const known = knownName(joined);
+      if (known) return known;
+      const cleaned = rawNames.map(cleanName).filter(Boolean);
+      if (!cleaned.length) return '未設定';
+      // 一番短い名称を代表名にする（支店名・部門名を避ける）
+      cleaned.sort((a,b)=>a.length-b.length || a.localeCompare(b,'ja'));
+      return cleaned[0];
     }
 
-    return found > 0 ? result : null;
+    const invoiceSet = new Set();
+
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const slipNo = normCode(row[23]);   // X列：原票番号
+      const codeRaw = normCode(row[24]);  // Y列：荷主コード
+      const nameRaw = String(row[26] || '').trim(); // AA列：荷主名
+      if (!slipNo || (!codeRaw && !nameRaw)) continue;
+
+      invoiceSet.add(slipNo);
+
+      let label = '';
+      if (labelCol >= 0) label = String(row[labelCol] || '').replace(/[\s　\u3000]/g,'');
+      if (!label) {
+        for (let i=0; i<row.length; i++) {
+          const v = String(row[i] || '').replace(/[\s　\u3000]/g,'');
+          if (incomeSet.has(v)) { label = v; break; }
+        }
+      }
+
+      const isIncome = !label || incomeSet.has(label);
+      if (!isIncome) continue;
+
+      let amount = amountCol >= 0 ? toNumber(row[amountCol]) : 0;
+      if (!amount) {
+        // 金額列が特定できない時の保険：行の右側から最大の数値を拾う
+        const nums = row.map(toNumber).filter(v => Math.abs(v) > 0);
+        amount = nums.length ? nums[nums.length - 1] : 0;
+      }
+      if (!amount) continue;
+
+      const known = knownName(nameRaw);
+      const code3 = codeRaw ? codeRaw.slice(0,3) : '';
+      // 原則は荷主コード頭3桁。同一頭3桁に別名が混ざるケースへの保険として、既知名称は名称で分離する。
+      const key = known || code3 || cleanName(nameRaw) || '未設定';
+      if (!result.shippers[key]) result.shippers[key] = { income:0, count:0, code3:code3, rawNames:[], invoiceSet:{} };
+      result.shippers[key].income += amount;
+      result.shippers[key].invoiceSet[slipNo] = true;
+      if (nameRaw && !result.shippers[key].rawNames.includes(nameRaw)) result.shippers[key].rawNames.push(nameRaw);
+    }
+
+    for (const key of Object.keys(result.shippers)) {
+      const g = result.shippers[key];
+      const displayName = pickDisplayName(g.rawNames || [key]);
+      g.count = Object.keys(g.invoiceSet || {}).length;
+      delete g.invoiceSet;
+      delete g.rawNames;
+      if (displayName !== key) {
+        if (!result.shippers[displayName]) result.shippers[displayName] = { income:0, count:0, code3:g.code3 };
+        result.shippers[displayName].income += g.income;
+        result.shippers[displayName].count += g.count;
+        delete result.shippers[key];
+      }
+    }
+
+    result.invoiceNos = Array.from(invoiceSet);
+    result.invoiceCount = invoiceSet.size;
+    return result;
   },
 
   // 計画データ（貼り付けテキスト）解析
@@ -631,89 +732,6 @@ const CSV = {
 /* ════════ §6 PROCESS（CSV生データ→データセット） ══════════════ */
 function n(v) { return typeof v==='number' ? v : (parseFloat(v)||0); }
 
-/* 荷主別売上：確定CSV/速報CSVのY列=荷主コード、AA列=荷主名から集計
-   注意：表示名だけで全体を上書きしない。まず名称を正規化し、コード頭3桁＋名称で安全に束ねる。
-   これにより、同じ頭3桁内に別名が混在しても「でんきち」がコジマに吸われない。 */
-function cleanShipperName(rawName) {
-  let name = String(rawName || '').trim();
-  if (!name) return '';
-  name = name.replace(/[\s　]+/g, ' ');
-  name = name.replace(/（[^）]*）/g, '').replace(/\([^)]*\)/g, '').trim();
-
-  // 代表名への寄せ。必要最小限に限定する。
-  if (/でんきち/.test(name)) return 'でんきち';
-  if (/コジマ/.test(name)) return 'コジマ';
-  if (/ビックカメラ|ビックカメラ/.test(name)) return 'ビックカメラ';
-
-  // 法人格などを軽く整理
-  name = name
-    .replace(/^株式会社\s*/,'')
-    .replace(/^\(株\)\s*/,'')
-    .replace(/^㈱\s*/,'')
-    .replace(/\s+/g,' ')
-    .trim();
-  return name;
-}
-
-function shipperCode3(rawCode) {
-  const code = String(rawCode || '').replace(/[^0-9A-Za-z]/g, '');
-  return code.slice(0, 3);
-}
-
-function shouldUseRowForShipperSales(label, value) {
-  if (!label || !value) return false;
-  const l = String(label || '');
-  if (CONFIG.INCOME_KEYS.includes(l) || CONFIG.INCOME_SUB_KEYS.includes(l)) return true;
-  return /収入|売上|配達|集荷|工事|リサイクル/.test(l) && !/原価|費|料$/.test(l);
-}
-
-function buildShipperGroupKey(code3, displayName) {
-  const nameKey = String(displayName || '').replace(/\s+/g, '');
-  // コードだけで無理に統合すると、実データで同じ頭3桁に別名が混在した時に誤統合するため、
-  // コジマ/でんきち等の代表名を併用して安全に束ねる。
-  return `${code3 || 'NO_CODE'}__${nameKey || '未設定'}`;
-}
-
-function addShipperSale(map, rawCode, rawName, label, amount) {
-  if (!shouldUseRowForShipperSales(label, amount)) return;
-  const code3 = shipperCode3(rawCode);
-  const displayName = cleanShipperName(rawName);
-  if (!code3 && !displayName) return;
-
-  const key = buildShipperGroupKey(code3, displayName);
-  if (!map[key]) {
-    map[key] = {
-      code3,
-      name: displayName || code3 || '未設定',
-      income: 0,
-      count: 0,
-      rawNames: {},
-      rawCodes: {},
-    };
-  }
-  map[key].income += n(amount);
-  map[key].count += 1;
-  if (rawName) map[key].rawNames[String(rawName).trim()] = (map[key].rawNames[String(rawName).trim()] || 0) + n(amount);
-  if (rawCode) map[key].rawCodes[String(rawCode).trim()] = (map[key].rawCodes[String(rawCode).trim()] || 0) + n(amount);
-}
-
-function finalizeShipperSalesMap(map) {
-  const out = {};
-  Object.values(map || {}).forEach(item => {
-    if (!item || !item.income) return;
-    const name = item.name || item.code3 || '未設定';
-    // 同じ表示名が別コードで分かれた場合は、表示上は合算する。
-    if (!out[name]) out[name] = { income: 0, count: 0, code3s: [], rawNames: {} };
-    out[name].income += n(item.income);
-    out[name].count += n(item.count);
-    if (item.code3 && !out[name].code3s.includes(item.code3)) out[name].code3s.push(item.code3);
-    Object.keys(item.rawNames || {}).forEach(k => {
-      out[name].rawNames[k] = (out[name].rawNames[k] || 0) + item.rawNames[k];
-    });
-  });
-  return out;
-}
-
 function processDataset(ym, type, rows) {
   const totalIncome  = CONFIG.INCOME_KEYS.reduce((s,k)=>s+n(rows[k]),0);
   const totalExpense = CONFIG.EXPENSE_KEYS.reduce((s,k)=>s+n(rows[k]),0);
@@ -728,15 +746,9 @@ function processDataset(ym, type, rows) {
   const fixedRate       = totalIncome > 0 ? fixedCost/totalIncome*100 : 0;
   const profitRate      = totalIncome > 0 ? profit/totalIncome*100    : 0;
 
-  const ds = { ym, type, rows, totalIncome, totalExpense, profit,
+  return { ym, type, rows, totalIncome, totalExpense, profit,
     pseudoLaborRate, variableRate, fixedRate, profitRate,
     laborCost, fixedCost, varCost, importedAt: new Date().toISOString() };
-
-  // CSV読込時に作った荷主別売上をデータセットへ保持する。
-  if (rows && rows.__shippers && Object.keys(rows.__shippers).length) {
-    ds.shippers = rows.__shippers;
-  }
-  return ds;
 }
 
 function upsertDataset(ds) {
@@ -815,8 +827,12 @@ const IMPORT = {
         const text = await CSV.read(f);
         const rows = CSV.parseSKDL(text, monthCol);
         if (!rows) { UI.toast(`${f.name}: データ行が見つかりません`,'warn'); continue; }
+        const detail = CSV.parseShipperMetrics(text);
         const type = importType;
         const ds = processDataset(ym, type, rows);
+        ds.shippers = detail.shippers || {};
+        ds.invoiceCount = detail.invoiceCount || 0;
+        ds.invoiceNos = detail.invoiceNos || [];
         ds.source = 'csv';
         ds.fileName = f.name;
         ds.fiscalYear = fiscalYearFromYM(ym);
@@ -2152,21 +2168,20 @@ function renderDashboard() {
     }
   }
 
-  // 荷主バー（確定/速報CSVのY列=荷主コード、AA列=荷主名から作成）
+  // 荷主バー（shippers存在時のみ）
   const shipArea = document.getElementById('shipper-bars-area');
   if (shipArea) {
-    const shippers = (ds.shippers && Object.keys(ds.shippers).length) ? ds.shippers : {};
-    if (Object.keys(shippers).length) {
-      const items = Object.entries(shippers).sort((a,b)=>n(b[1].income)-n(a[1].income)).slice(0,8);
-      const maxV = Math.max(...items.map(x=>n(x[1].income)),1);
+    if (ds.shippers && Object.keys(ds.shippers).length) {
+      const items = Object.entries(ds.shippers).sort((a,b)=>b[1].income-a[1].income).slice(0,8);
+      const maxV = Math.max(...items.map(x=>x[1].income),1);
       shipArea.innerHTML = items.map(([name,d],i)=>`
         <div class="mbar-row">
           <div class="mbar-label" title="${esc(name)}">${esc(name)}</div>
-          <div class="mbar-track"><div class="mbar-fill" style="width:${(n(d.income)/maxV*100).toFixed(1)}%;background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div></div>
-          <div class="mbar-val">${fmtK(n(d.income))}千</div>
+          <div class="mbar-track"><div class="mbar-fill" style="width:${(d.income/maxV*100).toFixed(1)}%;background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div></div>
+          <div class="mbar-val">${fmtK(d.income)}千</div>
         </div>`).join('');
     } else {
-      shipArea.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">荷主コード・荷主名がCSVから取得できませんでした（Y列・AA列を確認）</div>';
+      shipArea.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">荷主データは別途CSV取込が必要です</div>';
     }
   }
 }
@@ -2438,6 +2453,41 @@ function renderTrend() {
       scales:{y:{title:{display:true,text:'千円'},grid:{color:'#f0f0f0'}}}}
   });
 
+
+  // 月次件数推移：収支CSVのX列原票番号をユニーク件数として使用
+  const counts = list.map(d => n(d.invoiceCount));
+  CHART_MGR.make('c-trend-cnt', {
+    type:'bar',
+    data:{ labels, datasets:[{ label:'原票件数', data:counts, backgroundColor:'rgba(26,77,124,.75)' }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{title:{display:true,text:'件'}}} }
+  });
+
+  // 主要荷主 月別推移：ダッシュボードの荷主別売上と同じ ds.shippers を使用
+  const shipperTotals = {};
+  for (const d of list) {
+    for (const [name, val] of Object.entries(d.shippers || {})) {
+      shipperTotals[name] = (shipperTotals[name] || 0) + n(val.income);
+    }
+  }
+  const topShippers = Object.entries(shipperTotals).sort((a,b)=>b[1]-a[1]).slice(0,5).map(x=>x[0]);
+  const stLegend = document.getElementById('st-legend');
+  if (stLegend) {
+    stLegend.innerHTML = topShippers.map((name,i)=>`<div class="legend-item"><div class="legend-dot" style="background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div>${esc(name)}</div>`).join('');
+  }
+  CHART_MGR.make('c-trend-shipper', {
+    type:'line',
+    data:{ labels, datasets: topShippers.map((name,i)=>({
+      label:name,
+      data:list.map(d => n((d.shippers || {})[name]?.income) / 1000),
+      borderColor:CONFIG.COLORS[i%CONFIG.COLORS.length],
+      backgroundColor:CONFIG.COLORS[i%CONFIG.COLORS.length],
+      tension:.25,
+      pointRadius:3,
+      fill:false
+    })) },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{title:{display:true,text:'千円'}}} }
+  });
+
   const tbody = document.getElementById('trend-tbody');
   if (tbody) {
     const rows = [...list].reverse().map((d,i,arr)=>{
@@ -2447,7 +2497,7 @@ function renderTrend() {
         <td class="r">${fmtK(d.totalIncome)}</td><td class="r">${fmtK(d.totalExpense)}</td>
         <td class="r ${d.profit>=0?'cell-up':'cell-down'}">${fmtK(d.profit)}</td>
         <td class="r">${pct(d.profitRate)}</td>
-        <td class="r">—</td>
+        <td class="r">${d.invoiceCount ? fmt(d.invoiceCount) : '—'}</td>
         <td class="r">${ratio(d.totalIncome,prev?.totalIncome)}</td>
         <td class="r">${ratio(d.totalIncome,sameMonthLastYear(d.ym)?.totalIncome)}</td>
       </tr>`;
