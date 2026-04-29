@@ -359,7 +359,7 @@ const CENTER = (() => {
 const STATE = {
   datasets:  [],    // [{ym,type,rows,totalIncome,totalExpense,profit,...}]
   fieldData: [],    // [{ym,areas:{name:{count,shippers:{}}}}]
-  areaData:  [],    // PDF：荷主別配送エリア別物量 [{ym,shipper,zip,address,area,count,...}]
+  areaData:  [],    // CSV：荷主別配送エリア別物量 [{ym,shipper,zip,address,area,count,...}]
   capacity:  null,  // {areas:{name:{max}},updatedAt}
   planData:  {},    // 年度別計画データ { "2026": { rows, importedAt, itemCount } }
   fiscalYear: null, // 現在操作中の年度
@@ -690,7 +690,7 @@ const IMPORT = {
 
     if (csv.length)  { this._pending = csv; MODAL.openYM(csv); return; }
     if (xlsx.length) { this.importCapacityExcel(xlsx[0]).catch(e=>UI.toast(e.message,'error')); return; }
-    if (pdf.length)  { AREA_PDF_IMPORT.handleFiles(pdf); return; }
+    if (pdf.length)  { UI.toast('PDF取込は廃止しました。現場明細はCSVを取り込んでください。','warn'); return; }
     UI.toast('対応形式：CSV（収支）・XLSX（キャパ）','warn');
   },
 
@@ -1340,7 +1340,7 @@ function selectedDashboardDS() {
 
 function selectedYMForImport() {
   // 取込時の年月は画面で選択している年度・月を最優先にする。
-  // PDF内の日付は補助情報としてのみ使う。
+  // CSV内の日付は補助情報としてのみ使う。
   return dashboardSelectedYM() || STATE.selYM || latestDS()?.ym || null;
 }
 
@@ -2634,8 +2634,8 @@ const CAPACITY_UI = {
 
   async importCapacityExcel(file) { await IMPORT.importCapacityExcel(file); this.render(); },
 
-  async importAreaPdf(files) {
-    await AREA_PDF_IMPORT.handleFiles(files);
+  async importAreaCsv(files) {
+    await AREA_CSV_IMPORT.handleFiles(files);
     this.populateYMSel();
     this.render();
   },
@@ -2897,7 +2897,7 @@ function renderStorageMapTable() {
     ['収支実績CSV', `${fy}年度`, (monthsConfirmed||monthsDaily)?storageBadge('登録済','ok'):storageBadge('未登録','warn'), `確定 ${monthsConfirmed}ヶ月 / 速報 ${monthsDaily}ヶ月`, '円', formatImportedAt(storageLatestAt(csvRows)), 'SKDL0001/0003。速報と確定は両方保持。表示は確定優先。', '月別一覧から入替/削除'],
     ['計画データ', `${fy}年度`, plan?storageBadge('登録済','ok'):storageBadge('未登録','warn'), plan?`${Object.keys(plan).length}科目 / 合計 ${fmt(storagePlanAllTotal(plan))}千円`:'0科目', '千円', formatImportedAt(planPack?.importedAt), '年度単位で完全独立。取込時は年度丸ごと入替。', `<button class="btn btn-danger" onclick="DATA_STORAGE_TABLE.deletePlan('${fy}')" style="font-size:11px;padding:3px 8px">年度削除</button>`],
     ['収支補完', `${fy}年度`, histMonths?storageBadge('登録済','ok'):storageBadge('未登録','warn'), histMonths?`${histMonths}ヶ月 / 収入 ${fmt(histRows.reduce((s,d)=>s+storageAmountK(d,'totalIncome'),0))}千円`:'0ヶ月', '千円', formatImportedAt(storageLatestAt(histRows)), 'SKKS月次収支照会の貼付。年度単位で完全入替。', `<button class="btn btn-danger" onclick="DATA_STORAGE_TABLE.deleteHistory('${fy}')" style="font-size:11px;padding:3px 8px">年度削除</button>`],
-    ['エリア補完', `${fy}年度`, fieldRows.length?storageBadge('登録済','ok'):storageBadge('未登録','warn'), fieldRows.length?`${fieldRows.length}件`:'0件', '件数', '—', '作業者別CSV・エリアPDF由来。今後、年度別保管に拡張。', '今後実装'],
+    ['エリア補完', `${fy}年度`, fieldRows.length?storageBadge('登録済','ok'):storageBadge('未登録','warn'), fieldRows.length?`${fieldRows.length}件`:'0件', '件数', '—', '作業者別現場CSV由来。今後、年度別保管に拡張。', '今後実装'],
     ['荷主別データ', `${fy}年度`, shipperRows.length?storageBadge('登録済','ok'):storageBadge('未登録','warn'), shipperRows.length?`${shipperRows.length}ヶ月`:'0ヶ月', '円', formatImportedAt(storageLatestAt(shipperRows)), '荷主別CSVまたはSKDL内の荷主情報。未取込なら荷主分析は出ません。', '今後実装'],
   ];
 
@@ -3600,181 +3600,373 @@ const TSV_IMPORT = {
 
 // 現場データ取込2（インポート画面の2つ目のゾーン）
 
-/* ════════ §27-A AREA PDF IMPORT（荷主別配送エリア別物量PDF） ════════
-   対象帳票：荷主別配送エリア別物量
-   取込内容：郵便番号・住所・件数・配送料・幹線料・付帯料金・サイズ①〜⑧
-   注意：作業者別CSVとは完全に別処理。PDF内の日付ではなく画面選択中の年月で保存する。
+/* ════════ §27-A FIELD CSV IMPORT（現場明細CSV） ════════
+   対象：
+   1) 作業者別CSV
+   2) 荷主別配送エリア別物量CSV（商品・住所・商品サイズ・科目・原票番号）
+
+   方針：CSV取込は廃止。CSVだけを現場データとして取り込む。
+   ・エスライン原票番号の重複を検出
+   ・重複で件数が膨らまないよう、エリア件数は原票番号のユニーク件数で集計
+   ・商品名型番、住所、サイズ別数量、作業内容/コードを保持
 ════════════════════════════════════════════════════════════════ */
-const AREA_PDF_IMPORT = {
+const AREA_CSV_IMPORT = {
   async handleFiles(files) {
     const arr = Array.from(files || []);
-    const pdfs = arr.filter(f => /\.pdf$/i.test(f.name));
-    const others = arr.filter(f => !/\.pdf$/i.test(f.name));
+    const csvs = arr.filter(f => /\.csv$/i.test(f.name));
+    const others = arr.filter(f => !/\.csv$/i.test(f.name));
 
-    for (const pdf of pdfs) await this.importPdf(pdf);
-
-    if (others.length) IMPORT.handleFiles(others);
-  },
-
-  async importPdf(file) {
-    try {
-      UI.toast('荷主別配送エリア別物量PDFを解析中です...');
-      await ASSETS.pdfjs();
-      if (!window.pdfjsLib) throw new Error('PDF.jsを読み込めませんでした');
-
-      const forcedYM = selectedYMForImport();
-      if (!forcedYM) {
-        UI.toast('先に取込対象の年度・月を選択してください', 'warn');
-        return;
-      }
-
-      const buffer = await file.arrayBuffer();
-      const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
-
-      let fullText = '';
-      let allRecords = [];
-
-      for (let p = 1; p <= pdf.numPages; p++) {
-        const page = await pdf.getPage(p);
-        const content = await page.getTextContent();
-        const pageLines = this.itemsToLines(content.items);
-        const pageText = pageLines.join('\n');
-        fullText += '\n' + pageText;
-        allRecords = allRecords.concat(this.parseLines(pageLines, p));
-      }
-
-      allRecords = allRecords.map(r => ({ ...r, ym: forcedYM, importedAt: new Date().toISOString(), sourceFileName: file.name }));
-
-      if (!allRecords.length) {
-        if (!Array.isArray(STATE.areaData)) STATE.areaData = [];
-        STATE.areaData = STATE.areaData.filter(r => !(r.ym === forcedYM && r.sourceFileName === file.name));
-        STATE.areaData.push({ ym: forcedYM, sourceFileName: file.name, rawOnly: true, rawText: fullText.slice(0, 800000), importedAt: new Date().toISOString() });
-        STORE.save();
-        renderFieldDataList2();
-        UI.toast(`${ymLabel(forcedYM)} PDF原文は保存しましたが、明細行は読み込めませんでした`, 'warn');
-        NAV.refresh();
-        return;
-      }
-
-      const parsed = { ym: forcedYM, fileName: file.name, importedAt: new Date().toISOString(), totalCount: allRecords.reduce((sum, r) => sum + n(r.count), 0), records: allRecords };
-      this.saveParsed(parsed);
-      UI.toast(`${ymLabel(parsed.ym)} エリアPDF取込完了：${fmt(parsed.records.length)}行 / ${fmt(parsed.totalCount)}件`);
-      NAV.refresh();
-    } catch(e) {
-      console.error(e);
-      UI.toast('PDF取込エラー: ' + e.message, 'error');
+    if (others.length) {
+      UI.toast('現場データはCSVのみ取込できます。CSV取込は廃止しました。', 'warn');
     }
+    if (!csvs.length) return;
+
+    for (const csv of csvs) await this.importCsv(csv);
+
+    if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
+    if (FIELD_UI && FIELD_UI.updatePeriodBadge) FIELD_UI.updatePeriodBadge();
+    NAV.refresh();
   },
 
-  itemsToLines(items) {
-    const buckets = [];
-    for (const it of items || []) {
-      const str = String(it.str || '').trim();
-      if (!str) continue;
-      const tr = it.transform || [];
-      const x = Number(tr[4] || 0);
-      const y = Number(tr[5] || 0);
-      let bucket = buckets.find(b => Math.abs(b.y - y) <= 2.4);
-      if (!bucket) { bucket = { y, items: [] }; buckets.push(bucket); }
-      bucket.items.push({ x, str });
+  async importCsv(file) {
+    const ym = selectedYMForImport();
+    if (!ym) throw new Error('取込年月を選択してください');
+
+    UI.toast('現場明細CSVを解析中です...');
+    const text = await CSV.read(file);
+    const rows = CSV.toRows(text);
+    if (!rows || rows.length < 2) {
+      UI.toast(`${file.name}: CSVの明細行がありません`, 'warn');
+      return;
     }
-    return buckets.sort((a,b) => b.y - a.y).map(b => b.items.sort((a,b)=>a.x-b.x).map(i=>i.str).join(' ').replace(/[　]/g,' ').replace(/\s+/g,' ').trim()).filter(Boolean);
+
+    const parsed = this.parseCsvRows(rows, file.name, ym);
+    if (!parsed.records.length) {
+      UI.toast(`${file.name}: 現場明細として読める行がありません`, 'warn');
+      return;
+    }
+
+    this.saveParsed(parsed);
+    STORE.save();
+
+    const dupText = parsed.duplicateSlipCount
+      ? ` / 重複原票 ${fmt(parsed.duplicateSlipCount)}件`
+      : ' / 重複原票 0件';
+
+    UI.toast(
+      `${ymLabel(parsed.ym)} ${parsed.kindLabel}取込完了：` +
+      `${fmt(parsed.recordCount)}行 / 原票${fmt(parsed.uniqueSlipCount)}件${dupText}`
+    );
   },
 
-  parseLines(lines, pageNo) {
+  parseCsvRows(rows, fileName, ym) {
+    const header = rows[0].map(h => normalizeHeaderName(h));
+    const idx = makeHeaderIndex(header);
+
+    const hasSlip = idx('エスライン原票番号') >= 0 || idx('原票番号') >= 0;
+    const hasProduct = idx('商品名型番') >= 0 || idx('商品名') >= 0;
+    const hasAddress = idx('住所') >= 0 || idx('お届け先住所') >= 0;
+    const isAreaDetail = hasSlip || hasProduct || hasAddress;
+
     const records = [];
-    let currentMeta = { shipperCode:'', shipperName:'', pdfDateFrom:'', pdfDateTo:'' };
-    const expanded = [];
-    for (const raw of lines || []) {
-      const line = String(raw || '').trim();
-      if (!line) continue;
-      const safe = line.replace(/(\d)\s*(20\d{2}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+Page)/g, '$1\n$2').replace(/(合計[:：][^\n]*?)(?=20\d{2}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+Page)/g, '$1\n');
-      expanded.push(...safe.split(/\n+/).map(x=>x.trim()).filter(Boolean));
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row || !row.some(v => String(v || '').trim())) continue;
+
+      if (isAreaDetail) {
+        const rec = this.parseAreaDetailRow(row, idx, ym, fileName, r + 1);
+        if (rec) records.push(rec);
+      } else {
+        const rec = this.parseWorkerRow(row, idx, ym, fileName, r + 1, header);
+        if (rec) records.push(rec);
+      }
     }
-    for (const line of expanded) {
-      const shipperMeta = this.extractMetaFromLine(line);
-      if (shipperMeta.shipperCode || shipperMeta.pdfDateFrom) { currentMeta = { ...currentMeta, ...shipperMeta }; continue; }
-      const rec = this.parseDetailLine(line, currentMeta, pageNo);
-      if (rec) records.push(rec);
+
+    const duplicate = analyzeSlipDuplicates(records);
+    for (const rec of records) {
+      const key = rec.slipNo || '';
+      rec.duplicateSlipCount = key && duplicate.countBySlip[key] ? duplicate.countBySlip[key] : 0;
+      rec.isDuplicateSlip = rec.duplicateSlipCount > 1;
     }
-    return records;
+
+    const uniqueSlipCount = countUniqueSlips(records);
+
+    return {
+      ym,
+      source: isAreaDetail ? 'area_csv' : 'worker_csv',
+      kind: isAreaDetail ? 'area_detail_csv' : 'worker_csv',
+      kindLabel: isAreaDetail ? '商品・住所CSV' : '作業者別CSV',
+      fileName,
+      importedAt: new Date().toISOString(),
+      recordCount: records.length,
+      uniqueSlipCount,
+      duplicateSlipCount: duplicate.duplicateSlipCount,
+      duplicateLineCount: duplicate.duplicateLineCount,
+      duplicateGroups: duplicate.groups,
+      records
+    };
   },
 
-  extractMetaFromLine(line) {
-    const t = String(line || '').replace(/\s+/g,' ').trim();
-    const meta = {};
-    const shipperMatch = t.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+?)(?:\s+配達完了日|$)/);
-    if (shipperMatch) { meta.shipperCode = shipperMatch[1]; meta.shipperName = shipperMatch[2].trim(); }
-    const dateMatch = t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})\s+(\d{4})\/(\d{2})\/(\d{2})/);
-    if (dateMatch) { meta.pdfDateFrom = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`; meta.pdfDateTo = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`; }
-    return meta;
+  parseAreaDetailRow(row, idx, ym, fileName, lineNo) {
+    const get = (...names) => {
+      for (const name of names) {
+        const i = idx(name);
+        if (i >= 0) return String(row[i] ?? '').trim();
+      }
+      return '';
+    };
+
+    const slipNo = get('エスライン原票番号', '原票番号');
+    const shipperCode = get('荷主コード');
+    const shipperName = get('荷主名');
+    const storeCode = get('受注店コード');
+    const storeName = get('店名');
+    const branchCode = get('配達支店コード');
+    const branchName = get('配達支店名');
+    const zip = normalizeZip(get('お届け先郵便番号', '郵便番号'));
+    const address = get('住所', 'お届け先住所');
+    const destAddress = get('お届け先住所');
+    const product = get('商品名型番', '商品名', '品名');
+    const itemCode = get('コード', '商品コード');
+    const workContent = get('作業内容', '科目', '作業区分');
+    const unitPrice = toNumberSafe(get('単価'));
+    const quantity = toNumberSafe(get('数量')) || 1;
+    const amount = toNumberSafe(get('金額'));
+    const recycleTicketNo = get('リサイクル券番号');
+    const deliveredDate = normalizeDateText(get('配達完了日'));
+
+    const size = [];
+    for (let i = 1; i <= 8; i++) {
+      size.push(toNumberSafe(get(`サイズ別数量${i}`, `サイズ別数量${toZenkakuNumber(i)}`, `サイズ${i}`)));
+    }
+
+    if (!slipNo && !address && !product && !workContent) return null;
+
+    const area = normalizeAreaName(address || destAddress || zip || '未設定');
+    const productCategory = classifyProductCategory(product, workContent, itemCode);
+    const mainSize = detectMainSize(size);
+
+    return {
+      ym,
+      source: 'area_csv',
+      fileName,
+      lineNo,
+      deliveredDate,
+      shipperCode,
+      shipperName,
+      storeCode,
+      storeName,
+      branchCode,
+      branchName,
+      slipNo,
+      customerSlipNo: get('荷主伝票番号'),
+      zip,
+      address,
+      destAddress,
+      customerName: get('お届け先名'),
+      product,
+      productCategory,
+      itemCode,
+      workContent,
+      account: workContent || itemCode || '未設定',
+      unitPrice,
+      quantity,
+      amount,
+      recycleTicketNo,
+      recycleCompletedDate: normalizeDateText(get('リサイクル完了日')),
+      size,
+      mainSize,
+      area,
+      count: quantity || 1
+    };
   },
 
-  parseDetailLine(line, meta, pageNo) {
-    let t = String(line || '').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();
-    if (!t) return null;
-    if (/^20\d{2}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+Page/i.test(t)) return null;
-    if (/荷主別配送エリア別物量|管理者印|担当者印|配達完了日/.test(t)) return null;
-    if (/郵便番号\s+住所\s+件数/.test(t)) return null;
-    if (/^\/?\s*\/\s*\/?/.test(t)) return null;
-    if (/^合計[:：]/.test(t)) return null;
-    const head = t.match(/^((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)\s+(.+)$/i);
-    if (!head) return null;
-    let zip = head[1].replace(/\s+/g,'').toUpperCase();
-    if (zip.includes('UNKNOWN')) zip = 'UNKNOWN';
-    let rest = head[2].trim();
-    const nums = [];
-    let remain = rest;
-    while (nums.length < 20) {
-      const m = remain.match(/(?:^|\s)(-?\d[\d,]*)(?:\s*)$/);
-      if (!m) break;
-      nums.unshift(toNumberSafe(m[1]));
-      remain = remain.slice(0, m.index).trimEnd();
-    }
-    if (nums.length < 12) return null;
-    const tail = nums.slice(-12);
-    const [count, deliveryFee, trunkFee, extraFee, s1,s2,s3,s4,s5,s6,s7,s8] = tail;
-    let address = remain.replace(/郵便番号.*$/, '').replace(/件数.*$/, '').replace(/\s+/g, '').trim();
-    if (!address || address === '住所') return null;
-    return { ym: null, source: 'area_pdf', pageNo, shipperCode: meta.shipperCode || '', shipperName: meta.shipperName || '', pdfDateFrom: meta.pdfDateFrom || '', pdfDateTo: meta.pdfDateTo || '', zip, address, area: normalizeAreaName(address), count, deliveryFee, trunkFee, extraFee, size: [s1,s2,s3,s4,s5,s6,s7,s8] };
+  parseWorkerRow(row, idx, ym, fileName, lineNo, header) {
+    const get = (...names) => {
+      for (const name of names) {
+        const i = idx(name);
+        if (i >= 0) return String(row[i] ?? '').trim();
+      }
+      return '';
+    };
+
+    const workerName = get('作業者名', '作業者', '担当者', '社員名', '氏名') || String(row[0] || '').trim();
+    const workContent = get('作業内容', '作業区分', '科目');
+    const count = toNumberSafe(get('件数', '数量', '実績')) || 1;
+    if (!workerName) return null;
+
+    const raw = {};
+    header.forEach((h, i) => { raw[h || `列${i+1}`] = row[i] ?? ''; });
+
+    return {
+      ym,
+      source: 'worker_csv',
+      fileName,
+      lineNo,
+      workerName,
+      workContent,
+      account: workContent || '未設定',
+      count,
+      amount: toNumberSafe(get('金額', '売上', '料金')),
+      raw
+    };
   },
 
   saveParsed(parsed) {
-    if (!Array.isArray(STATE.areaData)) STATE.areaData = [];
-    STATE.areaData = STATE.areaData.filter(r => !(r.ym === parsed.ym && r.sourceFileName === parsed.fileName));
-    parsed.records.forEach(r => { STATE.areaData.push({ ...r, sourceFileName: parsed.fileName }); });
-    this.rebuildFieldDataFromAreaData(parsed.ym);
-    STORE.save();
-    renderFieldDataList2();
-    FIELD_UI.updatePeriodBadge && FIELD_UI.updatePeriodBadge();
+    STATE.areaData = (STATE.areaData || []).filter(r => !(r.ym === parsed.ym && r.source === parsed.source));
+
+    const rowsToSave = parsed.records.map(r => ({
+      ...r,
+      importKind: parsed.kind,
+      importKindLabel: parsed.kindLabel,
+      importedAt: parsed.importedAt,
+      recordCount: parsed.recordCount,
+      uniqueSlipCount: parsed.uniqueSlipCount,
+      duplicateSlipCount: parsed.duplicateSlipCount,
+      duplicateLineCount: parsed.duplicateLineCount
+    }));
+
+    STATE.areaData.push(...rowsToSave);
+    STATE.areaData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)) || String(a.source).localeCompare(String(b.source)));
+
+    if (parsed.source === 'area_csv') {
+      this.rebuildFieldDataFromAreaCsv(parsed.ym);
+    } else {
+      this.saveWorkerSummary(parsed);
+    }
   },
 
-  rebuildFieldDataFromAreaData(ym) {
-    const rows = (STATE.areaData || []).filter(r => r.ym === ym && !r.rawOnly);
+  rebuildFieldDataFromAreaCsv(ym) {
+    const rows = (STATE.areaData || []).filter(r => r.ym === ym && r.source === 'area_csv');
     if (!rows.length) return;
+
     const areas = {};
+    const seenSlipByArea = {};
+
     for (const r of rows) {
-      const area = r.area || '未分類';
-      if (!areas[area]) areas[area] = { count:0, amount:0, shippers:{}, size:[0,0,0,0,0,0,0,0] };
-      areas[area].count += n(r.count);
-      areas[area].amount += n(r.deliveryFee) + n(r.trunkFee) + n(r.extraFee);
-      for (let i=0;i<8;i++) areas[area].size[i] += n(r.size?.[i]);
+      const area = r.area || normalizeAreaName(r.address || r.destAddress || r.zip || '未設定');
+      if (!areas[area]) {
+        areas[area] = {
+          count:0,
+          lineCount:0,
+          amount:0,
+          shippers:{},
+          products:{},
+          accounts:{},
+          size:[0,0,0,0,0,0,0,0],
+          duplicateSlipCount:0
+        };
+        seenSlipByArea[area] = new Set();
+      }
+
+      areas[area].lineCount += 1;
+      areas[area].amount += n(r.amount);
+      (r.size || []).forEach((v,i)=>{ areas[area].size[i] += n(v); });
+
+      const slip = r.slipNo || `__line_${r.lineNo}`;
+      if (!seenSlipByArea[area].has(slip)) {
+        seenSlipByArea[area].add(slip);
+        areas[area].count += 1;
+      } else {
+        areas[area].duplicateSlipCount += 1;
+      }
+
       const shipper = r.shipperName || r.shipperCode || '未設定';
-      if (!areas[area].shippers[shipper]) areas[area].shippers[shipper] = { count:0, amount:0, size:[0,0,0,0,0,0,0,0] };
-      areas[area].shippers[shipper].count += n(r.count);
-      areas[area].shippers[shipper].amount += n(r.deliveryFee) + n(r.trunkFee) + n(r.extraFee);
-      for (let i=0;i<8;i++) areas[area].shippers[shipper].size[i] += n(r.size?.[i]);
+      if (!areas[area].shippers[shipper]) areas[area].shippers[shipper] = { count:0, amount:0, lineCount:0 };
+      areas[area].shippers[shipper].lineCount += 1;
+      areas[area].shippers[shipper].amount += n(r.amount);
+      areas[area].shippers[shipper].count = countUniqueSlips(rows.filter(x => (x.area || normalizeAreaName(x.address || x.destAddress || x.zip || '未設定')) === area && (x.shipperName || x.shipperCode || '未設定') === shipper));
+
+      const product = r.productCategory || '未設定';
+      areas[area].products[product] = (areas[area].products[product] || 0) + 1;
+
+      const account = r.account || '未設定';
+      areas[area].accounts[account] = (areas[area].accounts[account] || 0) + 1;
     }
-    STATE.fieldData = (STATE.fieldData || []).filter(d => d.ym !== ym);
-    STATE.fieldData.push({ ym, source: 'area_pdf', areas, importedAt: new Date().toISOString() });
-    STATE.fieldData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+
+    const duplicateInfo = analyzeSlipDuplicates(rows);
+
+    STATE.fieldData = (STATE.fieldData || []).filter(d => !(d.ym === ym && d.source === 'area_csv'));
+    STATE.fieldData.push({
+      ym,
+      source: 'area_csv',
+      label: '商品・住所CSV',
+      areas,
+      importedAt: new Date().toISOString(),
+      rowCount: rows.length,
+      uniqueSlipCount: countUniqueSlips(rows),
+      duplicateSlipCount: duplicateInfo.duplicateSlipCount,
+      duplicateLineCount: duplicateInfo.duplicateLineCount,
+      duplicateGroups: duplicateInfo.groups
+    });
+    STATE.fieldData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)) || String(a.source).localeCompare(String(b.source)));
+  },
+
+  saveWorkerSummary(parsed) {
+    const workers = {};
+    for (const r of parsed.records) {
+      const name = r.workerName || '未設定';
+      if (!workers[name]) workers[name] = { count:0, amount:0, accounts:{} };
+      workers[name].count += n(r.count);
+      workers[name].amount += n(r.amount);
+      const account = r.account || '未設定';
+      workers[name].accounts[account] = (workers[name].accounts[account] || 0) + n(r.count);
+    }
+
+    STATE.fieldData = (STATE.fieldData || []).filter(d => !(d.ym === parsed.ym && d.source === 'worker_csv'));
+    STATE.fieldData.push({
+      ym: parsed.ym,
+      source: 'worker_csv',
+      label: '作業者別CSV',
+      workers,
+      importedAt: parsed.importedAt,
+      rowCount: parsed.recordCount
+    });
+    STATE.fieldData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)) || String(a.source).localeCompare(String(b.source)));
   }
 };
+
+function normalizeHeaderName(v) {
+  return String(v || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/[\s　]/g, '')
+    .replace(/[①]/g, '1')
+    .replace(/[②]/g, '2')
+    .replace(/[③]/g, '3')
+    .replace(/[④]/g, '4')
+    .replace(/[⑤]/g, '5')
+    .replace(/[⑥]/g, '6')
+    .replace(/[⑦]/g, '7')
+    .replace(/[⑧]/g, '8')
+    .trim();
+}
+
+function makeHeaderIndex(header) {
+  return function(name) {
+    const key = normalizeHeaderName(name);
+    return header.findIndex(h => normalizeHeaderName(h) === key);
+  };
+}
+
 function toNumberSafe(v) {
-  const s = String(v ?? '').replace(/,/g,'').replace(/[^\d.-]/g,'');
+  const s = String(v ?? '').replace(/,/g,'').replace(/[円千]/g,'').replace(/[^\d.-]/g,'');
   if (!s || s === '-' || s === '.') return 0;
   const num = Number(s);
   return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeZip(v) {
+  return String(v || '').replace(/[^0-9A-Za-z]/g,'').toUpperCase();
+}
+
+function normalizeDateText(v) {
+  const s = String(v || '').replace(/[^0-9]/g,'');
+  if (s.length === 8) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+  return String(v || '').trim();
+}
+
+function toZenkakuNumber(n) {
+  return String(n).replace(/[0-9]/g, d => '０１２３４５６７８９'[Number(d)]);
 }
 
 function normalizeAreaName(address) {
@@ -3783,20 +3975,73 @@ function normalizeAreaName(address) {
 
   const prefMatch = t.match(/^(東京都|北海道|(?:京都|大阪)府|.{2,3}県)/);
   const pref = prefMatch ? prefMatch[1] : '';
-
   const rest = pref ? t.slice(pref.length) : t;
-
-  // 市区町村・郡町村を大まかに抽出
   const m = rest.match(/^(.+?[市区町村])/);
   if (m) return pref + m[1];
-
   return pref ? pref + rest : rest;
 }
 
+function classifyProductCategory(product, workContent, itemCode) {
+  const t = `${product || ''} ${workContent || ''} ${itemCode || ''}`;
+  if (/冷蔵|冷凍/.test(t)) return '冷蔵庫';
+  if (/洗濯|洗乾|ランドリー/.test(t)) return '洗濯機';
+  if (/エアコン|空調/.test(t)) return 'エアコン';
+  if (/テレビ|ＴＶ|TV|液晶/.test(t)) return 'テレビ';
+  if (/レンジ|オーブン/.test(t)) return 'レンジ';
+  if (/リサイクル|リサ券/.test(t)) return 'リサイクル';
+  if (/工事|取付|設置/.test(t)) return '工事・設置';
+  return product ? 'その他商品' : (workContent || '未設定');
+}
+
+function detectMainSize(size) {
+  const arr = Array.isArray(size) ? size : [];
+  let best = 0, max = 0;
+  arr.forEach((v,i)=>{ if (n(v) > max) { max = n(v); best = i+1; } });
+  return max > 0 ? `サイズ${best}` : '未設定';
+}
+
+function analyzeSlipDuplicates(records) {
+  const map = {};
+  for (const r of records || []) {
+    const key = String(r.slipNo || '').trim();
+    if (!key) continue;
+    if (!map[key]) map[key] = [];
+    map[key].push(r);
+  }
+
+  const groups = Object.entries(map)
+    .filter(([, list]) => list.length > 1)
+    .map(([slipNo, list]) => ({
+      slipNo,
+      lineCount: list.length,
+      products: [...new Set(list.map(r => r.product).filter(Boolean))],
+      accounts: [...new Set(list.map(r => r.account).filter(Boolean))],
+      address: list[0]?.address || list[0]?.destAddress || '',
+      shipper: list[0]?.shipperName || list[0]?.shipperCode || '',
+      amount: list.reduce((s,r)=>s+n(r.amount),0)
+    }))
+    .sort((a,b)=>b.lineCount-a.lineCount || String(a.slipNo).localeCompare(String(b.slipNo)));
+
+  const countBySlip = {};
+  Object.entries(map).forEach(([k,v]) => { countBySlip[k] = v.length; });
+
+  return {
+    groups,
+    countBySlip,
+    duplicateSlipCount: groups.length,
+    duplicateLineCount: groups.reduce((s,g)=>s+g.lineCount,0)
+  };
+}
+
+function countUniqueSlips(records) {
+  const slips = new Set((records || []).map(r => String(r.slipNo || '').trim()).filter(Boolean));
+  if (slips.size) return slips.size;
+  return (records || []).length;
+}
 
 function setupFieldImportYMControls() {
-  const fySel = document.getElementById('field-pdf-fy-select');
-  const mSel = document.getElementById('field-pdf-month-select');
+  const fySel = document.getElementById('field-csv-fy-select');
+  const mSel = document.getElementById('field-csv-month-select');
   if (!fySel || !mSel) return;
 
   const years = dashboardAvailableFiscalYears();
@@ -3816,8 +4061,8 @@ function setupFieldImportYMControls() {
 }
 
 function syncFieldImportYMFromControls() {
-  const fySel = document.getElementById('field-pdf-fy-select');
-  const mSel = document.getElementById('field-pdf-month-select');
+  const fySel = document.getElementById('field-csv-fy-select');
+  const mSel = document.getElementById('field-csv-month-select');
   if (!fySel || !mSel) return;
 
   const fy = String(fySel.value || dashboardSelectedFiscalYear());
@@ -3828,12 +4073,12 @@ function syncFieldImportYMFromControls() {
   STATE.selYM = `${year}${mm}`;
 
   const note = document.getElementById('field-import-ym-note');
-  if (note) note.textContent = `${ymLabel(STATE.selYM)} として保存します。PDF内の日付は参考情報として保存します。`;
+  if (note) note.textContent = `${ymLabel(STATE.selYM)} として保存します。CSVの配達完了日は参考情報として保存します。`;
 }
 
 const FIELD_IMPORT2 = {
-  handleFiles(files) { AREA_PDF_IMPORT.handleFiles(files); },
-  handleDrop(e) { e.preventDefault(); if(e.dataTransfer.files.length) AREA_PDF_IMPORT.handleFiles(e.dataTransfer.files); },
+  handleFiles(files) { AREA_CSV_IMPORT.handleFiles(files); },
+  handleDrop(e) { e.preventDefault(); if(e.dataTransfer.files.length) AREA_CSV_IMPORT.handleFiles(e.dataTransfer.files); },
 };
 
 // 現場データリスト更新（グローバル関数として呼ばれる）
@@ -3846,7 +4091,7 @@ function renderFieldDataList2() {
     list.innerHTML = STATE.fieldData.map(d=>{
       const areaRows = (STATE.areaData || []).filter(r => r.ym === d.ym);
       const areaCount = areaRows.reduce((s,r)=>s+n(r.count),0);
-      const areaLabel = areaRows.length ? ` / PDF ${fmt(areaRows.length)}行・${fmt(areaCount)}件` : '';
+      const areaLabel = areaRows.length ? ` / CSV ${fmt(areaRows.length)}行・${fmt(areaCount)}件` : '';
       return `
       <div class="data-item">
         <span>${ymLabel(d.ym)}${areaLabel}</span>
@@ -4007,582 +4252,165 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-/* ════════════════════════════════════════════════════════════════
-   2026-04-29 追補修正：荷主別配送エリア別物量PDF 取込安定化
-   ・作業者別CSVとは別処理
-   ・年度／月選択UIをアプリ側で自動生成
-   ・PDF.jsの行分割崩れに対応した全文正規表現解析
-   ・STATE.areaData → STATE.fieldData を再構築して画面に表示
+
+
+/* ════════ FIELD CSV IMPORT final patch（2026-04-29）════════
+   CSV取込廃止版。現場明細はCSVのみ取り込む。
+   表示一覧では、作業者別CSV / 商品・住所CSV / 原票番号重複を確認できる。
 ════════════════════════════════════════════════════════════════ */
-
-function ensureFieldImportYMControls() {
-  const zone =
-    document.getElementById('field-upload-zone2') ||
-    document.getElementById('field-upload-zone');
-
-  if (!zone) return;
-
-  let box = document.getElementById('field-pdf-period-box');
-
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'field-pdf-period-box';
-    box.style.cssText = [
-      'margin:0 0 12px',
-      'padding:12px 14px',
-      'border:1px solid #d9dee8',
-      'border-radius:12px',
-      'background:#f8fafc',
-      'display:flex',
-      'align-items:center',
-      'justify-content:space-between',
-      'gap:12px',
-      'flex-wrap:wrap'
-    ].join(';');
-
-    box.innerHTML = `
-      <div>
-        <div style="font-weight:900;color:#1f2d3d;font-size:13px">荷主別配送エリア別物量PDFの取込年月</div>
-        <div id="field-import-ym-note" style="font-size:12px;color:#64748b;margin-top:4px"></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <select id="field-pdf-fy-select" style="height:34px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;background:#fff;font-weight:800"></select>
-        <select id="field-pdf-month-select" style="height:34px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;background:#fff;font-weight:800">
-          <option value="04">4月</option>
-          <option value="05">5月</option>
-          <option value="06">6月</option>
-          <option value="07">7月</option>
-          <option value="08">8月</option>
-          <option value="09">9月</option>
-          <option value="10">10月</option>
-          <option value="11">11月</option>
-          <option value="12">12月</option>
-          <option value="01">1月</option>
-          <option value="02">2月</option>
-          <option value="03">3月</option>
-        </select>
-      </div>
-    `;
-
-    zone.parentNode.insertBefore(box, zone);
-  }
-
-  const fySel = document.getElementById('field-pdf-fy-select');
-  const mSel = document.getElementById('field-pdf-month-select');
-  if (!fySel || !mSel) return;
-
-  const now = new Date();
-  const defaultFY = dashboardSelectedFiscalYear ? dashboardSelectedFiscalYear() : getDefaultFiscalYear();
-  const current = fySel.value || defaultFY;
-
-  fySel.innerHTML = '';
-  for (let y = now.getFullYear() + 1; y >= 2020; y--) {
-    fySel.innerHTML += `<option value="${y}">${y}年度</option>`;
-  }
-
-  fySel.value = [...fySel.options].some(o => o.value === String(current)) ? String(current) : String(defaultFY);
-
-  const selected = STATE.selYM || (typeof dashboardSelectedYM === 'function' ? dashboardSelectedYM() : null);
-  if (selected) {
-    fySel.value = fiscalYearFromYM(selected);
-    mSel.value = selected.slice(4,6);
-  }
-
-  fySel.onchange = syncFieldImportYMFromControls;
-  mSel.onchange = syncFieldImportYMFromControls;
-
-  syncFieldImportYMFromControls();
-}
-
-selectedYMForImport = function selectedYMForImport() {
-  const fySel = document.getElementById('field-pdf-fy-select');
-  const mSel = document.getElementById('field-pdf-month-select');
-
-  if (fySel && mSel && fySel.value && mSel.value) {
-    const fy = String(fySel.value);
-    const mm = String(mSel.value).padStart(2, '0');
-    const year = ['01','02','03'].includes(mm) ? String(parseInt(fy,10) + 1) : fy;
-    STATE.fiscalYear = fy;
-    STATE.selYM = `${year}${mm}`;
-    return STATE.selYM;
-  }
-
-  return STATE.selYM || (typeof dashboardSelectedYM === 'function' ? dashboardSelectedYM() : null) || latestDS()?.ym || null;
-};
-
-if (typeof AREA_PDF_IMPORT !== 'undefined') {
-  AREA_PDF_IMPORT.handleFiles = async function(files) {
-    ensureFieldImportYMControls();
-    syncFieldImportYMFromControls();
-
-    const arr = Array.from(files || []);
-    const pdfs = arr.filter(f => /\.pdf$/i.test(f.name));
-    const others = arr.filter(f => !/\.pdf$/i.test(f.name));
-
-    for (const pdf of pdfs) await this.importPdf(pdf);
-
-    if (others.length) IMPORT.handleFiles(others);
-  };
-
-  AREA_PDF_IMPORT.importPdf = async function(file) {
-    try {
-      ensureFieldImportYMControls();
-      syncFieldImportYMFromControls();
-
-      UI.toast('荷主別配送エリア別物量PDFを解析中です...');
-      await ASSETS.pdfjs();
-      if (!window.pdfjsLib) throw new Error('PDF.jsを読み込めませんでした');
-
-      const forcedYM = selectedYMForImport();
-      if (!forcedYM) {
-        UI.toast('取込対象の年度・月を選択してください', 'warn');
-        return;
-      }
-
-      const buffer = await file.arrayBuffer();
-      const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
-
-      let allRecords = [];
-      let fullText = '';
-
-      for (let p = 1; p <= pdf.numPages; p++) {
-        const page = await pdf.getPage(p);
-        const content = await page.getTextContent();
-
-        const lineText = this.itemsToPageText ? this.itemsToPageText(content.items) : '';
-        const rawText = (content.items || []).map(i => String(i.str || '')).join(' ');
-        const pageText = `${lineText}\n${rawText}`;
-
-        fullText += '\n' + pageText;
-        allRecords = allRecords.concat(parseAreaVolumePdfText(pageText));
-      }
-
-      allRecords = allRecords.map(r => ({
-        ...r,
-        ym: forcedYM,
-        importedAt: new Date().toISOString()
-      }));
-
-      if (!allRecords.length) {
-        if (!Array.isArray(STATE.areaData)) STATE.areaData = [];
-        STATE.areaData = STATE.areaData.filter(r => !(r.ym === forcedYM && r.sourceFileName === file.name));
-        STATE.areaData.push({
-          ym: forcedYM,
-          source: 'area_pdf',
-          sourceFileName: file.name,
-          rawOnly: true,
-          rawText: fullText.slice(0, 500000),
-          importedAt: new Date().toISOString()
-        });
-        STORE.save();
-        if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
-        NAV.refresh();
-        UI.toast(`${ymLabel(forcedYM)} PDF原文は保存しましたが、明細行は読み込めませんでした`, 'warn');
-        return;
-      }
-
-      const parsed = {
-        ym: forcedYM,
-        fileName: file.name,
-        importedAt: new Date().toISOString(),
-        totalCount: allRecords.reduce((sum, r) => sum + n(r.count), 0),
-        totalDeliveryFee: allRecords.reduce((sum, r) => sum + n(r.deliveryFee), 0),
-        totalTrunkFee: allRecords.reduce((sum, r) => sum + n(r.trunkFee), 0),
-        totalExtraFee: allRecords.reduce((sum, r) => sum + n(r.extraFee), 0),
-        shipperCount: new Set(allRecords.map(r => `${r.shipperCode}_${r.shipperName}`)).size,
-        records: allRecords
-      };
-
-      this.saveParsed(parsed);
-
-      if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
-      NAV.refresh();
-
-      UI.toast(
-        `${ymLabel(parsed.ym)} エリア物量PDF取込完了：` +
-        `${fmt(parsed.shipperCount)}荷主 / ${fmt(parsed.records.length)}行 / ${fmt(parsed.totalCount)}件`
-      );
-    } catch(e) {
-      console.error(e);
-      UI.toast('PDF取込エラー: ' + e.message, 'error');
-    }
-  };
-}
-
-function parseAreaVolumePdfText(text) {
-  const t = String(text || '')
-    .replace(/[　]/g, ' ')
-    .replace(/(\d)(202\d\/)/g, '$1 $2')
-    .replace(/(0)(荷主[:：])/g, '$1 $2')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (!/荷主別配送エリア別物量/.test(t) && !/郵便番号\s+住所\s+件数/.test(t)) return [];
-
-  const meta = extractAreaVolumeMeta(t);
-  const records = [];
-
-  const num = '(-?\\d[\\d,]*)';
-  const rowRe = new RegExp(
-    '(?:^|\\s)' +
-    '((?:\\d{7})|UNKNOWN)' +
-    '\\s+(.+?)\\s+' +
-    Array(12).fill(num).join('\\s+') +
-    '(?=\\s+(?:\\d{7}|UNKNOWN|合計[:：]|荷主[:：]|配達完了日|郵便番号|202\\d/|$))',
-    'gi'
-  );
-
-  let m;
-  while ((m = rowRe.exec(t)) !== null) {
-    const zip = String(m[1] || '').trim().toUpperCase();
-    let address = String(m[2] || '').trim();
-
-    if (!address || /^(住所|件数)$/.test(address)) continue;
-    if (/郵便番号\s+住所\s+件数/.test(address)) continue;
-
-    address = address
-      .replace(/^住所\s*/, '')
-      .replace(/\s+/g, '')
-      .trim();
-
-    const values = m.slice(3, 15).map(toNumberSafe);
-    if (values.length !== 12) continue;
-
-    const [count, deliveryFee, trunkFee, extraFee, s1,s2,s3,s4,s5,s6,s7,s8] = values;
-    if (!Number.isFinite(count)) continue;
-
-    records.push({
-      ym: null,
-      source: 'area_pdf',
-      branchCode: meta.branchCode,
-      branchName: meta.branchName,
-      shipperCode: meta.shipperCode,
-      shipperName: meta.shipperName,
-      pdfDateFrom: meta.pdfDateFrom,
-      pdfDateTo: meta.pdfDateTo,
-      zip,
-      address,
-      area: normalizeAreaName(address),
-      count,
-      deliveryFee,
-      trunkFee,
-      extraFee,
-      totalFee: n(deliveryFee) + n(trunkFee) + n(extraFee),
-      size: [s1,s2,s3,s4,s5,s6,s7,s8]
-    });
-  }
-
-  return records;
-}
-
-function extractAreaVolumeMeta(text) {
-  const t = String(text || '').replace(/[　]/g,' ').replace(/\s+/g,' ');
-
-  let branchCode = '';
-  let branchName = '';
-  let shipperCode = '';
-  let shipperName = '';
-  let pdfDateFrom = '';
-  let pdfDateTo = '';
-
-  const branchMatch = t.match(/支店[:：]\s*([0-9A-Z]+)\s+(.+?)\s+管理者印/);
-  if (branchMatch) {
-    branchCode = branchMatch[1] || '';
-    branchName = (branchMatch[2] || '').trim();
-  }
-
-  const shipperMatch = t.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+?)\s+配達完了日/);
-  if (shipperMatch) {
-    shipperCode = shipperMatch[1] || '';
-    shipperName = (shipperMatch[2] || '').trim();
-  }
-
-  const dateMatch = t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})\s+(\d{4})\/(\d{2})\/(\d{2})/);
-  if (dateMatch) {
-    pdfDateFrom = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
-    pdfDateTo = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`;
-  }
-
-  return { branchCode, branchName, shipperCode, shipperName, pdfDateFrom, pdfDateTo };
-}
-
-const __renderImportOriginalForAreaPdf = typeof renderImport === 'function' ? renderImport : null;
-if (__renderImportOriginalForAreaPdf) {
-  renderImport = function renderImportPatched() {
-    __renderImportOriginalForAreaPdf();
-    ensureFieldImportYMControls();
+const __renderImportOriginalForFieldCsv = typeof renderImport === 'function' ? renderImport : null;
+if (__renderImportOriginalForFieldCsv) {
+  renderImport = function renderImportPatchedForFieldCsv() {
+    __renderImportOriginalForFieldCsv();
+    setupFieldImportYMControls();
     if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
   };
 }
 
-const __renderFieldDataList2OriginalForAreaPdf = typeof renderFieldDataList2 === 'function' ? renderFieldDataList2 : null;
-if (__renderFieldDataList2OriginalForAreaPdf) {
-  renderFieldDataList2 = function renderFieldDataList2Patched() {
+const __renderFieldDataList2OriginalForFieldCsv = typeof renderFieldDataList2 === 'function' ? renderFieldDataList2 : null;
+if (__renderFieldDataList2OriginalForFieldCsv) {
+  renderFieldDataList2 = function renderFieldDataList2PatchedForFieldCsv() {
     const list = document.getElementById('field-data-list2');
     const badge = document.getElementById('field-import-badge');
+    if (!list) return __renderFieldDataList2OriginalForFieldCsv();
 
     const fieldRows = STATE.fieldData || [];
-    const areaRows = (STATE.areaData || []).filter(r => !r.rawOnly);
-
-    if (!list) {
-      __renderFieldDataList2OriginalForAreaPdf();
-      return;
-    }
+    const detailRows = (STATE.areaData || []).filter(r => r.source === 'area_csv');
+    const workerRows = (STATE.areaData || []).filter(r => r.source === 'worker_csv');
 
     const yms = [...new Set([
       ...fieldRows.map(d => d.ym),
-      ...areaRows.map(r => r.ym)
+      ...detailRows.map(r => r.ym),
+      ...workerRows.map(r => r.ym)
     ].filter(Boolean))].sort();
 
-    if (yms.length) {
-      if (badge) { badge.textContent='読込済'; badge.className='badge badge-ok'; }
-
-      list.innerHTML = yms.map(ym => {
-        const f = fieldRows.find(d => d.ym === ym);
-        const rows = areaRows.filter(r => r.ym === ym);
-        const totalCount = rows.reduce((s,r)=>s+n(r.count),0) || Object.values(f?.areas || {}).reduce((s,a)=>s+n(a.count),0);
-        const shipperCount = new Set(rows.map(r => `${r.shipperCode}_${r.shipperName}`)).size;
-        const rowCount = rows.length;
-
-        return `
-          <div class="data-item">
-            <span>
-              <strong>${ymLabel(ym)}</strong>
-              <span style="margin-left:8px;color:var(--text3);font-size:11px">
-                エリア物量PDF ${fmt(rowCount)}行・${fmt(totalCount)}件${shipperCount ? `・${fmt(shipperCount)}荷主` : ''}
-              </span>
-            </span>
-            <button class="btn btn-danger" onclick="IMPORT.deleteFieldData && IMPORT.deleteFieldData('${ym}')" style="font-size:11px;padding:2px 8px">削除</button>
-          </div>`;
-      }).join('');
-
+    if (!yms.length) {
+      if (badge) { badge.textContent='未読込'; badge.className='badge badge-warn'; }
+      list.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">まだデータがありません</div>';
       const rowEl = document.getElementById('field-delete-all-row');
-      if (rowEl) rowEl.style.display = 'flex';
-    } else {
-      __renderFieldDataList2OriginalForAreaPdf();
+      if (rowEl) rowEl.style.display = 'none';
+      return;
     }
+
+    if (badge) { badge.textContent='読込済'; badge.className='badge badge-ok'; }
+
+    list.innerHTML = yms.map(ym => {
+      const dRows = detailRows.filter(r => r.ym === ym);
+      const wRows = workerRows.filter(r => r.ym === ym);
+      const uniqueSlip = countUniqueSlips(dRows);
+      const dup = analyzeSlipDuplicates(dRows);
+      const itemCats = [...new Set(dRows.map(r => r.productCategory).filter(Boolean))].length;
+      const accounts = [...new Set(dRows.map(r => r.account).filter(Boolean))].length;
+      const addresses = [...new Set(dRows.map(r => r.address || r.destAddress).filter(Boolean))].length;
+      const workers = [...new Set(wRows.map(r => r.workerName).filter(Boolean))].length;
+
+      const detailLabel = dRows.length
+        ? `商品・住所CSV ${fmt(dRows.length)}行 / 原票${fmt(uniqueSlip)}件 / 住所${fmt(addresses)}件 / 商品分類${fmt(itemCats)} / 科目${fmt(accounts)} / 重複原票${fmt(dup.duplicateSlipCount)}件`
+        : '商品・住所CSV 未登録';
+
+      const workerLabel = wRows.length
+        ? `作業者別CSV ${fmt(wRows.length)}行 / 作業者${fmt(workers)}名`
+        : '作業者別CSV 未登録';
+
+      const dupColor = dup.duplicateSlipCount ? '#b91c1c' : '#15803d';
+      const dupBg = dup.duplicateSlipCount ? '#fee2e2' : '#dcfce7';
+
+      return `
+        <div class="data-item" style="align-items:flex-start;gap:12px">
+          <div style="flex:1;line-height:1.7">
+            <div><strong>${ymLabel(ym)}</strong></div>
+            <div style="font-size:11px;color:var(--text2)">✅ ${detailLabel}</div>
+            <div style="font-size:11px;color:var(--text2)">✅ ${workerLabel}</div>
+            ${dRows.length ? `<div style="font-size:11px;margin-top:3px"><span style="display:inline-block;background:${dupBg};color:${dupColor};border-radius:999px;padding:2px 8px;font-weight:800">原票重複チェック：${dup.duplicateSlipCount ? `要確認 ${fmt(dup.duplicateSlipCount)}件` : 'OK'}</span></div>` : ''}
+          </div>
+          <button class="btn btn-danger" onclick="IMPORT.deleteFieldData && IMPORT.deleteFieldData('${ym}')" style="font-size:11px;padding:2px 8px">削除</button>
+        </div>`;
+    }).join('');
+
+    const rowEl = document.getElementById('field-delete-all-row');
+    if (rowEl) rowEl.style.display = 'flex';
   };
 }
 
+IMPORT.deleteFieldData = function(ym) {
+  STATE.fieldData = (STATE.fieldData || []).filter(d=>d.ym!==ym);
+  STATE.areaData = (STATE.areaData || []).filter(d=>d.ym!==ym);
+  STORE.save();
+  renderFieldDataList2();
+  NAV.refresh();
+  UI.toast(`${ymLabel(ym)} の現場CSVデータを削除しました`);
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
-    ensureFieldImportYMControls();
+    setupFieldImportYMControls();
     if (typeof renderFieldDataList2 === 'function') renderFieldDataList2();
   }, 300);
 });
 
-/* ════════ AREA PDF IMPORT v4 修正（2026-04-29）════════
-   ・PDF.js / 帳票PDFの郵便番号が「11 20 001」のように分割されるケースに対応
-   ・UNKNOWN が「UN KN OWN」のように分割されるケースに対応
-   ・1行ごとに解析し、荷主情報をページ内ヘッダーから保持
-   ・対象帳票：荷主別配送エリア別物量
-════════════════════════════════════════════════════════════════ */
-function parseAreaVolumePdfText(text) {
-  const rawLines = String(text || '')
-    .replace(/[　]/g, ' ')
-    .replace(/\u00a0/g, ' ')
-    .split(/\r?\n/);
+/* ════════ 月次登録チェック表：現場CSV列追加（2026-04-29）════════ */
+const __renderMonthlyCheckTableOriginalForFieldCsv = typeof renderMonthlyCheckTable === 'function' ? renderMonthlyCheckTable : null;
+if (__renderMonthlyCheckTableOriginalForFieldCsv) {
+  renderMonthlyCheckTable = function renderMonthlyCheckTableWithFieldCsv() {
+    const fy = storageFiscalYear();
+    const months = storageFiscalMonths(fy);
+    const states = months.map(ym => storageMonthState(fy, ym));
+    const missingCount = states.filter(s => s.judge === '漏れ').length;
+    const dailyOnlyCount = states.filter(s => s.judge === '注意').length;
+    const abnormalCount = states.filter(s => s.judge === '異常').length;
+    const histOnlyCount = states.filter(s => s.judge === '補完のみ').length;
 
-  const records = [];
-  let meta = {
-    branchCode: '',
-    branchName: '',
-    shipperCode: '',
-    shipperName: '',
-    pdfDateFrom: '',
-    pdfDateTo: ''
+    const summary = abnormalCount
+      ? storageBadge(`異常 ${abnormalCount}件`, 'danger')
+      : missingCount
+        ? storageBadge(`漏れ ${missingCount}ヶ月`, 'danger')
+        : dailyOnlyCount || histOnlyCount
+          ? storageBadge(`確認 ${dailyOnlyCount + histOnlyCount}ヶ月`, 'warn')
+          : storageBadge('12ヶ月 OK', 'ok');
+
+    function fieldCsvState(ym, source) {
+      const rows = (STATE.areaData || []).filter(r => r.ym === ym && r.source === source);
+      if (!rows.length) return { label:'未登録', kind:'danger', note:'' };
+      if (source === 'area_csv') {
+        const dup = analyzeSlipDuplicates(rows);
+        const uniqueSlip = countUniqueSlips(rows);
+        return {
+          label: dup.duplicateSlipCount ? `要確認 ${dup.duplicateSlipCount}` : '登録済',
+          kind: dup.duplicateSlipCount ? 'warn' : 'ok',
+          note: `商品住所 ${rows.length}行 / 原票${uniqueSlip}件 / 重複${dup.duplicateSlipCount}件`
+        };
+      }
+      const workers = new Set(rows.map(r => r.workerName).filter(Boolean)).size;
+      return { label:'登録済', kind:'ok', note:`作業者 ${rows.length}行 / ${workers}名` };
+    }
+
+    return `
+      <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+          <div>
+            <div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:3px">${fy}年度：${fy}年4月 ～ ${parseInt(fy,10)+1}年3月（年度順）</div>
+          </div>
+          <div>${summary}</div>
+        </div>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>作業者CSV</th><th>商品住所CSV</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
+          ${states.map(s=>{
+            const worker = fieldCsvState(s.ym, 'worker_csv');
+            const detail = fieldCsvState(s.ym, 'area_csv');
+            const note = [s.note, worker.note, detail.note].filter(Boolean).join(' / ');
+            return `
+            <tr>
+              <td><strong>${ymLabel(s.ym)}</strong></td>
+              <td>${storageBadge(s.csvLabel, s.csvKind)}</td>
+              <td>${storageBadge(s.histLabel, s.histKind)}</td>
+              <td>${storageBadge(s.planLabel, s.planKind)}</td>
+              <td>${storageBadge(worker.label, worker.kind)}</td>
+              <td>${storageBadge(detail.label, detail.kind)}</td>
+              <td>${storageBadge(s.judge, s.kind)}</td>
+              <td style="min-width:360px;color:var(--text2)">${esc(note)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody></table></div>
+      </div>`;
   };
-
-  function cleanLine(line) {
-    return String(line || '').replace(/\s+/g, ' ').trim();
-  }
-
-  function numValue(v) {
-    const s = String(v ?? '').replace(/,/g, '').replace(/[^\d.\-]/g, '');
-    if (!s || s === '-' || s === '.') return 0;
-    const num = parseFloat(s);
-    return Number.isFinite(num) ? num : 0;
-  }
-
-  function cleanZip(v) {
-    const s = String(v || '').replace(/\s+/g, '').toUpperCase();
-    if (s === 'UNKNOWN' || s === 'UNKNONW' || s === 'UNKNOW') return 'UNKNOWN';
-    return s;
-  }
-
-  function cleanAddress(v) {
-    return String(v || '')
-      .replace(/^住所\s*/, '')
-      .replace(/\s+/g, '')
-      .trim();
-  }
-
-  function updateMetaFromLine(line) {
-    const branch = line.match(/支店[:：]\s*([0-9A-Z]+)\s+(.+?)\s+管\s*理\s*者\s*印/i)
-      || line.match(/支店[:：]\s*([0-9A-Z]+)\s+(.+?)\s+管理者印/i);
-    if (branch) {
-      meta.branchCode = branch[1] || meta.branchCode;
-      meta.branchName = String(branch[2] || meta.branchName).replace(/\s+/g, '').trim();
-    }
-
-    const shipper = line.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+)$/i);
-    if (shipper && !/荷主別配送エリア別物量/.test(line)) {
-      meta.shipperCode = shipper[1] || '';
-      meta.shipperName = String(shipper[2] || '')
-        .replace(/配達完了日.*$/, '')
-        .replace(/\s+/g, '')
-        .trim();
-    }
-
-    const dateLine = line.replace(/\s+/g, '');
-    const date = dateLine.match(/配達完了日[:：]?([0-9]{4})\/(\d{2})\/(\d{2}).*?([0-9]{4})\/(\d{2})\/(\d{2})/);
-    if (date) {
-      meta.pdfDateFrom = `${date[1]}-${date[2]}-${date[3]}`;
-      meta.pdfDateTo = `${date[4]}-${date[5]}-${date[6]}`;
-    }
-  }
-
-  const rowRe = /^((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)\s+(.+?)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s*$/i;
-
-  for (const raw of rawLines) {
-    const line = cleanLine(raw);
-    if (!line) continue;
-
-    updateMetaFromLine(line);
-
-    if (/郵便番号\s+住所\s+件数/.test(line)) continue;
-    if (/合計[:：]/.test(line)) continue;
-    if (/Page\s+\d+\s+\/\s+\d+/i.test(line)) continue;
-    if (/荷主別配送エリア別物量|配達完了日|管理者印|担当者印/.test(line)) continue;
-
-    const m = line.match(rowRe);
-    if (!m) continue;
-
-    const zip = cleanZip(m[1]);
-    const address = cleanAddress(m[2]);
-    if (!address || /^(住所|件数)$/.test(address)) continue;
-
-    const values = m.slice(3, 15).map(numValue);
-    if (values.length !== 12) continue;
-
-    const [count, deliveryFee, trunkFee, extraFee, s1, s2, s3, s4, s5, s6, s7, s8] = values;
-
-    records.push({
-      ym: null,
-      source: 'area_pdf',
-      branchCode: meta.branchCode,
-      branchName: meta.branchName,
-      shipperCode: meta.shipperCode,
-      shipperName: meta.shipperName,
-      pdfDateFrom: meta.pdfDateFrom,
-      pdfDateTo: meta.pdfDateTo,
-      zip,
-      address,
-      area: typeof normalizeAreaName === 'function' ? normalizeAreaName(address) : address,
-      count,
-      deliveryFee,
-      trunkFee,
-      extraFee,
-      totalFee: numValue(deliveryFee) + numValue(trunkFee) + numValue(extraFee),
-      size: [s1, s2, s3, s4, s5, s6, s7, s8]
-    });
-  }
-
-  return records;
 }
-/* DEBUG_APPEND_START_20260429
-   app.jsのみ：PDF取込デバッグ表示版
-   center.html / app.css / index / toda / kitasaitama は変更不要
-*/
-(function(){
-  'use strict';
-  function escDebug(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-  function numDebug(v){var n=Number(String(v==null?'':v).replace(/,/g,'').replace(/[^0-9.-]/g,''));return Number.isFinite(n)?n:0;}
-  function toastDebug(msg,type){if(typeof UI!=='undefined'&&UI.toast)UI.toast(msg,type||'ok');else alert(msg);}
-  function ymLabelDebug(ym){if(typeof ymLabel==='function')return ymLabel(ym);return ym?ym.slice(0,4)+'年'+parseInt(ym.slice(4,6),10)+'月':'対象月未選択';}
-  function fmtDebug(v){if(typeof fmt==='function')return fmt(v);return new Intl.NumberFormat('ja-JP').format(Number(v||0));}
-  function areaNameDebug(address){
-    if(typeof normalizeAreaName==='function')return normalizeAreaName(address);
-    var t=String(address||'').replace(/\s+/g,'');
-    if(!t||t.indexOf('郵便番号未登録')>=0||t==='UNKNOWN')return '郵便番号未登録';
-    var pref=(t.match(/^(東京都|北海道|(?:京都|大阪)府|.{2,3}県)/)||['',''])[1];
-    var rest=pref?t.slice(pref.length):t;
-    var m=rest.match(/^(.+?[市区町村])/);
-    return m?pref+m[1]:(pref?pref+rest:rest);
-  }
-  var PDF_IMPORT_DEBUG={
-    lastReport:null,
-    getYM:function(){
-      try{
-        var fySel=document.getElementById('field-pdf-fy-select');
-        var mSel=document.getElementById('field-pdf-month-select');
-        if(fySel&&mSel&&fySel.value&&mSel.value){
-          var fy=String(fySel.value);var mm=String(mSel.value).padStart(2,'0');
-          var yyyy=(['01','02','03'].indexOf(mm)>=0)?String(parseInt(fy,10)+1):fy;
-          if(typeof STATE!=='undefined'){STATE.fiscalYear=fy;STATE.selYM=yyyy+mm;}
-          return yyyy+mm;
-        }
-        if(typeof selectedYMForImport==='function')return selectedYMForImport();
-        if(typeof STATE!=='undefined'&&STATE.selYM)return STATE.selYM;
-      }catch(e){}
-      return null;
-    },
-    showPanel:function(report){
-      this.lastReport=report;window.PDF_IMPORT_DEBUG_REPORT=report;console.log('PDF_IMPORT_DEBUG_REPORT',report);
-      var html=''+
-      '<div style="margin:12px 0;padding:14px;border:2px solid #f59e0b;border-radius:10px;background:#fff7ed;color:#7c2d12;font-size:12px;line-height:1.7">'+
-      '<div style="font-weight:900;font-size:14px;margin-bottom:8px">PDF取込デバッグ結果</div>'+
-      '<div><b>結論：</b>'+(report.records.length?'明細行を取得できました。保存処理まで実行しています。':'まだ明細行を取得できていません。下の候補行・文字部品・PDF生文字を確認します。')+'</div>'+
-      '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0">'+
-      '<div style="background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:8px"><b>対象月</b><br>'+escDebug(ymLabelDebug(report.ym))+'</div>'+
-      '<div style="background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:8px"><b>ページ数</b><br>'+escDebug(report.numPages)+'</div>'+
-      '<div style="background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:8px"><b>PDF文字部品</b><br>'+escDebug(report.totalItems)+'</div>'+
-      '<div style="background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:8px"><b>取得明細</b><br>'+escDebug(report.records.length)+' 行</div></div>'+
-      '<details open style="margin-top:8px"><summary style="cursor:pointer;font-weight:900">候補行サンプル（最大80行）</summary><textarea readonly style="width:100%;height:180px;margin-top:6px;font-family:Consolas,monospace;font-size:11px;border:1px solid #fdba74;border-radius:6px;padding:8px;background:#fff">'+escDebug(report.candidateLines.slice(0,80).join('\n'))+'</textarea></details>'+
-      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:900">PDF.js 文字部品サンプル（座標付き・最大120件）</summary><textarea readonly style="width:100%;height:180px;margin-top:6px;font-family:Consolas,monospace;font-size:11px;border:1px solid #fdba74;border-radius:6px;padding:8px;background:#fff">'+escDebug(report.itemSamples.slice(0,120).join('\n'))+'</textarea></details>'+
-      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:900">PDF生文字サンプル（先頭8000字）</summary><textarea readonly style="width:100%;height:220px;margin-top:6px;font-family:Consolas,monospace;font-size:11px;border:1px solid #fdba74;border-radius:6px;padding:8px;background:#fff">'+escDebug(report.fullText.slice(0,8000))+'</textarea></details>'+
-      '<div style="margin-top:8px;color:#92400e">※ この内容をスクショ、またはテキストコピーして送ってください。</div></div>';
-      var msg=document.getElementById('field-import-msg2')||document.getElementById('upload-msg');
-      if(msg)msg.innerHTML=html;else{var box=document.getElementById('pdf-import-debug-floating');if(!box){box=document.createElement('div');box.id='pdf-import-debug-floating';box.style.cssText='position:fixed;left:220px;right:20px;bottom:20px;z-index:999999;max-height:70vh;overflow:auto;background:#fff;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.25);padding:10px';document.body.appendChild(box);}box.innerHTML=html;}
-    },
-    itemsToRows:function(items,pageNo){
-      var rows=[];(items||[]).forEach(function(it){var str=String(it.str||'').trim();if(!str)return;var tr=it.transform||[];var x=Number(tr[4]||0);var y=Number(tr[5]||0);var row=rows.find(function(r){return Math.abs(r.y-y)<=2.8;});if(!row){row={pageNo:pageNo,y:y,items:[]};rows.push(row);}row.items.push({x:x,y:y,str:str});});
-      rows.sort(function(a,b){return b.y-a.y;});rows.forEach(function(r){r.items.sort(function(a,b){return a.x-b.x;});});return rows;
-    },
-    buildCandidateLines:function(rows,rawJoined){
-      var lines=[];rows.forEach(function(r){var spaced=r.items.map(function(i){return i.str;}).join(' ').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();var compact=r.items.map(function(i){return i.str;}).join('').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();if(spaced)lines.push(spaced);if(compact&&compact!==spaced)lines.push(compact);});
-      var raw=String(rawJoined||'').replace(/(20\d{2}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+Page)/g,'\n$1').replace(/((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)(?=\s*[\u3040-\u30ff\u3400-\u9fffA-Za-z])/gi,'\n$1').replace(/(合計[:：])/g,'\n$1');
-      raw.split(/\n+/).forEach(function(x){var s=x.replace(/[　]/g,' ').replace(/\s+/g,' ').trim();if(s)lines.push(s);});
-      return Array.from(new Set(lines)).filter(Boolean);
-    },
-    parseLine:function(line,meta,pageNo){
-      var t=String(line||'').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();if(!t)return null;
-      if(/荷主別配送エリア別物量|郵便番号\s*住所\s*件数|配達完了日|管理者印|担当者印|^合計[:：]|^\/?\s*\/?\s*\/?/.test(t))return null;
-      var head=t.match(/((?:\d\s*){7}|UNKNOWN|UN\s*KN\s*OWN)\s*(.+)$/i);if(!head)return null;
-      var zip=head[1].replace(/\s+/g,'').toUpperCase();if(/UNKNOWN/.test(zip))zip='UNKNOWN';var rest=head[2].trim();
-      var nums=[];var remain=rest;while(nums.length<12){var m=remain.match(/(?:^|\s)(-?\d[\d,]*)(?:\s*)$/);if(!m)break;nums.unshift(numDebug(m[1]));remain=remain.slice(0,m.index).trimEnd();}
-      if(nums.length<12)return null;var tail=nums.slice(-12);var address=remain.replace(/\s+/g,'').trim();if(!address||address==='住所')return null;
-      return {ym:null,source:'area_pdf',pageNo:pageNo,shipperCode:meta.shipperCode||'',shipperName:meta.shipperName||'',pdfDateFrom:meta.pdfDateFrom||'',pdfDateTo:meta.pdfDateTo||'',zip:zip,address:address,area:areaNameDebug(address),count:tail[0],deliveryFee:tail[1],trunkFee:tail[2],extraFee:tail[3],size:tail.slice(4,12)};
-    },
-    updateMeta:function(line,meta){
-      var t=String(line||'').replace(/[　]/g,' ').replace(/\s+/g,' ').trim();var s=t.match(/荷主[:：]\s*([0-9A-Z]+)\s+(.+?)(?:\s+配達完了日|$)/);if(s){meta.shipperCode=s[1];meta.shipperName=s[2].trim();}
-      var d=t.match(/配達完了日[:：]\s*(\d{4})\/(\d{2})\/(\d{2})\s+(\d{4})\/(\d{2})\/(\d{2})/);if(d){meta.pdfDateFrom=d[1]+'-'+d[2]+'-'+d[3];meta.pdfDateTo=d[4]+'-'+d[5]+'-'+d[6];}
-    },
-    saveParsed:function(ym,fileName,records){
-      if(typeof STATE==='undefined')return;if(!Array.isArray(STATE.areaData))STATE.areaData=[];STATE.areaData=STATE.areaData.filter(function(r){return !(r.ym===ym&&r.sourceFileName===fileName);});records.forEach(function(r){STATE.areaData.push(Object.assign({},r,{ym:ym,sourceFileName:fileName,importedAt:new Date().toISOString()}));});
-      var areas={};records.forEach(function(r){var area=r.area||'未分類';if(!areas[area])areas[area]={count:0,amount:0,shippers:{},size:[0,0,0,0,0,0,0,0]};areas[area].count+=Number(r.count||0);areas[area].amount+=Number(r.deliveryFee||0)+Number(r.trunkFee||0)+Number(r.extraFee||0);for(var i=0;i<8;i++)areas[area].size[i]+=Number((r.size||[])[i]||0);var shipper=r.shipperName||r.shipperCode||'未設定';if(!areas[area].shippers[shipper])areas[area].shippers[shipper]={count:0,amount:0,size:[0,0,0,0,0,0,0,0]};areas[area].shippers[shipper].count+=Number(r.count||0);areas[area].shippers[shipper].amount+=Number(r.deliveryFee||0)+Number(r.trunkFee||0)+Number(r.extraFee||0);for(var j=0;j<8;j++)areas[area].shippers[shipper].size[j]+=Number((r.size||[])[j]||0);});
-      if(!Array.isArray(STATE.fieldData))STATE.fieldData=[];STATE.fieldData=STATE.fieldData.filter(function(d){return d.ym!==ym;});STATE.fieldData.push({ym:ym,source:'area_pdf',areas:areas,importedAt:new Date().toISOString()});STATE.fieldData.sort(function(a,b){return String(a.ym).localeCompare(String(b.ym));});if(typeof STORE!=='undefined'&&STORE.save)STORE.save();if(typeof renderFieldDataList2==='function')renderFieldDataList2();if(typeof NAV!=='undefined'&&NAV.refresh)NAV.refresh();
-    }
-  };
-  window.PDF_IMPORT_DEBUG=PDF_IMPORT_DEBUG;
-  function installDebugOverride(){
-    if(typeof AREA_PDF_IMPORT==='undefined'){console.warn('AREA_PDF_IMPORT が未定義です');return;}
-    AREA_PDF_IMPORT.handleFiles=async function(files){try{if(typeof ensureFieldImportYMControls==='function')ensureFieldImportYMControls();}catch(e){}try{if(typeof syncFieldImportYMFromControls==='function')syncFieldImportYMFromControls();}catch(e){}var arr=Array.from(files||[]);var pdfs=arr.filter(function(f){return /\.pdf$/i.test(f.name);});var others=arr.filter(function(f){return !/\.pdf$/i.test(f.name);});for(var i=0;i<pdfs.length;i++)await this.importPdf(pdfs[i]);if(others.length&&typeof IMPORT!=='undefined'&&IMPORT.handleFiles)IMPORT.handleFiles(others);};
-    AREA_PDF_IMPORT.importPdf=async function(file){
-      var report={fileName:file?file.name:'',ym:PDF_IMPORT_DEBUG.getYM(),numPages:0,totalItems:0,candidateLines:[],itemSamples:[],fullText:'',records:[],errors:[]};
-      try{toastDebug('PDFデバッグ解析中です...');if(typeof ASSETS==='undefined'||!ASSETS.pdfjs)throw new Error('ASSETS.pdfjs が見つかりません');await ASSETS.pdfjs();if(!window.pdfjsLib)throw new Error('PDF.jsを読み込めませんでした');if(!file)throw new Error('PDFファイルが渡っていません');if(!report.ym)throw new Error('対象年月が取得できません');var buffer=await file.arrayBuffer();var pdf=await window.pdfjsLib.getDocument({data:buffer}).promise;report.numPages=pdf.numPages;var meta={shipperCode:'',shipperName:'',pdfDateFrom:'',pdfDateTo:''};var allCandidateLines=[];for(var p=1;p<=pdf.numPages;p++){var page=await pdf.getPage(p);var content=await page.getTextContent();var items=content.items||[];report.totalItems+=items.length;items.slice(0,120).forEach(function(it){var tr=it.transform||[];report.itemSamples.push('p'+p+' x='+Number(tr[4]||0).toFixed(1)+' y='+Number(tr[5]||0).toFixed(1)+' : '+String(it.str||''));});var rows=PDF_IMPORT_DEBUG.itemsToRows(items,p);var rawJoined=items.map(function(i){return String(i.str||'');}).join(' ');var rawCompact=items.map(function(i){return String(i.str||'');}).join('');report.fullText+='\n--- PAGE '+p+' RAW_JOINED ---\n'+rawJoined+'\n--- PAGE '+p+' RAW_COMPACT ---\n'+rawCompact+'\n';var candidates=PDF_IMPORT_DEBUG.buildCandidateLines(rows,rawJoined+'\n'+rawCompact);allCandidateLines=allCandidateLines.concat(candidates);candidates.forEach(function(line){PDF_IMPORT_DEBUG.updateMeta(line,meta);var rec=PDF_IMPORT_DEBUG.parseLine(line,meta,p);if(rec)report.records.push(rec);});}report.candidateLines=Array.from(new Set(allCandidateLines)).slice(0,500);if(report.records.length){PDF_IMPORT_DEBUG.saveParsed(report.ym,file.name,report.records);toastDebug(ymLabelDebug(report.ym)+' PDF取込成功：'+fmtDebug(report.records.length)+'行 / '+fmtDebug(report.records.reduce(function(s,r){return s+Number(r.count||0);},0))+'件');}else{if(typeof STATE!=='undefined'){if(!Array.isArray(STATE.areaData))STATE.areaData=[];STATE.areaData=STATE.areaData.filter(function(r){return !(r.ym===report.ym&&r.sourceFileName===file.name);});STATE.areaData.push({ym:report.ym,source:'area_pdf',sourceFileName:file.name,rawOnly:true,rawText:report.fullText.slice(0,500000),importedAt:new Date().toISOString()});if(typeof STORE!=='undefined'&&STORE.save)STORE.save();}toastDebug(ymLabelDebug(report.ym)+' 明細行は未取得。デバッグ結果を表示しました','warn');}PDF_IMPORT_DEBUG.showPanel(report);}catch(e){report.errors.push(e.message||String(e));PDF_IMPORT_DEBUG.showPanel(report);console.error(e);toastDebug('PDFデバッグ解析エラー: '+(e.message||e),'error');}
-    };
-  }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installDebugOverride);else installDebugOverride();
-})();
-/* DEBUG_APPEND_END_20260429 */
