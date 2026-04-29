@@ -5251,160 +5251,117 @@ function parseAreaVolumePdfText(text) {
     }, 200);
   });
 })();
-
-
 /* ════════════════════════════════════════════════════════════════
-   2026-04-29 追補：荷主分析 完全修正版 v2
-   ・最初の仕分け条件：K列に「収入」を含む行だけ対象
-   ・荷主別：Y列荷主コードを0補完し、頭4桁でグループ化
-   ・契約別：Y列荷主コードを0補完し、全桁で集計
-   ・契約名：AA列
-   ・件数／売上：AB列を重複除外して集計、U列金額を1回だけ合算
-   ・月件数推移：X列原票番号をユニーク件数で表示
-   ・主要荷主月別推移：荷主別と同じ頭4桁グループで表示
+   2026-04-29 追補：荷主別／契約別 集計再設計
+   ・荷主別：Y列 荷主コードの頭3桁で統合
+   ・契約別：Y列 荷主コード（フル）＋AA列 荷主名／契約名で集計
+   ・件数：AB列をユニーク化してカウント
+   ・売上：AB列ユニーク単位でU列金額を1回だけ合算
+   ・契約別は＋ボタンで開閉表示
 ════════════════════════════════════════════════════════════════ */
 (function(){
-  if (window.__SHIPPER_FINAL_PATCH_20260429_V2__) return;
-  window.__SHIPPER_FINAL_PATCH_20260429_V2__ = true;
+  if (window.__SHIPPER_CONTRACT_PATCH_20260429__) return;
+  window.__SHIPPER_CONTRACT_PATCH_20260429__ = true;
 
-  function _clean(v){ return String(v ?? '').replace(/[\u0000-\u001f]/g,'').replace(/　/g,' ').replace(/\s+/g,' ').trim(); }
-  function _digits(v){ return _clean(v).replace(/\.0$/,'').replace(/[^0-9]/g,''); }
-  function _num(v){
+  function _cleanText(v){ return String(v ?? '').replace(/[\u0000-\u001f]/g,'').replace(/\s+/g,' ').trim(); }
+  function _toNumber(v){
     const s = String(v ?? '').replace(/,/g,'').replace(/[円¥￥\s　]/g,'').replace(/[^0-9.\-]/g,'');
     if (!s || s === '-' || s === '.') return 0;
-    const n = Number(s);
-    return Number.isFinite(n) ? n : 0;
+    const num = Number(s);
+    return Number.isFinite(num) ? num : 0;
   }
-  function _fmt0(v){ return new Intl.NumberFormat('ja-JP',{maximumFractionDigits:0}).format(Math.round(Number(v)||0)); }
-  function _fmtK(v){ return _fmt0((Number(v)||0)/1000); }
-  function _yen(count, amount){ return count ? Math.round((Number(amount)||0) / count) : 0; }
-  function _esc(v){ return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-
-  function normalizeFullCode(raw){
-    const d = _digits(raw);
-    if (!d) return '';
-    // CSVで先頭0が落ちている前提に対応。既に0始まりなら二重に付けない。
-    return d.startsWith('0') ? d : ('0' + d);
-  }
-  function groupCode4(raw){
-    const c = normalizeFullCode(raw);
-    return c ? c.slice(0,4) : '';
-  }
-  function stripParen(name){
-    return _clean(name).replace(/（.*?）/g,'').replace(/\(.*?\)/g,'').trim();
-  }
-  function simpleGroupName(names){
-    const joined = (names || []).map(_clean).join(' ');
+  function _code(v){ return _cleanText(v).replace(/\.0$/,''); }
+  function _code3(v){ const c = _code(v); return c ? c.slice(0,3) : ''; }
+  function _stripParen(name){ return _cleanText(name).replace(/（.*?）/g,'').replace(/\(.*?\)/g,'').trim(); }
+  function _simpleGroupName(names){
+    const list = (names || []).map(_cleanText).filter(Boolean);
+    const joined = list.join(' ');
     if (/コジマ/.test(joined)) return 'コジマ';
-    if (/でんきち/.test(joined)) return 'でんきち';
+    if (/でんきち|デンキチ/.test(joined)) return 'でんきち';
     if (/ビックカメラ|ビック/.test(joined)) return 'ビックカメラ';
     if (/ジェイトップ/.test(joined)) return 'ジェイトップ';
-    if (/スリーエス|サンキ家具/.test(joined)) return 'スリーエスサンキ家具';
-    if (/フジ医療器/.test(joined)) return 'フジ医療器';
     if (/プラスカーゴ/.test(joined)) return 'プラスカーゴサービス';
-    const first = (names || []).map(stripParen).find(Boolean);
-    return first || '未設定';
+    if (/フジ医療器/.test(joined)) return 'フジ医療器';
+    if (/スリーエス/.test(joined)) return 'スリーエスサンキ家具';
+    const first = list[0] || '未設定';
+    return _stripParen(first) || first || '未設定';
   }
-  function contractName(name){
-    return _clean(name) || '未設定';
-  }
+  function _contractName(name){ return _cleanText(name) || '未設定'; }
+  function _yenPer(count, income){ return count > 0 ? Math.round(income / count) : 0; }
+  function _fmtKLocal(v){ return typeof fmtK === 'function' ? fmtK(v) : Math.round((Number(v)||0)/1000).toLocaleString('ja-JP'); }
+  function _fmtLocal(v){ return typeof fmt === 'function' ? fmt(v) : Math.round(Number(v)||0).toLocaleString('ja-JP'); }
+  function _escLocal(v){ return typeof esc === 'function' ? esc(v) : String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-  // 列定義：0始まり
-  const COL = {
-    workKind: 10,      // K列：収入の文字を含む行だけ対象
-    amount: 20,        // U列：金額
-    slip: 23,          // X列：原票番号（月件数推移用）
-    shipperCode: 24,   // Y列：荷主コード
-    shipperName: 26,   // AA列：荷主名／契約名
-    detailKey: 27      // AB列：重複除外キー
-  };
-
-  function isIncomeRow(row){
-    return /収入/.test(_clean(row[COL.workKind]));
-  }
-
-  function buildShipperAggregationFromCsvRows(rows){
-    const body = (rows || []).slice(1).filter(r => Array.isArray(r) && r.some(c => _clean(c)));
+  function buildShipperAggregationFromCsvRows(csvRows){
+    const rows = Array.isArray(csvRows) ? csvRows : [];
+    const body = rows.length > 1 ? rows.slice(1) : rows;
     const groups = new Map();
     const contracts = new Map();
-    const slipSet = new Set();
+    const usedByContract = new Set();
+    const usedByGroup = new Set();
 
-    for (const row of body) {
-      if (!isIncomeRow(row)) continue;
+    body.forEach((row, idx)=>{
+      if (!Array.isArray(row)) return;
+      const fullCode = _code(row[24]);
+      const c3 = _code3(fullCode);
+      const rawName = _contractName(row[26]);
+      const detailKeyRaw = _cleanText(row[27]);
+      const detailKey = detailKeyRaw || `__row_${idx}`;
+      const amount = _toNumber(row[20]);
+      if (!fullCode || !c3) return;
 
-      const fullCode = normalizeFullCode(row[COL.shipperCode]);
-      const gCode = groupCode4(row[COL.shipperCode]);
-      const name = contractName(row[COL.shipperName]);
-      const detailKeyRaw = _clean(row[COL.detailKey]);
-      const slip = _clean(row[COL.slip]);
-      const amount = _num(row[COL.amount]);
+      const contractKey = fullCode;
+      const contractDedupKey = `${contractKey}::${detailKey}`;
+      const groupDedupKey = `${c3}::${detailKey}`;
 
-      if (slip) slipSet.add(slip);
-      if (!fullCode || !gCode || !detailKeyRaw) continue;
-
-      // AB列が同じなら同一明細として扱う。ただし荷主コードが違う場合まで潰さないよう、契約コードと結合する。
-      const uniqueKey = fullCode + '|' + detailKeyRaw;
-
-      if (!groups.has(gCode)) {
-        groups.set(gCode, { code4:gCode, names:new Set(), detailSet:new Set(), income:0, contracts:new Map() });
+      if (!contracts.has(contractKey)) {
+        contracts.set(contractKey, { code:fullCode, groupCode:c3, name:rawName, names:new Set(), detailKeys:new Set(), count:0, income:0 });
       }
-      const g = groups.get(gCode);
-      g.names.add(name);
+      const contract = contracts.get(contractKey);
+      if (rawName) contract.names.add(rawName);
+      if (!contract.name || contract.name === '未設定') contract.name = rawName || contract.name;
 
-      if (!contracts.has(fullCode)) {
-        contracts.set(fullCode, { code:fullCode, groupCode:gCode, names:new Set(), detailSet:new Set(), income:0 });
+      if (!groups.has(c3)) {
+        groups.set(c3, { code3:c3, name:'', names:new Set(), detailKeys:new Set(), count:0, income:0, contracts:new Map() });
       }
-      const c = contracts.get(fullCode);
-      c.names.add(name);
+      const group = groups.get(c3);
+      if (rawName) group.names.add(rawName);
+      group.contracts.set(contractKey, contract);
 
-      if (!c.detailSet.has(uniqueKey)) {
-        c.detailSet.add(uniqueKey);
-        c.income += amount;
+      if (!usedByContract.has(contractDedupKey)) {
+        usedByContract.add(contractDedupKey);
+        contract.detailKeys.add(detailKey);
+        contract.count += 1;
+        contract.income += amount;
       }
-      if (!g.detailSet.has(uniqueKey)) {
-        g.detailSet.add(uniqueKey);
-        g.income += amount;
+      if (!usedByGroup.has(groupDedupKey)) {
+        usedByGroup.add(groupDedupKey);
+        group.detailKeys.add(detailKey);
+        group.count += 1;
+        group.income += amount;
       }
-    }
+    });
 
-    const contractList = Array.from(contracts.values()).map(c => ({
-      code: c.code,
-      groupCode: c.groupCode,
-      name: contractName(Array.from(c.names).find(Boolean) || ''),
-      count: c.detailSet.size,
-      income: c.income,
-      unit: _yen(c.detailSet.size, c.income)
-    })).sort((a,b)=>b.income-a.income || b.count-a.count || a.code.localeCompare(b.code,'ja'));
-
-    const groupList = Array.from(groups.values()).map(g => {
-      const children = contractList.filter(c => c.groupCode === g.code4)
-        .sort((a,b)=>b.income-a.income || b.count-a.count || a.code.localeCompare(b.code,'ja'));
-      const name = simpleGroupName(Array.from(g.names));
-      return {
-        code4: g.code4,
-        name,
-        count: g.detailSet.size,
-        income: g.income,
-        unit: _yen(g.detailSet.size, g.income),
-        contracts: children
-      };
+    const groupList = Array.from(groups.values()).map(g=>{
+      const contracts = Array.from(g.contracts.values()).map(c=>({
+        code:c.code, groupCode:c.groupCode, name:_contractName(c.name || Array.from(c.names)[0]), count:c.count, income:c.income, unit:_yenPer(c.count,c.income)
+      })).sort((a,b)=>b.income-a.income || b.count-a.count || a.code.localeCompare(b.code,'ja'));
+      return { code3:g.code3, name:_simpleGroupName(Array.from(g.names)), count:g.count, income:g.income, unit:_yenPer(g.count,g.income), contracts };
     }).sort((a,b)=>b.income-a.income || b.count-a.count || a.name.localeCompare(b.name,'ja'));
 
-    const dashboardShippers = {};
-    groupList.forEach(g => { dashboardShippers[g.name] = { income:g.income, count:g.count, code4:g.code4 }; });
+    const contractList = Array.from(contracts.values()).map(c=>({
+      code:c.code, groupCode:c.groupCode, groupName:_simpleGroupName(Array.from(groups.get(c.groupCode)?.names || [])),
+      name:_contractName(c.name || Array.from(c.names)[0]), count:c.count, income:c.income, unit:_yenPer(c.count,c.income)
+    })).sort((a,b)=>b.income-a.income || b.count-a.count || a.code.localeCompare(b.code,'ja'));
 
-    return {
-      groups: groupList,
-      contracts: contractList,
-      dashboardShippers,
-      monthlyCount: slipSet.size,
-      rule: 'K列=収入のみ／Y列0補完頭4桁グループ／Y列0補完全桁契約／AB列重複除外／U列金額'
-    };
+    const dashboardShippers = {};
+    groupList.forEach(g=>{ dashboardShippers[g.name] = { income:g.income, count:g.count, code3:g.code3 }; });
+    return { groups:groupList, contracts:contractList, dashboardShippers };
   }
 
-  const _originalParseSKDL = CSV.parseSKDL.bind(CSV);
+  const originalParseSKDL = CSV.parseSKDL.bind(CSV);
   CSV.parseSKDL = function(text, monthCol){
-    const result = _originalParseSKDL(text, monthCol);
+    const result = originalParseSKDL(text, monthCol);
     if (!result) return result;
     try {
       const rows = this.toRows(text);
@@ -5412,37 +5369,40 @@ function parseAreaVolumePdfText(text) {
       result._shipperGroups = agg.groups;
       result._shipperContracts = agg.contracts;
       result._dashboardShippers = agg.dashboardShippers;
-      result._shipperMonthlyCount = agg.monthlyCount;
-      result._shipperSourceRule = agg.rule;
+      result._shipperSourceRule = 'Y列荷主コード／AA列契約名／AB列重複除外／U列金額';
     } catch(e) {
       result._shipperGroups = [];
       result._shipperContracts = [];
       result._dashboardShippers = {};
-      result._shipperMonthlyCount = 0;
       result._shipperError = e.message;
     }
     return result;
   };
 
-  const _originalProcessDataset = processDataset;
+  const originalProcessDataset = processDataset;
   processDataset = function(ym, type, rows){
-    const ds = _originalProcessDataset(ym, type, rows);
+    const ds = originalProcessDataset(ym, type, rows);
     if (rows && rows._dashboardShippers) ds.shippers = rows._dashboardShippers;
     if (rows && rows._shipperGroups) ds.shipperGroups = rows._shipperGroups;
     if (rows && rows._shipperContracts) ds.shipperContracts = rows._shipperContracts;
-    if (rows && rows._shipperMonthlyCount != null) ds.shipperMonthlyCount = rows._shipperMonthlyCount;
     if (rows && rows._shipperSourceRule) ds.shipperSourceRule = rows._shipperSourceRule;
     return ds;
   };
 
-  function getGroups(ds){ return (ds && Array.isArray(ds.shipperGroups)) ? ds.shipperGroups : []; }
-  function getContracts(ds){ return (ds && Array.isArray(ds.shipperContracts)) ? ds.shipperContracts : []; }
+  const SHIPPER_DRILL = window.SHIPPER_DRILL || { openGroups:{} };
+  window.SHIPPER_DRILL = SHIPPER_DRILL;
+  SHIPPER_DRILL.toggle = function(code3){ this.openGroups[code3] = !this.openGroups[code3]; renderShipper(); };
 
-  const DRILL = window.SHIPPER_DRILL || { openGroups:{} };
-  window.SHIPPER_DRILL = DRILL;
-  DRILL.toggle = function(code4){ this.openGroups[code4] = !this.openGroups[code4]; renderShipper(); };
+  function getShipperGroups(ds){
+    if (ds && Array.isArray(ds.shipperGroups) && ds.shipperGroups.length) return ds.shipperGroups;
+    if (ds && ds.shippers && Object.keys(ds.shippers).length) {
+      return Object.entries(ds.shippers).map(([name,d])=>({ code3:d.code3 || name, name, count:d.count || 0, income:d.income || 0, unit:_yenPer(d.count||0,d.income||0), contracts:[] })).sort((a,b)=>b.income-a.income);
+    }
+    return [];
+  }
+  function getShipperContracts(ds){ return (ds && Array.isArray(ds.shipperContracts)) ? ds.shipperContracts : []; }
 
-  function setTabs(mode){
+  function setShipperTabs(mode){
     ['group','detail'].forEach(m=>{
       const btn = document.getElementById('shipper-tab-'+m);
       if (!btn) return;
@@ -5453,39 +5413,280 @@ function parseAreaVolumePdfText(text) {
     });
   }
 
-  function renderGroupTable(groups, total){
+  function renderGroupTable(groups, totalIncome){
     const tbody = document.getElementById('shipper-group-tbody');
     if (!tbody) return;
-    if (!groups.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">荷主別データがありません</td></tr>';
-      return;
-    }
+    if (!groups.length) { tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">荷主別データがありません</td></tr>'; return; }
     const rows = [];
     groups.forEach(g=>{
-      const open = !!DRILL.openGroups[g.code4];
-      const rate = total > 0 ? g.income / total * 100 : 0;
-      rows.push(`<tr style="cursor:pointer;background:${open?'#f8fafc':'#fff'}" onclick="SHIPPER_DRILL.toggle('${_esc(g.code4)}')"><td><button class="btn" style="padding:2px 7px;margin-right:8px;font-weight:900">${open?'－':'＋'}</button><strong>${_esc(g.name)}</strong> <span style="color:var(--text3);font-size:11px">(${_esc(g.code4)})</span></td><td class="r"><strong>${_fmt0(g.count)}</strong></td><td class="r"><strong>${_fmtK(g.income)}</strong></td><td class="r">${rate.toFixed(1)}%</td><td class="r">${_fmt0(g.unit)}</td><td class="c">${open?'表示中':'開く'}</td></tr>`);
+      const open = !!SHIPPER_DRILL.openGroups[g.code3];
+      const rate = totalIncome > 0 ? g.income / totalIncome * 100 : 0;
+      rows.push(`<tr style="cursor:pointer;background:${open?'#f8fafc':'#fff'}" onclick="SHIPPER_DRILL.toggle('${_escLocal(g.code3)}')"><td><button class="btn" style="padding:2px 7px;margin-right:8px;font-weight:900">${open?'－':'＋'}</button><strong>${_escLocal(g.name)}</strong> <span style="color:var(--text3);font-size:11px">(${_escLocal(g.code3)})</span></td><td class="r"><strong>${_fmtLocal(g.count)}</strong></td><td class="r"><strong>${_fmtKLocal(g.income)}</strong></td><td class="r">${rate.toFixed(1)}%</td><td class="r">${_fmtLocal(g.unit)}</td><td class="c">${open?'表示中':'開く'}</td></tr>`);
       if (open) {
-        rows.push('<tr class="row-h"><td>荷主コード</td><td>契約名</td><td class="r">件数</td><td class="r">売上（千円）</td><td class="r">構成比</td><td class="r">単価（円）</td></tr>');
+        rows.push(`<tr class="row-h"><td>荷主コード</td><td>契約名</td><td class="r">件数</td><td class="r">売上（千円）</td><td class="r">構成比</td><td class="r">単価（円）</td></tr>`);
         (g.contracts || []).forEach(c=>{
-          const cr = total > 0 ? c.income / total * 100 : 0;
-          rows.push(`<tr style="background:#fbfdff"><td style="padding-left:42px;font-family:monospace;color:#334155">${_esc(c.code)}</td><td><strong>${_esc(c.name)}</strong></td><td class="r">${_fmt0(c.count)}</td><td class="r">${_fmtK(c.income)}</td><td class="r">${cr.toFixed(1)}%</td><td class="r">${_fmt0(c.unit)}</td></tr>`);
+          const cr = totalIncome > 0 ? c.income / totalIncome * 100 : 0;
+          rows.push(`<tr style="background:#fbfdff"><td style="padding-left:42px;font-family:monospace;color:#334155">${_escLocal(c.code)}</td><td>${_escLocal(c.name)}</td><td class="r">${_fmtLocal(c.count)}</td><td class="r">${_fmtKLocal(c.income)}</td><td class="r">${cr.toFixed(1)}%</td><td class="r">${_fmtLocal(c.unit)}</td></tr>`);
         });
       }
     });
     tbody.innerHTML = rows.join('');
   }
 
-  function renderContractTable(contracts, total){
+  function renderContractTable(contracts, totalIncome){
     const tbody = document.getElementById('shipper-detail-tbody');
     if (!tbody) return;
-    if (!contracts.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">契約別データがありません</td></tr>';
-      return;
-    }
+    if (!contracts.length) { tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">契約別データがありません</td></tr>'; return; }
     tbody.innerHTML = contracts.map(c=>{
-      const rate = total > 0 ? c.income / total * 100 : 0;
-      return `<tr><td style="font-family:monospace;color:#334155">${_esc(c.code)}</td><td><strong>${_esc(c.name)}</strong></td><td class="r">${_fmt0(c.count)}</td><td class="r">${_fmtK(c.income)}</td><td class="r">${rate.toFixed(1)}%</td><td class="r">${_fmt0(c.unit)}</td></tr>`;
+      const rate = totalIncome > 0 ? c.income / totalIncome * 100 : 0;
+      return `<tr><td style="font-family:monospace;color:#334155">${_escLocal(c.code)}</td><td><strong>${_escLocal(c.name)}</strong><div style="font-size:10px;color:var(--text3)">${_escLocal(c.groupName || c.groupCode || '')}</div></td><td class="r">${_fmtLocal(c.count)}</td><td class="r">${_fmtKLocal(c.income)}</td><td class="r">${rate.toFixed(1)}%</td><td class="r">${_fmtLocal(c.unit)}</td></tr>`;
+    }).join('');
+  }
+
+  renderShipper = function(){
+    renderCommonPeriodSelector('shipper');
+    const ds = selectedDatasetInSelectedFiscalYear();
+    const mode = STATE.shipperMode || 'group';
+    setShipperTabs(mode);
+    let noticeEl = document.getElementById('shipper-notice');
+    if (!noticeEl) { const view = document.getElementById('view-shipper'); if (view) { noticeEl=document.createElement('div'); noticeEl.id='shipper-notice'; view.prepend(noticeEl); } }
+    const groups = getShipperGroups(ds);
+    const contracts = getShipperContracts(ds);
+    const totalIncome = groups.reduce((s,g)=>s+(Number(g.income)||0),0) || (ds ? ds.totalIncome : 0) || 0;
+    const hasData = groups.length || contracts.length;
+    if (!ds || !hasData) {
+      if (noticeEl) noticeEl.innerHTML = '<div class="msg msg-info" style="margin-bottom:14px">選択月の荷主別データがありません。確定CSV／速報CSVを再取込してください。</div>';
+      CHART_MGR.make('c-shipper-bar', {type:'bar', data:{labels:[], datasets:[{data:[]}]}, options:{responsive:true,maintainAspectRatio:false}});
+      renderGroupTable([],0); renderContractTable([],0); return;
+    }
+    if (noticeEl) noticeEl.innerHTML = '';
+    const groupCard = document.getElementById('shipper-group-card');
+    const detailCard = document.getElementById('shipper-detail-card');
+    const title = document.getElementById('shipper-chart-title');
+    const sub = document.getElementById('shipper-chart-sub');
+    const chartItems = mode === 'detail' ? contracts.slice(0,10) : groups.slice(0,10);
+    if (title) title.textContent = mode === 'detail' ? '契約別売上（荷主コード別）' : '荷主別売上（グループ統合）';
+    if (sub) sub.textContent = mode === 'detail' ? 'Y列荷主コード別／AB列重複除外' : 'Y列荷主コード頭3桁でグループ化／AB列重複除外';
+    CHART_MGR.make('c-shipper-bar', {type:'bar', data:{labels:chartItems.map(x => mode === 'detail' ? `${x.code} ${x.name}` : x.name), datasets:[{label:'売上（千円）', data:chartItems.map(x => (Number(x.income)||0)/1000), backgroundColor:chartItems.map((_,i)=>CONFIG.COLORS[i%CONFIG.COLORS.length])}]}, options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{title:{display:true,text:'千円'}}}}});
+    if (mode === 'detail') { if (groupCard) groupCard.style.display = 'none'; if (detailCard) detailCard.style.display = ''; renderContractTable(contracts,totalIncome); }
+    else { if (groupCard) groupCard.style.display = ''; if (detailCard) detailCard.style.display = 'none'; renderGroupTable(groups,totalIncome); }
+  };
+
+  const originalRenderDashboard = renderDashboard;
+  renderDashboard = function(){
+    originalRenderDashboard();
+    const ds = selectedDashboardDS();
+    const shipArea = document.getElementById('shipper-bars-area');
+    if (!shipArea || !ds) return;
+    const groups = getShipperGroups(ds);
+    if (!groups.length) return;
+    const items = groups.slice(0,8);
+    const maxV = Math.max(...items.map(x=>x.income),1);
+    shipArea.innerHTML = items.map((g,i)=>`<div class="mbar-row"><div class="mbar-label" title="${_escLocal(g.name)}">${_escLocal(g.name)}</div><div class="mbar-track"><div class="mbar-fill" style="width:${(g.income/maxV*100).toFixed(1)}%;background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div></div><div class="mbar-val">${_fmtKLocal(g.income)}千</div></div>`).join('');
+  };
+})();
+
+
+/* ════════════════════════════════════════════════════════════════
+   2026-04-29 最終追補：荷主分析 安定版
+   ・対象行：K列に「収入」を含む行のみ
+   ・荷主別：Y列 荷主コードを0補完し、左4桁で統合
+   ・契約別：Y列 荷主コードを0補完し、全桁で集計
+   ・契約名：AA列
+   ・件数：X列 原票番号のユニーク件数
+   ・売上：U列 金額をAB列ユニーク単位で1回だけ合算
+   ・グラフ表示：コードは出さず、名称だけ表示
+════════════════════════════════════════════════════════════════ */
+(function(){
+  if (window.__SHIPPER_FINAL_PATCH_20260429__) return;
+  window.__SHIPPER_FINAL_PATCH_20260429__ = true;
+
+  const COL = { category:10, amount:20, slip:23, code:24, name:26, detail:27 };
+
+  function s(v){ return String(v ?? '').replace(/[ -]/g,'').replace(/s+/g,' ').trim(); }
+  function esc2(v){ return typeof esc === 'function' ? esc(v) : String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function fmt2(v){ return typeof fmt === 'function' ? fmt(v) : Math.round(Number(v)||0).toLocaleString('ja-JP'); }
+  function fmtK2(v){ return typeof fmtK === 'function' ? fmtK(v) : Math.round((Number(v)||0)/1000).toLocaleString('ja-JP'); }
+  function toNum(v){
+    const t = String(v ?? '').replace(/,/g,'').replace(/[円¥￥s　]/g,'').replace(/[^0-9.-]/g,'');
+    if (!t || t === '-' || t === '.') return 0;
+    const num = Number(t);
+    return Number.isFinite(num) ? num : 0;
+  }
+  function normalizeCode(v){
+    const raw = s(v).replace(/.0$/,'').replace(/[^0-9A-Za-z]/g,'');
+    if (!raw) return '';
+    return raw.length < 10 ? raw.padStart(10, '0') : raw;
+  }
+  function groupCode4(fullCode){ const c = normalizeCode(fullCode); return c ? c.slice(0,4) : ''; }
+  function cleanContractName(v){ return s(v) || '未設定'; }
+  function stripParen(v){ return s(v).replace(/（.*?）/g,'').replace(/(.*?)/g,'').trim(); }
+  function groupDisplayName(names){
+    const list = Array.from(names || []).map(s).filter(Boolean);
+    const joined = list.join(' ');
+    if (/コジマ/.test(joined)) return 'コジマ';
+    if (/でんきち|デンキチ/.test(joined)) return 'でんきち';
+    if (/ビックカメラ|ビック/.test(joined)) return 'ビックカメラ';
+    if (/ジェイトップ/.test(joined)) return 'ジェイトップ';
+    if (/スリーエス/.test(joined)) return 'スリーエスサンキ家具';
+    if (/プラスカーゴ/.test(joined)) return 'プラスカーゴサービス';
+    if (/フジ医療器/.test(joined)) return 'フジ医療器';
+    if (/松崎電機/.test(joined)) return '松崎電機';
+    const first = list[0] || '未設定';
+    return stripParen(first) || first || '未設定';
+  }
+  function yenPer(count, income){ return count > 0 ? Math.round((Number(income)||0) / count) : 0; }
+  function isRevenueRow(row){ return s(row && row[COL.category]).includes('収入'); }
+
+  function buildShipperAggregationFromCsvRows(csvRows){
+    const rows = Array.isArray(csvRows) ? csvRows : [];
+    const body = rows.length > 1 ? rows.slice(1) : rows;
+    const groups = new Map();
+    const contracts = new Map();
+    const allSlipSet = new Set();
+    const usedAmountByGroup = new Set();
+    const usedAmountByContract = new Set();
+    let revenueRows = 0;
+
+    body.forEach((row, idx) => {
+      if (!Array.isArray(row)) return;
+      if (!isRevenueRow(row)) return;
+      revenueRows++;
+      const fullCode = normalizeCode(row[COL.code]);
+      const g4 = groupCode4(fullCode);
+      const contractName = cleanContractName(row[COL.name]);
+      const slipNo = s(row[COL.slip]);
+      const detailKey = s(row[COL.detail]) || slipNo || '__row_' + idx;
+      const amount = toNum(row[COL.amount]);
+      if (!fullCode || !g4) return;
+      if (slipNo) allSlipSet.add(slipNo);
+
+      if (!contracts.has(fullCode)) {
+        contracts.set(fullCode, { code:fullCode, groupCode:g4, name:contractName, names:new Set(), slipSet:new Set(), amountKeys:new Set(), count:0, income:0 });
+      }
+      const contract = contracts.get(fullCode);
+      if (contractName) contract.names.add(contractName);
+      if ((!contract.name || contract.name === '未設定') && contractName) contract.name = contractName;
+      if (slipNo) contract.slipSet.add(slipNo);
+
+      if (!groups.has(g4)) {
+        groups.set(g4, { code4:g4, name:'', names:new Set(), slipSet:new Set(), amountKeys:new Set(), count:0, income:0, contracts:new Map() });
+      }
+      const group = groups.get(g4);
+      if (contractName) group.names.add(contractName);
+      if (slipNo) group.slipSet.add(slipNo);
+      group.contracts.set(fullCode, contract);
+
+      const groupAmountKey = g4 + '::' + detailKey;
+      const contractAmountKey = fullCode + '::' + detailKey;
+      if (!usedAmountByGroup.has(groupAmountKey)) { usedAmountByGroup.add(groupAmountKey); group.amountKeys.add(detailKey); group.income += amount; }
+      if (!usedAmountByContract.has(contractAmountKey)) { usedAmountByContract.add(contractAmountKey); contract.amountKeys.add(detailKey); contract.income += amount; }
+    });
+
+    const groupList = Array.from(groups.values()).map(g => {
+      const contractList = Array.from(g.contracts.values()).map(c => {
+        const name = cleanContractName(c.name || Array.from(c.names)[0]);
+        const count = c.slipSet.size;
+        return { code:c.code, groupCode:c.groupCode, name, count, income:c.income, unit:yenPer(count, c.income) };
+      }).sort((a,b) => b.income - a.income || b.count - a.count || a.code.localeCompare(b.code, 'ja'));
+      const count = g.slipSet.size;
+      return { code4:g.code4, code3:g.code4, name:groupDisplayName(g.names), count, income:g.income, unit:yenPer(count, g.income), contracts:contractList };
+    }).sort((a,b) => b.income - a.income || b.count - a.count || a.name.localeCompare(b.name, 'ja'));
+
+    const contractList = Array.from(contracts.values()).map(c => {
+      const count = c.slipSet.size;
+      const group = groups.get(c.groupCode);
+      return { code:c.code, groupCode:c.groupCode, groupName:group ? groupDisplayName(group.names) : c.groupCode, name:cleanContractName(c.name || Array.from(c.names)[0]), count, income:c.income, unit:yenPer(count, c.income) };
+    }).sort((a,b) => b.income - a.income || b.count - a.count || a.code.localeCompare(b.code, 'ja'));
+
+    const dashboardShippers = {};
+    groupList.forEach(g => { dashboardShippers[g.name] = { income:g.income, count:g.count, code4:g.code4, code3:g.code4 }; });
+    return { groups:groupList, contracts:contractList, dashboardShippers, slipCount:allSlipSet.size, revenueRows };
+  }
+
+  const baseParseSKDL = CSV.parseSKDL.bind(CSV);
+  CSV.parseSKDL = function(text, monthCol){
+    const result = baseParseSKDL(text, monthCol);
+    if (!result) return result;
+    try {
+      const rows = this.toRows(text);
+      const agg = buildShipperAggregationFromCsvRows(rows);
+      result._shipperGroups = agg.groups;
+      result._shipperContracts = agg.contracts;
+      result._dashboardShippers = agg.dashboardShippers;
+      result._shipperSlipCount = agg.slipCount;
+      result._shipperRevenueRows = agg.revenueRows;
+      result._shipperSourceRule = 'K列収入行のみ／Y列0補完頭4桁統合／契約別はY列全桁／件数はX列原票番号ユニーク／売上はU列をAB列重複除外';
+    } catch(e) {
+      result._shipperGroups = []; result._shipperContracts = []; result._dashboardShippers = {}; result._shipperSlipCount = 0; result._shipperError = e.message;
+    }
+    return result;
+  };
+
+  const baseProcessDataset = processDataset;
+  processDataset = function(ym, type, rows){
+    const ds = baseProcessDataset(ym, type, rows);
+    if (rows && rows._dashboardShippers) ds.shippers = rows._dashboardShippers;
+    if (rows && rows._shipperGroups) ds.shipperGroups = rows._shipperGroups;
+    if (rows && rows._shipperContracts) ds.shipperContracts = rows._shipperContracts;
+    if (rows && rows._shipperSourceRule) ds.shipperSourceRule = rows._shipperSourceRule;
+    if (rows && typeof rows._shipperSlipCount === 'number') ds.shipperSlipCount = rows._shipperSlipCount;
+    if (rows && typeof rows._shipperRevenueRows === 'number') ds.shipperRevenueRows = rows._shipperRevenueRows;
+    return ds;
+  };
+
+  const DRILL = window.SHIPPER_DRILL || { openGroups:{} };
+  window.SHIPPER_DRILL = DRILL;
+  DRILL.toggle = function(code4){ this.openGroups[code4] = !this.openGroups[code4]; renderShipper(); };
+
+  function getGroups(ds){
+    if (ds && Array.isArray(ds.shipperGroups) && ds.shipperGroups.length) return ds.shipperGroups;
+    if (ds && ds.shippers && Object.keys(ds.shippers).length) {
+      return Object.entries(ds.shippers).map(([name,d]) => ({ code4:d.code4 || d.code3 || name, code3:d.code4 || d.code3 || name, name, count:d.count || 0, income:d.income || 0, unit:yenPer(d.count || 0, d.income || 0), contracts:[] })).sort((a,b) => b.income - a.income || b.count - a.count);
+    }
+    return [];
+  }
+  function getContracts(ds){ return (ds && Array.isArray(ds.shipperContracts)) ? ds.shipperContracts : []; }
+
+  function setTabs(mode){
+    ['group','detail'].forEach(m => {
+      const btn = document.getElementById('shipper-tab-' + m);
+      if (!btn) return;
+      const active = m === mode;
+      btn.style.background = active ? '#1a4d7c' : 'var(--surface)';
+      btn.style.color = active ? '#fff' : 'var(--text2)';
+      btn.classList.toggle('active-tab', active);
+    });
+  }
+
+  function renderGroupTable(groups, totalIncome){
+    const tbody = document.getElementById('shipper-group-tbody');
+    if (!tbody) return;
+    if (!groups.length) { tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">荷主別データがありません</td></tr>'; return; }
+    const rows = [];
+    groups.forEach(g => {
+      const code = g.code4 || g.code3 || '';
+      const open = !!DRILL.openGroups[code];
+      const rate = totalIncome > 0 ? g.income / totalIncome * 100 : 0;
+      rows.push('<tr style="cursor:pointer;background:' + (open?'#f8fafc':'#fff') + '" onclick="SHIPPER_DRILL.toggle(&quot;' + esc2(code) + '&quot;)"><td><button class="btn" style="padding:2px 7px;margin-right:8px;font-weight:900">' + (open?'－':'＋') + '</button><strong>' + esc2(g.name) + '</strong></td><td class="r"><strong>' + fmt2(g.count) + '</strong></td><td class="r"><strong>' + fmtK2(g.income) + '</strong></td><td class="r">' + rate.toFixed(1) + '%</td><td class="r">' + fmt2(g.unit) + '</td><td class="c">' + (open?'表示中':'開く') + '</td></tr>');
+      if (open) {
+        rows.push('<tr class="row-h"><td>荷主コード</td><td>契約名</td><td class="r">件数</td><td class="r">売上（千円）</td><td class="r">構成比</td><td class="r">単価（円）</td></tr>');
+        (g.contracts || []).forEach(c => {
+          const cr = totalIncome > 0 ? c.income / totalIncome * 100 : 0;
+          rows.push('<tr style="background:#fbfdff"><td style="padding-left:42px;font-family:monospace;color:#334155">' + esc2(c.code) + '</td><td>' + esc2(c.name) + '</td><td class="r">' + fmt2(c.count) + '</td><td class="r">' + fmtK2(c.income) + '</td><td class="r">' + cr.toFixed(1) + '%</td><td class="r">' + fmt2(c.unit) + '</td></tr>');
+        });
+      }
+    });
+    tbody.innerHTML = rows.join('');
+  }
+
+  function renderContractTable(contracts, totalIncome){
+    const tbody = document.getElementById('shipper-detail-tbody');
+    if (!tbody) return;
+    if (!contracts.length) { tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">契約別データがありません</td></tr>'; return; }
+    tbody.innerHTML = contracts.map(c => {
+      const rate = totalIncome > 0 ? c.income / totalIncome * 100 : 0;
+      return '<tr><td style="font-family:monospace;color:#334155">' + esc2(c.code) + '</td><td><strong>' + esc2(c.name) + '</strong></td><td class="r">' + fmt2(c.count) + '</td><td class="r">' + fmtK2(c.income) + '</td><td class="r">' + rate.toFixed(1) + '%</td><td class="r">' + fmt2(c.unit) + '</td></tr>';
     }).join('');
   }
 
@@ -5494,111 +5695,72 @@ function parseAreaVolumePdfText(text) {
     const ds = selectedDatasetInSelectedFiscalYear();
     const mode = STATE.shipperMode || 'group';
     setTabs(mode);
-
     let notice = document.getElementById('shipper-notice');
-    if (!notice) {
-      const view = document.getElementById('view-shipper');
-      if (view) { notice = document.createElement('div'); notice.id = 'shipper-notice'; view.prepend(notice); }
-    }
-
+    if (!notice) { const view = document.getElementById('view-shipper'); if (view) { notice = document.createElement('div'); notice.id = 'shipper-notice'; view.prepend(notice); } }
     const groups = getGroups(ds);
     const contracts = getContracts(ds);
-    const total = groups.reduce((s,g)=>s+(Number(g.income)||0),0);
-    const hasData = groups.length || contracts.length;
-
-    if (!ds || !hasData) {
+    const totalIncome = groups.reduce((sum,g) => sum + (Number(g.income)||0), 0) || (ds ? ds.totalIncome : 0) || 0;
+    if (!ds || (!groups.length && !contracts.length)) {
       if (notice) notice.innerHTML = '<div class="msg msg-info" style="margin-bottom:14px">選択月の荷主別データがありません。確定CSV／速報CSVを再取込してください。</div>';
-      CHART_MGR.make('c-shipper-bar', {type:'bar', data:{labels:[], datasets:[{data:[]}]}, options:{responsive:true,maintainAspectRatio:false}});
-      renderGroupTable([],0);
-      renderContractTable([],0);
-      return;
+      CHART_MGR.make('c-shipper-bar', { type:'bar', data:{ labels:[], datasets:[{ data:[] }] }, options:{ responsive:true, maintainAspectRatio:false } });
+      renderGroupTable([],0); renderContractTable([],0); return;
     }
     if (notice) notice.innerHTML = '';
-
     const groupCard = document.getElementById('shipper-group-card');
     const detailCard = document.getElementById('shipper-detail-card');
     const title = document.getElementById('shipper-chart-title');
     const sub = document.getElementById('shipper-chart-sub');
-    const chartItems = (mode === 'detail' ? contracts : groups).slice(0,10);
-
+    const chartItems = mode === 'detail' ? contracts.slice(0,10) : groups.slice(0,10);
     if (title) title.textContent = mode === 'detail' ? '契約別売上（荷主コード別）' : '荷主別売上（グループ統合）';
-    if (sub) sub.textContent = mode === 'detail' ? 'Y列荷主コード全桁／K列収入のみ／AB列重複除外' : 'Y列荷主コード頭4桁／K列収入のみ／AB列重複除外';
-
+    if (sub) sub.textContent = mode === 'detail' ? 'K列収入行のみ／Y列荷主コード全桁／件数はX列原票番号ユニーク／売上はAB列重複除外' : 'K列収入行のみ／Y列荷主コード頭4桁でグループ化／件数はX列原票番号ユニーク／売上はAB列重複除外';
     CHART_MGR.make('c-shipper-bar', {
       type:'bar',
-      data:{labels:chartItems.map(x => x.name), datasets:[{label:'売上（千円）', data:chartItems.map(x => (Number(x.income)||0)/1000), backgroundColor:chartItems.map((_,i)=>CONFIG.COLORS[i%CONFIG.COLORS.length])}]},
-      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{title:{display:true,text:'千円'}}}}
+      data:{ labels: chartItems.map(x => x.name), datasets:[{ label:'売上（千円）', data:chartItems.map(x => (Number(x.income)||0)/1000), backgroundColor:chartItems.map((_,i)=>CONFIG.COLORS[i%CONFIG.COLORS.length]) }] },
+      options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ title:{ display:true, text:'千円' } } } }
     });
-
-    if (mode === 'detail') {
-      if (groupCard) groupCard.style.display = 'none';
-      if (detailCard) detailCard.style.display = '';
-      renderContractTable(contracts, total);
-    } else {
-      if (groupCard) groupCard.style.display = '';
-      if (detailCard) detailCard.style.display = 'none';
-      renderGroupTable(groups, total);
-    }
+    if (mode === 'detail') { if (groupCard) groupCard.style.display = 'none'; if (detailCard) detailCard.style.display = ''; renderContractTable(contracts, totalIncome); }
+    else { if (groupCard) groupCard.style.display = ''; if (detailCard) detailCard.style.display = 'none'; renderGroupTable(groups, totalIncome); }
   };
 
-  const _originalRenderDashboard = renderDashboard;
+  const baseRenderDashboard = renderDashboard;
   renderDashboard = function(){
-    _originalRenderDashboard();
+    baseRenderDashboard();
     const ds = selectedDashboardDS();
     const area = document.getElementById('shipper-bars-area');
-    if (!area) return;
+    if (!area || !ds) return;
     const groups = getGroups(ds);
-    if (!ds || !groups.length) {
-      area.innerHTML = '<div style="padding:22px;color:var(--text3);font-size:12px">荷主データは確定CSV／速報CSVの再取込後に表示されます</div>';
-      return;
-    }
+    if (!groups.length) { area.innerHTML = '<div class="empty">荷主別データがありません。対象月の確定CSV／速報CSVを再取込してください。</div>'; return; }
     const items = groups.slice(0,8);
-    const maxV = Math.max(...items.map(x=>x.income),1);
-    area.innerHTML = items.map((g,i)=>`<div class="mbar-row"><div class="mbar-label" title="${_esc(g.name)}">${_esc(g.name)}</div><div class="mbar-track"><div class="mbar-fill" style="width:${(g.income/maxV*100).toFixed(1)}%;background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div></div><div class="mbar-val">${_fmtK(g.income)}千</div></div>`).join('');
+    const maxV = Math.max.apply(null, items.map(x => Number(x.income)||0).concat([1]));
+    area.innerHTML = items.map((g,i) => '<div class="mbar-row"><div class="mbar-label" title="' + esc2(g.name) + '">' + esc2(g.name) + '</div><div class="mbar-track"><div class="mbar-fill" style="width:' + ((Number(g.income)||0)/maxV*100).toFixed(1) + '%;background:' + CONFIG.COLORS[i%CONFIG.COLORS.length] + '"></div></div><div class="mbar-val">' + fmtK2(g.income) + '千</div></div>').join('');
   };
 
-  const _originalRenderTrend = renderTrend;
+  const baseRenderTrend = renderTrend;
   renderTrend = function(){
-    _originalRenderTrend();
+    baseRenderTrend();
     const list = datasetsForSelectedFiscalYear();
-    const labels = monthsOfFiscalYear(dashboardSelectedFiscalYear()).map(ymLabel);
-    const months = monthsOfFiscalYear(dashboardSelectedFiscalYear());
-
-    const countData = months.map(ym => {
-      const ds = activeDatasetByYM(ym);
-      return ds && Number.isFinite(Number(ds.shipperMonthlyCount)) ? Number(ds.shipperMonthlyCount) : 0;
-    });
+    if (!list || !list.length) return;
+    const labels = list.map(d => ymLabel(d.ym));
+    const counts = list.map(d => Number(d.shipperSlipCount) || 0);
     if (document.getElementById('c-trend-cnt')) {
       CHART_MGR.make('c-trend-cnt', {
         type:'line',
-        data:{labels, datasets:[{label:'原票件数', data:countData, borderColor:'#1a4d7c', backgroundColor:'rgba(26,77,124,.12)', tension:.25, fill:true, pointRadius:3}]},
-        options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,title:{display:true,text:'件'}}}}
+        data:{ labels, datasets:[{ label:'件数', data:counts, borderColor:'#1a4d7c', backgroundColor:'rgba(26,77,124,.12)', tension:.25, fill:true, pointRadius:3 }] },
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ title:{ display:true, text:'件' }, beginAtZero:true } } }
       });
     }
-
-    const latest = selectedDatasetInSelectedFiscalYear();
-    const topGroups = getGroups(latest).slice(0,5);
-    const colors = CONFIG.COLORS;
-    const datasets = topGroups.map((g,i)=>({
-      label:g.name,
-      data:months.map(ym=>{
-        const ds = activeDatasetByYM(ym);
-        const found = getGroups(ds).find(x => x.code4 === g.code4 || x.name === g.name);
-        return found ? (Number(found.income)||0)/1000 : 0;
-      }),
-      borderColor:colors[i%colors.length],
-      backgroundColor:colors[i%colors.length],
-      tension:.25,
-      fill:false,
-      pointRadius:3
-    }));
-    const legend = document.getElementById('st-legend');
-    if (legend) legend.innerHTML = topGroups.map((g,i)=>`<div class="legend-item"><div class="legend-dot" style="background:${colors[i%colors.length]}"></div>${_esc(g.name)}</div>`).join('');
     if (document.getElementById('c-trend-shipper')) {
+      const latestWithGroups = list.slice().reverse().find(d => getGroups(d).length);
+      const topGroups = latestWithGroups ? getGroups(latestWithGroups).slice(0,5) : [];
+      const datasets = topGroups.map((g,i) => ({
+        label: g.name,
+        data: list.map(d => { const found = getGroups(d).find(x => (x.code4 || x.code3) === (g.code4 || g.code3)); return found ? (Number(found.income)||0)/1000 : 0; }),
+        borderColor: CONFIG.COLORS[i % CONFIG.COLORS.length], backgroundColor: CONFIG.COLORS[i % CONFIG.COLORS.length], tension:.25, fill:false, pointRadius:3
+      }));
       CHART_MGR.make('c-trend-shipper', {
         type:'line',
-        data:{labels, datasets},
-        options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,title:{display:true,text:'千円'}}}}
+        data:{ labels, datasets },
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'top' } }, scales:{ y:{ title:{ display:true, text:'千円' }, beginAtZero:true } } }
       });
     }
   };
