@@ -7,14 +7,14 @@
    ・計画の親項目は子科目合計を優先
    ・同名科目のゼロ行上書きを防止
 */
-/* 単位修正＋重複確認版 2026-04-28
+/* 単位修正＋重複確認版 2026-04-28a
    ・CSV=円、計画/収支補完=千円保持
    ・収支補完は表示時だけ円換算して既存グラフ/KPIに合わせる
    ・重複・異常データ確認表を追加
 */
 /* ダッシュボード年度・月選択追加版 2026-04-28
    ・ダッシュボードに対象年度/対象月プルダウンを追加
-   ・CSV確定/CSV速報/収支補完の表示ラベルを分離
+   ・CSV確定/CSV速報/収支補完の表示ラベルを分離a
    ・初期表示は最新月
    ・年度順（4月→翌年3月）で月を管理
    ・今回の対象はダッシュボードのみ
@@ -4885,7 +4885,7 @@ document.addEventListener('DOMContentLoaded', () => {
    2026-04-30 追補：荷主・件数 集計安定版（CSV専用・収入/費用分離）
    ・収入判定：K列「収支科目名」に「収入」を含む行だけ対象
    ・売上：N列「金額」をそのまま合算（AB列は契約名のため金額重複除外には使わない）
-   ・件数：X列「原票番号」のユニーク件数
+   ・件数：X列「原票番号」のユニーク件数（荷主コードなしのその他収入は件数対象外）
    ・荷主別：Y列「荷主基本コード」を0補完し、左4桁で統合
    ・契約別：Y列「荷主基本コード」を0補完し、全桁で集計
    ・名称：AA列「荷主名」を荷主別表示、AB列「契約名」を契約別表示
@@ -5054,7 +5054,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const amount = yen(row[idx.amount]);
 
       totalIncome += amount;
-      allSlipSet.add(slip);
+      if (hasCode) {
+        allSlipSet.add(slip);
+      }
 
       if (!groups.has(gKey)) {
         groups.set(gKey, {
@@ -5069,10 +5071,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const group = groups.get(gKey);
       group.names.add(shipperName);
-      group.slipSet.add(slip);
+      if (hasCode) {
+        group.slipSet.add(slip);
+      }
       group.income += amount;
       if (!hasCode) {
+        // 荷主コードなしの「その他収入」は売上には含めるが、件数・単価・契約別には含めない。
         group.breakdown.set(otherClass, (group.breakdown.get(otherClass) || 0) + amount);
+        return;
       }
 
       if (!contracts.has(contractKey)) {
@@ -5129,7 +5135,8 @@ document.addEventListener('DOMContentLoaded', () => {
         name:majorityName(g.names, true),
         count:g.slipSet.size,
         income:g.income,
-        unit:unit(g.slipSet.size, g.income),
+        unit:g.code4 === '9999' ? null : unit(g.slipSet.size, g.income),
+        isOther:g.code4 === '9999',
         contracts:contractsInGroup,
         breakdown:Array.from((g.breakdown || new Map()).entries()).map(([name,income])=>({name,income})).sort((a,b)=>b.income-a.income)
       };
@@ -5139,9 +5146,10 @@ document.addEventListener('DOMContentLoaded', () => {
     groupList.forEach(g=>{
       dashboardShippers[g.name] = {
         income:g.income,
-        count:g.count,
+        count:g.code4 === '9999' ? 0 : g.count,
         code4:g.code4,
-        code3:g.code4
+        code3:g.code4,
+        isOther:g.code4 === '9999'
       };
     });
 
@@ -5153,7 +5161,7 @@ document.addEventListener('DOMContentLoaded', () => {
       totalIncome,
       targetRows,
       skippedNoCode,
-      sourceRule:'K列「収支科目名」に収入を含む行のみ / N列金額を合算 / X列原票番号で件数 / Y列0補完左4桁で荷主統合 / Y列空欄はその他収入（荷主未設定）として内訳分解 / AA列荷主名 / AB列契約名',
+      sourceRule:'K列「収支科目名」に収入を含む行のみ / N列金額を合算 / X列原票番号で件数（その他収入は件数対象外） / Y列0補完左4桁で荷主統合 / Y列空欄はその他収入（荷主未設定）として内訳分解 / 契約別はY列全桁コード別 / AA列荷主名 / AB列契約名',
       columns:idx
     };
   }
@@ -5411,10 +5419,10 @@ document.addEventListener('DOMContentLoaded', () => {
           return `<tr>
             <td style="font-family:monospace">${String(c.code || '').startsWith('9999_') ? '—' : esc2(c.code)}</td>
             <td><strong>${esc2(c.name)}</strong></td>
-            <td class="r">${fmt2(c.count)}</td>
+            <td class="r">${String(c.code || '').startsWith('9999_') ? '—' : fmt2(c.count)}</td>
             <td class="r">${fmtK2(c.income)}</td>
             <td class="r">${rate.toFixed(1)}%</td>
-            <td class="r">${fmt2(c.unit)}</td>
+            <td class="r">${String(c.code || '').startsWith('9999_') ? '—' : fmt2(c.unit)}</td>
           </tr>`;
         }).join('') : '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">契約別データがありません</td></tr>';
       }
@@ -5444,10 +5452,10 @@ document.addEventListener('DOMContentLoaded', () => {
           const hasContracts = Array.isArray(g.contracts) && g.contracts.length;
           let html = `<tr>
             <td><strong>${esc2(g.name)}</strong></td>
-            <td class="r"><strong>${fmt2(g.count)}</strong></td>
+            <td class="r"><strong>${g.code4 === '9999' ? '—' : fmt2(g.count)}</strong></td>
             <td class="r"><strong>${fmtK2(g.income)}</strong></td>
             <td class="r">${rate.toFixed(1)}%</td>
-            <td class="r">${fmt2(g.unit)}</td>
+            <td class="r">${g.code4 === '9999' ? '—' : fmt2(g.unit)}</td>
             <td class="r">${hasContracts ? `<button type="button" class="btn-mini" data-shipper-toggle="${detailId}">＋</button>` : ''}</td>
           </tr>`;
 
@@ -5472,10 +5480,10 @@ document.addEventListener('DOMContentLoaded', () => {
               return `<tr>
                 <td style="font-family:monospace;color:var(--text2)">${codeText}</td>
                 <td>${esc2(c.name)}</td>
-                <td class="r">${fmt2(c.count)}</td>
+                <td class="r">${String(c.code || '').startsWith('9999_') ? '—' : fmt2(c.count)}</td>
                 <td class="r">${fmtK2(c.income)}</td>
                 <td class="r">${cr.toFixed(1)}%</td>
-                <td class="r">${fmt2(c.unit)}</td>
+                <td class="r">${String(c.code || '').startsWith('9999_') ? '—' : fmt2(c.unit)}</td>
               </tr>`;
             }).join('');
             html += `<tr id="${detailId}" style="display:none;background:#ffffff">
