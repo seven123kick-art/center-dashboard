@@ -5754,8 +5754,17 @@ document.addEventListener('DOMContentLoaded', () => {
       .shipper-up{color:#059669;font-weight:900}
       .shipper-down{color:#dc2626;font-weight:900}
       .shipper-flat{color:#64748b;font-weight:800}
-      .dashboard-compare-mini{margin-top:10px;padding:10px;border:1px solid #dbeafe;background:#eff6ff;border-radius:10px;font-size:12px;color:#1e3a8a;line-height:1.7}
+      .dashboard-compare-mini{margin-top:10px;padding:12px;border:1px solid #dbeafe;background:#eff6ff;border-radius:10px;font-size:12px;color:#1e3a8a;line-height:1.7}
       .dashboard-compare-mini strong{font-weight:900}
+      .dashboard-unit-title{font-weight:900;margin-bottom:6px;color:#1e3a8a}
+      .dashboard-unit-list{display:grid;gap:4px}
+      .dashboard-unit-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+      .dashboard-unit-rank{width:18px;height:18px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:#fff;background:#64748b;flex:0 0 auto}
+      .dashboard-unit-rank.rank-1{background:#1a4d7c}
+      .dashboard-unit-rank.rank-2{background:#e05b4d}
+      .dashboard-unit-rank.rank-3{background:#1a7a52}
+      .dashboard-unit-name{font-weight:900;color:#0f172a;min-width:86px}
+      .dashboard-unit-formula{color:#1e3a8a}
     `;
     document.head.appendChild(style);
   }
@@ -5844,10 +5853,20 @@ document.addEventListener('DOMContentLoaded', () => {
       if (shipArea.parentNode) shipArea.parentNode.appendChild(mini);
     }
     if (!rows.length) {
-      mini.innerHTML = '<strong>単価×件数：</strong>表示対象なし';
+      mini.innerHTML = '<div class="dashboard-unit-title">単価×件数</div><div class="dashboard-unit-list">表示対象なし</div>';
       return;
     }
-    mini.innerHTML = `<strong>単価×件数：</strong> ${rows.map(r=>`${escCmp(r.name)} ${fmtKCmp(r.income)}千 = ${fmtCmp(r.count)}件 × ${fmtCmp(r.unit)}円`).join(' ／ ')}`;
+    mini.innerHTML = `
+      <div class="dashboard-unit-title">単価×件数</div>
+      <div class="dashboard-unit-list">
+        ${rows.map((r,i)=>`
+          <div class="dashboard-unit-row">
+            <span class="dashboard-unit-rank rank-${i+1}">${i+1}</span>
+            <span class="dashboard-unit-name">${escCmp(r.name)}</span>
+            <span class="dashboard-unit-formula">${fmtKCmp(r.income)}千 = ${fmtCmp(r.count)}件 × ${fmtCmp(r.unit)}円</span>
+          </div>
+        `).join('')}
+      </div>`;
   }
 
   const prevRenderShipperForCompare = renderShipper;
