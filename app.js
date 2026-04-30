@@ -4884,7 +4884,7 @@ document.addEventListener('DOMContentLoaded', () => {
    2026-04-30 追補：荷主・件数 集計安定版（CSV専用）
    ・K列に「収入」を含む行のみ荷主分析対象
    ・件数：X列 原票番号ユニーク
-   ・売上：U列 金額をAB列重複除外で合算
+   ・売上：N列 金額をAB列重複除外で合算
    ・荷主別：Y列コードを0補完して左4桁で統合
    ・契約別：Y列コードを0補完した全桁で集計、契約名はAA列
    ・既存のダッシュボード・収支グラフは維持し、荷主/件数だけ上書き表示
@@ -4894,7 +4894,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const IDX = {
     category: 10,     // K列：収入/費用などの判定文字
-    amount: 20,       // U列：金額
+    amount: 13,       // N列：金額
     slipNo: 23,       // X列：原票番号
     shipperCode: 24,  // Y列：荷主コード
     shipperName: 26,  // AA列：契約名/荷主名
@@ -5030,7 +5030,7 @@ document.addEventListener('DOMContentLoaded', () => {
       contracts:contractList,
       dashboardShippers,
       ticketCount:allSlipSet.size,
-      sourceRule:'K列「収入」のみ / X列原票番号で件数 / Y列0補完左4桁で荷主統合 / AA列契約名 / U列金額 / AB列重複除外',
+      sourceRule:'K列「収入」のみ / X列原票番号で件数 / Y列0補完左4桁で荷主統合 / AA列契約名 / N列金額 / AB列重複除外',
       columns:{category:IDX.category, amount:IDX.amount, slipNo:IDX.slipNo, shipperCode:IDX.shipperCode, shipperName:IDX.shipperName, detailKey:IDX.detailKey}
     };
   }
