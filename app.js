@@ -5906,3 +5906,102 @@ document.addEventListener('DOMContentLoaded', () => {
     renderDashboardCompareMini();
   };
 })();
+
+/* ════════════════════════════════════════════════════════════════
+   UI表示ノイズ削除 2026-05-01
+   ・各画面右上等に残る「データ取込からCSVを読み込んでください」を非表示
+   ・荷主分析上部のK列/N列/X列/Y列などの説明ロジック文を非表示
+   ・集計ロジック自体は変更しない
+════════════════════════════════════════════════════════════════ */
+(function(){
+  function cleanTextNodePrompts(root){
+    if (!root) return;
+    const phrases = [
+      'データ取込からCSVを読み込んでください',
+      '左メニューの「データ取込」からCSVを読み込んでください'
+    ];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const targets = [];
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const text = String(node.nodeValue || '');
+      if (phrases.some(p => text.includes(p))) targets.push(node);
+    }
+    targets.forEach(node => {
+      const parent = node.parentElement;
+      if (parent && parent.textContent && parent.textContent.trim().length <= 80) {
+        parent.style.display = 'none';
+      } else {
+        node.nodeValue = textWithoutPrompt(node.nodeValue);
+      }
+    });
+  }
+
+  function textWithoutPrompt(text){
+    return String(text || '')
+      .replace(/データ取込からCSVを読み込んでください/g, '')
+      .replace(/左メニューの「データ取込」からCSVを読み込んでください/g, '');
+  }
+
+  function cleanShipperLogicNotes(){
+    const view = document.getElementById('view-shipper');
+    if (!view) return;
+
+    ['shipper-rule-notice','shipper-notice'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.innerHTML = '';
+        el.style.display = 'none';
+      }
+    });
+
+    view.querySelectorAll('.msg, .msg-info, [id*="notice"]').forEach(el => {
+      const text = String(el.textContent || '');
+      if (
+        text.includes('K列') ||
+        text.includes('N列') ||
+        text.includes('X列') ||
+        text.includes('Y列') ||
+        text.includes('AA列') ||
+        text.includes('AB列') ||
+        text.includes('収支科目名') ||
+        text.includes('取得列') ||
+        text.includes('対象収入行') ||
+        text.includes('荷主売上')
+      ) {
+        el.innerHTML = '';
+        el.style.display = 'none';
+      }
+    });
+  }
+
+  function cleanUiNoise(){
+    cleanTextNodePrompts(document.body);
+    cleanShipperLogicNotes();
+  }
+
+  const prevUpdateTopbarForClean = UI.updateTopbar.bind(UI);
+  UI.updateTopbar = function(view){
+    prevUpdateTopbarForClean(view);
+    cleanUiNoise();
+    setTimeout(cleanUiNoise, 0);
+  };
+
+  const prevRenderShipperForClean = renderShipper;
+  renderShipper = function(){
+    prevRenderShipperForClean();
+    cleanUiNoise();
+  };
+
+  const prevRenderDashboardForClean = renderDashboard;
+  renderDashboard = function(){
+    prevRenderDashboardForClean();
+    cleanUiNoise();
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    cleanUiNoise();
+    setTimeout(cleanUiNoise, 50);
+    setTimeout(cleanUiNoise, 300);
+  });
+})();
