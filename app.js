@@ -4999,6 +4999,17 @@ document.addEventListener('DOMContentLoaded', () => {
     return account.includes('収入');
   }
 
+  function classifyOtherIncome(row, idx){
+    const account = s(row[idx.accountName]);
+    if (account.includes('雑')) return '雑収入';
+    if (account.includes('調整')) return '調整';
+    if (account.includes('値引')) return '値引戻し';
+    if (account.includes('返品')) return '返品関連';
+    if (account.includes('手数料')) return '手数料';
+    if (account) return account;
+    return 'その他';
+  }
+
   function buildShipperAggregationV3(csvRows){
     const rows = Array.isArray(csvRows) ? csvRows : [];
     if (!rows.length) {
@@ -5024,15 +5035,21 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!isIncomeRow(row, idx)) return;
       targetRows++;
 
-      const fullCode = normalizeCode(row[idx.shipperCode]);
-      const gKey = groupKeyFromCode(fullCode);
-      if (!fullCode || !gKey) {
+      const rawCode = s(row[idx.shipperCode]);
+      const hasCode = !!rawCode;
+      const fullCode = hasCode ? normalizeCode(rawCode) : '9999';
+      const gKey = hasCode ? groupKeyFromCode(fullCode) : '9999';
+      if (!gKey) {
         skippedNoCode++;
         return;
       }
 
-      const shipperName = s(row[idx.shipperName]) || '未設定';
-      const contractName = s(row[idx.contractName]) || shipperName || '未設定';
+      if (!hasCode) skippedNoCode++;
+
+      const shipperName = hasCode ? (s(row[idx.shipperName]) || '未設定') : 'その他収入（荷主未設定）';
+      const otherClass = classifyOtherIncome(row, idx);
+      const contractName = hasCode ? (s(row[idx.contractName]) || shipperName || '未設定') : otherClass;
+      const contractKey = hasCode ? fullCode : `9999_${otherClass}`;
       const slip = s(row[idx.slipNo]) || `__row_slip_${rowIndex}`;
       const amount = yen(row[idx.amount]);
 
@@ -5045,7 +5062,8 @@ document.addEventListener('DOMContentLoaded', () => {
           names:new Set(),
           slipSet:new Set(),
           income:0,
-          contracts:new Map()
+          contracts:new Map(),
+          breakdown:new Map()
         });
       }
 
@@ -5053,10 +5071,13 @@ document.addEventListener('DOMContentLoaded', () => {
       group.names.add(shipperName);
       group.slipSet.add(slip);
       group.income += amount;
+      if (!hasCode) {
+        group.breakdown.set(otherClass, (group.breakdown.get(otherClass) || 0) + amount);
+      }
 
-      if (!contracts.has(fullCode)) {
-        contracts.set(fullCode, {
-          code:fullCode,
+      if (!contracts.has(contractKey)) {
+        contracts.set(contractKey, {
+          code:contractKey,
           groupCode:gKey,
           shipperNames:new Set(),
           contractNames:new Set(),
@@ -5065,12 +5086,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
 
-      const contract = contracts.get(fullCode);
+      const contract = contracts.get(contractKey);
       contract.shipperNames.add(shipperName);
       contract.contractNames.add(contractName);
       contract.slipSet.add(slip);
       contract.income += amount;
-      group.contracts.set(fullCode, contract);
+      group.contracts.set(contractKey, contract);
     });
 
     const contractList = Array.from(contracts.values()).map(c=>{
@@ -5109,7 +5130,8 @@ document.addEventListener('DOMContentLoaded', () => {
         count:g.slipSet.size,
         income:g.income,
         unit:unit(g.slipSet.size, g.income),
-        contracts:contractsInGroup
+        contracts:contractsInGroup,
+        breakdown:Array.from((g.breakdown || new Map()).entries()).map(([name,income])=>({name,income})).sort((a,b)=>b.income-a.income)
       };
     }).sort((a,b)=>b.income-a.income || b.count-a.count || a.name.localeCompare(b.name,'ja'));
 
@@ -5131,7 +5153,7 @@ document.addEventListener('DOMContentLoaded', () => {
       totalIncome,
       targetRows,
       skippedNoCode,
-      sourceRule:'K列「収支科目名」に収入を含む行のみ / N列金額を合算 / X列原票番号で件数 / Y列0補完左4桁で荷主統合 / AA列荷主名 / AB列契約名',
+      sourceRule:'K列「収支科目名」に収入を含む行のみ / N列金額を合算 / X列原票番号で件数 / Y列0補完左4桁で荷主統合 / Y列空欄はその他収入（荷主未設定）として内訳分解 / AA列荷主名 / AB列契約名',
       columns:idx
     };
   }
@@ -5376,7 +5398,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = contracts.length ? contracts.map(c=>{
           const rate = totalIncome > 0 ? c.income/totalIncome*100 : 0;
           return `<tr>
-            <td style="font-family:monospace">${esc2(c.code)}</td>
+            <td style="font-family:monospace">${String(c.code || '').startsWith('9999_') ? '—' : esc2(c.code)}</td>
             <td><strong>${esc2(c.name)}</strong></td>
             <td class="r">${fmt2(c.count)}</td>
             <td class="r">${fmtK2(c.income)}</td>
@@ -5393,7 +5415,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tbody) {
         tbody.innerHTML = groups.length ? groups.map(g=>{
           const rate = totalIncome > 0 ? g.income/totalIncome*100 : 0;
-          return `<tr>
+          let html = `<tr>
             <td><strong>${esc2(g.name)}</strong></td>
             <td class="r"><strong>${fmt2(g.count)}</strong></td>
             <td class="r"><strong>${fmtK2(g.income)}</strong></td>
@@ -5401,6 +5423,20 @@ document.addEventListener('DOMContentLoaded', () => {
             <td class="r">${fmt2(g.unit)}</td>
             <td></td>
           </tr>`;
+          if (g.code4 === '9999' && Array.isArray(g.breakdown) && g.breakdown.length) {
+            html += g.breakdown.map(b=>{
+              const br = g.income > 0 ? (Number(b.income)||0) / g.income * 100 : 0;
+              return `<tr style="background:#f8fafc">
+                <td style="padding-left:28px;color:var(--text2)">└ ${esc2(b.name)}</td>
+                <td class="r">—</td>
+                <td class="r">${fmtK2(b.income)}</td>
+                <td class="r">${br.toFixed(1)}%</td>
+                <td class="r">—</td>
+                <td></td>
+              </tr>`;
+            }).join('');
+          }
+          return html;
         }).join('') : '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">荷主別データがありません</td></tr>';
       }
     }
