@@ -1314,6 +1314,14 @@ function dashboardSelectedYM() {
     STATE.selYM = latestInFY;
     return latestInFY;
   }
+
+  // 年度を明示選択している場合、データが無い年度で勝手に最新年度へ戻さない。
+  // 年次サマリー等で「2026年度」を選んだのに2025年度データが出る誤表示を防ぐ。
+  if (STATE.fiscalYear) {
+    STATE.selYM = null;
+    return null;
+  }
+
   const latest = latestDS();
   if (latest && latest.ym) {
     STATE.fiscalYear = fiscalYearFromYM(latest.ym);
@@ -1324,7 +1332,10 @@ function dashboardSelectedYM() {
 }
 function selectedDashboardDS() {
   const ym = dashboardSelectedYM();
-  return ym ? activeDatasetByYM(ym) : latestDS();
+  if (ym) return activeDatasetByYM(ym);
+  // 年度を明示選択していて対象月が無い場合は「データなし」を返す。
+  if (STATE.fiscalYear) return null;
+  return latestDS();
 }
 
 
@@ -5582,13 +5593,9 @@ document.addEventListener('DOMContentLoaded', () => {
     panel.innerHTML=anomalyHtml(detectShipperAnomalies(ds),ds);
   }
   function renderDashboardAnomalyMini(){
-    ensureAnomalyStyles();
-    const ds=typeof selectedDashboardDS==='function'?selectedDashboardDS():null;
-    const shipArea=document.getElementById('shipper-bars-area'); if(!shipArea||!ds)return;
-    const list=detectShipperAnomalies(ds);
-    let mini=document.getElementById('dashboard-anomaly-mini');
-    if(!mini){ mini=document.createElement('div'); mini.id='dashboard-anomaly-mini'; if(shipArea.parentNode)shipArea.parentNode.appendChild(mini); }
-    mini.innerHTML=list.length?`<div class="anomaly-mini">⚠ 異常検知 ${list.length}件：${escLocal(list.slice(0,3).map(x=>`${x.name} ${x.type}`).join(' ／ '))}${list.length>3?' ほか':''}</div>`:`<div class="anomaly-mini" style="background:#ecfdf5;border-color:#bbf7d0;color:#047857">異常検知：異常なし</div>`;
+    // 異常検知は荷主分析画面のみ表示。ダッシュボード側の簡易表示は出さない。
+    const mini=document.getElementById('dashboard-anomaly-mini');
+    if(mini) mini.remove();
   }
   const prevRenderShipperForAnomaly=renderShipper;
   renderShipper=function(){ prevRenderShipperForAnomaly(); renderAnomalyPanel(); };
