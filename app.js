@@ -7,14 +7,14 @@
    ・計画の親項目は子科目合計を優先
    ・同名科目のゼロ行上書きを防止
 */
-/* 単位修正＋重複確認版 2026-04-28a
+/* 単位修正＋重複確認版 2026-04-28
    ・CSV=円、計画/収支補完=千円保持
    ・収支補完は表示時だけ円換算して既存グラフ/KPIに合わせる
    ・重複・異常データ確認表を追加
 */
 /* ダッシュボード年度・月選択追加版 2026-04-28
    ・ダッシュボードに対象年度/対象月プルダウンを追加
-   ・CSV確定/CSV速報/収支補完の表示ラベルを分離a
+   ・CSV確定/CSV速報/収支補完の表示ラベルを分離
    ・初期表示は最新月
    ・年度順（4月→翌年3月）で月を管理
    ・今回の対象はダッシュボードのみ
@@ -5514,4 +5514,84 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   };
+})();
+
+/* ════════════════════════════════════════════════════════════════
+   2026-04-30 追補：異常検知（単価・件数・売上）
+   ・対象：荷主別グループ（その他収入は除外）
+   ・単価：3,000円未満 / 20,000円超を検知（件数1件以下は除外）
+   ・件数：前月比±50%以上を検知
+   ・売上：前月比±30%以上を検知
+   ・表示：荷主分析画面に詳細、ダッシュボードに簡易件数
+════════════════════════════════════════════════════════════════ */
+(function(){
+  'use strict';
+  const UNIT_MIN = 3000;
+  const UNIT_MAX = 20000;
+  const COUNT_RATE_LIMIT = 50;
+  const SALES_RATE_LIMIT = 30;
+  function fmtNum(v){ return Math.round(Number(v)||0).toLocaleString('ja-JP'); }
+  function fmtKLocal(v){ return typeof fmtK === 'function' ? fmtK(v) : Math.round((Number(v)||0)/1000).toLocaleString('ja-JP'); }
+  function escLocal(v){ const s=String(v??''); return typeof esc==='function'?esc(s):s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function ymPrev(ym){ if(!ym||ym.length<6)return null; let y=parseInt(ym.slice(0,4),10); let m=parseInt(ym.slice(4,6),10)-1; if(!y||!Number.isFinite(m))return null; if(m<=0){y-=1;m=12;} return String(y)+String(m).padStart(2,'0'); }
+  function groupsOfLocal(ds){
+    if(ds&&Array.isArray(ds.shipperGroups))return ds.shipperGroups;
+    if(ds&&ds.shippers){return Object.entries(ds.shippers).map(([name,d])=>({name,code4:d.code4||d.code3||name,count:Number(d.count)||0,income:Number(d.income)||0,isOther:!!d.isOther}));}
+    return [];
+  }
+  function groupKey(g){ return String(g.code4||g.code3||g.name||''); }
+  function rateObj(cur,prev){ if(!prev)return null; const rate=(Number(cur)||0-Number(prev||0))/Math.abs(Number(prev)||1)*100; if(!Number.isFinite(rate))return null; return {rate,text:(rate>0?'+':'')+Math.round(rate)+'%'}; }
+  function prevDatasetFor(ds){ if(!ds||!ds.ym||typeof activeDatasetByYM!=='function')return null; const p=ymPrev(ds.ym); return p?activeDatasetByYM(p):null; }
+  function detectShipperAnomalies(ds){
+    const groups=groupsOfLocal(ds).filter(g=>!g.isOther&&String(g.code4||'')!=='9999');
+    const prevMap=new Map(groupsOfLocal(prevDatasetFor(ds)).map(g=>[groupKey(g),g]));
+    const list=[];
+    groups.forEach(g=>{
+      const name=g.name||'未設定', key=groupKey(g), count=Number(g.count)||0, income=Number(g.income)||0, unit=count>0?Math.round(income/count):0;
+      if(count>1){
+        if(unit>UNIT_MAX)list.push({level:'high',type:'単価高',name,detail:`単価 ${fmtNum(unit)}円（基準 ${fmtNum(UNIT_MAX)}円超）`,amount:income,count,key});
+        else if(unit>0&&unit<UNIT_MIN)list.push({level:'mid',type:'単価低',name,detail:`単価 ${fmtNum(unit)}円（基準 ${fmtNum(UNIT_MIN)}円未満）`,amount:income,count,key});
+      }
+      const pg=prevMap.get(key);
+      if(pg){
+        const cr=rateObj(count,Number(pg.count)||0);
+        if(cr&&Math.abs(cr.rate)>=COUNT_RATE_LIMIT)list.push({level:'mid',type:'件数変動',name,detail:`前月比 ${cr.text}（${fmtNum(pg.count)}件 → ${fmtNum(count)}件）`,amount:income,count,key});
+        const sr=rateObj(income,Number(pg.income)||0);
+        if(sr&&Math.abs(sr.rate)>=SALES_RATE_LIMIT)list.push({level:'mid',type:'売上変動',name,detail:`前月比 ${sr.text}（${fmtKLocal(pg.income)}千 → ${fmtKLocal(income)}千）`,amount:income,count,key});
+      }
+    });
+    return list.sort((a,b)=>(a.level==='high'?0:1)-(b.level==='high'?0:1)||Math.abs(Number(b.amount)||0)-Math.abs(Number(a.amount)||0));
+  }
+  function ensureAnomalyStyles(){
+    if(document.getElementById('anomaly-style-v1'))return;
+    const style=document.createElement('style'); style.id='anomaly-style-v1';
+    style.textContent=`.anomaly-card{background:#fff;border:1px solid var(--border,#dbe3ee);border-radius:14px;box-shadow:0 2px 8px rgba(15,23,42,.08);margin:16px 0;overflow:hidden}.anomaly-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border,#e5e7eb);font-weight:900;color:var(--text,#0f172a)}.anomaly-sub{font-size:12px;color:var(--text3,#94a3b8);font-weight:700}.anomaly-body{padding:12px 16px}.anomaly-empty{padding:14px 16px;color:#059669;font-weight:900;background:#ecfdf5;border-radius:10px}.anomaly-list{display:grid;gap:8px}.anomaly-item{display:grid;grid-template-columns:110px 1fr 1.5fr 90px;gap:10px;align-items:center;padding:10px 12px;border:1px solid #fee2e2;border-radius:10px;background:#fff7ed;font-size:13px}.anomaly-badge{display:inline-flex;justify-content:center;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:900;background:#fee2e2;color:#b91c1c}.anomaly-badge.mid{background:#fef3c7;color:#92400e}.anomaly-name{font-weight:900;color:var(--text,#0f172a)}.anomaly-detail{color:var(--text2,#475569)}.anomaly-num{text-align:right;font-weight:900;color:var(--text,#0f172a)}.anomaly-mini{font-size:12px;margin-top:8px;padding:8px 10px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-weight:900}@media(max-width:800px){.anomaly-item{grid-template-columns:1fr}.anomaly-num{text-align:left}}`;
+    document.head.appendChild(style);
+  }
+  function anomalyHtml(list,ds){
+    const month=ds&&ds.ym?ymLabel(ds.ym):'対象月';
+    if(!list.length)return `<div class="anomaly-card"><div class="anomaly-head"><span>⚠ 異常検知</span><span class="anomaly-sub">${escLocal(month)} / 単価・件数・売上</span></div><div class="anomaly-body"><div class="anomaly-empty">異常なし</div></div></div>`;
+    return `<div class="anomaly-card"><div class="anomaly-head"><span>⚠ 異常検知</span><span class="anomaly-sub">${escLocal(month)} / ${list.length}件</span></div><div class="anomaly-body"><div class="anomaly-list">${list.map(x=>`<div class="anomaly-item"><div><span class="anomaly-badge ${x.level==='high'?'':'mid'}">${escLocal(x.type)}</span></div><div class="anomaly-name">${escLocal(x.name)}</div><div class="anomaly-detail">${escLocal(x.detail)}</div><div class="anomaly-num">${fmtKLocal(x.amount)}千</div></div>`).join('')}</div></div></div>`;
+  }
+  function renderAnomalyPanel(){
+    ensureAnomalyStyles();
+    const ds=typeof selectedDatasetInSelectedFiscalYear==='function'?selectedDatasetInSelectedFiscalYear():(typeof selectedDashboardDS==='function'?selectedDashboardDS():null);
+    const view=document.getElementById('view-shipper'); if(!view||!ds)return;
+    let panel=document.getElementById('shipper-anomaly-panel');
+    if(!panel){ panel=document.createElement('div'); panel.id='shipper-anomaly-panel'; const anchor=document.getElementById('shipper-group-card')||document.getElementById('shipper-detail-card'); if(anchor&&anchor.parentNode)anchor.parentNode.insertBefore(panel,anchor.nextSibling); else view.appendChild(panel); }
+    panel.innerHTML=anomalyHtml(detectShipperAnomalies(ds),ds);
+  }
+  function renderDashboardAnomalyMini(){
+    ensureAnomalyStyles();
+    const ds=typeof selectedDashboardDS==='function'?selectedDashboardDS():null;
+    const shipArea=document.getElementById('shipper-bars-area'); if(!shipArea||!ds)return;
+    const list=detectShipperAnomalies(ds);
+    let mini=document.getElementById('dashboard-anomaly-mini');
+    if(!mini){ mini=document.createElement('div'); mini.id='dashboard-anomaly-mini'; if(shipArea.parentNode)shipArea.parentNode.appendChild(mini); }
+    mini.innerHTML=list.length?`<div class="anomaly-mini">⚠ 異常検知 ${list.length}件：${escLocal(list.slice(0,3).map(x=>`${x.name} ${x.type}`).join(' ／ '))}${list.length>3?' ほか':''}</div>`:`<div class="anomaly-mini" style="background:#ecfdf5;border-color:#bbf7d0;color:#047857">異常検知：異常なし</div>`;
+  }
+  const prevRenderShipperForAnomaly=renderShipper;
+  renderShipper=function(){ prevRenderShipperForAnomaly(); renderAnomalyPanel(); };
+  const prevRenderDashboardForAnomaly=renderDashboard;
+  renderDashboard=function(){ prevRenderDashboardForAnomaly(); renderDashboardAnomalyMini(); };
 })();
