@@ -5250,7 +5250,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const maxV = Math.max(...items.map(g=>Math.abs(Number(g.income)||0)),1);
-    shipArea.innerHTML = items.map((g,i)=>`
+    const shipperTotal = groupsOf(ds).reduce((sum,g)=>sum+(Number(g.income)||0),0);
+    const revenueTotal = Number(ds.totalIncome)||0;
+    const gap = revenueTotal - shipperTotal;
+    const gapK = Math.round(gap/1000);
+    const gapOk = Math.abs(gapK) <= 1;
+    const verifyHtml = `
+      <div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;font-size:12px;color:var(--text2);margin:0 0 8px">
+        <span>営業収益 ${fmtK2(revenueTotal)}千</span>
+        <span>荷主合計 ${fmtK2(shipperTotal)}千</span>
+        <span style="font-weight:900;color:${gapOk ? '#059669' : '#dc2626'}">差分 ${fmtK2(gap)}千</span>
+      </div>`;
+    shipArea.innerHTML = verifyHtml + items.map((g,i)=>`
       <div class="mbar-row">
         <div class="mbar-label" title="${esc2(g.name)}">${esc2(g.name)}</div>
         <div class="mbar-track">
@@ -5413,16 +5424,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const tbody = document.getElementById('shipper-group-tbody');
       if (tbody) {
-        tbody.innerHTML = groups.length ? groups.map(g=>{
+        const shipperTotal = groups.reduce((sum,g)=>sum+(Number(g.income)||0),0);
+        const revenueTotal = ds ? (Number(ds.totalIncome)||0) : 0;
+        const gap = revenueTotal - shipperTotal;
+        const gapOk = Math.abs(Math.round(gap/1000)) <= 1;
+
+        const verifyRow = `<tr style="background:${gapOk ? '#ecfdf5' : '#fef2f2'}">
+          <td><strong>営業収益との差分チェック</strong></td>
+          <td class="r">営業収益 ${fmtK2(revenueTotal)}千</td>
+          <td class="r">荷主合計 ${fmtK2(shipperTotal)}千</td>
+          <td class="r" style="font-weight:900;color:${gapOk ? '#059669' : '#dc2626'}">差分 ${fmtK2(gap)}千</td>
+          <td class="r">${gapOk ? 'OK' : '要確認'}</td>
+          <td></td>
+        </tr>`;
+
+        tbody.innerHTML = groups.length ? verifyRow + groups.map((g,gi)=>{
           const rate = totalIncome > 0 ? g.income/totalIncome*100 : 0;
+          const detailId = `shipper-group-detail-${gi}`;
+          const hasContracts = Array.isArray(g.contracts) && g.contracts.length;
           let html = `<tr>
             <td><strong>${esc2(g.name)}</strong></td>
             <td class="r"><strong>${fmt2(g.count)}</strong></td>
             <td class="r"><strong>${fmtK2(g.income)}</strong></td>
             <td class="r">${rate.toFixed(1)}%</td>
             <td class="r">${fmt2(g.unit)}</td>
-            <td></td>
+            <td class="r">${hasContracts ? `<button type="button" class="btn-mini" data-shipper-toggle="${detailId}">＋</button>` : ''}</td>
           </tr>`;
+
           if (g.code4 === '9999' && Array.isArray(g.breakdown) && g.breakdown.length) {
             html += g.breakdown.map(b=>{
               const br = g.income > 0 ? (Number(b.income)||0) / g.income * 100 : 0;
@@ -5436,8 +5464,45 @@ document.addEventListener('DOMContentLoaded', () => {
               </tr>`;
             }).join('');
           }
+
+          if (hasContracts) {
+            const contractRows = g.contracts.map(c=>{
+              const cr = g.income > 0 ? (Number(c.income)||0) / g.income * 100 : 0;
+              const codeText = String(c.code || '').startsWith('9999_') ? '—' : esc2(c.code);
+              return `<tr>
+                <td style="font-family:monospace;color:var(--text2)">${codeText}</td>
+                <td>${esc2(c.name)}</td>
+                <td class="r">${fmt2(c.count)}</td>
+                <td class="r">${fmtK2(c.income)}</td>
+                <td class="r">${cr.toFixed(1)}%</td>
+                <td class="r">${fmt2(c.unit)}</td>
+              </tr>`;
+            }).join('');
+            html += `<tr id="${detailId}" style="display:none;background:#ffffff">
+              <td colspan="6" style="padding:0">
+                <div style="padding:12px 16px;background:#f8fafc;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+                  <div style="font-weight:900;margin-bottom:8px;color:var(--text)">${esc2(g.name)} 契約別内訳</div>
+                  <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+                    <thead><tr style="background:#f1f5f9"><th style="text-align:left;padding:8px">荷主コード</th><th style="text-align:left;padding:8px">契約名</th><th style="text-align:right;padding:8px">件数</th><th style="text-align:right;padding:8px">売上（千円）</th><th style="text-align:right;padding:8px">構成比</th><th style="text-align:right;padding:8px">単価（円）</th></tr></thead>
+                    <tbody>${contractRows}</tbody>
+                  </table>
+                </div>
+              </td>
+            </tr>`;
+          }
           return html;
         }).join('') : '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">荷主別データがありません</td></tr>';
+
+        tbody.querySelectorAll('[data-shipper-toggle]').forEach(btn=>{
+          btn.addEventListener('click', ()=>{
+            const id = btn.getAttribute('data-shipper-toggle');
+            const row = document.getElementById(id);
+            if (!row) return;
+            const open = row.style.display !== 'none';
+            row.style.display = open ? 'none' : '';
+            btn.textContent = open ? '＋' : '－';
+          });
+        });
       }
     }
   };
