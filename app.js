@@ -5595,3 +5595,263 @@ document.addEventListener('DOMContentLoaded', () => {
   const prevRenderDashboardForAnomaly=renderDashboard;
   renderDashboard=function(){ prevRenderDashboardForAnomaly(); renderDashboardAnomalyMini(); };
 })();
+
+/* ════════════════════════════════════════════════════════════════
+   2026-04-30 追補：荷主別 前月・前年比較 ＋ 件数×単価 分解
+   ・対象：荷主別グループ（その他収入は除外）
+   ・比較：前月、前年同月
+   ・分解：売上 = 件数 × 平均単価
+   ・表示：荷主分析画面に専用カード、ダッシュボードに簡易カード
+════════════════════════════════════════════════════════════════ */
+(function(){
+  'use strict';
+
+  function escCmp(v){
+    const s = String(v ?? '');
+    return typeof esc === 'function'
+      ? esc(s)
+      : s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function fmtCmp(v){
+    const n = Number(v) || 0;
+    return Math.round(n).toLocaleString('ja-JP');
+  }
+
+  function fmtKCmp(v){
+    return typeof fmtK === 'function'
+      ? fmtK(v)
+      : Math.round((Number(v)||0)/1000).toLocaleString('ja-JP');
+  }
+
+  function ymLabelCmp(ym){
+    return typeof ymLabel === 'function' ? ymLabel(ym) : (ym || '対象月');
+  }
+
+  function prevYM(ym){
+    if (!ym || String(ym).length < 6) return null;
+    let y = parseInt(String(ym).slice(0,4),10);
+    let m = parseInt(String(ym).slice(4,6),10) - 1;
+    if (!Number.isFinite(y) || !Number.isFinite(m)) return null;
+    if (m <= 0) { y -= 1; m = 12; }
+    return String(y) + String(m).padStart(2,'0');
+  }
+
+  function lastYearYM(ym){
+    if (!ym || String(ym).length < 6) return null;
+    const y = parseInt(String(ym).slice(0,4),10) - 1;
+    const m = String(ym).slice(4,6);
+    if (!Number.isFinite(y)) return null;
+    return String(y) + m;
+  }
+
+  function groupsFromDS(ds){
+    if (!ds) return [];
+    if (Array.isArray(ds.shipperGroups)) {
+      return ds.shipperGroups
+        .filter(g => g && !g.isOther && String(g.code4 || '') !== '9999')
+        .map(g => ({
+          key: String(g.code4 || g.code3 || g.name || ''),
+          name: String(g.name || '未設定'),
+          count: Number(g.count) || 0,
+          income: Number(g.income) || 0,
+          unit: Number(g.unit) || ((Number(g.count)||0) > 0 ? Math.round((Number(g.income)||0) / (Number(g.count)||1)) : 0)
+        }));
+    }
+    if (ds.shippers && typeof ds.shippers === 'object') {
+      return Object.entries(ds.shippers)
+        .filter(([name,d]) => !(d && d.isOther) && String(d && (d.code4 || d.code3) || '') !== '9999')
+        .map(([name,d]) => ({
+          key: String((d && (d.code4 || d.code3)) || name),
+          name: String(name || '未設定'),
+          count: Number(d && d.count) || 0,
+          income: Number(d && d.income) || 0,
+          unit: (Number(d && d.count)||0) > 0 ? Math.round((Number(d && d.income)||0) / (Number(d && d.count)||1)) : 0
+        }));
+    }
+    return [];
+  }
+
+  function dsByYM(ym){
+    return ym && typeof activeDatasetByYM === 'function' ? activeDatasetByYM(ym) : null;
+  }
+
+  function pctDiff(cur, base){
+    const c = Number(cur) || 0;
+    const b = Number(base) || 0;
+    if (!b) return null;
+    return (c / b - 1) * 100;
+  }
+
+  function diffText(cur, base, unitLabel){
+    const d = (Number(cur)||0) - (Number(base)||0);
+    const p = pctDiff(cur, base);
+    const sign = d >= 0 ? '+' : '';
+    const value = unitLabel === '千円' ? `${sign}${fmtKCmp(d)}千円` : `${sign}${fmtCmp(d)}${unitLabel}`;
+    const pctText = p == null ? '—' : `${p >= 0 ? '+' : ''}${p.toFixed(1)}%`;
+    return `${value} / ${pctText}`;
+  }
+
+  function buildComparisonRows(ds){
+    if (!ds || !ds.ym) return [];
+    const curGroups = groupsFromDS(ds);
+    const prevDS = dsByYM(prevYM(ds.ym));
+    const lyDS = dsByYM(lastYearYM(ds.ym));
+    const prevMap = new Map(groupsFromDS(prevDS).map(g => [g.key, g]));
+    const lyMap = new Map(groupsFromDS(lyDS).map(g => [g.key, g]));
+
+    return curGroups
+      .sort((a,b)=>b.income-a.income || b.count-a.count || a.name.localeCompare(b.name,'ja'))
+      .slice(0,12)
+      .map(g => {
+        const p = prevMap.get(g.key) || null;
+        const y = lyMap.get(g.key) || null;
+        const unit = g.count > 0 ? Math.round(g.income / g.count) : 0;
+
+        // 前月差を「件数要因」と「単価要因」に分解。
+        // 前月データがない場合は計算しない。
+        let countEffect = null;
+        let unitEffect = null;
+        if (p && p.count > 0) {
+          const pUnit = p.count > 0 ? p.income / p.count : 0;
+          countEffect = (g.count - p.count) * pUnit;
+          unitEffect = g.count * (unit - pUnit);
+        }
+
+        return {
+          ...g,
+          unit,
+          prev:p,
+          lastYear:y,
+          countEffect,
+          unitEffect
+        };
+      });
+  }
+
+  function ensureCompareStyles(){
+    if (document.getElementById('shipper-compare-style-v1')) return;
+    const style = document.createElement('style');
+    style.id = 'shipper-compare-style-v1';
+    style.textContent = `
+      .shipper-compare-card{background:#fff;border:1px solid var(--border,#dbe3ee);border-radius:14px;box-shadow:0 2px 8px rgba(15,23,42,.08);margin:16px 0;overflow:hidden}
+      .shipper-compare-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border,#e5e7eb);font-weight:900;color:var(--text,#0f172a)}
+      .shipper-compare-sub{font-size:12px;color:var(--text3,#94a3b8);font-weight:700}
+      .shipper-compare-body{padding:12px 16px;overflow-x:auto}
+      .shipper-compare-table{width:100%;border-collapse:collapse;font-size:12px;min-width:980px}
+      .shipper-compare-table th{background:#f8fafc;border-bottom:1px solid #e5e7eb;color:#475569;text-align:left;padding:8px;white-space:nowrap}
+      .shipper-compare-table td{border-bottom:1px solid #f1f5f9;padding:8px;vertical-align:middle}
+      .shipper-compare-table .r{text-align:right;white-space:nowrap}
+      .shipper-compare-name{font-weight:900;color:#0f172a;white-space:nowrap}
+      .shipper-compare-formula{color:#64748b;font-size:11px;white-space:nowrap}
+      .shipper-up{color:#059669;font-weight:900}
+      .shipper-down{color:#dc2626;font-weight:900}
+      .shipper-flat{color:#64748b;font-weight:800}
+      .dashboard-compare-mini{margin-top:10px;padding:10px;border:1px solid #dbeafe;background:#eff6ff;border-radius:10px;font-size:12px;color:#1e3a8a;line-height:1.7}
+      .dashboard-compare-mini strong{font-weight:900}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function diffClass(cur, base){
+    const d = (Number(cur)||0) - (Number(base)||0);
+    if (Math.abs(d) < 1) return 'shipper-flat';
+    return d > 0 ? 'shipper-up' : 'shipper-down';
+  }
+
+  function renderComparePanel(){
+    ensureCompareStyles();
+    const ds = typeof selectedDatasetInSelectedFiscalYear === 'function'
+      ? selectedDatasetInSelectedFiscalYear()
+      : (typeof selectedDashboardDS === 'function' ? selectedDashboardDS() : null);
+    const view = document.getElementById('view-shipper');
+    if (!view || !ds) return;
+
+    let panel = document.getElementById('shipper-compare-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'shipper-compare-panel';
+      const anchor = document.getElementById('shipper-anomaly-panel') || document.getElementById('shipper-group-card') || document.getElementById('shipper-detail-card');
+      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(panel, anchor.nextSibling);
+      else view.appendChild(panel);
+    }
+
+    const rows = buildComparisonRows(ds);
+    if (!rows.length) {
+      panel.innerHTML = `<div class="shipper-compare-card"><div class="shipper-compare-head"><span>前月・前年比較／件数×単価分解</span><span class="shipper-compare-sub">${escCmp(ymLabelCmp(ds.ym))}</span></div><div class="shipper-compare-body">比較対象データがありません。</div></div>`;
+      return;
+    }
+
+    panel.innerHTML = `
+      <div class="shipper-compare-card">
+        <div class="shipper-compare-head">
+          <span>前月・前年比較／件数×単価分解</span>
+          <span class="shipper-compare-sub">${escCmp(ymLabelCmp(ds.ym))} / 売上 = 件数 × 平均単価</span>
+        </div>
+        <div class="shipper-compare-body">
+          <table class="shipper-compare-table">
+            <thead>
+              <tr>
+                <th>荷主</th>
+                <th class="r">件数</th>
+                <th class="r">平均単価</th>
+                <th class="r">売上</th>
+                <th class="r">前月売上差</th>
+                <th class="r">前年売上差</th>
+                <th class="r">件数要因</th>
+                <th class="r">単価要因</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r=>{
+                const prevIncome = r.prev ? r.prev.income : null;
+                const lyIncome = r.lastYear ? r.lastYear.income : null;
+                return `<tr>
+                  <td><div class="shipper-compare-name">${escCmp(r.name)}</div><div class="shipper-compare-formula">${fmtKCmp(r.income)}千円 = ${fmtCmp(r.count)}件 × ${fmtCmp(r.unit)}円</div></td>
+                  <td class="r">${fmtCmp(r.count)}</td>
+                  <td class="r">${fmtCmp(r.unit)}円</td>
+                  <td class="r"><strong>${fmtKCmp(r.income)}千</strong></td>
+                  <td class="r ${prevIncome == null ? 'shipper-flat' : diffClass(r.income, prevIncome)}">${prevIncome == null ? '—' : diffText(r.income, prevIncome, '千円')}</td>
+                  <td class="r ${lyIncome == null ? 'shipper-flat' : diffClass(r.income, lyIncome)}">${lyIncome == null ? '—' : diffText(r.income, lyIncome, '千円')}</td>
+                  <td class="r ${r.countEffect == null ? 'shipper-flat' : diffClass(r.countEffect, 0)}">${r.countEffect == null ? '—' : `${r.countEffect>=0?'+':''}${fmtKCmp(r.countEffect)}千`}</td>
+                  <td class="r ${r.unitEffect == null ? 'shipper-flat' : diffClass(r.unitEffect, 0)}">${r.unitEffect == null ? '—' : `${r.unitEffect>=0?'+':''}${fmtKCmp(r.unitEffect)}千`}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function renderDashboardCompareMini(){
+    ensureCompareStyles();
+    const ds = typeof selectedDashboardDS === 'function' ? selectedDashboardDS() : null;
+    const shipArea = document.getElementById('shipper-bars-area');
+    if (!ds || !shipArea) return;
+    const rows = buildComparisonRows(ds).slice(0,3);
+    let mini = document.getElementById('dashboard-compare-mini');
+    if (!mini) {
+      mini = document.createElement('div');
+      mini.id = 'dashboard-compare-mini';
+      mini.className = 'dashboard-compare-mini';
+      if (shipArea.parentNode) shipArea.parentNode.appendChild(mini);
+    }
+    if (!rows.length) {
+      mini.innerHTML = '<strong>単価×件数：</strong>表示対象なし';
+      return;
+    }
+    mini.innerHTML = `<strong>単価×件数：</strong> ${rows.map(r=>`${escCmp(r.name)} ${fmtKCmp(r.income)}千 = ${fmtCmp(r.count)}件 × ${fmtCmp(r.unit)}円`).join(' ／ ')}`;
+  }
+
+  const prevRenderShipperForCompare = renderShipper;
+  renderShipper = function(){
+    prevRenderShipperForCompare();
+    renderComparePanel();
+  };
+
+  const prevRenderDashboardForCompare = renderDashboard;
+  renderDashboard = function(){
+    prevRenderDashboardForCompare();
+    renderDashboardCompareMini();
+  };
+})();
