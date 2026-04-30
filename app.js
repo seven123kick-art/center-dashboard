@@ -2471,11 +2471,36 @@ function renderAnnual() {
   const fy = dashboardSelectedFiscalYear();
   const list = datasetsForSelectedFiscalYear();
 
+  const annualCanvas = document.getElementById('c-annual-trend');
+  function showAnnualNoDataMessage(show) {
+    const msgId = 'annual-chart-empty-message';
+    const oldMsg = document.getElementById(msgId);
+    if (oldMsg) oldMsg.remove();
+    if (!annualCanvas) return;
+    if (show) {
+      if (STATE._charts && STATE._charts['c-annual-trend']) {
+        try { STATE._charts['c-annual-trend'].destroy(); } catch(e) {}
+        delete STATE._charts['c-annual-trend'];
+      }
+      annualCanvas.style.display = 'none';
+      const msg = document.createElement('div');
+      msg.id = msgId;
+      msg.style.cssText = 'min-height:240px;display:flex;align-items:center;justify-content:center;color:var(--text3);font-weight:700';
+      msg.textContent = `${fy}年度のデータがありません`;
+      annualCanvas.parentElement.appendChild(msg);
+    } else {
+      annualCanvas.style.display = '';
+    }
+  }
+
   if (!list.length) {
-    if (kpi) kpi.innerHTML = '';
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;color:var(--text3);text-align:center">選択年度のデータがありません</td></tr>';
+    if (kpi) kpi.innerHTML = `<div style="grid-column:1/-1" class="msg msg-info">${fy}年度のデータがありません</div>`;
+    showAnnualNoDataMessage(true);
+    tbody.innerHTML = `<tr><td colspan="8" style="padding:16px;color:var(--text3);text-align:center">${fy}年度のデータがありません</td></tr>`;
     return;
   }
+
+  showAnnualNoDataMessage(false);
 
   const inc = list.reduce((s,d)=>s+d.totalIncome,0);
   const exp = list.reduce((s,d)=>s+d.totalExpense,0);
