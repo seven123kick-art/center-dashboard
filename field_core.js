@@ -958,7 +958,12 @@ IMPORT.deleteFieldData = function(ym) {
     setupFieldCommonSelectors();
     setupYmSelects();
     FIELD_UI.updatePeriodBadge();
-    renderWorker();
+    const isWorkerViewActive = (document.getElementById('view-field-worker')?.classList.contains('active')) || STATE.view === 'field-worker';
+    if (isWorkerViewActive && window.FIELD_WORKER_UI && typeof window.FIELD_WORKER_UI.render === 'function') {
+      window.FIELD_WORKER_UI.render();
+    } else {
+      renderWorker();
+    }
     renderContent();
     renderProduct();
     renderMap();
