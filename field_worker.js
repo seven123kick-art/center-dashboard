@@ -8,8 +8,8 @@
 */
 'use strict';
 (function(){
-  if (window.__FIELD_WORKER_VERTICAL_RETURN_FIXED_20260501__) return;
-  window.__FIELD_WORKER_VERTICAL_RETURN_FIXED_20260501__ = true;
+  if (window.__FIELD_WORKER_VERTICAL_STACK_FIXED_20260501__) return;
+  window.__FIELD_WORKER_VERTICAL_STACK_FIXED_20260501__ = true;
 
   const STATE_KEY = '__fieldWorkerSelectedName';
   const STORAGE_PREFIX = (() => {
@@ -232,6 +232,11 @@
     style = document.createElement('style');
     style.id = 'worker-bar-style-20260501';
     style.textContent = `
+      /* 作業者分析は横並び禁止：ランキング→詳細を縦に固定 */
+      #view-field-worker .grid2{display:grid!important;grid-template-columns:1fr!important;gap:16px!important;align-items:stretch!important}
+      #view-field-worker .grid2 > .card{width:100%!important;max-width:100%!important;min-width:0!important}
+      #view-field-worker .grid2 > .card:nth-child(1){order:1!important}
+      #view-field-worker .grid2 > .card:nth-child(2){order:2!important}
       .worker-amount-note{margin:-2px 0 14px;color:#64748b;font-size:12px;line-height:1.6;padding:0 4px}
       .worker-detail-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
       .worker-detail-summary span{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:#f8fafc;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;color:#334155}
