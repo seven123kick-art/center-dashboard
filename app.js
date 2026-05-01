@@ -3370,6 +3370,7 @@ async function loadScreenModules() {
 }
 
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
+function setupFieldImportYMControls(){}
 document.addEventListener('DOMContentLoaded', async () => {
   // 0. 画面別モジュール読込（荷主分析など）
   try {
