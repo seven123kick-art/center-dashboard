@@ -1,18 +1,15 @@
-/* field_worker.js : 作業者分析ビュー（請求/直収分離・平均売上/日強化版）
+/* field_worker.js : 作業者分析ビュー（請求/直収分離・整理版）
    2026-05-01
    ・件数：作業者CSVの原票番号ユニーク
    ・稼働日：A列日付で判定
-   ・平均件数/日：配送件数 ÷ 稼働日
-   ・平均売上/日：M列=請求の金額 ÷ 稼働日
-   ・直収/日：M列=直収の金額 ÷ 稼働日
+   ・売上/直収：M列「請求／直収」で分離
    ・合計売上：請求＋直収（field_core.jsで幹線料系を除外済み）
-   ・作業内容内訳：サイズ①〜⑦は順番固定、その他は表記ゆれを統合
-   ・グラフ：円グラフではなく横棒ランキング表示
+   ・一覧は必要指標だけ、売上/日・直収/日は選択中詳細へ集約
 */
 'use strict';
 (function(){
-  if (window.__FIELD_WORKER_AVG_SALES_DAY_20260501__) return;
-  window.__FIELD_WORKER_AVG_SALES_DAY_20260501__ = true;
+  if (window.__FIELD_WORKER_BILLING_CLEAN_20260501__) return;
+  window.__FIELD_WORKER_BILLING_CLEAN_20260501__ = true;
 
   const STATE_KEY = '__fieldWorkerSelectedName';
 
@@ -46,11 +43,9 @@
       const count = Object.keys(slips).length || num(w.rows);
       const workDays = safeArray(w.workDays);
       const workDayCount = num(w.workDayCount || workDays.length);
-      const avg = workDayCount > 0 ? count / workDayCount : 0;
-      const amount = num(w.amount);
-      const salesAmount = num(w.salesAmount || w.includedAmount || amount - num(w.directAmount));
+      const salesAmount = num(w.salesAmount || w.includedAmount || (num(w.amount) - num(w.directAmount)));
       const directAmount = num(w.directAmount);
-      const excludedAmount = num(w.excludedAmount || w.excluded || 0);
+      const amount = num(w.amount || salesAmount + directAmount);
       return {
         label: String(w.name || '未設定'),
         count,
@@ -58,13 +53,13 @@
         amount,
         salesAmount,
         directAmount,
-        excludedAmount,
+        excludedAmount:num(w.excludedAmount || w.excluded || 0),
         works: w.works || {},
         chartWorks: w.chartWorks || w.works || {},
         directWorks: w.directWorks || {},
         workDays,
         workDayCount,
-        avgPerWorkDay: avg,
+        avgPerWorkDay: workDayCount > 0 ? count / workDayCount : 0,
         avgSalesPerWorkDay: workDayCount > 0 ? salesAmount / workDayCount : 0,
         avgDirectPerWorkDay: workDayCount > 0 ? directAmount / workDayCount : 0,
         slips
@@ -95,6 +90,7 @@
     if (/食洗|食器洗/.test(s)) return { group:'other', label:'食洗機', order:17 };
     if (/照明|シーリング/.test(s)) return { group:'other', label:'照明', order:18 };
     if (/取付|設置/.test(s)) return { group:'other', label:'取付・設置', order:19 };
+    if (/クレーン/.test(s)) return { group:'other', label:'クレーン', order:30 };
     return { group:'other', label:s, order:200 };
   }
 
@@ -122,11 +118,11 @@
     if (!note) {
       note = document.createElement('div');
       note.id = 'worker-amount-note';
-      note.style.cssText = 'margin:-4px 0 14px;color:#64748b;font-size:12px;line-height:1.6;padding:0 4px';
-      if (selector && selector.parentNode === view) selector.insertAdjacentElement("afterend", note);
+      note.className = 'worker-amount-note';
+      if (selector && selector.parentNode === view) selector.insertAdjacentElement('afterend', note);
       else view.insertBefore(note, view.firstChild);
     }
-    note.innerHTML = '※作業者分析の金額は、M列の「請求／直収」で分け、幹線料金を除外して表示しています。';
+    note.innerHTML = '※金額はM列の「請求／直収」で分け、幹線料金を除外して表示しています。';
   }
 
   function makeKpi(rec, rows, ym){
@@ -138,17 +134,14 @@
     const directAmount = rows.reduce((s,r)=>s+r.directAmount,0);
     const workDayCount = num(rec.workDayCount || safeArray(rec.workDays).length || 0);
     const avgCount = workDayCount > 0 ? totalCount / workDayCount : 0;
-    const avgSales = workDayCount > 0 ? salesAmount / workDayCount : 0;
-    const avgDirect = workDayCount > 0 ? directAmount / workDayCount : 0;
-    kpi.style.gridTemplateColumns = 'repeat(7,minmax(0,1fr))';
+    const avgTotalSales = workDayCount > 0 ? totalAmount / workDayCount : 0;
+    kpi.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
     kpi.innerHTML = `
       <div class="kpi-card accent-navy"><div class="kpi-label">対象月</div><div class="kpi-value">${esc(ymText(ym))}</div></div>
       <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">平均件数/日</div><div class="kpi-value">${workDayCount ? fmt1(avgCount) : '—'}件</div></div>
-      <div class="kpi-card accent-green"><div class="kpi-label">売上/日</div><div class="kpi-value">${workDayCount ? fmtK(avgSales) : '—'}千円</div></div>
-      <div class="kpi-card accent-green"><div class="kpi-label">直収/日</div><div class="kpi-value">${workDayCount ? fmtK(avgDirect) : '—'}千円</div></div>
-      <div class="kpi-card accent-amber"><div class="kpi-label">合計売上</div><div class="kpi-value">${fmtK(totalAmount)}千円</div><div class="kpi-sub-row"><span class="kpi-sub">売上 ${fmtK(salesAmount)}千 / 直収 ${fmtK(directAmount)}千</span></div></div>`;
+      <div class="kpi-card accent-amber"><div class="kpi-label">合計売上</div><div class="kpi-value">${fmtK(totalAmount)}千円</div><div class="kpi-sub-row"><span class="kpi-sub">売上 ${fmtK(salesAmount)}千 / 直収 ${fmtK(directAmount)}千</span><span class="kpi-sub">平均 ${fmtK(avgTotalSales)}千円/日</span></div></div>`;
   }
 
   function renderStatusNotice(){
@@ -166,12 +159,12 @@
     box.innerHTML = `
       <div class="worker-card-intro">
         <div class="worker-card-main-title">作業者別ランキング</div>
-        <div class="worker-card-sub-title">配送件数・売上/日・直収/日を比較</div>
+        <div class="worker-card-sub-title">配送件数・平均件数/日・合計売上を比較</div>
       </div>
       <div class="scroll-x">
         <table class="tbl field-worker-ranking-table">
           <thead><tr>
-            <th style="width:48px">順位</th><th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">平均件数/日</th><th class="r">売上/日</th><th class="r">直収/日</th><th class="r">合計売上</th>
+            <th style="width:48px">順位</th><th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">平均件数/日</th><th class="r">合計売上</th>
           </tr></thead>
           <tbody>${topRows.map((r,i)=>{
             const active = r.label === selectedName;
@@ -182,9 +175,7 @@
               <td class="r"><strong>${fmt(r.count)}</strong>件</td>
               <td class="r">${r.workDayCount ? fmt(r.workDayCount)+'日' : '—'}</td>
               <td class="r"><strong>${r.workDayCount ? fmt1(r.avgPerWorkDay) : '—'}</strong>件/日</td>
-              <td class="r"><strong>${r.workDayCount ? fmtK(r.avgSalesPerWorkDay) : '—'}</strong>千円/日</td>
-              <td class="r"><strong>${r.workDayCount ? fmtK(r.avgDirectPerWorkDay) : '—'}</strong>千円/日</td>
-              <td class="r">${fmtK(r.amount)}千</td>
+              <td class="r"><strong>${fmtK(r.amount)}</strong>千</td>
             </tr>`;
           }).join('')}</tbody>
         </table>
@@ -211,23 +202,25 @@
   }
 
   function ensureWorkerChartStyles(){
-    if (document.getElementById('worker-bar-style-20260501')) return;
-    const style = document.createElement('style');
+    let style = document.getElementById('worker-bar-style-20260501');
+    if (style) style.remove();
+    style = document.createElement('style');
     style.id = 'worker-bar-style-20260501';
     style.textContent = `
+      .worker-amount-note{margin:-2px 0 14px;color:#64748b;font-size:12px;line-height:1.6;padding:0 4px}
       .worker-detail-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-      .worker-detail-summary span{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:#f8fafc;border-radius:999px;padding:6px 10px;font-size:12px;color:#334155}
+      .worker-detail-summary span{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:#f8fafc;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;color:#334155}
       .worker-chart-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;height:auto}
-      .worker-chart-card{border:1px solid var(--border);border-radius:12px;padding:12px;background:#fff;min-height:300px}
-      .worker-chart-title{font-weight:900;color:#334155;margin-bottom:12px}
-      .worker-chart-wrap{height:auto;min-height:230px;position:relative}
-      .work-break-row{display:grid;grid-template-columns:minmax(92px,130px) minmax(120px,1fr) minmax(70px,90px);gap:10px;align-items:center;margin:9px 0}
-      .work-break-label{font-size:12px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#334155}
+      .worker-chart-card{border:1px solid var(--border);border-radius:12px;padding:12px;background:#fff;min-height:270px}
+      .worker-chart-title{font-weight:900;color:#334155;margin-bottom:12px;font-size:14px}
+      .worker-chart-wrap{height:auto;min-height:220px;position:relative}
+      .work-break-row{display:grid;grid-template-columns:minmax(82px,120px) minmax(110px,1fr) minmax(62px,78px);gap:10px;align-items:center;margin:9px 0}
+      .work-break-label{font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#334155}
       .work-break-track{height:12px;background:#e5e7eb;border-radius:999px;overflow:hidden}
       .work-break-fill{height:100%;background:#1a4d7c;border-radius:999px}
-      .work-break-value{text-align:right;font-size:12px;font-weight:900;color:#0f172a;white-space:nowrap}
+      .work-break-value{text-align:right;font-size:13px;font-weight:900;color:#0f172a;white-space:nowrap}
       .worker-card-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:0 0 12px;padding:2px 0 10px;border-bottom:1px solid #edf2f7}
-      .worker-card-main-title{font-size:16px;font-weight:900;color:#0f172a;letter-spacing:.02em}
+      .worker-card-main-title{font-size:17px;font-weight:900;color:#0f172a;letter-spacing:.02em}
       .worker-card-sub-title{font-size:12px;font-weight:700;color:#64748b}
       .field-worker-ranking-table th{font-size:12px;color:#334155;background:#f3f6fb}
       .field-worker-ranking-table td{font-size:13px;padding-top:10px;padding-bottom:10px}
@@ -237,13 +230,10 @@
       .field-worker-ranking-table .field-worker-row:hover td{background:#f8fbff}
       .rank-badge{display:inline-flex;align-items:center;justify-content:center;min-width:25px;height:25px;border-radius:999px;background:#e5eef9;color:#1a4d7c;font-weight:900}
       .field-worker-row.is-active .rank-badge{background:#1a4d7c;color:#fff}
-      .worker-selected-hero{border:1px solid #bfdbfe;background:linear-gradient(135deg,#eff6ff,#ffffff);border-radius:14px;padding:14px 16px;margin-bottom:12px}
-      .worker-selected-name{font-size:20px;font-weight:900;color:#0f172a;line-height:1.25}
-      .worker-selected-meta{font-size:12px;font-weight:800;color:#475569;margin-top:6px}
-      .worker-detail-summary span{font-size:12px;font-weight:800}
-      .worker-chart-title{font-size:14px}
-      .work-break-label,.work-break-value{font-size:13px}
-      @media(max-width:1200px){.worker-chart-grid{grid-template-columns:1fr}.worker-chart-card{min-height:unset}.worker-card-intro{align-items:flex-start;flex-direction:column}}
+      .worker-selected-hero{border:2px solid #2563eb;background:linear-gradient(135deg,#eff6ff,#ffffff);border-radius:16px;padding:16px 18px;margin-bottom:12px;box-shadow:0 10px 22px rgba(37,99,235,.10)}
+      .worker-selected-name{font-size:24px;font-weight:900;color:#0f172a;line-height:1.25}
+      .worker-selected-meta{font-size:13px;font-weight:900;color:#475569;margin-top:8px;line-height:1.8}
+      @media(max-width:1280px){.worker-chart-grid{grid-template-columns:1fr}.worker-chart-card{min-height:unset}.worker-card-intro{align-items:flex-start;flex-direction:column}}
     `;
     document.head.appendChild(style);
   }
@@ -255,15 +245,15 @@
     const oldCanvas = document.getElementById('c-worker-content');
     const body = oldCanvas ? oldCanvas.parentElement : document.querySelector('#view-field-worker .grid2 .card:nth-child(2) .card-body');
     if (!body) return;
-    if (!document.getElementById('worker-size-bars') || !document.getElementById('worker-other-bars')) {
+    if (!document.getElementById('worker-size-bars') || !document.getElementById('worker-other-bars') || !document.getElementById('worker-direct-bars')) {
       body.style.height = 'auto'; body.style.position = 'relative';
       body.innerHTML = `<div class="worker-selected-hero" id="worker-selected-hero"></div><div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系（①〜⑦）</div><div class="worker-chart-wrap" id="worker-size-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他（表記統合）</div><div class="worker-chart-wrap" id="worker-other-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">直収（M列=直収）</div><div class="worker-chart-wrap" id="worker-direct-bars"></div></div></div>`;
     }
     const hero = document.getElementById('worker-selected-hero');
     const summary = document.getElementById('worker-detail-summary');
     if (!row) {
-      if (hero) hero.innerHTML = '<div class="worker-selected-name">作業者を選択してください</div>';
-      if (summary) summary.innerHTML = '<span>ランキング行をクリックすると内訳が表示されます</span>';
+      if (hero) hero.innerHTML = '<div class="worker-selected-name">作業者を選択してください</div><div class="worker-selected-meta">ランキング行をクリックすると内訳が表示されます</div>';
+      if (summary) summary.innerHTML = '';
       renderBarList('worker-size-bars', [], '件');
       renderBarList('worker-other-bars', [], '件');
       renderBarList('worker-direct-bars', [], '件');
@@ -273,36 +263,33 @@
     const directSplit = splitWorks(row.directWorks);
     const sizeTotal = split.size.reduce((s,x)=>s+num(x.count),0);
     const otherTotal = split.other.reduce((s,x)=>s+num(x.count),0);
-    const directTotal = directSplit.size.reduce((s,x)=>s+num(x.count),0) + directSplit.other.reduce((s,x)=>s+num(x.count),0);
+    const directItems = [...directSplit.size, ...directSplit.other].filter(x=>num(x.count)>0);
+    const directTotal = directItems.reduce((s,x)=>s+num(x.count),0);
     if (hero) hero.innerHTML = `<div class="worker-selected-name">${esc(row.label)}</div><div class="worker-selected-meta">配送 ${fmt(row.count)}件 ｜ 稼働 ${row.workDayCount ? fmt(row.workDayCount) : '—'}日 ｜ 平均 ${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}件/日 ｜ 売上 ${row.workDayCount ? fmtK(row.avgSalesPerWorkDay) : '—'}千円/日 ｜ 直収 ${row.workDayCount ? fmtK(row.avgDirectPerWorkDay) : '—'}千円/日</div>`;
     if (summary) summary.innerHTML = `
-      <span><strong>${esc(row.label)}</strong></span>
-      <span>配送件数：<strong>${fmt(row.count)}</strong>件</span>
-      <span>稼働：<strong>${row.workDayCount ? fmt(row.workDayCount) : '—'}</strong>日</span>
-      <span>平均件数/日：<strong>${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}</strong>件</span>
-      <span>売上/日：<strong>${row.workDayCount ? fmtK(row.avgSalesPerWorkDay) : '—'}</strong>千円</span>
-      <span>直収/日：<strong>${row.workDayCount ? fmtK(row.avgDirectPerWorkDay) : '—'}</strong>千円</span>
       <span>合計：<strong>${fmtK(row.amount)}</strong>千</span>
       <span>売上：<strong>${fmtK(row.salesAmount)}</strong>千</span>
       <span>直収：<strong>${fmtK(row.directAmount)}</strong>千</span>
-      <span>サイズ系：<strong>${fmt(sizeTotal)}</strong>件</span><span>その他：<strong>${fmt(otherTotal)}</strong>件</span><span>直収：<strong>${fmt(directTotal)}</strong>件</span>`;
+      <span>サイズ系：<strong>${fmt(sizeTotal)}</strong>件</span>
+      <span>その他：<strong>${fmt(otherTotal)}</strong>件</span>
+      <span>直収：<strong>${fmt(directTotal)}</strong>件</span>`;
     renderBarList('worker-size-bars', split.size, '件');
     renderBarList('worker-other-bars', split.other, '件');
-    renderBarList('worker-direct-bars', [...directSplit.size, ...directSplit.other].filter(x=>num(x.count)>0), '件');
+    renderBarList('worker-direct-bars', directItems, '件');
   }
 
   function renderDetailTable(rows, selectedName){
     const tbody = document.getElementById('f-worker-tbody');
     if (!tbody) return;
     const tableRows = rows.slice(0, 100);
-    tbody.innerHTML = tableRows.map((r,i)=>`<tr class="field-worker-detail-row ${r.label===selectedName?'is-active':''}" onclick="FIELD_WORKER_UI.selectWorker('${jsArg(r.label)}')" style="cursor:pointer"><td><strong>${i+1}. ${esc(r.label)}</strong></td><td class="r">${fmt(r.count)}</td><td class="r">${r.workDayCount?fmt(r.workDayCount):'—'}</td><td class="r">${r.workDayCount?fmt1(r.avgPerWorkDay):'—'}</td><td class="r">${r.workDayCount?fmtK(r.avgSalesPerWorkDay):'—'}</td><td class="r">${r.workDayCount?fmtK(r.avgDirectPerWorkDay):'—'}</td><td class="r">${fmtK(r.amount)}</td></tr>`).join('');
+    tbody.innerHTML = tableRows.map((r,i)=>`<tr class="field-worker-detail-row ${r.label===selectedName?'is-active':''}" onclick="FIELD_WORKER_UI.selectWorker('${jsArg(r.label)}')" style="cursor:pointer"><td><strong>${i+1}. ${esc(r.label)}</strong></td><td class="r">${fmt(r.count)}</td><td class="r">${r.workDayCount?fmt(r.workDayCount):'—'}</td><td class="r">${r.workDayCount?fmt1(r.avgPerWorkDay):'—'}</td><td class="r">${fmtK(r.salesAmount)}</td><td class="r">${fmtK(r.directAmount)}</td><td class="r">${fmtK(r.amount)}</td></tr>`).join('');
   }
 
   function ensureDetailHeader(){
     const table = document.getElementById('f-worker-tbody')?.closest('table');
     if (!table) return;
     const thead = table.querySelector('thead tr');
-    if (thead) thead.innerHTML = '<th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">平均件数/日</th><th class="r">売上/日</th><th class="r">直収/日</th><th class="r">合計売上（千円）</th>';
+    if (thead) thead.innerHTML = '<th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">平均件数/日</th><th class="r">売上（千円）</th><th class="r">直収（千円）</th><th class="r">合計（千円）</th>';
   }
 
   function render(){
@@ -342,7 +329,6 @@
     try { render(); } catch(e) { console.error(e); }
   };
 
-
   function forceRenderSoon(){
     clearTimeout(window.__fieldWorkerForceTimer);
     window.__fieldWorkerForceTimer = setTimeout(()=>{
@@ -353,7 +339,6 @@
     }, 30);
   }
 
-  // field_core側の月・年度変更処理で旧描画が走った後、必ず作業者専用UIで上書きする
   document.addEventListener('change', (e)=>{
     const id = e.target && e.target.id;
     if (id === 'field-common-month-select' || id === 'field-common-fy-select') forceRenderSoon();
@@ -364,7 +349,6 @@
     if (nav) forceRenderSoon();
   }, true);
 
-  // 旧renderWorkerがテキストランキングを描いた場合も検知して戻す
   document.addEventListener('DOMContentLoaded', ()=>{
     const box = document.getElementById('f-worker-bars');
     if (box && window.MutationObserver) {
