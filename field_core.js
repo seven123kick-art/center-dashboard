@@ -216,26 +216,64 @@ IMPORT.deleteFieldData = function(ym) {
     return fallback;
   }
 
+  function normalizeWorkDate(v){
+    const raw = clean(v);
+    if (!raw) return '';
+    // A列は日付のみ想定。時刻は無い前提だが、念のため空白以降は切る。
+    const head = raw.split(/\s+/)[0];
+    const m1 = head.match(/^(\d{4})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})日?$/);
+    if (m1) return `${m1[1]}-${String(m1[2]).padStart(2,'0')}-${String(m1[3]).padStart(2,'0')}`;
+    const m2 = head.match(/^(\d{8})$/);
+    if (m2) return `${m2[1].slice(0,4)}-${m2[1].slice(4,6)}-${m2[1].slice(6,8)}`;
+    return head;
+  }
+
   function parseWorkerCsvRows(rows, fileName){
     if (!rows.length) return { rowCount:0, workerCount:0, workers:{} };
     const header = rows[0] || [];
     const body = rows.slice(1).filter(r => r && r.some(c => clean(c)));
+    const dateIdx = headerIndex(header, ['日付','作業日','配送日','計上日'], 0); // A列を基本にする
     const workerIdx = headerIndex(header, ['作業者名','作業者','担当者','社員名','氏名'], 0);
     const amountIdx = headerIndex(header, ['金額','売上','合計'], -1);
     const workIdx = headerIndex(header, ['作業内容','内容','科目'], -1);
     const workers = {};
+    const allWorkDays = new Set();
+
     body.forEach(r => {
       const name = clean(r[workerIdx]) || '未設定';
-      if (!workers[name]) workers[name] = { name, rows:0, amount:0, works:{} };
+      const workDate = normalizeWorkDate(r[dateIdx]);
+      if (!workers[name]) workers[name] = { name, rows:0, amount:0, works:{}, workDays:[] };
       workers[name].rows += 1;
       if (amountIdx >= 0) workers[name].amount += yen(r[amountIdx]);
+      if (workDate) {
+        if (!Array.isArray(workers[name].workDays)) workers[name].workDays = [];
+        if (!workers[name].workDays.includes(workDate)) workers[name].workDays.push(workDate);
+        allWorkDays.add(workDate);
+      }
       if (workIdx >= 0) {
         const w = clean(r[workIdx]) || '未設定';
         workers[name].works[w] = (workers[name].works[w] || 0) + 1;
       }
     });
-    return { rowCount: body.length, workerCount: Object.keys(workers).length, workers, sourceFileName:fileName };
+
+    Object.values(workers).forEach(w => {
+      w.workDays = Array.from(new Set(w.workDays || [])).sort();
+      w.workDayCount = w.workDays.length;
+      w.avgPerWorkDay = w.workDayCount > 0 ? w.rows / w.workDayCount : 0;
+    });
+
+    return {
+      rowCount: body.length,
+      workerCount: Object.keys(workers).length,
+      workers,
+      sourceFileName:fileName,
+      dateColumnIndex: dateIdx,
+      workDays: Array.from(allWorkDays).sort(),
+      workDayCount: allWorkDays.size,
+      avgPerWorkDay: allWorkDays.size > 0 ? body.length / allWorkDays.size : 0
+    };
   }
+
 
   function productCategory(product){
     const p = clean(product);
