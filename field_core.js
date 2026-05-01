@@ -479,7 +479,12 @@ IMPORT.deleteFieldData = function(ym) {
   }
   function setupFieldCommonSelectors(){
     ensureState();
-    const view = document.getElementById('view-field');
+    const view = document.querySelector('#view-field-worker.view.active, #view-field-content.view.active, #view-field-product.view.active, #view-field-area.view.active, #view-field.view.active')
+      || document.getElementById('view-field-worker')
+      || document.getElementById('view-field-content')
+      || document.getElementById('view-field-product')
+      || document.getElementById('view-field-area')
+      || document.getElementById('view-field');
     if (!view) return;
     let box = document.getElementById('field-common-selector-box');
     if (!box) {
@@ -495,8 +500,9 @@ IMPORT.deleteFieldData = function(ym) {
             <label style="font-size:12px;font-weight:800">対象月</label><select id="field-common-month-select" style="font-size:13px;font-weight:800;min-width:190px"></select>
           </div>
         </div>`;
-      const tabs = view.querySelector('.field-tabs');
-      view.insertBefore(box, tabs || view.firstChild);
+      view.insertBefore(box, view.firstChild);
+    } else if (box.parentElement !== view) {
+      view.insertBefore(box, view.firstChild);
     }
     const fySel = document.getElementById('field-common-fy-select');
     const mSel = document.getElementById('field-common-month-select');
@@ -759,7 +765,7 @@ IMPORT.deleteFieldData = function(ym) {
     refreshFieldAll();
     msg(`${ymText(ym)} の${type==='all'?'現場明細':type==='worker'?'作業者CSV':'商品住所CSV'}を削除しました`, 'warn');
   }
-  window.FIELD_CSV_REBUILD = { refresh:refreshFieldAll, deleteMonthType, importWorker, importProduct };
+  window.FIELD_CSV_REBUILD = { refresh:refreshFieldAll, deleteMonthType, importWorker, importProduct, renderWorker, renderContent, renderProduct, renderMap, renderDataList };
   window.renderFieldDataList2 = renderDataList;
   if (typeof DATA_RESET !== 'undefined') DATA_RESET.clearFieldAll = function(){
     if (!confirm('現場明細データ（作業者CSV・商品住所CSV）を全月削除しますか？')) return;
