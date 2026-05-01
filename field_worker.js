@@ -286,7 +286,9 @@
   }
 
   function render(){
-    // 共通フィルターはfield_core.js側で管理。ここでは描画だけ行う。
+    try {
+      if (typeof window.setupFieldCommonSelectors === 'function') window.setupFieldCommonSelectors();
+    } catch(e) {}
     const ym = selectedYM();
     const rec = workerRecord(ym);
     const rows = rowsFromRecord(rec);
