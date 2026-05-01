@@ -259,3 +259,12 @@ html.restore-view-booting body::after{
 .capacity-area-row.selected td{background:#dbeafe!important}
 .capacity-mini-bar{height:8px;background:#e5e7eb;border-radius:99px;overflow:hidden;min-width:80px}
 .capacity-mini-fill{height:100%;border-radius:99px;background:#1a4d7c}
+
+
+/* ===== 現場分析：画面分離後の表示調整 ===== */
+#view-field-worker .field-pane,
+#view-field-content .field-pane,
+#view-field-product .field-pane,
+#view-field-area .field-pane{
+  display:block;
+}
