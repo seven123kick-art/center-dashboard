@@ -8,10 +8,33 @@
 */
 'use strict';
 (function(){
-  if (window.__FIELD_WORKER_BILLING_CLEAN_20260501__) return;
-  window.__FIELD_WORKER_BILLING_CLEAN_20260501__ = true;
+  if (window.__FIELD_WORKER_VERTICAL_RETURN_FIXED_20260501__) return;
+  window.__FIELD_WORKER_VERTICAL_RETURN_FIXED_20260501__ = true;
 
   const STATE_KEY = '__fieldWorkerSelectedName';
+  const STORAGE_PREFIX = (() => {
+    const centerId = (window.CENTER && CENTER.id) ? CENTER.id : 'default';
+    return `center-dashboard:${centerId}:field-worker`;
+  })();
+  let pendingDetailScroll = false;
+
+  function saveSelectedName(name){
+    if (!name) return;
+    try { localStorage.setItem(`${STORAGE_PREFIX}:selected`, String(name)); } catch(e) {}
+  }
+  function loadSelectedName(){
+    try { return localStorage.getItem(`${STORAGE_PREFIX}:selected`) || ''; } catch(e) { return ''; }
+  }
+  function goBackToRanking(){
+    const ranking = document.getElementById('f-worker-bars');
+    if (ranking) ranking.scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+  function scrollToDetail(){
+    const detail = document.getElementById('worker-selected-hero')
+      || document.querySelector('#view-field-worker .grid2 .card:nth-child(2)');
+    if (!detail) return;
+    setTimeout(()=>{ try { detail.scrollIntoView({ behavior:'smooth', block:'start' }); } catch(e) {} }, 40);
+  }
 
   function safeArray(v){ return Array.isArray(v) ? v : []; }
   function esc(v){ return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -256,7 +279,7 @@
     if (!body) return;
     if (!document.getElementById('worker-size-bars') || !document.getElementById('worker-other-bars') || !document.getElementById('worker-direct-bars')) {
       body.style.height = 'auto'; body.style.position = 'relative';
-      body.innerHTML = `<div class="worker-selected-hero" id="worker-selected-hero"></div><div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系（①〜⑦）</div><div class="worker-chart-wrap" id="worker-size-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他（表記統合）</div><div class="worker-chart-wrap" id="worker-other-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">直収（M列=直収）</div><div class="worker-chart-wrap" id="worker-direct-bars"></div></div></div>`;
+      body.innerHTML = `<div class="worker-back-link" onclick="FIELD_WORKER_UI.backToRanking()">← ランキングへ戻る</div><div class="worker-selected-hero" id="worker-selected-hero"></div><div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系（①〜⑦）</div><div class="worker-chart-wrap" id="worker-size-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他（表記統合）</div><div class="worker-chart-wrap" id="worker-other-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">直収（M列=直収）</div><div class="worker-chart-wrap" id="worker-direct-bars"></div></div></div>`;
     }
     const hero = document.getElementById('worker-selected-hero');
     const summary = document.getElementById('worker-detail-summary');
@@ -334,20 +357,31 @@
       renderDetailTable([], '');
       return;
     }
-    let selectedName = window[STATE_KEY];
+    let selectedName = window[STATE_KEY] || loadSelectedName();
     if (!rows.some(r=>r.label===selectedName)) selectedName = rows[0].label;
     window[STATE_KEY] = selectedName;
+    saveSelectedName(selectedName);
     const selectedRow = rows.find(r=>r.label===selectedName) || rows[0];
     makeKpi(rec, rows, ym);
     renderStatusNotice(rows);
     renderRanking(rows, selectedName);
     renderWorkerDetail(selectedRow);
     renderDetailTable(rows, selectedName);
+    if (pendingDetailScroll) {
+      pendingDetailScroll = false;
+      scrollToDetail();
+    }
   }
 
   window.FIELD_WORKER_UI = {
     render,
-    selectWorker(name){ window[STATE_KEY] = name; render(); }
+    selectWorker(name){
+      window[STATE_KEY] = name;
+      saveSelectedName(name);
+      pendingDetailScroll = true;
+      render();
+    },
+    backToRanking(){ goBackToRanking(); }
   };
 
   const oldRefresh = window.refreshFieldAll;
