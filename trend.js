@@ -82,7 +82,7 @@
 
   function renderTrend() {
     const notice = document.getElementById('trend-notice');
-    renderCommonPeriodSelector('trend');
+    renderCommonPeriodSelector('trend', { useMonth:false });
 
     const list = datasetsForSelectedFiscalYear();
     if (!list.length) {
