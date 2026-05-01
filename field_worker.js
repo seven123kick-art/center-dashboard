@@ -286,7 +286,7 @@
   }
 
   function render(){
-    try { if (typeof window.setupFieldCommonSelectors === "function") window.setupFieldCommonSelectors(); } catch(e){}
+    // 共通フィルターはfield_core.js側で管理。ここでは描画だけ行う。
     const ym = selectedYM();
     const rec = workerRecord(ym);
     const rows = rowsFromRecord(rec);
@@ -320,7 +320,39 @@
     try { render(); } catch(e) { console.error(e); }
   };
 
+
+  function forceRenderSoon(){
+    clearTimeout(window.__fieldWorkerForceTimer);
+    window.__fieldWorkerForceTimer = setTimeout(()=>{
+      try {
+        const view = document.getElementById('view-field-worker');
+        if (view && view.classList.contains('active')) render();
+      } catch(e) { console.error(e); }
+    }, 30);
+  }
+
+  // field_core側の月・年度変更処理で旧描画が走った後、必ず作業者専用UIで上書きする
+  document.addEventListener('change', (e)=>{
+    const id = e.target && e.target.id;
+    if (id === 'field-common-month-select' || id === 'field-common-fy-select') forceRenderSoon();
+  }, true);
+
+  document.addEventListener('click', (e)=>{
+    const nav = e.target && e.target.closest ? e.target.closest('[data-view="field-worker"]') : null;
+    if (nav) forceRenderSoon();
+  }, true);
+
+  // 旧renderWorkerがテキストランキングを描いた場合も検知して戻す
   document.addEventListener('DOMContentLoaded', ()=>{
+    const box = document.getElementById('f-worker-bars');
+    if (box && window.MutationObserver) {
+      const mo = new MutationObserver(()=>{
+        const view = document.getElementById('view-field-worker');
+        if (!view || !box || !view.classList.contains('active')) return;
+        if (!box.querySelector('.field-worker-ranking-table')) forceRenderSoon();
+      });
+      mo.observe(box, { childList:true, subtree:false });
+    }
     setTimeout(()=>{ try { render(); } catch(e){} }, 250);
   });
 })();
