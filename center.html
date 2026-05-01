@@ -154,9 +154,18 @@
   </div>
 
   <div class="sidebar-divider"></div>
-  <div class="sidebar-section">現場明細</div>
-  <div class="nav-item" data-view="field" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="4"/><line x1="10" y1="10" x2="15" y2="15"/></svg>作業者・エリア分析
+  <div class="sidebar-section">現場分析</div>
+  <div class="nav-item" data-view="field-worker" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="5" r="3"/><path d="M1.5 14c.8-3 2.8-5 4.5-5s3.7 2 4.5 5"/></svg>作業者分析
+  </div>
+  <div class="nav-item" data-view="field-content" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="1.5"/><line x1="5" y1="6" x2="11" y2="6"/><line x1="5" y1="10" x2="11" y2="10"/></svg>作業内容分析
+  </div>
+  <div class="nav-item" data-view="field-product" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4l5-2 5 2v8l-5 2-5-2z"/><path d="M3 4l5 2 5-2"/><path d="M8 6v8"/></svg>商品カテゴリ分析
+  </div>
+  <div class="nav-item" data-view="field-area" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 14s5-4.5 5-8A5 5 0 003 6c0 3.5 5 8 5 8z"/><circle cx="8" cy="6" r="1.5"/></svg>エリア分析
   </div>
   <div class="nav-item" data-view="capacity" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 11V8M8 11V5M11 11V7"/></svg>キャパ分析
@@ -745,155 +754,130 @@
     </div>
 
 
-    <!-- ▼ 現場明細 -->
-    <div class="view" id="view-field">
-      <!-- サブタブ -->
-      <div class="field-tabs">
-        <button class="field-tab active" data-ftab="worker"   onclick="FIELD_UI.switchTab(this)">作業者別</button>
-        <button class="field-tab"        data-ftab="content"  onclick="FIELD_UI.switchTab(this)">作業内容別</button>
-        <button class="field-tab"        data-ftab="product"  onclick="FIELD_UI.switchTab(this)">商品カテゴリ</button>
-        <button class="field-tab"        data-ftab="map"      onclick="FIELD_UI.switchTab(this)">エリア地図</button>
-        <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
-          <span id="field-period-badge" style="font-size:11px;color:var(--text3)">データ未読込</span>
-          <div id="field-month-btns" style="display:flex;gap:3px;align-items:center"></div>
-
-        </div>
-      </div>
-
+    <!-- ▼ 作業者分析 -->
+    <div class="view" id="view-field-worker">
       <!-- 作業者別 -->
-      <div class="field-pane active" id="fpane-worker">
-        <div class="kpi-row kpi-row-4" id="f-kpi-worker"></div>
-        <div class="grid2">
-          <div class="card">
-            <div class="card-header"><span class="card-title">作業者別売上ランキング</span></div>
-            <div class="card-body" id="f-worker-bars"></div>
-          </div>
-          <div class="card">
-            <div class="card-header"><span class="card-title">作業者別　作業内容内訳</span></div>
-            <div class="card-body" style="height:250px;position:relative"><canvas id="c-worker-content"></canvas></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">作業者別明細</span></div>
-          <div class="scroll-x">
-            <table class="tbl">
-              <thead><tr>
-                <th>作業者</th><th class="r">件数</th><th class="r">売上（千円）</th>
-                <th class="r">構成比</th><th class="r">1件単価（円）</th>
-                <th class="r">配送料</th><th class="r">設置料</th><th class="r">リサイクル</th>
-              </tr></thead>
-              <tbody id="f-worker-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- 作業内容別 -->
-      <div class="field-pane" id="fpane-content">
-        <div class="grid2">
-          <div class="card">
-            <div class="card-header"><span class="card-title">作業内容カテゴリ別売上</span></div>
-            <div class="card-body">
-              <div style="height:220px;position:relative"><canvas id="c-content-donut"></canvas></div>
-              <div id="content-donut-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+            <div class="field-pane active" id="fpane-worker">
+              <div class="kpi-row kpi-row-4" id="f-kpi-worker"></div>
+              <div class="grid2">
+                <div class="card">
+                  <div class="card-header"><span class="card-title">作業者別売上ランキング</span></div>
+                  <div class="card-body" id="f-worker-bars"></div>
+                </div>
+                <div class="card">
+                  <div class="card-header"><span class="card-title">作業者別　作業内容内訳</span></div>
+                  <div class="card-body" style="height:250px;position:relative"><canvas id="c-worker-content"></canvas></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header"><span class="card-title">作業者別明細</span></div>
+                <div class="scroll-x">
+                  <table class="tbl">
+                    <thead><tr>
+                      <th>作業者</th><th class="r">件数</th><th class="r">売上（千円）</th>
+                      <th class="r">構成比</th><th class="r">1件単価（円）</th>
+                      <th class="r">配送料</th><th class="r">設置料</th><th class="r">リサイクル</th>
+                    </tr></thead>
+                    <tbody id="f-worker-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-          </div>
-          <div class="card">
-            <div class="card-header"><span class="card-title">作業内容別　上位20件</span></div>
-            <div class="card-body" style="height:240px;position:relative"><canvas id="c-content-bar"></canvas></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">作業内容カテゴリ別明細</span></div>
-          <div class="scroll-x">
-            <table class="tbl">
-              <thead><tr>
-                <th>カテゴリ</th><th>主な内容</th>
-                <th class="r">件数</th><th class="r">売上（千円）</th><th class="r">構成比</th>
-              </tr></thead>
-              <tbody id="f-content-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- 商品カテゴリ -->
-      <div class="field-pane" id="fpane-product">
-        <div class="card" style="margin-bottom:14px">
-          <div class="card-header"><span class="card-title">商品カテゴリ別売上</span></div>
-          <div class="card-body">
-            <div style="height:260px;position:relative"><canvas id="c-product-bar"></canvas></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">商品カテゴリ別明細</span></div>
-          <div class="scroll-x">
-            <table class="tbl">
-              <thead><tr>
-                <th>商品カテゴリ</th><th class="r">伝票数</th><th class="r">売上（千円）</th><th class="r">構成比</th>
-              </tr></thead>
-              <tbody id="f-product-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- エリア地図 -->
-      <div class="field-pane" id="fpane-map">
-        <div class="card" style="margin-bottom:14px">
-          <div class="card-header" style="align-items:flex-start;gap:12px;flex-wrap:wrap">
-            <div>
-              <span class="card-title">配送エリア別物量</span>
-              <div style="font-size:11px;color:var(--text3);margin-top:4px">商品・住所CSVをI列エスライン原票番号で1件化して表示します。</div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <label style="font-size:11px;color:var(--text2);font-weight:700">表示形式</label>
-              <select id="field-area-view-mode" onchange="FIELD_UI.renderMap()" style="font-size:12px;font-weight:700">
-                <option value="overall">全体ランキング</option>
-                <option value="pref">都道府県別（開閉）</option>
-              </select>
-              <label style="font-size:11px;color:var(--text2);font-weight:700">並び</label>
-              <select id="field-area-sort-mode" onchange="FIELD_UI.renderMap()" style="font-size:12px;font-weight:700">
-                <option value="count">件数順</option>
-                <option value="amount">売上順</option>
-                <option value="name">名称順</option>
-              </select>
-              <label style="font-size:11px;color:var(--text2);font-weight:700">表示値</label>
-              <select id="map-metric-sel" onchange="FIELD_UI.renderMap()" style="font-size:12px;font-weight:700">
-                <option value="count">件数</option>
-                <option value="amount">売上</option>
-              </select>
-            </div>
-          </div>
-          <div class="card-body" style="position:relative;padding:0">
-            <div id="map-debug-info" style="display:none;padding:6px 12px;font-size:11px;background:#fffbeb;border-bottom:1px solid #fcd34d;color:#78350f"></div>
-            <div id="field-map"></div>
-            <div id="map-no-data" style="display:none;padding:40px;text-align:center;color:var(--text3)">データを読み込んでください</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 現場データ取込 -->
-      <div class="field-pane" id="fpane-import" style="display:none">
-        <div class="card">
-          <div class="card-body">
-            <div class="upload-zone no-print" id="field-upload-zone">
-              <input type="file" id="field-file-input" accept=".csv" multiple style="display:none">
-              <div style="font-size:30px;color:#94a3b8;margin-bottom:10px">⬆</div>
-              <div style="font-size:14px;font-weight:700;margin-bottom:6px">CSVをクリック / ドロップ</div>
-              <div style="font-size:12px;color:var(--text2);margin-bottom:4px">作業者別売上伝票明細表（CSV）</div>
-              <div style="font-size:11px;color:var(--text3)">または商品・住所・サイズ・科目CSV — 両方まとめて選択できます</div>
-            </div>
-            <div id="field-upload-msg"></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">読み込み済み現場データ</span></div>
-          <div id="field-data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
-        </div>
-      </div>
     </div>
 
+    <!-- ▼ 作業内容分析 -->
+    <div class="view" id="view-field-content">
+      <!-- 作業内容別 -->
+            <div class="field-pane active" id="fpane-content">
+              <div class="grid2">
+                <div class="card">
+                  <div class="card-header"><span class="card-title">作業内容カテゴリ別売上</span></div>
+                  <div class="card-body">
+                    <div style="height:220px;position:relative"><canvas id="c-content-donut"></canvas></div>
+                    <div id="content-donut-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-header"><span class="card-title">作業内容別　上位20件</span></div>
+                  <div class="card-body" style="height:240px;position:relative"><canvas id="c-content-bar"></canvas></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header"><span class="card-title">作業内容カテゴリ別明細</span></div>
+                <div class="scroll-x">
+                  <table class="tbl">
+                    <thead><tr>
+                      <th>カテゴリ</th><th>主な内容</th>
+                      <th class="r">件数</th><th class="r">売上（千円）</th><th class="r">構成比</th>
+                    </tr></thead>
+                    <tbody id="f-content-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+    </div>
+
+    <!-- ▼ 商品カテゴリ分析 -->
+    <div class="view" id="view-field-product">
+      <!-- 商品カテゴリ -->
+            <div class="field-pane active" id="fpane-product">
+              <div class="card" style="margin-bottom:14px">
+                <div class="card-header"><span class="card-title">商品カテゴリ別売上</span></div>
+                <div class="card-body">
+                  <div style="height:260px;position:relative"><canvas id="c-product-bar"></canvas></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header"><span class="card-title">商品カテゴリ別明細</span></div>
+                <div class="scroll-x">
+                  <table class="tbl">
+                    <thead><tr>
+                      <th>商品カテゴリ</th><th class="r">伝票数</th><th class="r">売上（千円）</th><th class="r">構成比</th>
+                    </tr></thead>
+                    <tbody id="f-product-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+    </div>
+
+    <!-- ▼ エリア分析 -->
+    <div class="view" id="view-field-area">
+      <!-- エリア地図 -->
+            <div class="field-pane active" id="fpane-map">
+              <div class="card" style="margin-bottom:14px">
+                <div class="card-header" style="align-items:flex-start;gap:12px;flex-wrap:wrap">
+                  <div>
+                    <span class="card-title">配送エリア別物量</span>
+                    <div style="font-size:11px;color:var(--text3);margin-top:4px">商品・住所CSVをI列エスライン原票番号で1件化して表示します。</div>
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <label style="font-size:11px;color:var(--text2);font-weight:700">表示形式</label>
+                    <select id="field-area-view-mode" onchange="FIELD_UI.renderMap()" style="font-size:12px;font-weight:700">
+                      <option value="overall">全体ランキング</option>
+                      <option value="pref">都道府県別（開閉）</option>
+                    </select>
+                    <label style="font-size:11px;color:var(--text2);font-weight:700">並び</label>
+                    <select id="field-area-sort-mode" onchange="FIELD_UI.renderMap()" style="font-size:12px;font-weight:700">
+                      <option value="count">件数順</option>
+                      <option value="amount">売上順</option>
+                      <option value="name">名称順</option>
+                    </select>
+                    <label style="font-size:11px;color:var(--text2);font-weight:700">表示値</label>
+                    <select id="map-metric-sel" onchange="FIELD_UI.renderMap()" style="font-size:12px;font-weight:700">
+                      <option value="count">件数</option>
+                      <option value="amount">売上</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="card-body" style="position:relative;padding:0">
+                  <div id="map-debug-info" style="display:none;padding:6px 12px;font-size:11px;background:#fffbeb;border-bottom:1px solid #fcd34d;color:#78350f"></div>
+                  <div id="field-map"></div>
+                  <div id="map-no-data" style="display:none;padding:40px;text-align:center;color:var(--text3)">データを読み込んでください</div>
+                </div>
+              </div>
+            </div>
+    </div>
 
     <!-- ▼ キャパ分析 -->
     <div class="view" id="view-capacity">
@@ -1278,6 +1262,10 @@
 <script src="shipper.js"></script>
 <script src="pl.js"></script>
 <script src="trend.js"></script>
-<script src="field.js"></script>
+<script src="field_core.js"></script>
+<script src="field_worker.js"></script>
+<script src="field_task.js"></script>
+<script src="field_product.js"></script>
+<script src="field_area.js"></script>
 </body>
 </html>
