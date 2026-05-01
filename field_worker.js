@@ -1,25 +1,20 @@
-/* field_worker.js : 作業者分析ビュー（稼働日平均＋作業内容2分割版）
+/* field_worker.js : 作業者分析ビュー（原票番号JOIN確定売上版）
    2026-05-01
-   ・1日平均を「A列日付ベースの稼働日数」で算出
-   ・作業内容内訳（明細行ベース）を「サイズ系」と「その他」に2分割
-   ・ランキングを表形式＋クリック連動で表示
-   ・field_core.jsのCSV取込側は workDays / workDayCount を保持する版を併用
+   ・速報：作業者CSVのみで表示（件数・稼働日・作業CSV金額）
+   ・確定：確定CSV取込後、原票番号が一致したものだけ確定CSV売上に切替
+   ・同一原票番号が複数作業者に出た場合は二重計上防止のため均等按分
+   ・1日平均は A列日付に対する稼働日ベース
+   ・作業内容内訳はサイズ系／その他の2グラフ
 */
 'use strict';
 (function(){
-  if (window.__FIELD_WORKER_WORKDAYS_SPLIT_20260501__) return;
-  window.__FIELD_WORKER_WORKDAYS_SPLIT_20260501__ = true;
+  if (window.__FIELD_WORKER_JOIN_CONFIRMED_20260501__) return;
+  window.__FIELD_WORKER_JOIN_CONFIRMED_20260501__ = true;
 
   const STATE_KEY = '__fieldWorkerSelectedName';
 
   function safeArray(v){ return Array.isArray(v) ? v : []; }
-  function esc(v){
-    return String(v ?? '')
-      .replace(/&/g,'&amp;')
-      .replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;');
-  }
+  function esc(v){ return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function jsArg(v){ return String(v ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,' '); }
   function num(v){ return Number(v || 0) || 0; }
   function fmt(v){ return Math.round(num(v)).toLocaleString('ja-JP'); }
@@ -41,28 +36,81 @@
     return safeArray(STATE.workerCsvData).find(d => d && d.ym === ym) || null;
   }
 
-  function monthDaysFromYM(ym){
-    const y = Number(String(ym || '').slice(0,4));
-    const m = Number(String(ym || '').slice(4,6));
-    if (!y || !m) return 0;
-    return new Date(y, m, 0).getDate();
+  function getDatasetForYM(ym){
+    if (typeof activeDatasetByYM === 'function') {
+      const active = activeDatasetByYM(ym);
+      if (active) return active;
+    }
+    return safeArray(STATE.datasets).find(d => d && d.ym === ym && (d.type || 'confirmed') === 'confirmed')
+        || safeArray(STATE.datasets).find(d => d && d.ym === ym)
+        || null;
   }
 
-  function rowsFromRecord(rec){
+  function confirmedSlipMap(ym){
+    const ds = getDatasetForYM(ym);
+    const map = ds && ds.confirmedSlipSales ? ds.confirmedSlipSales : null;
+    return map && typeof map === 'object' ? map : {};
+  }
+
+  function buildSlipWorkerCount(rec){
+    const map = {};
+    Object.values(rec?.workers || {}).forEach(w => {
+      Object.keys(w.slips || {}).forEach(slip => {
+        if (!slip || String(slip).startsWith('__row_')) return;
+        map[slip] = (map[slip] || 0) + 1;
+      });
+    });
+    return map;
+  }
+
+  function rowsFromRecord(rec, ym){
     const workers = rec && rec.workers ? rec.workers : {};
+    const confirmed = confirmedSlipMap(ym);
+    const hasConfirmed = Object.keys(confirmed).length > 0;
+    const slipWorkerCount = buildSlipWorkerCount(rec);
+
     return Object.values(workers).map(w => {
-      const count = num(w.rows);
+      const slips = w.slips || {};
+      const count = Object.keys(slips).length || num(w.rows);
       const workDays = safeArray(w.workDays);
       const workDayCount = num(w.workDayCount || workDays.length);
       const avg = workDayCount > 0 ? count / workDayCount : 0;
+      let confirmedAmount = 0;
+      let matchedCount = 0;
+      let unmatchedCount = 0;
+      let速報Amount = num(w.amount);
+
+      Object.keys(slips).forEach(slip => {
+        if (String(slip).startsWith('__row_')) return;
+        const hit = confirmed[slip];
+        if (hasConfirmed && hit) {
+          const divisor = Math.max(1, num(slipWorkerCount[slip]));
+          confirmedAmount += num(hit.income) / divisor;
+          matchedCount += 1;
+        } else if (hasConfirmed) {
+          unmatchedCount += 1;
+        }
+      });
+
+      const matchRate = count > 0 ? matchedCount / count * 100 : 0;
+      const amount = hasConfirmed ? confirmedAmount :速報Amount;
       return {
         label: String(w.name || '未設定'),
         count,
-        amount: num(w.amount),
+        lineRows:num(w.lineRows),
+        amount,
+       速報Amount,
+        confirmedAmount,
+        hasConfirmed,
+        matchedCount,
+        unmatchedCount,
+        matchRate,
+        amountMode: hasConfirmed ? '確定JOIN' : '速報',
         works: w.works || {},
         workDays,
         workDayCount,
-        avgPerWorkDay: avg
+        avgPerWorkDay: avg,
+        slips
       };
     }).sort((a,b)=> b.count - a.count || b.amount - a.amount || a.label.localeCompare(b.label, 'ja'));
   }
@@ -81,35 +129,49 @@
       (isSizeWork(item.label) ? size : other).push(item);
     });
     const sorter = (a,b)=>b.count-a.count || a.label.localeCompare(b.label,'ja');
-    size.sort(sorter);
-    other.sort(sorter);
+    size.sort(sorter); other.sort(sorter);
     return { size, other };
-  }
-
-  function findWorkCount(works, patterns){
-    const entries = Object.entries(works || {});
-    let total = 0;
-    entries.forEach(([k,v]) => {
-      const key = String(k || '');
-      if (patterns.some(p => key.includes(p))) total += num(v);
-    });
-    return total;
   }
 
   function makeKpi(rec, rows, ym){
     const kpi = document.getElementById('f-kpi-worker');
     if (!kpi) return;
-    const totalCount = rec.rowCount || rows.reduce((s,r)=>s+r.count,0);
+    const totalCount = rows.reduce((s,r)=>s+r.count,0);
     const totalAmount = rows.reduce((s,r)=>s+r.amount,0);
+    const matched = rows.reduce((s,r)=>s+r.matchedCount,0);
+    const hasConfirmed = rows.some(r=>r.hasConfirmed);
     const workDayCount = num(rec.workDayCount || safeArray(rec.workDays).length || 0);
     const avg = workDayCount > 0 ? totalCount / workDayCount : 0;
+    const matchRate = totalCount > 0 ? matched / totalCount * 100 : 0;
     kpi.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
     kpi.innerHTML = `
       <div class="kpi-card accent-navy"><div class="kpi-label">対象月</div><div class="kpi-value">${esc(ymText(ym))}</div></div>
-      <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div><div class="kpi-sub">原票番号ユニーク</div></div>
+      <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div><div class="kpi-sub">作業者×原票番号</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div><div class="kpi-sub">A列日付で判定</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">1日平均</div><div class="kpi-value">${workDayCount ? fmt1(avg) : '—'}件</div><div class="kpi-sub">配送件数 ÷ 稼働日</div></div>
-      <div class="kpi-card accent-amber"><div class="kpi-label">金額（参考）</div><div class="kpi-value">${fmtK(totalAmount)}千円</div></div>`;
+      <div class="kpi-card ${hasConfirmed ? 'accent-green' : 'accent-amber'}"><div class="kpi-label">売上（${hasConfirmed ? '確定JOIN' : '速報'}）</div><div class="kpi-value">${fmtK(totalAmount)}千円</div><div class="kpi-sub">${hasConfirmed ? `一致率 ${fmt1(matchRate)}%` : '作業CSV金額'}</div></div>`;
+  }
+
+  function renderStatusNotice(rows){
+    let el = document.getElementById('worker-join-notice');
+    const view = document.getElementById('view-field-worker');
+    if (!view) return;
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'worker-join-notice';
+      const kpi = document.getElementById('f-kpi-worker');
+      if (kpi && kpi.parentNode) kpi.parentNode.insertBefore(el, kpi.nextSibling);
+      else view.prepend(el);
+    }
+    const hasConfirmed = rows.some(r=>r.hasConfirmed);
+    const total = rows.reduce((s,r)=>s+r.count,0);
+    const matched = rows.reduce((s,r)=>s+r.matchedCount,0);
+    if (!hasConfirmed) {
+      el.innerHTML = `<div class="msg msg-warn" style="margin:10px 0">速報表示です。確定CSVを取り込むと、作業者CSVと確定CSVの原票番号が一致した分だけ確定売上に切り替わります。</div>`;
+    } else {
+      const rate = total > 0 ? matched / total * 100 : 0;
+      el.innerHTML = `<div class="msg msg-info" style="margin:10px 0">確定JOIN表示：一致 ${fmt(matched)}件 / 対象 ${fmt(total)}件（${fmt1(rate)}%）。一致しない原票番号は確定売上に含めていません。同一原票番号が複数作業者にある場合は均等按分しています。</div>`;
+    }
   }
 
   function renderRanking(rows, selectedName){
@@ -122,100 +184,57 @@
     box.innerHTML = `
       <div class="scroll-x">
         <table class="tbl field-worker-ranking-table">
-          <thead>
-            <tr>
-              <th style="width:48px">順位</th>
-              <th>作業者</th>
-              <th class="r">配送件数</th>
-              <th class="r">稼働日</th>
-              <th class="r">1日平均</th>
-              <th class="r">構成比</th>
-              <th class="r">金額</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${topRows.map((r,i)=>{
-              const active = r.label === selectedName;
-              const pct = r.count / totalCount * 100;
-              const width = Math.max(3, r.count / maxCount * 100);
-              return `<tr class="field-worker-row ${active ? 'is-active' : ''}" data-worker="${esc(r.label)}" onclick="FIELD_WORKER_UI.selectWorker('${jsArg(r.label)}')">
-                <td><span class="rank-badge">${i+1}</span></td>
-                <td>
-                  <strong>${esc(r.label)}</strong>
-                  <div class="mini-track"><div class="mini-fill" style="width:${width.toFixed(1)}%"></div></div>
-                </td>
-                <td class="r"><strong>${fmt(r.count)}</strong>件</td>
-                <td class="r">${r.workDayCount ? fmt(r.workDayCount)+'日' : '—'}</td>
-                <td class="r"><strong>${r.workDayCount ? fmt1(r.avgPerWorkDay) : '—'}</strong>件/日</td>
-                <td class="r">${pct.toFixed(1)}%</td>
-                <td class="r">${fmtK(r.amount)}千</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
+          <thead><tr>
+            <th style="width:48px">順位</th><th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">1日平均</th><th class="r">一致率</th><th class="r">売上</th><th class="c">状態</th>
+          </tr></thead>
+          <tbody>${topRows.map((r,i)=>{
+            const active = r.label === selectedName;
+            const pct = r.count / totalCount * 100;
+            const width = Math.max(3, r.count / maxCount * 100);
+            return `<tr class="field-worker-row ${active ? 'is-active' : ''}" data-worker="${esc(r.label)}" onclick="FIELD_WORKER_UI.selectWorker('${jsArg(r.label)}')">
+              <td><span class="rank-badge">${i+1}</span></td>
+              <td><strong>${esc(r.label)}</strong><div class="mini-track"><div class="mini-fill" style="width:${width.toFixed(1)}%"></div></div></td>
+              <td class="r"><strong>${fmt(r.count)}</strong>件</td>
+              <td class="r">${r.workDayCount ? fmt(r.workDayCount)+'日' : '—'}</td>
+              <td class="r"><strong>${r.workDayCount ? fmt1(r.avgPerWorkDay) : '—'}</strong>件/日</td>
+              <td class="r">${r.hasConfirmed ? fmt1(r.matchRate)+'%' : '—'}</td>
+              <td class="r">${fmtK(r.amount)}千</td>
+              <td class="c"><span class="badge ${r.hasConfirmed ? 'badge-ok' : 'badge-warn'}">${r.amountMode}</span></td>
+            </tr>`;
+          }).join('')}</tbody>
         </table>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:10px">上位50名を表示。1日平均は「A列日付に1件以上作業がある日」を稼働日として算出します。</div>`;
+      <div style="font-size:11px;color:var(--text3);margin-top:10px">売上は、確定CSVがある場合は原票番号一致分だけ確定売上を採用します。確定CSVが無い場合は作業CSV金額の速報表示です。</div>`;
   }
 
   function renderDoughnut(canvasId, items, emptyText){
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
     if (!items.length) {
-      if (typeof CHART_MGR !== 'undefined') CHART_MGR.destroy && CHART_MGR.destroy(canvasId);
+      if (typeof CHART_MGR !== 'undefined' && CHART_MGR.destroy) CHART_MGR.destroy(canvasId);
       const parent = canvas.parentElement;
-      if (parent) {
-        parent.innerHTML = `<canvas id="${canvasId}"></canvas><div class="field-empty-overlay">${esc(emptyText)}</div>`;
-      }
+      if (parent) parent.innerHTML = `<canvas id="${canvasId}"></canvas><div class="field-empty-overlay">${esc(emptyText)}</div>`;
       return;
     }
     if (typeof CHART_MGR !== 'undefined') {
       CHART_MGR.make(canvasId, {
         type:'doughnut',
-        data:{
-          labels:items.map(w=>w.label),
-          datasets:[{
-            data:items.map(w=>w.count),
-            backgroundColor:items.map((_,i)=>CONFIG.COLORS[i % CONFIG.COLORS.length])
-          }]
-        },
-        options:{
-          responsive:true,
-          maintainAspectRatio:false,
-          cutout:'58%',
-          plugins:{
-            legend:{ position:'bottom', labels:{ boxWidth:12, font:{ size:10 } } },
-            tooltip:{ callbacks:{ label:(ctx)=>`${ctx.label}: ${fmt(ctx.raw)}件` } }
-          }
-        }
+        data:{ labels:items.map(w=>w.label), datasets:[{ data:items.map(w=>w.count), backgroundColor:items.map((_,i)=>CONFIG.COLORS[i % CONFIG.COLORS.length]) }] },
+        options:{ responsive:true, maintainAspectRatio:false, cutout:'58%', plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{ size:10 } } }, tooltip:{ callbacks:{ label:(ctx)=>`${ctx.label}: ${fmt(ctx.raw)}件` } } } }
       });
     }
   }
 
   function renderWorkerDetail(row){
     const titleEl = document.querySelector('#view-field-worker .grid2 .card:nth-child(2) .card-title');
-    if (titleEl) titleEl.textContent = row ? `作業内容内訳（明細行ベース）：${row.label}` : '作業者別　作業内容内訳（明細行ベース）';
-
+    if (titleEl) titleEl.textContent = row ? `作業内容内訳：${row.label}` : '作業者別　作業内容内訳';
     const oldCanvas = document.getElementById('c-worker-content');
     const body = oldCanvas ? oldCanvas.parentElement : document.querySelector('#view-field-worker .grid2 .card:nth-child(2) .card-body');
     if (!body) return;
-
     if (!document.getElementById('c-worker-size') || !document.getElementById('c-worker-other')) {
-      body.style.height = '360px';
-      body.style.position = 'relative';
-      body.innerHTML = `
-        <div class="worker-detail-summary" id="worker-detail-summary"></div>
-        <div class="worker-chart-grid">
-          <div class="worker-chart-card">
-            <div class="worker-chart-title">サイズ系</div>
-            <div class="worker-chart-wrap"><canvas id="c-worker-size"></canvas></div>
-          </div>
-          <div class="worker-chart-card">
-            <div class="worker-chart-title">その他</div>
-            <div class="worker-chart-wrap"><canvas id="c-worker-other"></canvas></div>
-          </div>
-        </div>`;
+      body.style.height = '390px'; body.style.position = 'relative';
+      body.innerHTML = `<div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系</div><div class="worker-chart-wrap"><canvas id="c-worker-size"></canvas></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他</div><div class="worker-chart-wrap"><canvas id="c-worker-other"></canvas></div></div></div>`;
     }
-
     const summary = document.getElementById('worker-detail-summary');
     if (!row) {
       if (summary) summary.innerHTML = '<span>作業者を選択してください</span>';
@@ -223,20 +242,17 @@
       renderDoughnut('c-worker-other', [], 'その他データなし');
       return;
     }
-
     const split = splitWorks(row.works);
     const sizeTotal = split.size.reduce((s,x)=>s+x.count,0);
     const otherTotal = split.other.reduce((s,x)=>s+x.count,0);
-    if (summary) {
-      summary.innerHTML = `
-        <span><strong>${esc(row.label)}</strong></span>
-        <span>配送件数：<strong>${fmt(row.count)}</strong>件</span>
-        <span>稼働：<strong>${row.workDayCount ? fmt(row.workDayCount) : '—'}</strong>日</span>
-        <span>平均：<strong>${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}</strong>件/日</span>
-        <span>サイズ系：<strong>${fmt(sizeTotal)}</strong>件</span>
-        <span>その他：<strong>${fmt(otherTotal)}</strong>件</span>`;
-    }
-
+    if (summary) summary.innerHTML = `
+      <span><strong>${esc(row.label)}</strong></span>
+      <span>配送：<strong>${fmt(row.count)}</strong>件</span>
+      <span>稼働：<strong>${row.workDayCount ? fmt(row.workDayCount) : '—'}</strong>日</span>
+      <span>平均：<strong>${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}</strong>件/日</span>
+      <span>売上：<strong>${fmtK(row.amount)}</strong>千</span>
+      <span>${row.hasConfirmed ? `一致：<strong>${fmt(row.matchedCount)}</strong>件 / ${fmt1(row.matchRate)}%` : '速報表示'}</span>
+      <span>サイズ系：<strong>${fmt(sizeTotal)}</strong>件</span><span>その他：<strong>${fmt(otherTotal)}</strong>件</span>`;
     renderDoughnut('c-worker-size', split.size.slice(0,8), 'サイズ系データなし');
     renderDoughnut('c-worker-other', split.other.slice(0,8), 'その他データなし');
   }
@@ -244,128 +260,50 @@
   function renderDetailTable(rows, selectedName){
     const tbody = document.getElementById('f-worker-tbody');
     if (!tbody) return;
-    const totalCount = rows.reduce((s,r)=>s+r.count,0) || 1;
     const tableRows = rows.slice(0, 100);
-    tbody.innerHTML = tableRows.map((r,i)=>{
-      const delivery = findWorkCount(r.works, ['配送','配送料','配達']);
-      const install = findWorkCount(r.works, ['設置','取付','工事']);
-      const recycle = findWorkCount(r.works, ['リサイクル','回収']);
-      const active = r.label === selectedName;
-      return `<tr class="field-worker-detail-row ${active ? 'is-active' : ''}" onclick="FIELD_WORKER_UI.selectWorker('${jsArg(r.label)}')" style="cursor:pointer">
-        <td><strong>${i+1}. ${esc(r.label)}</strong></td>
-        <td class="r">${fmt(r.count)}</td>
-        <td class="r">${r.workDayCount ? fmt(r.workDayCount) : '—'}</td>
-        <td class="r">${r.workDayCount ? fmt1(r.avgPerWorkDay) : '—'}</td>
-        <td class="r">${fmtK(r.amount)}</td>
-        <td class="r">${(r.count/totalCount*100).toFixed(1)}%</td>
-        <td class="r">${r.count ? fmt(r.amount/r.count) : '0'}</td>
-        <td class="r">${delivery ? fmt(delivery) : '—'}</td>
-        <td class="r">${install ? fmt(install) : '—'}</td>
-        <td class="r">${recycle ? fmt(recycle) : '—'}</td>
-      </tr>`;
-    }).join('');
+    tbody.innerHTML = tableRows.map((r,i)=>`<tr class="field-worker-detail-row ${r.label===selectedName?'is-active':''}" onclick="FIELD_WORKER_UI.selectWorker('${jsArg(r.label)}')" style="cursor:pointer"><td><strong>${i+1}. ${esc(r.label)}</strong></td><td class="r">${fmt(r.count)}</td><td class="r">${r.workDayCount?fmt(r.workDayCount):'—'}</td><td class="r">${r.workDayCount?fmt1(r.avgPerWorkDay):'—'}</td><td class="r">${r.hasConfirmed?fmt1(r.matchRate)+'%':'—'}</td><td class="r">${fmtK(r.amount)}</td></tr>`).join('');
   }
 
-  function ensureStyle(){
-    if (document.getElementById('field-worker-workdays-style')) return;
-    const st = document.createElement('style');
-    st.id = 'field-worker-workdays-style';
-    st.textContent = `
-      #f-kpi-worker{gap:12px;margin-bottom:16px}
-      .field-worker-ranking-table td{vertical-align:middle;padding-top:9px;padding-bottom:9px}
-      .field-worker-row,.field-worker-detail-row{cursor:pointer;transition:background .15s ease}
-      .field-worker-row:hover td,.field-worker-detail-row:hover td{background:#f8fafc!important}
-      .field-worker-row.is-active td,.field-worker-detail-row.is-active td{background:#eaf3ff!important}
-      .rank-badge{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:999px;background:#e5edf7;color:#1a4d7c;font-weight:900;font-size:12px}
-      .field-worker-row.is-active .rank-badge{background:#1a4d7c;color:#fff}
-      .mini-track{height:7px;background:#e5e7eb;border-radius:999px;margin-top:7px;overflow:hidden;max-width:280px}
-      .mini-fill{height:100%;background:#1a4d7c;border-radius:999px}
-      .worker-detail-summary{display:flex;flex-wrap:wrap;gap:8px 14px;margin-bottom:12px;font-size:12px;color:var(--text2)}
-      .worker-detail-summary span{background:#f8fafc;border:1px solid var(--border);border-radius:999px;padding:5px 9px}
-      .worker-chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;height:300px}
-      .worker-chart-card{border:1px solid var(--border);border-radius:12px;background:#fff;min-width:0;padding:10px;display:flex;flex-direction:column}
-      .worker-chart-title{font-weight:800;color:var(--text2);font-size:12px;margin-bottom:6px}
-      .worker-chart-wrap{position:relative;flex:1;min-height:0}
-      .field-empty-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text3);font-weight:700;font-size:12px;pointer-events:none}
-      @media(max-width:1300px){#f-kpi-worker{grid-template-columns:repeat(3,minmax(0,1fr))!important}.worker-chart-grid{grid-template-columns:1fr;height:520px}}
-    `;
-    document.head.appendChild(st);
-  }
-
-  function patchWorkerTableHeader(){
+  function ensureDetailHeader(){
     const table = document.getElementById('f-worker-tbody')?.closest('table');
-    const headRow = table?.querySelector('thead tr');
-    if (!headRow || headRow.dataset.workdaysPatched === '1') return;
-    headRow.dataset.workdaysPatched = '1';
-    headRow.innerHTML = `
-      <th>作業者</th>
-      <th class="r">配送件数</th>
-      <th class="r">稼働日</th>
-      <th class="r">1日平均</th>
-      <th class="r">金額（千円）</th>
-      <th class="r">構成比</th>
-      <th class="r">単価（円）</th>
-      <th class="r">配送</th>
-      <th class="r">設置</th>
-      <th class="r">回収</th>`;
+    if (!table) return;
+    const thead = table.querySelector('thead tr');
+    if (thead) thead.innerHTML = '<th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">1日平均</th><th class="r">一致率</th><th class="r">売上（千円）</th>';
   }
 
-  function renderWorkerProfessional(){
-    ensureStyle();
-    patchWorkerTableHeader();
+  function render(){
     const ym = selectedYM();
     const rec = workerRecord(ym);
-    const kpi = document.getElementById('f-kpi-worker');
-    const bars = document.getElementById('f-worker-bars');
-    const tbody = document.getElementById('f-worker-tbody');
-
-    if (!rec) {
-      if (kpi) kpi.innerHTML = '<div class="card" style="grid-column:1/-1;padding:20px;color:var(--text3);font-weight:700">選択月の作業者CSVがありません。</div>';
-      if (bars) bars.innerHTML = '<div style="padding:30px;color:var(--text3);font-weight:700">作業者別CSVを読み込むとランキングを表示します。</div>';
-      if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:24px">データなし</td></tr>';
+    const rows = rowsFromRecord(rec, ym);
+    ensureDetailHeader();
+    if (!rec || !rows.length) {
+      const kpi = document.getElementById('f-kpi-worker'); if (kpi) kpi.innerHTML = '<div class="msg msg-info">選択月の作業者CSVがありません。</div>';
+      const box = document.getElementById('f-worker-bars'); if (box) box.innerHTML = '<div class="empty">作業者CSVを取り込んでください。</div>';
       renderWorkerDetail(null);
+      renderDetailTable([], '');
       return;
     }
-
-    const rows = rowsFromRecord(rec);
-    if (!rows.length) {
-      if (kpi) kpi.innerHTML = '<div class="card" style="grid-column:1/-1;padding:20px;color:var(--text3);font-weight:700">作業者データがありません。</div>';
-      return;
-    }
-
-    let selectedName = sessionStorage.getItem(STATE_KEY) || rows[0].label;
-    if (!rows.some(r => r.label === selectedName)) selectedName = rows[0].label;
-    sessionStorage.setItem(STATE_KEY, selectedName);
-    const selectedRow = rows.find(r => r.label === selectedName) || rows[0];
-
+    let selectedName = window[STATE_KEY];
+    if (!rows.some(r=>r.label===selectedName)) selectedName = rows[0].label;
+    window[STATE_KEY] = selectedName;
+    const selectedRow = rows.find(r=>r.label===selectedName) || rows[0];
     makeKpi(rec, rows, ym);
+    renderStatusNotice(rows);
     renderRanking(rows, selectedName);
     renderWorkerDetail(selectedRow);
     renderDetailTable(rows, selectedName);
   }
 
   window.FIELD_WORKER_UI = {
-    render(){
-      if (window.FIELD_CSV_REBUILD && FIELD_CSV_REBUILD.refresh) FIELD_CSV_REBUILD.refresh(false);
-      renderWorkerProfessional();
-    },
-    selectWorker(name){
-      sessionStorage.setItem(STATE_KEY, String(name || ''));
-      renderWorkerProfessional();
-    },
-    renderProfessional: renderWorkerProfessional
+    render,
+    selectWorker(name){ window[STATE_KEY] = name; render(); }
   };
 
-  if (window.FIELD_CSV_REBUILD && FIELD_CSV_REBUILD.refresh && !FIELD_CSV_REBUILD.__workerWorkdaysPatched) {
-    const oldRefresh = FIELD_CSV_REBUILD.refresh.bind(FIELD_CSV_REBUILD);
-    FIELD_CSV_REBUILD.refresh = function(){
-      const result = oldRefresh.apply(FIELD_CSV_REBUILD, arguments);
-      const activeWorkerView = document.getElementById('view-field-worker');
-      if (activeWorkerView && activeWorkerView.classList.contains('active')) {
-        setTimeout(renderWorkerProfessional, 0);
-      }
-      return result;
-    };
-    FIELD_CSV_REBUILD.__workerWorkdaysPatched = true;
+  const oldRefresh = window.FIELD_CSV_REBUILD && window.FIELD_CSV_REBUILD.refresh;
+  if (window.FIELD_CSV_REBUILD) {
+    window.FIELD_CSV_REBUILD.renderWorker = render;
+    window.FIELD_CSV_REBUILD.refresh = function(){ if (typeof oldRefresh === 'function') oldRefresh.apply(this, arguments); render(); };
   }
+
+  document.addEventListener('DOMContentLoaded', () => setTimeout(render, 300));
 })();
