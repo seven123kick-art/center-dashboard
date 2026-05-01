@@ -740,7 +740,7 @@ IMPORT.deleteFieldData = function(ym) {
         const ym = ymFromFiscalMonth(fy, mm);
         const hasW = safeArray(STATE.workerCsvData).some(d=>d.ym===ym);
         const hasP = safeArray(STATE.productAddressData).some(d=>d.ym===ym);
-        const label = `${ymText(ym)}${hasW||hasP ? `（${hasW?'作業者':''}${hasW&&hasP?'・':''}${hasP?'商品住所':''}あり）` : '（未登録）'}`;
+        const label = ymText(ym);
         return `<option value="${ym}">${label}</option>`;
       }).join('');
       if ([...mSel.options].some(o=>o.value===current)) mSel.value = current;
