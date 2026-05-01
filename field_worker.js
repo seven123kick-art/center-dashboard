@@ -1,9 +1,10 @@
-/* field_worker.js : 作業者分析ビュー（単一CSV完結・サイズ/幹線料除外金額版）
+/* field_worker.js : 作業者分析ビュー（単一CSV完結・除外ロジック完全統一版）
    2026-05-01
-   ・1日平均を「A列日付ベースの稼働日数」で算出
-   ・作業内容内訳（明細行ベース）を「サイズ系」と「その他」に2分割
-   ・ランキングを表形式＋クリック連動で表示
-   ・金額は作業者CSV内で「サイズ」「幹線料」「幹線」表記行を除外して集計
+   ・件数：作業者CSVの原票番号ユニーク
+   ・稼働日：A列日付で判定
+   ・1日平均：配送件数 ÷ 稼働日
+   ・金額：作業者CSV金額から、サイズ系・幹線料系を集計前に除外
+   ・グラフ：幹線料系を除外した作業内容を、サイズ系／その他に2分割
 */
 'use strict';
 (function(){
@@ -41,11 +42,13 @@
     return safeArray(STATE.workerCsvData).find(d => d && d.ym === ym) || null;
   }
 
-  function monthDaysFromYM(ym){
-    const y = Number(String(ym || '').slice(0,4));
-    const m = Number(String(ym || '').slice(4,6));
-    if (!y || !m) return 0;
-    return new Date(y, m, 0).getDate();
+  function isKansenWork(label){
+    const s = String(label || '').replace(/[\s　]/g,'');
+    return /幹線|幹線料|中継|中継料/.test(s);
+  }
+  function isSizeWork(label){
+    const s = String(label || '').replace(/[\s　]/g,'');
+    return /サイズ|大型|中型|小型/.test(s);
   }
 
   function rowsFromRecord(rec){
@@ -55,13 +58,19 @@
       const workDays = safeArray(w.workDays);
       const workDayCount = num(w.workDayCount || workDays.length);
       const avg = workDayCount > 0 ? count / workDayCount : 0;
+      const amount = num(w.includedAmount || w.amount);
       return {
         label: String(w.name || '未設定'),
         count,
-        amount: num(w.amount),
+        amount,
         excludedAmount: num(w.excludedAmount),
-        includedAmount: num(w.includedAmount || w.amount),
+        includedAmount: amount,
+        lineRows:num(w.lineRows),
+        excludedLineRows:num(w.excludedLineRows),
         works: w.works || {},
+        chartWorks: w.chartWorks || w.works || {},
+        includedWorks: w.includedWorks || {},
+        excludedWorks: w.excludedWorks || {},
         workDays,
         workDayCount,
         avgPerWorkDay: avg
@@ -69,15 +78,11 @@
     }).sort((a,b)=> b.count - a.count || b.amount - a.amount || a.label.localeCompare(b.label, 'ja'));
   }
 
-  function isSizeWork(label){
-    const s = String(label || '');
-    return /サイズ/.test(s) || /大型|中型|小型|幹線料|配送料/.test(s);
-  }
-
   function splitWorks(works){
     const size = [];
     const other = [];
     Object.entries(works || {}).forEach(([label,count]) => {
+      if (isKansenWork(label)) return;
       const item = { label: label || '未設定', count:num(count) };
       if (item.count <= 0) return;
       (isSizeWork(item.label) ? size : other).push(item);
@@ -103,6 +108,7 @@
     if (!kpi) return;
     const totalCount = rec.rowCount || rows.reduce((s,r)=>s+r.count,0);
     const totalAmount = rows.reduce((s,r)=>s+r.amount,0);
+    const excludedAmount = rows.reduce((s,r)=>s+r.excludedAmount,0) || num(rec.excludedAmount);
     const workDayCount = num(rec.workDayCount || safeArray(rec.workDays).length || 0);
     const avg = workDayCount > 0 ? totalCount / workDayCount : 0;
     kpi.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
@@ -111,7 +117,7 @@
       <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div><div class="kpi-sub">原票番号ユニーク</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div><div class="kpi-sub">A列日付で判定</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">1日平均</div><div class="kpi-value">${workDayCount ? fmt1(avg) : '—'}件</div><div class="kpi-sub">配送件数 ÷ 稼働日</div></div>
-      <div class="kpi-card accent-amber"><div class="kpi-label">金額（除外後）</div><div class="kpi-value">${fmtK(totalAmount)}千円</div><div class="kpi-sub">サイズ・幹線料を除外</div></div>`;
+      <div class="kpi-card accent-amber"><div class="kpi-label">金額（対象分）</div><div class="kpi-value">${fmtK(totalAmount)}千円</div><div class="kpi-sub">除外 ${fmtK(excludedAmount)}千円</div></div>`;
   }
 
   function renderRanking(rows, selectedName){
@@ -156,7 +162,7 @@
           </tbody>
         </table>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:10px">上位50名を表示。1日平均は「A列日付に1件以上作業がある日」を稼働日として算出します。金額は作業者CSVからサイズ・幹線料表記行を除外した参考値です。</div>`;
+      <div style="font-size:11px;color:var(--text3);margin-top:10px">上位50名を表示。1日平均は「A列日付に1件以上作業がある日」を稼働日として算出します。金額は作業者CSVからサイズ系・幹線料系を集計前に除外した参考値です。グラフは幹線料系を除外して表示します。</div>`;
   }
 
   function renderDoughnut(canvasId, items, emptyText){
@@ -208,11 +214,11 @@
         <div class="worker-detail-summary" id="worker-detail-summary"></div>
         <div class="worker-chart-grid">
           <div class="worker-chart-card">
-            <div class="worker-chart-title">サイズ系</div>
+            <div class="worker-chart-title">サイズ系（幹線料除外）</div>
             <div class="worker-chart-wrap"><canvas id="c-worker-size"></canvas></div>
           </div>
           <div class="worker-chart-card">
-            <div class="worker-chart-title">その他</div>
+            <div class="worker-chart-title">その他（幹線料除外）</div>
             <div class="worker-chart-wrap"><canvas id="c-worker-other"></canvas></div>
           </div>
         </div>`;
@@ -226,7 +232,7 @@
       return;
     }
 
-    const split = splitWorks(row.works);
+    const split = splitWorks(row.chartWorks || row.works);
     const sizeTotal = split.size.reduce((s,x)=>s+x.count,0);
     const otherTotal = split.other.reduce((s,x)=>s+x.count,0);
     if (summary) {
@@ -235,7 +241,7 @@
         <span>配送件数：<strong>${fmt(row.count)}</strong>件</span>
         <span>稼働：<strong>${row.workDayCount ? fmt(row.workDayCount) : '—'}</strong>日</span>
         <span>平均：<strong>${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}</strong>件/日</span>
-        <span>金額：<strong>${fmtK(row.amount)}</strong>千</span>
+        <span>金額対象：<strong>${fmtK(row.amount)}</strong>千</span>
         <span>除外：<strong>${fmtK(row.excludedAmount)}</strong>千</span>
         <span>サイズ系：<strong>${fmt(sizeTotal)}</strong>件</span>
         <span>その他：<strong>${fmt(otherTotal)}</strong>件</span>`;
@@ -251,9 +257,10 @@
     const totalCount = rows.reduce((s,r)=>s+r.count,0) || 1;
     const tableRows = rows.slice(0, 100);
     tbody.innerHTML = tableRows.map((r,i)=>{
-      const delivery = findWorkCount(r.works, ['配送','配送料','配達']);
-      const install = findWorkCount(r.works, ['設置','取付','工事']);
-      const recycle = findWorkCount(r.works, ['リサイクル','回収']);
+      const workForTable = r.chartWorks || r.works;
+      const delivery = findWorkCount(workForTable, ['配送','配送料','配達']);
+      const install = findWorkCount(workForTable, ['設置','取付','工事']);
+      const recycle = findWorkCount(workForTable, ['リサイクル','回収']);
       const active = r.label === selectedName;
       return `<tr class="field-worker-detail-row ${active ? 'is-active' : ''}" onclick="FIELD_WORKER_UI.selectWorker('${jsArg(r.label)}')" style="cursor:pointer">
         <td><strong>${i+1}. ${esc(r.label)}</strong></td>
@@ -306,7 +313,7 @@
       <th class="r">配送件数</th>
       <th class="r">稼働日</th>
       <th class="r">1日平均</th>
-      <th class="r">金額除外後（千円）</th>
+      <th class="r">金額対象（千円）</th>
       <th class="r">構成比</th>
       <th class="r">単価（円）</th>
       <th class="r">配送</th>
