@@ -336,7 +336,9 @@ const CONFIG = {
     dashboard:'ダッシュボード', pl:'月次収支表', trend:'売上推移',
     shipper:'荷主分析', indicators:'経営指標', annual:'年次サマリー',
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
-    library:'過去資料', field:'作業者・エリア分析', capacity:'キャパ分析', import:'データ取込',
+    library:'過去資料', field:'作業者・エリア分析',
+    'field-worker':'作業者分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
+    capacity:'キャパ分析', import:'データ取込',
   },
 };
 
@@ -3041,6 +3043,10 @@ const NAV = {
       case 'import':     renderImport();       break;
       case 'library':    PAST_LIBRARY.renderList(); break;
       case 'field':      FIELD_UI.renderDataList(); FIELD_UI.updatePeriodBadge(); break;
+      case 'field-worker':  if (window.FIELD_WORKER_UI?.render) FIELD_WORKER_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
+      case 'field-content': if (window.FIELD_TASK_UI?.render) FIELD_TASK_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
+      case 'field-product': if (window.FIELD_PRODUCT_UI?.render) FIELD_PRODUCT_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
+      case 'field-area':    if (window.FIELD_AREA_UI?.render) FIELD_AREA_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       // report: フォームそのままで描画不要
     }
   },
