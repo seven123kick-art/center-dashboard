@@ -1,9 +1,9 @@
-/* field_worker.js : 作業者分析ビュー（単一CSV完結・除外ロジック完全統一版）
+/* field_worker.js : 作業者分析ビュー（単一CSV完結・幹線料除外ロジック完全統一版）
    2026-05-01
    ・件数：作業者CSVの原票番号ユニーク
    ・稼働日：A列日付で判定
    ・1日平均：配送件数 ÷ 稼働日
-   ・金額：作業者CSV金額から、サイズ系・幹線料系を集計前に除外
+   ・金額：作業者CSV金額から、幹線料系だけを集計前に除外（サイズ配送料は対象）
    ・グラフ：幹線料系を除外した作業内容を、サイズ系／その他に2分割
 */
 'use strict';
@@ -117,7 +117,7 @@
       <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div><div class="kpi-sub">原票番号ユニーク</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div><div class="kpi-sub">A列日付で判定</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">1日平均</div><div class="kpi-value">${workDayCount ? fmt1(avg) : '—'}件</div><div class="kpi-sub">配送件数 ÷ 稼働日</div></div>
-      <div class="kpi-card accent-amber"><div class="kpi-label">金額（対象分）</div><div class="kpi-value">${fmtK(totalAmount)}千円</div><div class="kpi-sub">除外 ${fmtK(excludedAmount)}千円</div></div>`;
+      <div class="kpi-card accent-amber"><div class="kpi-label">金額（幹線除外後）</div><div class="kpi-value">${fmtK(totalAmount)}千円</div><div class="kpi-sub">除外 ${fmtK(excludedAmount)}千円</div></div>`;
   }
 
   function renderRanking(rows, selectedName){
@@ -138,7 +138,7 @@
               <th class="r">稼働日</th>
               <th class="r">1日平均</th>
               <th class="r">構成比</th>
-              <th class="r">金額（除外後）</th>
+              <th class="r">金額（幹線除外後）</th>
             </tr>
           </thead>
           <tbody>
@@ -162,7 +162,7 @@
           </tbody>
         </table>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:10px">上位50名を表示。1日平均は「A列日付に1件以上作業がある日」を稼働日として算出します。金額は作業者CSVからサイズ系・幹線料系を集計前に除外した参考値です。グラフは幹線料系を除外して表示します。</div>`;
+      <div style="font-size:11px;color:var(--text3);margin-top:10px">上位50名を表示。1日平均は「A列日付に1件以上作業がある日」を稼働日として算出します。金額は作業者CSVから幹線料系だけを集計前に除外した参考値です。サイズ配送料は売上対象に含めます。グラフは幹線料系を除外して表示します。</div>`;
   }
 
   function renderDoughnut(canvasId, items, emptyText){
