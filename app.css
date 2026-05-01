@@ -268,3 +268,34 @@ html.restore-view-booting body::after{
 #view-field-area .field-pane{
   display:block;
 }
+
+/* =====================================================================
+   UI統一・プロ仕様 2026-05-01
+   既存ロジック変更なし。見た目・余白・サイドバー・カードを統一。
+===================================================================== */
+:root{
+  --sidebar-w:232px;--sidebar-bg:#17283d;--sidebar-hover:#203852;--sidebar-active:#24558a;
+  --bg:#f1f4f8;--surface:#fff;--light:#f8fafc;--border:#dfe5ec;--border2:#cbd5e1;
+  --navy:#174f7f;--blue:#2563eb;--green:#059669;--red:#dc2626;--amber:#d97706;
+  --text:#0f172a;--text2:#475569;--text3:#94a3b8;--radius:14px;
+  --shadow:0 10px 26px rgba(15,23,42,.06),0 1px 3px rgba(15,23,42,.08);
+}
+body{font-size:13px;letter-spacing:.01em;background:linear-gradient(180deg,#eef3f8 0%,#f6f8fb 100%)}
+#sidebar{box-shadow:8px 0 24px rgba(15,23,42,.08)}
+.sidebar-logo{padding:18px 16px 16px;border-bottom:1px solid rgba(255,255,255,.10)}
+.sidebar-logo-title{font-size:14px;font-weight:900;letter-spacing:.02em}.sidebar-logo-sub{font-size:11px;color:#b7c9df;font-weight:700}
+.center-fixed-box{margin:14px 14px 8px;padding:12px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08)}
+.center-fixed-label{font-size:10px;color:#7fa7c9;font-weight:900;letter-spacing:.12em;margin-bottom:4px}.center-fixed-name{font-size:14px;color:#fff;font-weight:900}
+.sidebar-top-link{display:block;margin:0 14px 14px;color:#bfd4ea;text-decoration:none;font-size:12px;font-weight:800;padding:7px 10px;border-radius:10px}.sidebar-top-link:hover{background:rgba(255,255,255,.07);color:#fff}
+.sidebar-section{padding:12px 16px 5px;font-size:10px;color:#7fa7c9;letter-spacing:.12em;text-transform:uppercase}.nav-item{margin:2px 8px;border-radius:12px;border-left:0;padding:10px 12px;font-size:13px;font-weight:750;gap:10px;color:#b7c9df}.nav-item:hover{transform:translateX(1px);background:rgba(255,255,255,.07)}.nav-item.active{background:linear-gradient(135deg,#24558a,#2b639b);box-shadow:inset 0 0 0 1px rgba(255,255,255,.10),0 8px 18px rgba(0,0,0,.16)}.nav-icon{width:17px;height:17px;opacity:.82}.sidebar-divider{margin:10px 14px;background:rgba(255,255,255,.10)}
+#topbar{height:66px;padding:0 28px;background:rgba(255,255,255,.92);backdrop-filter:saturate(140%) blur(8px);box-shadow:0 1px 0 rgba(15,23,42,.05)}.page-title{font-size:18px;font-weight:950}.page-sub{font-size:12px;color:#8b9aab;margin-top:3px;font-weight:700}#content{padding:24px}
+.card{border-radius:16px;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden;background:rgba(255,255,255,.96)}.card-header{padding:14px 18px;background:linear-gradient(180deg,#fff,#fbfdff)}.card-title{font-size:13px;color:#1e3654;text-transform:none;letter-spacing:.02em;font-weight:900}.card-body{padding:18px}.card-body-sm{padding:14px 18px}
+.kpi-row{gap:14px;margin-bottom:18px}.kpi-card{border-radius:16px;padding:18px 20px;border:1px solid var(--border);box-shadow:var(--shadow);position:relative;overflow:hidden}.kpi-card::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;background:#94a3b8}.kpi-card.accent-navy::before{background:var(--navy)}.kpi-card.accent-green::before{background:var(--green)}.kpi-card.accent-red::before{background:var(--red)}.kpi-card.accent-amber::before{background:#ea580c}.kpi-label{font-size:12px;color:#334155;font-weight:900;margin-bottom:8px}.kpi-value{font-size:28px;letter-spacing:-.04em;font-weight:950}.kpi-sub{font-size:12px;color:#94a3b8;font-weight:700}.pill{border-radius:999px;padding:4px 9px;font-size:12px}
+.tbl{font-size:13px;border-collapse:separate;border-spacing:0}.tbl th{background:#f5f7fb;color:#334155;font-size:12px;padding:11px 10px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1}.tbl td{padding:10px;border-bottom:1px solid #edf1f5}.tbl tbody tr:hover td{background:#f8fbff}
+.btn,button.btn{border-radius:10px;border:1px solid #cbd5e1;background:#fff;color:#1e3654;font-weight:900;transition:.15s ease;box-shadow:0 1px 2px rgba(15,23,42,.04)}.btn:hover,button.btn:hover{transform:translateY(-1px);box-shadow:0 8px 18px rgba(15,23,42,.10)}.btn-primary{background:linear-gradient(135deg,#1d4ed8,#2563eb)!important;color:#fff!important;border-color:#2563eb!important}
+select,input,textarea{border-radius:12px!important;border:1px solid #cbd5e1!important;background:#fff;color:#0f172a;font-weight:800;outline:none;transition:.15s ease}select:focus,input:focus,textarea:focus{border-color:#2563eb!important;box-shadow:0 0 0 4px rgba(37,99,235,.12)}.msg{border-radius:14px;padding:13px 16px;font-weight:800}.msg-info{background:#eaf3ff;border:1px solid #bfdbfe;color:#1d4ed8}.msg-ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#047857}.msg-ng{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c}
+.upload-zone{border-radius:18px!important;border:1.5px dashed #93c5fd!important;background:linear-gradient(180deg,#f8fbff,#f1f7ff)!important;transition:.15s ease}.upload-zone:hover{border-color:#2563eb!important;box-shadow:0 10px 24px rgba(37,99,235,.10);transform:translateY(-1px)}
+.field-tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:16px;flex-wrap:wrap}.field-tab{border:0;background:transparent;padding:12px 14px;font-weight:950;color:#64748b;cursor:pointer;border-bottom:3px solid transparent}.field-tab.active{color:var(--navy);border-bottom-color:var(--navy)}.field-pane{display:none}.field-pane.active{display:block}
+#field-map .field-area-row{grid-template-columns:minmax(220px,340px) minmax(260px,1fr) minmax(130px,180px);gap:16px;margin:10px 0}#field-map .field-area-label{font-size:13px;color:#1e293b}#field-map .field-area-track{height:20px;background:#e2e8f0}#field-map .field-area-fill{background:linear-gradient(90deg,#174f7f,#2563eb)}#field-map .field-area-value{font-size:13px;color:#0f172a}.chart-wrap{min-height:120px}
+@media(max-width:1200px){:root{--sidebar-w:218px}#content{padding:18px}.grid2,.grid3,.grid-6-4{grid-template-columns:1fr!important}.kpi-row-4,.kpi-row-3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){body{display:block;overflow:auto}#sidebar{position:relative;width:100%;height:auto;max-height:none}#main{height:auto}#topbar{height:auto;min-height:64px;padding:14px 18px;align-items:flex-start;flex-direction:column}#content{padding:14px}.kpi-row-4,.kpi-row-3{grid-template-columns:1fr}}
