@@ -745,7 +745,7 @@ IMPORT.deleteFieldData = function(ym) {
       }).join('');
       if ([...mSel.options].some(o=>o.value===current)) mSel.value = current;
       else {
-        const latest = [...mSel.options].reverse().find(o => /あり/.test(o.textContent));
+        const latest = [...mSel.options].reverse().find(o => safeArray(STATE.workerCsvData).some(d=>d.ym===o.value) || safeArray(STATE.productAddressData).some(d=>d.ym===o.value));
         mSel.value = latest ? latest.value : ymFromFiscalMonth(fy, '04');
       }
       STATE.fiscalYear = fy;
@@ -955,7 +955,7 @@ IMPORT.deleteFieldData = function(ym) {
 
   function refreshFieldAll(rebuildSelectors=true){
     ensureState();
-    if (rebuildSelectors) setupFieldCommonSelectors();
+    setupFieldCommonSelectors();
     setupYmSelects();
     FIELD_UI.updatePeriodBadge();
     renderWorker();
@@ -1066,6 +1066,7 @@ IMPORT.deleteFieldData = function(ym) {
     };
   })();
 
+  window.setupFieldCommonSelectors = setupFieldCommonSelectors;
   window.FIELD_CSV_REBUILD = { refresh:refreshFieldAll, deleteMonthType, importWorker, importProduct, renderWorker, renderContent, renderProduct, renderMap, renderDataList };
   window.renderFieldDataList2 = renderDataList;
   if (typeof DATA_RESET !== 'undefined') DATA_RESET.clearFieldAll = function(){
@@ -1091,7 +1092,7 @@ IMPORT.deleteFieldData = function(ym) {
     badge.textContent = `${ymText(ym)} ${(workerRecord(ym)||productRecord(ym)) ? '読込済' : '未登録'}`;
   };
   const oldSwitch = FIELD_UI.switchTab.bind(FIELD_UI);
-  FIELD_UI.switchTab = function(el){ oldSwitch(el); refreshFieldAll(false); };
+  FIELD_UI.switchTab = function(el){ oldSwitch(el); refreshFieldAll(true); };
 
   renderMonthlyCheck();
 
