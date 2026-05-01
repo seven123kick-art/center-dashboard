@@ -1,7 +1,7 @@
 /* field_worker.js : 作業者分析ビュー（稼働日平均＋作業内容2分割版）
    2026-05-01
    ・1日平均を「A列日付ベースの稼働日数」で算出
-   ・作業内容内訳を「サイズ系」と「その他」に2分割
+   ・作業内容内訳（明細行ベース）を「サイズ系」と「その他」に2分割
    ・ランキングを表形式＋クリック連動で表示
    ・field_core.jsのCSV取込側は workDays / workDayCount を保持する版を併用
 */
@@ -106,9 +106,9 @@
     kpi.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
     kpi.innerHTML = `
       <div class="kpi-card accent-navy"><div class="kpi-label">対象月</div><div class="kpi-value">${esc(ymText(ym))}</div></div>
-      <div class="kpi-card accent-navy"><div class="kpi-label">作業件数</div><div class="kpi-value">${fmt(totalCount)}</div></div>
+      <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div><div class="kpi-sub">原票番号ユニーク</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div><div class="kpi-sub">A列日付で判定</div></div>
-      <div class="kpi-card accent-green"><div class="kpi-label">1日平均</div><div class="kpi-value">${workDayCount ? fmt1(avg) : '—'}件</div><div class="kpi-sub">作業件数 ÷ 稼働日</div></div>
+      <div class="kpi-card accent-green"><div class="kpi-label">1日平均</div><div class="kpi-value">${workDayCount ? fmt1(avg) : '—'}件</div><div class="kpi-sub">配送件数 ÷ 稼働日</div></div>
       <div class="kpi-card accent-amber"><div class="kpi-label">金額（参考）</div><div class="kpi-value">${fmtK(totalAmount)}千円</div></div>`;
   }
 
@@ -126,7 +126,7 @@
             <tr>
               <th style="width:48px">順位</th>
               <th>作業者</th>
-              <th class="r">件数</th>
+              <th class="r">配送件数</th>
               <th class="r">稼働日</th>
               <th class="r">1日平均</th>
               <th class="r">構成比</th>
@@ -193,7 +193,7 @@
 
   function renderWorkerDetail(row){
     const titleEl = document.querySelector('#view-field-worker .grid2 .card:nth-child(2) .card-title');
-    if (titleEl) titleEl.textContent = row ? `作業内容内訳：${row.label}` : '作業者別　作業内容内訳';
+    if (titleEl) titleEl.textContent = row ? `作業内容内訳（明細行ベース）：${row.label}` : '作業者別　作業内容内訳（明細行ベース）';
 
     const oldCanvas = document.getElementById('c-worker-content');
     const body = oldCanvas ? oldCanvas.parentElement : document.querySelector('#view-field-worker .grid2 .card:nth-child(2) .card-body');
@@ -230,7 +230,7 @@
     if (summary) {
       summary.innerHTML = `
         <span><strong>${esc(row.label)}</strong></span>
-        <span>件数：<strong>${fmt(row.count)}</strong>件</span>
+        <span>配送件数：<strong>${fmt(row.count)}</strong>件</span>
         <span>稼働：<strong>${row.workDayCount ? fmt(row.workDayCount) : '—'}</strong>日</span>
         <span>平均：<strong>${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}</strong>件/日</span>
         <span>サイズ系：<strong>${fmt(sizeTotal)}</strong>件</span>
@@ -299,7 +299,7 @@
     headRow.dataset.workdaysPatched = '1';
     headRow.innerHTML = `
       <th>作業者</th>
-      <th class="r">件数</th>
+      <th class="r">配送件数</th>
       <th class="r">稼働日</th>
       <th class="r">1日平均</th>
       <th class="r">金額（千円）</th>
