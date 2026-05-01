@@ -263,13 +263,17 @@ IMPORT.deleteFieldData = function(ym) {
     const workerIdx = headerIndex(header, ['作業者名','作業者','担当者','社員名','氏名'], 0);
     const amountIdx = headerIndex(header, ['金額','売上','合計'], -1);
     const workIdx = headerIndex(header, ['作業内容','内容','科目'], -1);
+    const billingIdx = headerIndex(header, ['付帯区分','請求区分','売上区分','区分'], 12); // M列：請求／直収
     const slipIdx = headerIndex(header, ['エスライン原票番号','原票番号','伝票番号','配送番号','荷主伝票番号'], -1);
 
     const workers = {};
     const allWorkDays = new Set();
     const allSlips = new Set();
     const globalChartWorks = {};
+    const globalDirectWorks = {};
     let includedAmountTotal = 0;
+    let salesAmountTotal = 0;
+    let directAmountTotal = 0;
     let excludedAmountTotal = 0;
     let excludedLineRows = 0;
 
@@ -280,6 +284,8 @@ IMPORT.deleteFieldData = function(ym) {
       const slipKey = slipRaw || `__row_${i}`;
       const workLabel = workIdx >= 0 ? (clean(r[workIdx]) || '未設定') : '未設定';
       const amountVal = amountIdx >= 0 ? yen(r[amountIdx]) : 0;
+      const billingType = billingIdx >= 0 ? clean(r[billingIdx]) : '';
+      const isDirectSales = /直収/.test(billingType);
       const amountExcluded = isExcludedWorkerAmountLabel(workLabel);
       const lineExcludedForChart = isKansenWorkerLabel(workLabel);
 
@@ -290,10 +296,13 @@ IMPORT.deleteFieldData = function(ym) {
           lineRows:0,                // 明細行数
           amount:0,                  // 幹線料系を除外した金額
           includedAmount:0,
+          salesAmount:0,             // M列=請求
+          directAmount:0,            // M列=直収
           excludedAmount:0,
           excludedLineRows:0,
           works:{},                  // 全作業内容（明細行ベース）
-          chartWorks:{},             // グラフ用：幹線料系を除外した作業内容
+          chartWorks:{},             // グラフ用：請求かつ幹線料系を除外した作業内容
+          directWorks:{},            // グラフ用：直収かつ幹線料系を除外した作業内容
           includedWorks:{},          // 金額対象の作業内容
           excludedWorks:{},          // 金額除外対象の作業内容
           workDays:[],
@@ -306,7 +315,7 @@ IMPORT.deleteFieldData = function(ym) {
       worker.lineRows += 1;
 
       if (!worker.slips[slipKey]) {
-        worker.slips[slipKey] = { slip:slipKey, date:workDate, amount:0, includedAmount:0, excludedAmount:0, works:{}, chartWorks:{} };
+        worker.slips[slipKey] = { slip:slipKey, date:workDate, amount:0, includedAmount:0, salesAmount:0, directAmount:0, excludedAmount:0, works:{}, chartWorks:{}, directWorks:{} };
         worker.rows += 1;
       }
       const slipObj = worker.slips[slipKey];
@@ -318,9 +327,15 @@ IMPORT.deleteFieldData = function(ym) {
         worker.excludedLineRows += 1;
         excludedLineRows += 1;
       } else {
-        slipObj.chartWorks[workLabel] = (slipObj.chartWorks[workLabel] || 0) + 1;
-        worker.chartWorks[workLabel] = (worker.chartWorks[workLabel] || 0) + 1;
-        globalChartWorks[workLabel] = (globalChartWorks[workLabel] || 0) + 1;
+        if (isDirectSales) {
+          slipObj.directWorks[workLabel] = (slipObj.directWorks[workLabel] || 0) + 1;
+          worker.directWorks[workLabel] = (worker.directWorks[workLabel] || 0) + 1;
+          globalDirectWorks[workLabel] = (globalDirectWorks[workLabel] || 0) + 1;
+        } else {
+          slipObj.chartWorks[workLabel] = (slipObj.chartWorks[workLabel] || 0) + 1;
+          worker.chartWorks[workLabel] = (worker.chartWorks[workLabel] || 0) + 1;
+          globalChartWorks[workLabel] = (globalChartWorks[workLabel] || 0) + 1;
+        }
       }
 
       // 金額は明細行の金額をそのまま使う。ただし、幹線料系は集計前に完全除外する。サイズ配送料は対象に残す。
@@ -334,6 +349,15 @@ IMPORT.deleteFieldData = function(ym) {
         worker.includedAmount += amountVal;
         slipObj.amount += amountVal;
         slipObj.includedAmount += amountVal;
+        if (isDirectSales) {
+          worker.directAmount += amountVal;
+          slipObj.directAmount += amountVal;
+          directAmountTotal += amountVal;
+        } else {
+          worker.salesAmount += amountVal;
+          slipObj.salesAmount += amountVal;
+          salesAmountTotal += amountVal;
+        }
         worker.includedWorks[workLabel] = (worker.includedWorks[workLabel] || 0) + 1;
         includedAmountTotal += amountVal;
       }
@@ -364,14 +388,18 @@ IMPORT.deleteFieldData = function(ym) {
       sourceFileName:fileName,
       dateColumnIndex: dateIdx,
       workerColumnIndex: workerIdx,
+      billingColumnIndex: billingIdx,
       slipColumnIndex: slipIdx,
       countRule: slipIdx >= 0 ? '作業者別に原票番号をユニーク化' : '原票番号列未検出のため行数で代替',
       amountRule: '作業者CSV金額から、幹線料系だけを集計前に除外（サイズ配送料は対象）',
       chartRule: '作業内容グラフは幹線料系を除外し、サイズ系とその他に分割',
       includedAmount: includedAmountTotal,
+      salesAmount: salesAmountTotal,
+      directAmount: directAmountTotal,
       excludedAmount: excludedAmountTotal,
       excludedLineRows,
       chartWorks: globalChartWorks,
+      directWorks: globalDirectWorks,
       workDays: Array.from(allWorkDays).sort(),
       workDayCount: allWorkDays.size,
       avgPerWorkDay: allWorkDays.size > 0 ? totalSlipCount / allWorkDays.size : 0
@@ -546,9 +574,12 @@ IMPORT.deleteFieldData = function(ym) {
       amountRule:'作業者CSV金額から、幹線料系だけを集計前に除外（サイズ配送料は対象）',
       chartRule:'作業内容グラフは幹線料系を除外し、サイズ系とその他に分割',
       includedAmount:0,
+      salesAmount:0,
+      directAmount:0,
       excludedAmount:0,
       excludedLineRows:0,
-      chartWorks:{}
+      chartWorks:{},
+      directWorks:{}
     };
     const allDays = new Set();
     const allSlips = new Set();
@@ -558,11 +589,14 @@ IMPORT.deleteFieldData = function(ym) {
       const parsed = parseWorkerCsvRows(csvRowsFromText(text), file.name);
       combined.lineRowCount += parsed.lineRowCount || 0;
       combined.includedAmount += Number(parsed.includedAmount || 0);
+      combined.salesAmount += Number(parsed.salesAmount || 0);
+      combined.directAmount += Number(parsed.directAmount || 0);
       combined.excludedAmount += Number(parsed.excludedAmount || 0);
       combined.excludedLineRows += Number(parsed.excludedLineRows || 0);
       combined.files.push(file.name);
       (parsed.workDays || []).forEach(d => allDays.add(d));
       Object.entries(parsed.chartWorks || {}).forEach(([k,v]) => combined.chartWorks[k] = (combined.chartWorks[k] || 0) + Number(v || 0));
+      Object.entries(parsed.directWorks || {}).forEach(([k,v]) => combined.directWorks[k] = (combined.directWorks[k] || 0) + Number(v || 0));
 
       Object.values(parsed.workers || {}).forEach(w => {
         if (!combined.workers[w.name]) {
@@ -572,10 +606,13 @@ IMPORT.deleteFieldData = function(ym) {
             lineRows:0,
             amount:0,
             includedAmount:0,
+            salesAmount:0,
+            directAmount:0,
             excludedAmount:0,
             excludedLineRows:0,
             works:{},
             chartWorks:{},
+            directWorks:{},
             includedWorks:{},
             excludedWorks:{},
             workDays:[],
@@ -589,19 +626,23 @@ IMPORT.deleteFieldData = function(ym) {
         (w.workDays || []).forEach(d => { if (!cw.workDays.includes(d)) cw.workDays.push(d); });
         Object.entries(w.works || {}).forEach(([k,v]) => cw.works[k] = (cw.works[k] || 0) + Number(v || 0));
         Object.entries(w.chartWorks || {}).forEach(([k,v]) => cw.chartWorks[k] = (cw.chartWorks[k] || 0) + Number(v || 0));
+        Object.entries(w.directWorks || {}).forEach(([k,v]) => cw.directWorks[k] = (cw.directWorks[k] || 0) + Number(v || 0));
         Object.entries(w.includedWorks || {}).forEach(([k,v]) => cw.includedWorks[k] = (cw.includedWorks[k] || 0) + Number(v || 0));
         Object.entries(w.excludedWorks || {}).forEach(([k,v]) => cw.excludedWorks[k] = (cw.excludedWorks[k] || 0) + Number(v || 0));
 
         Object.entries(w.slips || {}).forEach(([slip, obj]) => {
           if (!cw.slips[slip]) {
-            cw.slips[slip] = { slip, date:obj.date || '', amount:0, includedAmount:0, excludedAmount:0, works:{}, chartWorks:{} };
+            cw.slips[slip] = { slip, date:obj.date || '', amount:0, includedAmount:0, salesAmount:0, directAmount:0, excludedAmount:0, works:{}, chartWorks:{}, directWorks:{} };
             cw.rows += 1;
           }
           cw.slips[slip].amount += Number(obj.amount || 0);
           cw.slips[slip].includedAmount += Number(obj.includedAmount || obj.amount || 0);
+          cw.slips[slip].salesAmount += Number(obj.salesAmount || 0);
+          cw.slips[slip].directAmount += Number(obj.directAmount || 0);
           cw.slips[slip].excludedAmount += Number(obj.excludedAmount || 0);
           Object.entries(obj.works || {}).forEach(([k,v]) => cw.slips[slip].works[k] = (cw.slips[slip].works[k] || 0) + Number(v || 0));
           Object.entries(obj.chartWorks || {}).forEach(([k,v]) => cw.slips[slip].chartWorks[k] = (cw.slips[slip].chartWorks[k] || 0) + Number(v || 0));
+          Object.entries(obj.directWorks || {}).forEach(([k,v]) => cw.slips[slip].directWorks[k] = (cw.slips[slip].directWorks[k] || 0) + Number(v || 0));
           if (slip && !String(slip).startsWith('__row_')) allSlips.add(slip);
         });
       });
@@ -614,6 +655,8 @@ IMPORT.deleteFieldData = function(ym) {
       w.rows = Object.keys(w.slips || {}).length;
       w.amount = Object.values(w.slips || {}).reduce((s,x)=>s+Number(x.amount||0),0);
       w.includedAmount = Object.values(w.slips || {}).reduce((s,x)=>s+Number(x.includedAmount||x.amount||0),0);
+      w.salesAmount = Object.values(w.slips || {}).reduce((s,x)=>s+Number(x.salesAmount||0),0);
+      w.directAmount = Object.values(w.slips || {}).reduce((s,x)=>s+Number(x.directAmount||0),0);
       w.excludedAmount = Object.values(w.slips || {}).reduce((s,x)=>s+Number(x.excludedAmount||0),0);
       w.avgPerWorkDay = w.workDayCount > 0 ? w.rows / w.workDayCount : 0;
     });
