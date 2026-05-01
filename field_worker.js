@@ -1,10 +1,11 @@
-/* field_worker.js : 作業者分析ビュー（作業CSV単独・平均件数/日・平均売上/日強化版）
+/* field_worker.js : 作業者分析ビュー（請求/直収分離・平均売上/日強化版）
    2026-05-01
    ・件数：作業者CSVの原票番号ユニーク
    ・稼働日：A列日付で判定
    ・平均件数/日：配送件数 ÷ 稼働日
-   ・平均売上/日：金額 ÷ 稼働日
-   ・金額：field_core.jsで幹線料系を除外済みの金額を使用
+   ・平均売上/日：M列=請求の金額 ÷ 稼働日
+   ・直収/日：M列=直収の金額 ÷ 稼働日
+   ・合計売上：請求＋直収（field_core.jsで幹線料系を除外済み）
    ・作業内容内訳：サイズ①〜⑦は順番固定、その他は表記ゆれを統合
    ・グラフ：円グラフではなく横棒ランキング表示
 */
@@ -47,18 +48,25 @@
       const workDayCount = num(w.workDayCount || workDays.length);
       const avg = workDayCount > 0 ? count / workDayCount : 0;
       const amount = num(w.amount);
+      const salesAmount = num(w.salesAmount || w.includedAmount || amount - num(w.directAmount));
+      const directAmount = num(w.directAmount);
       const excludedAmount = num(w.excludedAmount || w.excluded || 0);
       return {
         label: String(w.name || '未設定'),
         count,
         lineRows:num(w.lineRows),
         amount,
+        salesAmount,
+        directAmount,
         excludedAmount,
         works: w.works || {},
+        chartWorks: w.chartWorks || w.works || {},
+        directWorks: w.directWorks || {},
         workDays,
         workDayCount,
         avgPerWorkDay: avg,
-        avgSalesPerWorkDay: workDayCount > 0 ? amount / workDayCount : 0,
+        avgSalesPerWorkDay: workDayCount > 0 ? salesAmount / workDayCount : 0,
+        avgDirectPerWorkDay: workDayCount > 0 ? directAmount / workDayCount : 0,
         slips
       };
     }).sort((a,b)=> b.count - a.count || b.amount - a.amount || a.label.localeCompare(b.label, 'ja'));
@@ -118,7 +126,7 @@
       if (selector && selector.parentNode === view) selector.insertAdjacentElement("afterend", note);
       else view.insertBefore(note, view.firstChild);
     }
-    note.innerHTML = '※作業者分析の金額は、作業者CSVから幹線料金を除外して表示しています。';
+    note.innerHTML = '※作業者分析の金額は、M列の「請求／直収」で分け、幹線料金を除外して表示しています。';
   }
 
   function makeKpi(rec, rows, ym){
@@ -126,17 +134,21 @@
     if (!kpi) return;
     const totalCount = rows.reduce((s,r)=>s+r.count,0);
     const totalAmount = rows.reduce((s,r)=>s+r.amount,0);
+    const salesAmount = rows.reduce((s,r)=>s+r.salesAmount,0);
+    const directAmount = rows.reduce((s,r)=>s+r.directAmount,0);
     const workDayCount = num(rec.workDayCount || safeArray(rec.workDays).length || 0);
     const avgCount = workDayCount > 0 ? totalCount / workDayCount : 0;
-    const avgSales = workDayCount > 0 ? totalAmount / workDayCount : 0;
-    kpi.style.gridTemplateColumns = 'repeat(6,minmax(0,1fr))';
+    const avgSales = workDayCount > 0 ? salesAmount / workDayCount : 0;
+    const avgDirect = workDayCount > 0 ? directAmount / workDayCount : 0;
+    kpi.style.gridTemplateColumns = 'repeat(7,minmax(0,1fr))';
     kpi.innerHTML = `
       <div class="kpi-card accent-navy"><div class="kpi-label">対象月</div><div class="kpi-value">${esc(ymText(ym))}</div></div>
       <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">平均件数/日</div><div class="kpi-value">${workDayCount ? fmt1(avgCount) : '—'}件</div></div>
-      <div class="kpi-card accent-green"><div class="kpi-label">平均売上/日</div><div class="kpi-value">${workDayCount ? fmtK(avgSales) : '—'}千円</div></div>
-      <div class="kpi-card accent-amber"><div class="kpi-label">金額</div><div class="kpi-value">${fmtK(totalAmount)}千円</div></div>`;
+      <div class="kpi-card accent-green"><div class="kpi-label">売上/日</div><div class="kpi-value">${workDayCount ? fmtK(avgSales) : '—'}千円</div></div>
+      <div class="kpi-card accent-green"><div class="kpi-label">直収/日</div><div class="kpi-value">${workDayCount ? fmtK(avgDirect) : '—'}千円</div></div>
+      <div class="kpi-card accent-amber"><div class="kpi-label">合計売上</div><div class="kpi-value">${fmtK(totalAmount)}千円</div><div class="kpi-sub-row"><span class="kpi-sub">売上 ${fmtK(salesAmount)}千 / 直収 ${fmtK(directAmount)}千</span></div></div>`;
   }
 
   function renderStatusNotice(){
@@ -154,12 +166,12 @@
     box.innerHTML = `
       <div class="worker-card-intro">
         <div class="worker-card-main-title">作業者別ランキング</div>
-        <div class="worker-card-sub-title">配送件数・平均件数/日・平均売上/日を比較</div>
+        <div class="worker-card-sub-title">配送件数・売上/日・直収/日を比較</div>
       </div>
       <div class="scroll-x">
         <table class="tbl field-worker-ranking-table">
           <thead><tr>
-            <th style="width:48px">順位</th><th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">平均件数/日</th><th class="r">平均売上/日</th><th class="r">金額</th>
+            <th style="width:48px">順位</th><th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">平均件数/日</th><th class="r">売上/日</th><th class="r">直収/日</th><th class="r">合計売上</th>
           </tr></thead>
           <tbody>${topRows.map((r,i)=>{
             const active = r.label === selectedName;
@@ -171,6 +183,7 @@
               <td class="r">${r.workDayCount ? fmt(r.workDayCount)+'日' : '—'}</td>
               <td class="r"><strong>${r.workDayCount ? fmt1(r.avgPerWorkDay) : '—'}</strong>件/日</td>
               <td class="r"><strong>${r.workDayCount ? fmtK(r.avgSalesPerWorkDay) : '—'}</strong>千円/日</td>
+              <td class="r"><strong>${r.workDayCount ? fmtK(r.avgDirectPerWorkDay) : '—'}</strong>千円/日</td>
               <td class="r">${fmtK(r.amount)}千</td>
             </tr>`;
           }).join('')}</tbody>
@@ -204,7 +217,7 @@
     style.textContent = `
       .worker-detail-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
       .worker-detail-summary span{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:#f8fafc;border-radius:999px;padding:6px 10px;font-size:12px;color:#334155}
-      .worker-chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;height:auto}
+      .worker-chart-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;height:auto}
       .worker-chart-card{border:1px solid var(--border);border-radius:12px;padding:12px;background:#fff;min-height:300px}
       .worker-chart-title{font-weight:900;color:#334155;margin-bottom:12px}
       .worker-chart-wrap{height:auto;min-height:230px;position:relative}
@@ -244,7 +257,7 @@
     if (!body) return;
     if (!document.getElementById('worker-size-bars') || !document.getElementById('worker-other-bars')) {
       body.style.height = 'auto'; body.style.position = 'relative';
-      body.innerHTML = `<div class="worker-selected-hero" id="worker-selected-hero"></div><div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系（①〜⑦）</div><div class="worker-chart-wrap" id="worker-size-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他（表記統合）</div><div class="worker-chart-wrap" id="worker-other-bars"></div></div></div>`;
+      body.innerHTML = `<div class="worker-selected-hero" id="worker-selected-hero"></div><div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系（①〜⑦）</div><div class="worker-chart-wrap" id="worker-size-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他（表記統合）</div><div class="worker-chart-wrap" id="worker-other-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">直収（M列=直収）</div><div class="worker-chart-wrap" id="worker-direct-bars"></div></div></div>`;
     }
     const hero = document.getElementById('worker-selected-hero');
     const summary = document.getElementById('worker-detail-summary');
@@ -253,36 +266,43 @@
       if (summary) summary.innerHTML = '<span>ランキング行をクリックすると内訳が表示されます</span>';
       renderBarList('worker-size-bars', [], '件');
       renderBarList('worker-other-bars', [], '件');
+      renderBarList('worker-direct-bars', [], '件');
       return;
     }
-    const split = splitWorks(row.works);
+    const split = splitWorks(row.chartWorks);
+    const directSplit = splitWorks(row.directWorks);
     const sizeTotal = split.size.reduce((s,x)=>s+num(x.count),0);
     const otherTotal = split.other.reduce((s,x)=>s+num(x.count),0);
-    if (hero) hero.innerHTML = `<div class="worker-selected-name">${esc(row.label)}</div><div class="worker-selected-meta">配送 ${fmt(row.count)}件 ｜ 稼働 ${row.workDayCount ? fmt(row.workDayCount) : '—'}日 ｜ 平均 ${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}件/日 ｜ ${row.workDayCount ? fmtK(row.avgSalesPerWorkDay) : '—'}千円/日</div>`;
+    const directTotal = directSplit.size.reduce((s,x)=>s+num(x.count),0) + directSplit.other.reduce((s,x)=>s+num(x.count),0);
+    if (hero) hero.innerHTML = `<div class="worker-selected-name">${esc(row.label)}</div><div class="worker-selected-meta">配送 ${fmt(row.count)}件 ｜ 稼働 ${row.workDayCount ? fmt(row.workDayCount) : '—'}日 ｜ 平均 ${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}件/日 ｜ 売上 ${row.workDayCount ? fmtK(row.avgSalesPerWorkDay) : '—'}千円/日 ｜ 直収 ${row.workDayCount ? fmtK(row.avgDirectPerWorkDay) : '—'}千円/日</div>`;
     if (summary) summary.innerHTML = `
       <span><strong>${esc(row.label)}</strong></span>
       <span>配送件数：<strong>${fmt(row.count)}</strong>件</span>
       <span>稼働：<strong>${row.workDayCount ? fmt(row.workDayCount) : '—'}</strong>日</span>
       <span>平均件数/日：<strong>${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}</strong>件</span>
-      <span>平均売上/日：<strong>${row.workDayCount ? fmtK(row.avgSalesPerWorkDay) : '—'}</strong>千円</span>
-      <span>金額：<strong>${fmtK(row.amount)}</strong>千</span>
-      <span>サイズ系：<strong>${fmt(sizeTotal)}</strong>件</span><span>その他：<strong>${fmt(otherTotal)}</strong>件</span>`;
+      <span>売上/日：<strong>${row.workDayCount ? fmtK(row.avgSalesPerWorkDay) : '—'}</strong>千円</span>
+      <span>直収/日：<strong>${row.workDayCount ? fmtK(row.avgDirectPerWorkDay) : '—'}</strong>千円</span>
+      <span>合計：<strong>${fmtK(row.amount)}</strong>千</span>
+      <span>売上：<strong>${fmtK(row.salesAmount)}</strong>千</span>
+      <span>直収：<strong>${fmtK(row.directAmount)}</strong>千</span>
+      <span>サイズ系：<strong>${fmt(sizeTotal)}</strong>件</span><span>その他：<strong>${fmt(otherTotal)}</strong>件</span><span>直収：<strong>${fmt(directTotal)}</strong>件</span>`;
     renderBarList('worker-size-bars', split.size, '件');
     renderBarList('worker-other-bars', split.other, '件');
+    renderBarList('worker-direct-bars', [...directSplit.size, ...directSplit.other].filter(x=>num(x.count)>0), '件');
   }
 
   function renderDetailTable(rows, selectedName){
     const tbody = document.getElementById('f-worker-tbody');
     if (!tbody) return;
     const tableRows = rows.slice(0, 100);
-    tbody.innerHTML = tableRows.map((r,i)=>`<tr class="field-worker-detail-row ${r.label===selectedName?'is-active':''}" onclick="FIELD_WORKER_UI.selectWorker('${jsArg(r.label)}')" style="cursor:pointer"><td><strong>${i+1}. ${esc(r.label)}</strong></td><td class="r">${fmt(r.count)}</td><td class="r">${r.workDayCount?fmt(r.workDayCount):'—'}</td><td class="r">${r.workDayCount?fmt1(r.avgPerWorkDay):'—'}</td><td class="r">${r.workDayCount?fmtK(r.avgSalesPerWorkDay):'—'}</td><td class="r">${fmtK(r.amount)}</td></tr>`).join('');
+    tbody.innerHTML = tableRows.map((r,i)=>`<tr class="field-worker-detail-row ${r.label===selectedName?'is-active':''}" onclick="FIELD_WORKER_UI.selectWorker('${jsArg(r.label)}')" style="cursor:pointer"><td><strong>${i+1}. ${esc(r.label)}</strong></td><td class="r">${fmt(r.count)}</td><td class="r">${r.workDayCount?fmt(r.workDayCount):'—'}</td><td class="r">${r.workDayCount?fmt1(r.avgPerWorkDay):'—'}</td><td class="r">${r.workDayCount?fmtK(r.avgSalesPerWorkDay):'—'}</td><td class="r">${r.workDayCount?fmtK(r.avgDirectPerWorkDay):'—'}</td><td class="r">${fmtK(r.amount)}</td></tr>`).join('');
   }
 
   function ensureDetailHeader(){
     const table = document.getElementById('f-worker-tbody')?.closest('table');
     if (!table) return;
     const thead = table.querySelector('thead tr');
-    if (thead) thead.innerHTML = '<th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">平均件数/日</th><th class="r">平均売上/日</th><th class="r">金額（千円）</th>';
+    if (thead) thead.innerHTML = '<th>作業者</th><th class="r">配送件数</th><th class="r">稼働日</th><th class="r">平均件数/日</th><th class="r">売上/日</th><th class="r">直収/日</th><th class="r">合計売上（千円）</th>';
   }
 
   function render(){
