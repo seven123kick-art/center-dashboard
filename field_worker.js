@@ -152,6 +152,10 @@
     const topRows = rows.slice(0, 50);
 
     box.innerHTML = `
+      <div class="worker-card-intro">
+        <div class="worker-card-main-title">作業者別ランキング</div>
+        <div class="worker-card-sub-title">配送件数・平均件数/日・平均売上/日を比較</div>
+      </div>
       <div class="scroll-x">
         <table class="tbl field-worker-ranking-table">
           <thead><tr>
@@ -209,7 +213,24 @@
       .work-break-track{height:12px;background:#e5e7eb;border-radius:999px;overflow:hidden}
       .work-break-fill{height:100%;background:#1a4d7c;border-radius:999px}
       .work-break-value{text-align:right;font-size:12px;font-weight:900;color:#0f172a;white-space:nowrap}
-      @media(max-width:1200px){.worker-chart-grid{grid-template-columns:1fr}.worker-chart-card{min-height:unset}}
+      .worker-card-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:0 0 12px;padding:2px 0 10px;border-bottom:1px solid #edf2f7}
+      .worker-card-main-title{font-size:16px;font-weight:900;color:#0f172a;letter-spacing:.02em}
+      .worker-card-sub-title{font-size:12px;font-weight:700;color:#64748b}
+      .field-worker-ranking-table th{font-size:12px;color:#334155;background:#f3f6fb}
+      .field-worker-ranking-table td{font-size:13px;padding-top:10px;padding-bottom:10px}
+      .field-worker-ranking-table .field-worker-row.is-active td{background:#eaf3ff !important;border-top:1px solid #bfdbfe;border-bottom:1px solid #bfdbfe}
+      .field-worker-ranking-table .field-worker-row.is-active td:first-child{border-left:4px solid #1a4d7c}
+      .field-worker-ranking-table .field-worker-row{cursor:pointer}
+      .field-worker-ranking-table .field-worker-row:hover td{background:#f8fbff}
+      .rank-badge{display:inline-flex;align-items:center;justify-content:center;min-width:25px;height:25px;border-radius:999px;background:#e5eef9;color:#1a4d7c;font-weight:900}
+      .field-worker-row.is-active .rank-badge{background:#1a4d7c;color:#fff}
+      .worker-selected-hero{border:1px solid #bfdbfe;background:linear-gradient(135deg,#eff6ff,#ffffff);border-radius:14px;padding:14px 16px;margin-bottom:12px}
+      .worker-selected-name{font-size:20px;font-weight:900;color:#0f172a;line-height:1.25}
+      .worker-selected-meta{font-size:12px;font-weight:800;color:#475569;margin-top:6px}
+      .worker-detail-summary span{font-size:12px;font-weight:800}
+      .worker-chart-title{font-size:14px}
+      .work-break-label,.work-break-value{font-size:13px}
+      @media(max-width:1200px){.worker-chart-grid{grid-template-columns:1fr}.worker-chart-card{min-height:unset}.worker-card-intro{align-items:flex-start;flex-direction:column}}
     `;
     document.head.appendChild(style);
   }
@@ -217,17 +238,19 @@
   function renderWorkerDetail(row){
     ensureWorkerChartStyles();
     const titleEl = document.querySelector('#view-field-worker .grid2 .card:nth-child(2) .card-title');
-    if (titleEl) titleEl.textContent = row ? `作業内容内訳：${row.label}` : '作業者別　作業内容内訳';
+    if (titleEl) titleEl.textContent = row ? `選択中の作業者：${row.label}` : '選択中の作業者';
     const oldCanvas = document.getElementById('c-worker-content');
     const body = oldCanvas ? oldCanvas.parentElement : document.querySelector('#view-field-worker .grid2 .card:nth-child(2) .card-body');
     if (!body) return;
     if (!document.getElementById('worker-size-bars') || !document.getElementById('worker-other-bars')) {
       body.style.height = 'auto'; body.style.position = 'relative';
-      body.innerHTML = `<div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系（①〜⑦）</div><div class="worker-chart-wrap" id="worker-size-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他（表記統合）</div><div class="worker-chart-wrap" id="worker-other-bars"></div></div></div>`;
+      body.innerHTML = `<div class="worker-selected-hero" id="worker-selected-hero"></div><div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系（①〜⑦）</div><div class="worker-chart-wrap" id="worker-size-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他（表記統合）</div><div class="worker-chart-wrap" id="worker-other-bars"></div></div></div>`;
     }
+    const hero = document.getElementById('worker-selected-hero');
     const summary = document.getElementById('worker-detail-summary');
     if (!row) {
-      if (summary) summary.innerHTML = '<span>作業者を選択してください</span>';
+      if (hero) hero.innerHTML = '<div class="worker-selected-name">作業者を選択してください</div>';
+      if (summary) summary.innerHTML = '<span>ランキング行をクリックすると内訳が表示されます</span>';
       renderBarList('worker-size-bars', [], '件');
       renderBarList('worker-other-bars', [], '件');
       return;
@@ -235,6 +258,7 @@
     const split = splitWorks(row.works);
     const sizeTotal = split.size.reduce((s,x)=>s+num(x.count),0);
     const otherTotal = split.other.reduce((s,x)=>s+num(x.count),0);
+    if (hero) hero.innerHTML = `<div class="worker-selected-name">${esc(row.label)}</div><div class="worker-selected-meta">配送 ${fmt(row.count)}件 ｜ 稼働 ${row.workDayCount ? fmt(row.workDayCount) : '—'}日 ｜ 平均 ${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}件/日 ｜ ${row.workDayCount ? fmtK(row.avgSalesPerWorkDay) : '—'}千円/日</div>`;
     if (summary) summary.innerHTML = `
       <span><strong>${esc(row.label)}</strong></span>
       <span>配送件数：<strong>${fmt(row.count)}</strong>件</span>
