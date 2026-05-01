@@ -115,7 +115,10 @@
       note = document.createElement('div');
       note.id = 'worker-amount-note';
       note.style.cssText = 'margin:-4px 0 14px;color:#64748b;font-size:12px;line-height:1.6;padding:0 4px';
-      if (selector && selector.parentNode) selector.parentNode.insertBefore(note, selector.nextSibling);
+      const view = document.getElementById('view-field-worker');
+if (view && view.firstChild) {
+  view.insertBefore(note, view.firstChild);
+}
       else view.insertBefore(note, view.firstChild);
     }
     note.innerHTML = '※作業者分析の金額は、作業者CSVから幹線料金を除外して表示しています。';
