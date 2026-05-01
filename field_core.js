@@ -1,5 +1,5 @@
 /* =====================================================================
-   経営管理システム field.js
+   経営管理システム field_core.js
    2026-05-01
    ・app.jsから現場分析（作業者・商品住所・エリア）を安全分割
    ・CSV読込基礎 / STATE / STORE / CLOUD / 共通関数はapp.js側を使用
@@ -90,7 +90,7 @@ IMPORT.deleteFieldData = function(ym) {
 (function(){
   'use strict';
 
-  const FIELD_REBUILD_VERSION = 'field-csv-rebuild-single-worker-20260501';
+  const FIELD_REBUILD_VERSION = 'field-csv-rebuild-20260429';
   const MONTHS = ['04','05','06','07','08','09','10','11','12','01','02','03'];
 
   function safeArray(v){ return Array.isArray(v) ? v : []; }
@@ -228,15 +228,34 @@ IMPORT.deleteFieldData = function(ym) {
     return head;
   }
 
+  function normalizeSlipNo(v){
+    const raw = clean(v).replace(/\.0$/,'');
+    if (!raw) return '';
+    // 原票番号は数値化されるCSVもあるため、数字だけなら先頭0差を吸収する。
+    if (/^\d+$/.test(raw)) return raw.replace(/^0+/, '') || '0';
+    return raw;
+  }
+
+  function normalizeWorkLabel(v){
+    return clean(v).replace(/[\s　]/g,'');
+  }
+  function isKansenWorkerLabel(label){
+    const s = normalizeWorkLabel(label);
+    return /幹線|幹線料|中継|中継料/.test(s);
+  }
+  function isSizeWorkerLabel(label){
+    const s = normalizeWorkLabel(label);
+    return /サイズ|大型|中型|小型/.test(s);
+  }
   function isExcludedWorkerAmountLabel(label){
-    const s = clean(label);
-    // 作業者分析の金額は、現場収支を見るために「サイズ系」「幹線料」を除外する。
-    // 件数・作業内容内訳には残す（作業実績としては必要なため）。
-    return /サイズ|幹線料|幹線/.test(s);
+    const s = normalizeWorkLabel(label);
+    // 作業者分析の金額は、車両・作業者の実態収支を見るため、サイズ系と幹線料系を除外する。
+    // 件数は原票番号ユニークで残し、作業内訳は「幹線料系を除いた明細行」で表示する。
+    return /サイズ|大型|中型|小型|幹線|幹線料|中継|中継料/.test(s);
   }
 
   function parseWorkerCsvRows(rows, fileName){
-    if (!rows.length) return { rowCount:0, lineRowCount:0, workerCount:0, workers:{} };
+    if (!rows.length) return { rowCount:0, lineRowCount:0, workerCount:0, workers:{}, uniqueSlipCount:0 };
     const header = rows[0] || [];
     const body = rows.slice(1).filter(r => r && r.some(c => clean(c)));
 
@@ -248,25 +267,37 @@ IMPORT.deleteFieldData = function(ym) {
 
     const workers = {};
     const allWorkDays = new Set();
+    const allSlips = new Set();
+    const globalChartWorks = {};
+    let includedAmountTotal = 0;
+    let excludedAmountTotal = 0;
+    let excludedLineRows = 0;
 
     body.forEach((r, i) => {
       const name = clean(r[workerIdx]) || '未設定';
       const workDate = normalizeWorkDate(r[dateIdx]);
-      const slipRaw = slipIdx >= 0 ? clean(r[slipIdx]) : '';
+      const slipRaw = slipIdx >= 0 ? normalizeSlipNo(r[slipIdx]) : '';
       const slipKey = slipRaw || `__row_${i}`;
+      const workLabel = workIdx >= 0 ? (clean(r[workIdx]) || '未設定') : '未設定';
+      const amountVal = amountIdx >= 0 ? yen(r[amountIdx]) : 0;
+      const amountExcluded = isExcludedWorkerAmountLabel(workLabel);
+      const lineExcludedForChart = isKansenWorkerLabel(workLabel);
 
       if (!workers[name]) {
         workers[name] = {
           name,
-          rows:0,
-          lineRows:0,
-          amount:0,              // サイズ・幹線料を除外した参考売上
-          includedAmount:0,      // amountと同じ（内訳確認用）
-          excludedAmount:0,      // サイズ・幹線料として除外した金額
-          works:{},
+          rows:0,                    // 作業者別の原票番号ユニーク件数
+          lineRows:0,                // 明細行数
+          amount:0,                  // サイズ系・幹線料系を除外した金額
+          includedAmount:0,
+          excludedAmount:0,
+          excludedLineRows:0,
+          works:{},                  // 全作業内容（明細行ベース）
+          chartWorks:{},             // グラフ用：幹線料系を除外した作業内容
+          includedWorks:{},          // 金額対象の作業内容
+          excludedWorks:{},          // 金額除外対象の作業内容
           workDays:[],
-          _slipSet:{},
-          _amountDedup:{},
+          slips:{},                  // 原票番号 -> { slip,date,amount,includedAmount,excludedAmount,works,chartWorks }
           slipColumnMissing: slipIdx < 0
         };
       }
@@ -274,35 +305,44 @@ IMPORT.deleteFieldData = function(ym) {
       const worker = workers[name];
       worker.lineRows += 1;
 
-      if (!worker._slipSet[slipKey]) {
-        worker._slipSet[slipKey] = true;
+      if (!worker.slips[slipKey]) {
+        worker.slips[slipKey] = { slip:slipKey, date:workDate, amount:0, includedAmount:0, excludedAmount:0, works:{}, chartWorks:{} };
         worker.rows += 1;
       }
+      const slipObj = worker.slips[slipKey];
 
-      if (amountIdx >= 0) {
-        const workLabelForAmount = workIdx >= 0 ? (clean(r[workIdx]) || '未設定') : '未設定';
-        const amountVal = yen(r[amountIdx]);
-        const amountDedupKey = `${slipKey}::${workLabelForAmount}::${clean(r[amountIdx])}`;
-        if (!worker._amountDedup[amountDedupKey]) {
-          worker._amountDedup[amountDedupKey] = true;
-          if (isExcludedWorkerAmountLabel(workLabelForAmount)) {
-            worker.excludedAmount = (worker.excludedAmount || 0) + amountVal;
-          } else {
-            worker.amount += amountVal;
-            worker.includedAmount = (worker.includedAmount || 0) + amountVal;
-          }
-        }
+      slipObj.works[workLabel] = (slipObj.works[workLabel] || 0) + 1;
+      worker.works[workLabel] = (worker.works[workLabel] || 0) + 1;
+
+      if (lineExcludedForChart) {
+        worker.excludedLineRows += 1;
+        excludedLineRows += 1;
+      } else {
+        slipObj.chartWorks[workLabel] = (slipObj.chartWorks[workLabel] || 0) + 1;
+        worker.chartWorks[workLabel] = (worker.chartWorks[workLabel] || 0) + 1;
+        globalChartWorks[workLabel] = (globalChartWorks[workLabel] || 0) + 1;
+      }
+
+      // 金額は明細行の金額をそのまま使う。ただし、サイズ系・幹線料系は集計前に完全除外する。
+      if (amountExcluded) {
+        worker.excludedAmount += amountVal;
+        slipObj.excludedAmount += amountVal;
+        worker.excludedWorks[workLabel] = (worker.excludedWorks[workLabel] || 0) + 1;
+        excludedAmountTotal += amountVal;
+      } else {
+        worker.amount += amountVal;
+        worker.includedAmount += amountVal;
+        slipObj.amount += amountVal;
+        slipObj.includedAmount += amountVal;
+        worker.includedWorks[workLabel] = (worker.includedWorks[workLabel] || 0) + 1;
+        includedAmountTotal += amountVal;
       }
 
       if (workDate) {
         if (!worker.workDays.includes(workDate)) worker.workDays.push(workDate);
         allWorkDays.add(workDate);
       }
-
-      if (workIdx >= 0) {
-        const w = clean(r[workIdx]) || '未設定';
-        worker.works[w] = (worker.works[w] || 0) + 1;
-      }
+      if (slipRaw) allSlips.add(slipRaw);
     });
 
     Object.values(workers).forEach(w => {
@@ -310,8 +350,7 @@ IMPORT.deleteFieldData = function(ym) {
       w.workDayCount = w.workDays.length;
       w.avgPerWorkDay = w.workDayCount > 0 ? w.rows / w.workDayCount : 0;
       w.slipCount = w.rows;
-      delete w._slipSet;
-      delete w._amountDedup;
+      w.slipList = Object.keys(w.slips || {}).filter(k => !k.startsWith('__row_'));
     });
 
     const totalSlipCount = Object.values(workers).reduce((sum, w) => sum + (Number(w.rows) || 0), 0);
@@ -319,6 +358,7 @@ IMPORT.deleteFieldData = function(ym) {
     return {
       rowCount: totalSlipCount,
       lineRowCount: body.length,
+      uniqueSlipCount: allSlips.size,
       workerCount: Object.keys(workers).length,
       workers,
       sourceFileName:fileName,
@@ -326,7 +366,12 @@ IMPORT.deleteFieldData = function(ym) {
       workerColumnIndex: workerIdx,
       slipColumnIndex: slipIdx,
       countRule: slipIdx >= 0 ? '作業者別に原票番号をユニーク化' : '原票番号列未検出のため行数で代替',
-      amountRule: '作業者CSV金額から「サイズ」「幹線料」「幹線」表記行を除外',
+      amountRule: '作業者CSV金額から、サイズ系・幹線料系を集計前に除外',
+      chartRule: '作業内容グラフは幹線料系を除外し、サイズ系とその他に分割',
+      includedAmount: includedAmountTotal,
+      excludedAmount: excludedAmountTotal,
+      excludedLineRows,
+      chartWorks: globalChartWorks,
       workDays: Array.from(allWorkDays).sort(),
       workDayCount: allWorkDays.size,
       avgPerWorkDay: allWorkDays.size > 0 ? totalSlipCount / allWorkDays.size : 0
@@ -489,25 +534,102 @@ IMPORT.deleteFieldData = function(ym) {
   async function importWorker(files){
     ensureState(); setupYmSelects();
     const ym = selectedWorkerYM();
-    let combined = { rowCount:0, workerCount:0, workers:{}, files:[] };
+    let combined = {
+      rowCount:0,
+      lineRowCount:0,
+      uniqueSlipCount:0,
+      workerCount:0,
+      workers:{},
+      workDays:[],
+      files:[],
+      countRule:'作業者別に原票番号をユニーク化',
+      amountRule:'作業者CSV金額から、サイズ系・幹線料系を集計前に除外',
+      chartRule:'作業内容グラフは幹線料系を除外し、サイズ系とその他に分割',
+      includedAmount:0,
+      excludedAmount:0,
+      excludedLineRows:0,
+      chartWorks:{}
+    };
+    const allDays = new Set();
+    const allSlips = new Set();
+
     for (const file of Array.from(files || [])) {
       const text = await readCsvFile(file);
       const parsed = parseWorkerCsvRows(csvRowsFromText(text), file.name);
-      combined.rowCount += parsed.rowCount;
+      combined.lineRowCount += parsed.lineRowCount || 0;
+      combined.includedAmount += Number(parsed.includedAmount || 0);
+      combined.excludedAmount += Number(parsed.excludedAmount || 0);
+      combined.excludedLineRows += Number(parsed.excludedLineRows || 0);
       combined.files.push(file.name);
+      (parsed.workDays || []).forEach(d => allDays.add(d));
+      Object.entries(parsed.chartWorks || {}).forEach(([k,v]) => combined.chartWorks[k] = (combined.chartWorks[k] || 0) + Number(v || 0));
+
       Object.values(parsed.workers || {}).forEach(w => {
-        if (!combined.workers[w.name]) combined.workers[w.name] = { name:w.name, rows:0, amount:0, works:{} };
-        combined.workers[w.name].rows += w.rows;
-        combined.workers[w.name].amount += w.amount;
-        Object.entries(w.works || {}).forEach(([k,v]) => combined.workers[w.name].works[k] = (combined.workers[w.name].works[k] || 0) + v);
+        if (!combined.workers[w.name]) {
+          combined.workers[w.name] = {
+            name:w.name,
+            rows:0,
+            lineRows:0,
+            amount:0,
+            includedAmount:0,
+            excludedAmount:0,
+            excludedLineRows:0,
+            works:{},
+            chartWorks:{},
+            includedWorks:{},
+            excludedWorks:{},
+            workDays:[],
+            slips:{},
+            slipList:[]
+          };
+        }
+        const cw = combined.workers[w.name];
+        cw.lineRows += Number(w.lineRows || 0);
+        cw.excludedLineRows += Number(w.excludedLineRows || 0);
+        (w.workDays || []).forEach(d => { if (!cw.workDays.includes(d)) cw.workDays.push(d); });
+        Object.entries(w.works || {}).forEach(([k,v]) => cw.works[k] = (cw.works[k] || 0) + Number(v || 0));
+        Object.entries(w.chartWorks || {}).forEach(([k,v]) => cw.chartWorks[k] = (cw.chartWorks[k] || 0) + Number(v || 0));
+        Object.entries(w.includedWorks || {}).forEach(([k,v]) => cw.includedWorks[k] = (cw.includedWorks[k] || 0) + Number(v || 0));
+        Object.entries(w.excludedWorks || {}).forEach(([k,v]) => cw.excludedWorks[k] = (cw.excludedWorks[k] || 0) + Number(v || 0));
+
+        Object.entries(w.slips || {}).forEach(([slip, obj]) => {
+          if (!cw.slips[slip]) {
+            cw.slips[slip] = { slip, date:obj.date || '', amount:0, includedAmount:0, excludedAmount:0, works:{}, chartWorks:{} };
+            cw.rows += 1;
+          }
+          cw.slips[slip].amount += Number(obj.amount || 0);
+          cw.slips[slip].includedAmount += Number(obj.includedAmount || obj.amount || 0);
+          cw.slips[slip].excludedAmount += Number(obj.excludedAmount || 0);
+          Object.entries(obj.works || {}).forEach(([k,v]) => cw.slips[slip].works[k] = (cw.slips[slip].works[k] || 0) + Number(v || 0));
+          Object.entries(obj.chartWorks || {}).forEach(([k,v]) => cw.slips[slip].chartWorks[k] = (cw.slips[slip].chartWorks[k] || 0) + Number(v || 0));
+          if (slip && !String(slip).startsWith('__row_')) allSlips.add(slip);
+        });
       });
     }
+
+    Object.values(combined.workers).forEach(w => {
+      w.workDays = Array.from(new Set(w.workDays || [])).sort();
+      w.workDayCount = w.workDays.length;
+      w.slipList = Object.keys(w.slips || {}).filter(k => !k.startsWith('__row_'));
+      w.rows = Object.keys(w.slips || {}).length;
+      w.amount = Object.values(w.slips || {}).reduce((s,x)=>s+Number(x.amount||0),0);
+      w.includedAmount = Object.values(w.slips || {}).reduce((s,x)=>s+Number(x.includedAmount||x.amount||0),0);
+      w.excludedAmount = Object.values(w.slips || {}).reduce((s,x)=>s+Number(x.excludedAmount||0),0);
+      w.avgPerWorkDay = w.workDayCount > 0 ? w.rows / w.workDayCount : 0;
+    });
+    combined.rowCount = Object.values(combined.workers).reduce((s,w)=>s+Number(w.rows||0),0);
+    combined.uniqueSlipCount = allSlips.size;
     combined.workerCount = Object.keys(combined.workers).length;
+    combined.workDays = Array.from(allDays).sort();
+    combined.workDayCount = combined.workDays.length;
+    combined.avgPerWorkDay = combined.workDayCount > 0 ? combined.rowCount / combined.workDayCount : 0;
+    combined.amountMode = '単一CSV：サイズ系・幹線料系除外後';
+
     upsertByYm('workerCsvData', { ym, source:'worker_csv', importedAt:new Date().toISOString(), ...combined });
     STORE.save();
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
     refreshFieldAll();
-    msg(`${ymText(ym)} 作業者別CSVを入替完了：${combined.rowCount.toLocaleString()}行 / 作業者${combined.workerCount.toLocaleString()}名`);
+    msg(`${ymText(ym)} 作業者別CSVを入替完了：配送${combined.rowCount.toLocaleString()}件 / 作業者${combined.workerCount.toLocaleString()}名 / 金額${Math.round(combined.includedAmount/1000).toLocaleString()}千円（除外${Math.round(combined.excludedAmount/1000).toLocaleString()}千円）`);
   }
 
   async function importProduct(files){
@@ -861,6 +983,89 @@ IMPORT.deleteFieldData = function(ym) {
     refreshFieldAll();
     msg(`${ymText(ym)} の${type==='all'?'現場明細':type==='worker'?'作業者CSV':'商品住所CSV'}を削除しました`, 'warn');
   }
+
+  /* 確定CSV 原票番号別売上マップ作成
+     - 作業者CSVは先に入るため、まず速報表示
+     - 確定CSV取込後は、作業者CSVの原票番号と一致した分だけ確定売上へ切替
+     - 確定CSV側に存在しない原票番号は確定売上に含めない（一致率で表示） */
+  (function setupConfirmedSlipSalesPatch(){
+    if (window.__FIELD_CONFIRMED_SLIP_SALES_PATCH_20260501__) return;
+    window.__FIELD_CONFIRMED_SLIP_SALES_PATCH_20260501__ = true;
+
+    function detectConfirmedColumns(rows){
+      const header = rows && rows.length ? rows[0] : [];
+      return {
+        accountName: headerIndex(header, ['収支科目名','経費計上先収支科目名','科目名'], 10), // K列
+        amount:      headerIndex(header, ['金額','売上金額','請求金額','合計金額'], 13),       // N列
+        slipNo:      headerIndex(header, ['原票番号','エスライン原票番号','伝票番号','配送番号'], 23), // X列
+        shipperCode: headerIndex(header, ['荷主基本コード','荷主コード','荷主ＣＤ','荷主CD'], 24), // Y列
+        shipperName: headerIndex(header, ['荷主名','荷主名称'], 26) // AA列
+      };
+    }
+
+    function buildConfirmedSlipSalesFromRows(rows){
+      rows = safeArray(rows);
+      if (!rows.length) return { map:{}, count:0, income:0, columns:null };
+      const c = detectConfirmedColumns(rows);
+      const map = {};
+      const body = rows.length > 1 ? rows.slice(1) : rows;
+      body.forEach((row)=>{
+        if (!Array.isArray(row)) return;
+        const account = clean(row[c.accountName]);
+        if (!account || !account.includes('収入')) return;
+        const slip = normalizeSlipNo(row[c.slipNo]);
+        if (!slip) return;
+        const amount = yen(row[c.amount]);
+        if (!map[slip]) {
+          map[slip] = { slip, income:0, rows:0, shipperCode:clean(row[c.shipperCode]), shipperName:clean(row[c.shipperName]) };
+        }
+        map[slip].income += amount;
+        map[slip].rows += 1;
+      });
+      const values = Object.values(map);
+      return {
+        map,
+        count: values.length,
+        income: values.reduce((s,x)=>s+Number(x.income||0),0),
+        columns:c,
+        rule:'確定CSVの収入行のみ／X列原票番号別にN列金額を合算'
+      };
+    }
+
+    const oldParseSKDL = CSV.parseSKDL.bind(CSV);
+    CSV.parseSKDL = function(text, monthCol){
+      const result = oldParseSKDL(text, monthCol);
+      if (!result) return result;
+      try {
+        const rows = this.toRows(text);
+        const built = buildConfirmedSlipSalesFromRows(rows);
+        result._confirmedSlipSales = built.map;
+        result._confirmedSlipSalesCount = built.count;
+        result._confirmedSlipSalesIncome = built.income;
+        result._confirmedSlipSalesColumns = built.columns;
+        result._confirmedSlipSalesRule = built.rule;
+      } catch(e) {
+        result._confirmedSlipSales = {};
+        result._confirmedSlipSalesError = e.message;
+      }
+      return result;
+    };
+
+    const oldProcessDataset = processDataset;
+    processDataset = function(ym, type, rows){
+      const ds = oldProcessDataset(ym, type, rows);
+      if (rows && rows._confirmedSlipSales) {
+        ds.confirmedSlipSales = rows._confirmedSlipSales;
+        ds.confirmedSlipSalesCount = rows._confirmedSlipSalesCount || 0;
+        ds.confirmedSlipSalesIncome = rows._confirmedSlipSalesIncome || 0;
+        ds.confirmedSlipSalesColumns = rows._confirmedSlipSalesColumns || null;
+        ds.confirmedSlipSalesRule = rows._confirmedSlipSalesRule || '';
+        ds.confirmedSlipSalesError = rows._confirmedSlipSalesError || '';
+      }
+      return ds;
+    };
+  })();
+
   window.FIELD_CSV_REBUILD = { refresh:refreshFieldAll, deleteMonthType, importWorker, importProduct, renderWorker, renderContent, renderProduct, renderMap, renderDataList };
   window.renderFieldDataList2 = renderDataList;
   if (typeof DATA_RESET !== 'undefined') DATA_RESET.clearFieldAll = function(){
