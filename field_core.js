@@ -249,9 +249,9 @@ IMPORT.deleteFieldData = function(ym) {
   }
   function isExcludedWorkerAmountLabel(label){
     const s = normalizeWorkLabel(label);
-    // 作業者分析の金額は、車両・作業者の実態収支を見るため、サイズ系と幹線料系を除外する。
-    // 件数は原票番号ユニークで残し、作業内訳は「幹線料系を除いた明細行」で表示する。
-    return /サイズ|大型|中型|小型|幹線|幹線料|中継|中継料/.test(s);
+    // 作業者分析の金額は、車両・作業者の実態収支を見るため、幹線料系だけを除外する。
+    // サイズ配送料は売上対象として残す。件数は原票番号ユニークで残し、作業内訳は「幹線料系を除いた明細行」で表示する。
+    return /幹線|幹線料|中継|中継料/.test(s);
   }
 
   function parseWorkerCsvRows(rows, fileName){
@@ -288,7 +288,7 @@ IMPORT.deleteFieldData = function(ym) {
           name,
           rows:0,                    // 作業者別の原票番号ユニーク件数
           lineRows:0,                // 明細行数
-          amount:0,                  // サイズ系・幹線料系を除外した金額
+          amount:0,                  // 幹線料系を除外した金額
           includedAmount:0,
           excludedAmount:0,
           excludedLineRows:0,
@@ -323,7 +323,7 @@ IMPORT.deleteFieldData = function(ym) {
         globalChartWorks[workLabel] = (globalChartWorks[workLabel] || 0) + 1;
       }
 
-      // 金額は明細行の金額をそのまま使う。ただし、サイズ系・幹線料系は集計前に完全除外する。
+      // 金額は明細行の金額をそのまま使う。ただし、幹線料系は集計前に完全除外する。サイズ配送料は対象に残す。
       if (amountExcluded) {
         worker.excludedAmount += amountVal;
         slipObj.excludedAmount += amountVal;
@@ -366,7 +366,7 @@ IMPORT.deleteFieldData = function(ym) {
       workerColumnIndex: workerIdx,
       slipColumnIndex: slipIdx,
       countRule: slipIdx >= 0 ? '作業者別に原票番号をユニーク化' : '原票番号列未検出のため行数で代替',
-      amountRule: '作業者CSV金額から、サイズ系・幹線料系を集計前に除外',
+      amountRule: '作業者CSV金額から、幹線料系だけを集計前に除外（サイズ配送料は対象）',
       chartRule: '作業内容グラフは幹線料系を除外し、サイズ系とその他に分割',
       includedAmount: includedAmountTotal,
       excludedAmount: excludedAmountTotal,
@@ -543,7 +543,7 @@ IMPORT.deleteFieldData = function(ym) {
       workDays:[],
       files:[],
       countRule:'作業者別に原票番号をユニーク化',
-      amountRule:'作業者CSV金額から、サイズ系・幹線料系を集計前に除外',
+      amountRule:'作業者CSV金額から、幹線料系だけを集計前に除外（サイズ配送料は対象）',
       chartRule:'作業内容グラフは幹線料系を除外し、サイズ系とその他に分割',
       includedAmount:0,
       excludedAmount:0,
@@ -623,7 +623,7 @@ IMPORT.deleteFieldData = function(ym) {
     combined.workDays = Array.from(allDays).sort();
     combined.workDayCount = combined.workDays.length;
     combined.avgPerWorkDay = combined.workDayCount > 0 ? combined.rowCount / combined.workDayCount : 0;
-    combined.amountMode = '単一CSV：サイズ系・幹線料系除外後';
+    combined.amountMode = '単一CSV：幹線料系除外後';
 
     upsertByYm('workerCsvData', { ym, source:'worker_csv', importedAt:new Date().toISOString(), ...combined });
     STORE.save();
