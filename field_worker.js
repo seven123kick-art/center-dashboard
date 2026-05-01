@@ -135,13 +135,15 @@
     const workDayCount = num(rec.workDayCount || safeArray(rec.workDays).length || 0);
     const avgCount = workDayCount > 0 ? totalCount / workDayCount : 0;
     const avgTotalSales = workDayCount > 0 ? totalAmount / workDayCount : 0;
+    const avgSales = workDayCount > 0 ? salesAmount / workDayCount : 0;
+    const avgDirect = workDayCount > 0 ? directAmount / workDayCount : 0;
     kpi.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
     kpi.innerHTML = `
       <div class="kpi-card accent-navy"><div class="kpi-label">対象月</div><div class="kpi-value">${esc(ymText(ym))}</div></div>
       <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">平均件数/日</div><div class="kpi-value">${workDayCount ? fmt1(avgCount) : '—'}件</div></div>
-      <div class="kpi-card accent-amber"><div class="kpi-label">合計売上</div><div class="kpi-value">${fmtK(totalAmount)}千円</div><div class="kpi-sub-row"><span class="kpi-sub">売上 ${fmtK(salesAmount)}千 / 直収 ${fmtK(directAmount)}千</span><span class="kpi-sub">平均 ${fmtK(avgTotalSales)}千円/日</span></div></div>`;
+      <div class="kpi-card accent-amber"><div class="kpi-label">平均売上/日</div><div class="kpi-value">${workDayCount ? fmtK(avgTotalSales) : '—'}千円</div><div class="kpi-sub-row"><span class="kpi-sub">売上 ${fmtK(avgSales)}千 ＋ 直収 ${fmtK(avgDirect)}千</span><span class="kpi-sub">月間 ${fmtK(totalAmount)}千円</span></div></div>`;
   }
 
   function renderStatusNotice(){
@@ -233,7 +235,14 @@
       .worker-selected-hero{border:2px solid #2563eb;background:linear-gradient(135deg,#eff6ff,#ffffff);border-radius:16px;padding:16px 18px;margin-bottom:12px;box-shadow:0 10px 22px rgba(37,99,235,.10)}
       .worker-selected-name{font-size:24px;font-weight:900;color:#0f172a;line-height:1.25}
       .worker-selected-meta{font-size:13px;font-weight:900;color:#475569;margin-top:8px;line-height:1.8}
-      @media(max-width:1280px){.worker-chart-grid{grid-template-columns:1fr}.worker-chart-card{min-height:unset}.worker-card-intro{align-items:flex-start;flex-direction:column}}
+      .worker-day-sales-box{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 10px}
+      .worker-day-sales-main{grid-column:1/-1;border:1px solid #bfdbfe;background:#eff6ff;border-radius:14px;padding:12px 14px}
+      .worker-day-sales-label{font-size:12px;font-weight:900;color:#475569;margin-bottom:4px}
+      .worker-day-sales-value{font-size:26px;font-weight:950;color:#0f172a;line-height:1.15}
+      .worker-day-sales-sub{font-size:12px;font-weight:800;color:#64748b;margin-top:5px}
+      .worker-day-sales-mini{border:1px solid #e2e8f0;background:#fff;border-radius:12px;padding:10px 12px}
+      .worker-day-sales-mini .worker-day-sales-value{font-size:18px;color:#1f2937}
+      @media(max-width:1280px){.worker-chart-grid{grid-template-columns:1fr}.worker-chart-card{min-height:unset}.worker-card-intro{align-items:flex-start;flex-direction:column}.worker-day-sales-box{grid-template-columns:1fr}}
     `;
     document.head.appendChild(style);
   }
@@ -265,11 +274,29 @@
     const otherTotal = split.other.reduce((s,x)=>s+num(x.count),0);
     const directItems = [...directSplit.size, ...directSplit.other].filter(x=>num(x.count)>0);
     const directTotal = directItems.reduce((s,x)=>s+num(x.count),0);
-    if (hero) hero.innerHTML = `<div class="worker-selected-name">${esc(row.label)}</div><div class="worker-selected-meta">配送 ${fmt(row.count)}件 ｜ 稼働 ${row.workDayCount ? fmt(row.workDayCount) : '—'}日 ｜ 平均 ${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}件/日 ｜ 売上 ${row.workDayCount ? fmtK(row.avgSalesPerWorkDay) : '—'}千円/日 ｜ 直収 ${row.workDayCount ? fmtK(row.avgDirectPerWorkDay) : '—'}千円/日</div>`;
+    const totalPerDay = row.workDayCount ? row.amount / row.workDayCount : 0;
+    if (hero) hero.innerHTML = `
+      <div class="worker-selected-name">${esc(row.label)}</div>
+      <div class="worker-selected-meta">配送 ${fmt(row.count)}件 ｜ 稼働 ${row.workDayCount ? fmt(row.workDayCount) : '—'}日 ｜ 平均件数 ${row.workDayCount ? fmt1(row.avgPerWorkDay) : '—'}件/日</div>
+      <div class="worker-day-sales-box">
+        <div class="worker-day-sales-main">
+          <div class="worker-day-sales-label">1日あたり合計売上</div>
+          <div class="worker-day-sales-value">${row.workDayCount ? fmtK(totalPerDay) : '—'}千円</div>
+          <div class="worker-day-sales-sub">売上 ${row.workDayCount ? fmtK(row.avgSalesPerWorkDay) : '—'}千円 ＋ 直収 ${row.workDayCount ? fmtK(row.avgDirectPerWorkDay) : '—'}千円</div>
+        </div>
+        <div class="worker-day-sales-mini">
+          <div class="worker-day-sales-label">月間売上</div>
+          <div class="worker-day-sales-value">${fmtK(row.salesAmount)}千円</div>
+        </div>
+        <div class="worker-day-sales-mini">
+          <div class="worker-day-sales-label">月間直収</div>
+          <div class="worker-day-sales-value">${fmtK(row.directAmount)}千円</div>
+        </div>
+      </div>`;
     if (summary) summary.innerHTML = `
-      <span>合計：<strong>${fmtK(row.amount)}</strong>千</span>
-      <span>売上：<strong>${fmtK(row.salesAmount)}</strong>千</span>
-      <span>直収：<strong>${fmtK(row.directAmount)}</strong>千</span>
+      <span>月間合計：<strong>${fmtK(row.amount)}</strong>千円</span>
+      <span>配送件数：<strong>${fmt(row.count)}</strong>件</span>
+      <span>稼働：<strong>${row.workDayCount ? fmt(row.workDayCount) : '—'}</strong>日</span>
       <span>サイズ系：<strong>${fmt(sizeTotal)}</strong>件</span>
       <span>その他：<strong>${fmt(otherTotal)}</strong>件</span>
       <span>直収：<strong>${fmt(directTotal)}</strong>件</span>`;
