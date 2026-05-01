@@ -1388,7 +1388,10 @@ function renderCommonPeriodSelector(viewKey, opt={}) {
   const view = document.getElementById('view-' + viewKey);
   if (!view) return;
 
-  const useMonth = opt.useMonth !== false;
+  // 年度推移・年度指標系は「対象年度」だけに統一する。
+  // 月を選んでも年度内の先月まで表示されるように見える誤解を防ぐため。
+  const yearOnlyViews = new Set(['trend','indicators','annual']);
+  const useMonth = opt.useMonth !== false && !yearOnlyViews.has(viewKey);
   const boxId = `${viewKey}-period-selector`;
   let box = document.getElementById(boxId);
   if (!box) {
@@ -1416,7 +1419,7 @@ function renderCommonPeriodSelector(viewKey, opt={}) {
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
       <div>
         <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
-        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / ${useMonth?'年度・月を共通管理':'年度累計表示'}</div>
+        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / ${useMonth?'年度・月を共通管理':'年度内推移を表示'}</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
@@ -2019,11 +2022,12 @@ function renderIndicators() {
   const view = document.getElementById('view-indicators');
   if (!view) return;
 
-  const ds = selectedDatasetInSelectedFiscalYear();
   const fyList = datasetsForSelectedFiscalYear();
+  const ds = latestDatasetInSelectedFiscalYear();
 
-  if (!ds) {
+  if (!ds || !fyList.length) {
     view.innerHTML = '<div class="msg msg-info">選択年度のデータがありません</div>';
+    renderCommonPeriodSelector('indicators', {useMonth:false});
     return;
   }
 
@@ -2069,7 +2073,7 @@ function renderIndicators() {
     </div>
 
     <div class="grid2" style="margin-bottom:14px">
-      <div class="card"><div class="card-header"><span class="card-title">固定費 / 変動費　構成（選択月）</span></div>
+      <div class="card"><div class="card-header"><span class="card-title">固定費 / 変動費　構成（年度最新月）</span></div>
         <div class="card-body">
           ${gauge(ds.fixedRate, 50, 65, '%', true)}
           ${gauge(ds.variableRate, T.variableRateMax, 90, '%', true)}
@@ -2077,7 +2081,7 @@ function renderIndicators() {
             固定費：${fmtK(ds.fixedCost)}千円 / 変動費：${fmtK(ds.varCost)}千円
           </div>
         </div></div>
-      <div class="card"><div class="card-header"><span class="card-title">損益分岐点　簡易判定（選択月）</span></div>
+      <div class="card"><div class="card-header"><span class="card-title">損益分岐点　簡易判定（年度最新月）</span></div>
         <div class="card-body">
           <div style="font-size:12px;color:var(--text2);line-height:1.9">
             営業収益：${fmtK(ds.totalIncome)}千円<br>
@@ -2093,7 +2097,7 @@ function renderIndicators() {
       <div class="card-body"><div class="chart-wrap" style="height:220px"><canvas id="c-ind-trend"></canvas></div></div>
     </div>`;
 
-  renderCommonPeriodSelector('indicators');
+  renderCommonPeriodSelector('indicators', {useMonth:false});
 
   CHART_MGR.make('c-ind-trend', {
     type:'line',
