@@ -115,7 +115,7 @@
       note = document.createElement('div');
       note.id = 'worker-amount-note';
       note.style.cssText = 'margin:-4px 0 14px;color:#64748b;font-size:12px;line-height:1.6;padding:0 4px';
-      if (selector && selector.parentNode) selector.parentNode.insertBefore(note, selector.nextSibling);
+      if (selector && selector.parentNode === view) selector.insertAdjacentElement("afterend", note);
       else view.insertBefore(note, view.firstChild);
     }
     note.innerHTML = '※作業者分析の金額は、作業者CSVから幹線料金を除外して表示しています。';
@@ -214,8 +214,8 @@
       .work-break-fill{height:100%;background:#1a4d7c;border-radius:999px}
       .work-break-value{text-align:right;font-size:12px;font-weight:900;color:#0f172a;white-space:nowrap}
       .worker-card-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:0 0 12px;padding:2px 0 10px;border-bottom:1px solid #edf2f7}
-      .worker-card-main-title{font-size:18px;font-weight:900;color:#0f172a;letter-spacing:.02em}
-      .worker-card-sub-title{font-size:13px;font-weight:800;color:#64748b}
+      .worker-card-main-title{font-size:16px;font-weight:900;color:#0f172a;letter-spacing:.02em}
+      .worker-card-sub-title{font-size:12px;font-weight:700;color:#64748b}
       .field-worker-ranking-table th{font-size:12px;color:#334155;background:#f3f6fb}
       .field-worker-ranking-table td{font-size:13px;padding-top:10px;padding-bottom:10px}
       .field-worker-ranking-table .field-worker-row.is-active td{background:#eaf3ff !important;border-top:1px solid #bfdbfe;border-bottom:1px solid #bfdbfe}
@@ -224,9 +224,9 @@
       .field-worker-ranking-table .field-worker-row:hover td{background:#f8fbff}
       .rank-badge{display:inline-flex;align-items:center;justify-content:center;min-width:25px;height:25px;border-radius:999px;background:#e5eef9;color:#1a4d7c;font-weight:900}
       .field-worker-row.is-active .rank-badge{background:#1a4d7c;color:#fff}
-      .worker-selected-hero{border:2px solid #2563eb;border-left:8px solid #1a4d7c;background:linear-gradient(135deg,#eaf3ff 0%,#ffffff 72%);border-radius:16px;padding:18px 20px;margin-bottom:14px;box-shadow:0 10px 24px rgba(26,77,124,.12)}
-      .worker-selected-name{font-size:26px;font-weight:900;color:#0f172a;line-height:1.2;letter-spacing:.02em}
-      .worker-selected-meta{font-size:14px;font-weight:900;color:#334155;margin-top:8px;line-height:1.7}
+      .worker-selected-hero{border:1px solid #bfdbfe;background:linear-gradient(135deg,#eff6ff,#ffffff);border-radius:14px;padding:14px 16px;margin-bottom:12px}
+      .worker-selected-name{font-size:20px;font-weight:900;color:#0f172a;line-height:1.25}
+      .worker-selected-meta{font-size:12px;font-weight:800;color:#475569;margin-top:6px}
       .worker-detail-summary span{font-size:12px;font-weight:800}
       .worker-chart-title{font-size:14px}
       .work-break-label,.work-break-value{font-size:13px}
@@ -238,7 +238,7 @@
   function renderWorkerDetail(row){
     ensureWorkerChartStyles();
     const titleEl = document.querySelector('#view-field-worker .grid2 .card:nth-child(2) .card-title');
-    if (titleEl) titleEl.textContent = '選択中の作業者';
+    if (titleEl) titleEl.textContent = row ? `選択中の作業者：${row.label}` : '選択中の作業者';
     const oldCanvas = document.getElementById('c-worker-content');
     const body = oldCanvas ? oldCanvas.parentElement : document.querySelector('#view-field-worker .grid2 .card:nth-child(2) .card-body');
     if (!body) return;
@@ -286,6 +286,7 @@
   }
 
   function render(){
+    try { if (typeof window.setupFieldCommonSelectors === "function") window.setupFieldCommonSelectors(); } catch(e){}
     const ym = selectedYM();
     const rec = workerRecord(ym);
     const rows = rowsFromRecord(rec);
