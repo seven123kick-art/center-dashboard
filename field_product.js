@@ -68,12 +68,32 @@
     return !!(v && v.classList.contains('active'));
   }
 
+  function ensureCsvState(){
+    if (!window.STATE) window.STATE = {};
+    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
+    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
+
+    // field_core.js は localStorage の mgmt5_<center>_workerCsvData / productAddressData に保存する。
+    // 商品カテゴリ単体で描画するときに STATE 側へまだ反映されていないケースがあるため、ここで補完する。
+    try {
+      const prefix = (window.STORE && STORE._p) ? STORE._p : `mgmt5_${(window.CENTER && CENTER.id) || 'toda'}_`;
+      if (!STATE.workerCsvData.length) {
+        const w = localStorage.getItem(prefix + 'workerCsvData');
+        if (w) STATE.workerCsvData = JSON.parse(w) || [];
+      }
+      if (!STATE.productAddressData.length) {
+        const p = localStorage.getItem(prefix + 'productAddressData');
+        if (p) STATE.productAddressData = JSON.parse(p) || [];
+      }
+    } catch(e) {}
+  }
+
   function getYms(){
+    ensureCsvState();
     const s = window.STATE || {};
     const yms = new Set();
     safeArray(s.productAddressData).forEach(d => d && d.ym && yms.add(String(d.ym)));
     safeArray(s.workerCsvData).forEach(d => d && d.ym && yms.add(String(d.ym)));
-    safeArray(s.fieldData).forEach(d => d && d.ym && yms.add(String(d.ym)));
     return [...yms].sort();
   }
 
@@ -87,24 +107,18 @@
   }
 
   function selectedYM(){
-    const yms = getYms();
+    ensureCsvState();
     const latest = latestYM();
 
+    // 商品カテゴリ画面内の月セレクトは、値に YYYYMM を直接持たせる
     const localMonth = document.getElementById('fp-product-month-select');
-    const localYear = document.getElementById('fp-product-year-select');
-    if (localMonth && localYear && localMonth.value && localYear.value) {
-      const ym = ymFromFiscalMonth(localYear.value, localMonth.value);
-      if (hasDataYM(ym)) return ym;
-      return latest;
-    }
+    if (localMonth && localMonth.value && hasDataYM(localMonth.value)) return localMonth.value;
 
+    // field_core.js の共通セレクトも、月側は YYYYMM を値に持つ
     const commonMonth = document.getElementById('field-common-month-select');
-    const commonYear = document.getElementById('field-common-year-select');
-    if (commonMonth && commonYear && commonMonth.value && commonYear.value) {
-      const ym = ymFromFiscalMonth(commonYear.value, commonMonth.value);
-      if (hasDataYM(ym)) return ym;
-      return latest;
-    }
+    if (commonMonth && commonMonth.value && hasDataYM(commonMonth.value)) return commonMonth.value;
+
+    if (window.STATE && STATE.selYM && hasDataYM(STATE.selYM)) return STATE.selYM;
 
     return latest;
   }
@@ -306,6 +320,7 @@
   }
 
   function aggregate(){
+    ensureCsvState();
     const ym = selectedYM();
     const rec = productRecord(ym);
     const worker = workerRecord(ym);
@@ -455,24 +470,26 @@
 
   function renderSelector(result){
     const yms = getYms();
-    const years = [...new Set(yms.map(fiscalYearFromYM2))].sort((a,b)=>Number(b)-Number(a));
     const ym = result.ym || latestYM();
     const curFY = fiscalYearFromYM2(ym);
-    const curMM = String(ym).slice(4,6) || '03';
+    const years = [...new Set(yms.map(fiscalYearFromYM2))].sort((a,b)=>Number(b)-Number(a));
+    const fyList = years.length ? years : (curFY ? [curFY] : []);
+    const monthYms = yms.filter(x => fiscalYearFromYM2(x) === curFY);
+    const monthOptions = monthYms.length ? monthYms : (ym ? [ym] : []);
 
     return `<div class="fp-selector-card">
       <div>
         <div class="fp-selector-title">表示対象</div>
-        <div class="fp-selector-sub">年度順：4月 → 翌年3月 / 年度・月を共通管理</div>
+        <div class="fp-selector-sub">年度順：4月 → 翌年3月 / 登録済みデータ月のみ表示</div>
       </div>
       <div class="fp-selector-controls">
         <label>対象年度</label>
         <select id="fp-product-year-select">
-          ${(years.length ? years : [curFY]).map(y=>`<option value="${esc(y)}" ${String(y)===String(curFY)?'selected':''}>${esc(y)}年度</option>`).join('')}
+          ${fyList.map(y=>`<option value="${esc(y)}" ${String(y)===String(curFY)?'selected':''}>${esc(y)}年度</option>`).join('')}
         </select>
         <label>対象月</label>
         <select id="fp-product-month-select">
-          ${MONTHS.map(mm=>`<option value="${mm}" ${mm===curMM?'selected':''}>${Number(mm)}月</option>`).join('')}
+          ${monthOptions.map(x=>`<option value="${esc(x)}" ${String(x)===String(ym)?'selected':''}>${esc(ymLabel2(x))}</option>`).join('') || '<option value="">データなし</option>'}
         </select>
       </div>
     </div>`;
@@ -578,16 +595,36 @@
 
     const yearSel = document.getElementById('fp-product-year-select');
     const monthSel = document.getElementById('fp-product-month-select');
-    [yearSel, monthSel].forEach(sel => {
-      if (!sel) return;
-      sel.onchange = () => {
-        const commonYear = document.getElementById('field-common-year-select');
+
+    if (yearSel) {
+      yearSel.onchange = () => {
+        const yms = getYms().filter(x => fiscalYearFromYM2(x) === yearSel.value);
+        const nextYM = yms[yms.length - 1] || latestYM();
+        if (window.STATE) {
+          STATE.fiscalYear = yearSel.value;
+          STATE.selYM = nextYM;
+        }
+        const commonFY = document.getElementById('field-common-fy-select');
         const commonMonth = document.getElementById('field-common-month-select');
-        if (commonYear) commonYear.value = yearSel.value;
-        if (commonMonth) commonMonth.value = monthSel.value;
+        if (commonFY) commonFY.value = yearSel.value;
+        if (commonMonth && [...commonMonth.options].some(o=>o.value===nextYM)) commonMonth.value = nextYM;
         forceRenderSoon();
       };
-    });
+    }
+
+    if (monthSel) {
+      monthSel.onchange = () => {
+        if (window.STATE) {
+          STATE.selYM = monthSel.value;
+          STATE.fiscalYear = fiscalYearFromYM2(monthSel.value);
+        }
+        const commonFY = document.getElementById('field-common-fy-select');
+        const commonMonth = document.getElementById('field-common-month-select');
+        if (commonFY) commonFY.value = fiscalYearFromYM2(monthSel.value);
+        if (commonMonth && [...commonMonth.options].some(o=>o.value===monthSel.value)) commonMonth.value = monthSel.value;
+        forceRenderSoon();
+      };
+    }
 
     view.dataset.productStableRendered = '1';
   }
