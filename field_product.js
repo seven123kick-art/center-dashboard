@@ -1,320 +1,506 @@
-/* field_product.js : 商品カテゴリ分析 完全版（UI復旧＋クレーン最優先＋表記ゆれ正規化）
+/* field_product.js : 商品カテゴリ分析（N列作業内容優先・クレーン補正完全版）
    2026-05-02
-   ・Chart.jsに依存しないHTMLバー表示
-   ・商品名は 【商品名】 単位で一度分解してから分類
-   ・一般的な商品カテゴリへ戻し、冷蔵庫/洗濯機/テレビ等を主軸に整理
-   ・冷蔵庫は容量帯で中分類。2桁数字は末尾に0を補って容量扱い（例：50 → 500L）
-   ・リサイクル文字を含むものは大分類「リサイクル」、中分類は冷蔵庫/洗濯機/テレビ等で判定
-   ・複数商品が1原票に入る場合は、売上を商品点数で按分して合計売上を崩さない
-   ・商品名が空欄の場合は、作業内容（N列想定／保存済みworkDetails等）から分類を補完
-   ・表示対象（年度/月）セレクターを商品カテゴリ分析にも必ず表示
+   方針：
+   ・金額系の分類は N列相当の作業内容を最優先
+   ・クレーン／ユニック／手吊り／吊り は商品名より優先して「クレーン」
+   ・ただし「ユニック含まず」はクレーン扱いしない
+   ・幹線料は除外
+   ・N列で分類できない場合のみ、I列相当の商品名から冷蔵庫・洗濯機・テレビ等を判定
+   ・商品名は【】単位で分解して補助分類
+   ・Chart.js に依存せず HTMLバーで表示
 */
 'use strict';
+
 (function(){
-  if (window.__FIELD_PRODUCT_UI_RESTORE_CRANE_PRIORITY_20260502__) return;
-  window.__FIELD_PRODUCT_UI_RESTORE_CRANE_PRIORITY_20260502__ = true;
+  if (window.__FIELD_PRODUCT_N_FIRST_CRANE_20260502__) return;
+  window.__FIELD_PRODUCT_N_FIRST_CRANE_20260502__ = true;
+
+  const COLORS = ['#1a4d7c','#e05b4d','#198754','#b85c00','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#ea580c'];
 
   function safeArray(v){ return Array.isArray(v) ? v : []; }
-  function num(v){ return Number(v || 0) || 0; }
   function esc(v){ return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function num(v){ return Number(v || 0) || 0; }
   function fmt(v){ return Math.round(num(v)).toLocaleString('ja-JP'); }
   function fmtK(v){ return Math.round(num(v) / 1000).toLocaleString('ja-JP'); }
-  function fmt1(v){ return (Math.round(num(v) * 10) / 10).toLocaleString('ja-JP', { minimumFractionDigits:1, maximumFractionDigits:1 }); }
-  function ymText(ym){ return typeof ymLabel === 'function' ? ymLabel(ym) : `${String(ym).slice(0,4)}年${Number(String(ym).slice(4,6))}月`; }
-  function clean(v){ return String(v ?? '').replace(/[\u0000-\u001f]/g,'').trim(); }
-  function compact(v){ return clean(v).replace(/[\s　]/g,''); }
-  function toHalf(v){
-    // NFKCで全角英数・半角カナをまとめて正規化する。
-    // 例：ﾚｲｿﾞｳｺ → レイゾウコ、Ｌ → L、５００ → 500
-    return String(v ?? '')
+  function pct(v,total){ return total ? (num(v) / total * 100).toFixed(1) + '%' : '0.0%'; }
+  function ymText(ym){
+    if (typeof ymLabel === 'function') return ymLabel(ym);
+    const s = String(ym || '');
+    if (s.length >= 6) return `${s.slice(0,4)}年${Number(s.slice(4,6))}月`;
+    return s || '未選択';
+  }
+
+  function normalizeText(text){
+    return String(text || '')
       .normalize('NFKC')
-      .replace(/～/g,'〜')
-      .replace(/－/g,'-')
-      .replace(/―/g,'-');
+      .toLowerCase()
+      .replace(/[‐‑‒–—―ー－]/g, '-')
+      .replace(/\s+/g, '')
+      .replace(/　+/g, '');
+  }
+
+  function rawText(row, keys){
+    for (const k of keys) {
+      const v = row && row[k];
+      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
+    }
+    return '';
+  }
+
+  function getWorkText(row){
+    return rawText(row, [
+      'workContent','work_content','work','workName','work_name','作業内容','作業名','N列','N',
+      'content','itemName','firstWork'
+    ]);
+  }
+
+  function getProductText(row){
+    return rawText(row, [
+      'productName','product_name','product','商品名','商品','I列','I','category','productCategory',
+      'firstProduct'
+    ]);
+  }
+
+  function getAmount(row){
+    return num(row.amount ?? row.price ?? row.金額 ?? row['金額'] ?? row.Q ?? row['Q列'] ?? row.total ?? row.value);
+  }
+
+  function getSlip(row){
+    return String(row.slipNo ?? row.slip_no ?? row.invoiceNo ?? row.invoice_no ?? row['原票番号'] ?? row.I ?? row['I列'] ?? row.X ?? row['X列'] ?? '').trim();
+  }
+
+  function getBillingType(row){
+    const s = rawText(row, ['billingType','billing_type','付帯区分','M列','M','kubun','区分']);
+    return normalizeText(s);
+  }
+
+  function isKansen(text){
+    const t = normalizeText(text);
+    return /幹線|中継/.test(t);
+  }
+
+  function isCraneWork(workRaw){
+    const t = normalizeText(workRaw);
+    if (!t) return false;
+    if (t.includes('ユニック含まず') || t.includes('ﾕﾆｯｸ含まず')) return false;
+    return /クレーン|ｸﾚｰﾝ|クーレン|ユニック|ﾕﾆｯｸ|unic|手吊|吊り|吊/.test(workRaw) ||
+           /クレ-ン|ユニック|手吊|吊/.test(t);
+  }
+
+  function isRecycleWork(workRaw){
+    const t = normalizeText(workRaw);
+    return /リサイクル|ﾘｻｲｸﾙ|家電リサイクル|リサイクル料|リサイクル料金/.test(workRaw) || t.includes('リサイクル');
+  }
+
+  function isWasteWork(workRaw){
+    const t = normalizeText(workRaw);
+    return /廃材|廃材処理|廃材引取|廃材引取り|廃材引取料/.test(workRaw) || t.includes('廃材');
+  }
+
+  function isSizeDelivery(workRaw){
+    const t = normalizeText(workRaw);
+    return /サイズ[①②③④⑤⑥⑦1-7]/.test(workRaw) || /サイズ[1-7]/.test(t);
+  }
+
+  function sizeMid(workRaw){
+    const m = String(workRaw || '').match(/サイズ\s*([①②③④⑤⑥⑦1-7])/);
+    if (!m) return 'サイズその他';
+    const map = {'①':'①','②':'②','③':'③','④':'④','⑤':'⑤','⑥':'⑥','⑦':'⑦','1':'①','2':'②','3':'③','4':'④','5':'⑤','6':'⑥','7':'⑦'};
+    return `サイズ${map[m[1]] || m[1]}`;
+  }
+
+  function extractBracketParts(text){
+    const s = String(text || '');
+    const parts = [];
+    const re = /【([^】]+)】/g;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      if (m[1] && m[1].trim()) parts.push(m[1].trim());
+    }
+    if (parts.length) return parts;
+    return s.trim() ? [s.trim()] : [];
+  }
+
+  function extractRefrigeratorVolume(text){
+    const s = String(text || '').normalize('NFKC');
+    let m = s.match(/([1-9]\d{2})\s*l/i) || s.match(/([1-9]\d{2})\s*Ｌ/i);
+    let v = m ? Number(m[1]) : 0;
+
+    if (!v) {
+      // 冷蔵庫文脈で 50, 55 など2桁があれば 500L, 550L とみなす
+      const nums = Array.from(s.matchAll(/(?:^|[^0-9])([1-9]\d)(?:[^0-9]|$)/g)).map(x => Number(x[1]));
+      const plausible = nums.find(n => n >= 20 && n <= 99);
+      if (plausible) v = plausible * 10;
+    }
+
+    if (!v) return '容量不明';
+    if (v < 300) return '300L未満';
+    if (v < 400) return '300〜399L';
+    if (v < 500) return '400〜499L';
+    if (v < 600) return '500〜599L';
+    if (v < 700) return '600〜699L';
+    return '700L以上';
+  }
+
+  function classifyProductFromText(productRaw){
+    const raw = String(productRaw || '');
+    const t = normalizeText(raw);
+
+    if (!raw.trim()) return { big:'付帯作業・その他', mid:'未設定', small:'未設定' };
+
+    // 商品名側にもクレーンが書かれているケースは拾う
+    if (isCraneWork(raw)) return { big:'クレーン', mid:'クレーン作業', small:raw };
+
+    if (isRecycleWork(raw)) {
+      if (/冷蔵|ﾚｲｿﾞｳ|冷凍/.test(raw) || /冷蔵|冷凍/.test(t)) return { big:'リサイクル', mid:'冷蔵庫', small:raw };
+      if (/洗濯|ﾃﾝﾀｸ|センタク|ドラム|乾燥/.test(raw) || /洗濯|ドラム|乾燥/.test(t)) return { big:'リサイクル', mid:'洗濯機', small:raw };
+      if (/テレビ|TV|ＴＶ|液晶|有機|OLED/i.test(raw) || /テレビ|tv|液晶|有機|oled/.test(t)) return { big:'リサイクル', mid:'テレビ', small:raw };
+      return { big:'リサイクル', mid:'その他', small:raw };
+    }
+
+    if (/冷蔵|ﾚｲｿﾞｳ|冷凍/.test(raw) || /冷蔵|冷凍/.test(t)) {
+      return { big:'冷蔵庫', mid:extractRefrigeratorVolume(raw), small:raw };
+    }
+
+    if (/洗濯|センタク|ﾃﾝﾀｸ|ドラム|乾燥/.test(raw) || /洗濯|ドラム|乾燥/.test(t)) {
+      return { big:'洗濯機', mid:/ドラム|乾燥/.test(raw) || /ドラム|乾燥/.test(t) ? 'ドラム・乾燥機' : '洗濯機', small:raw };
+    }
+
+    if (/テレビ|TV|ＴＶ|液晶|有機|OLED/i.test(raw) || /テレビ|tv|液晶|有機|oled/.test(t)) {
+      return { big:'テレビ', mid:'テレビ', small:raw };
+    }
+
+    if (/エアコン|空調/.test(raw) || /エアコン|空調/.test(t)) return { big:'エアコン', mid:'エアコン', small:raw };
+    if (/レンジ|オーブン/.test(raw) || /レンジ|オーブン/.test(t)) return { big:'レンジ', mid:'レンジ', small:raw };
+    if (/炊飯/.test(raw) || /炊飯/.test(t)) return { big:'炊飯器', mid:'炊飯器', small:raw };
+
+    return { big:'付帯作業・その他', mid:'その他', small:raw };
+  }
+
+  function classifyByWorkFirst(workRaw, productRaw){
+    const work = String(workRaw || '');
+    const t = normalizeText(work);
+
+    // ① N列：クレーン最優先
+    if (isCraneWork(work)) {
+      let mid = 'クレーン作業';
+      if (/見積|下見|現調/.test(work)) mid = 'クレーン見積もり';
+      else if (/差額/.test(work)) mid = 'クレーン差額';
+      else if (/搬入|搬出|入替|入れ|入れ替え/.test(work)) mid = 'クレーン搬入';
+      return { big:'クレーン', mid, small:work || productRaw || 'クレーン' };
+    }
+
+    // ② N列：リサイクル
+    if (isRecycleWork(work)) {
+      if (/冷蔵|ﾚｲｿﾞｳ|冷凍/.test(work) || /冷蔵|冷凍/.test(t)) return { big:'リサイクル', mid:'冷蔵庫', small:work };
+      if (/洗濯|センタク|ドラム|乾燥/.test(work) || /洗濯|ドラム|乾燥/.test(t)) return { big:'リサイクル', mid:'洗濯機', small:work };
+      if (/テレビ|TV|ＴＶ|液晶|有機|OLED/i.test(work) || /テレビ|tv|液晶|有機|oled/.test(t)) return { big:'リサイクル', mid:'テレビ', small:work };
+      return { big:'リサイクル', mid:'その他', small:work };
+    }
+
+    // ③ N列：廃材
+    if (isWasteWork(work)) return { big:'廃材', mid:'廃材', small:work };
+
+    // ④ N列：サイズ配送料
+    if (isSizeDelivery(work)) return { big:'配送', mid:sizeMid(work), small:work };
+
+    // ⑤ N列：作業系
+    if (/階段|段上げ/.test(work) || /階段|段上げ/.test(t)) return { big:'作業', mid:'階段上げ', small:work };
+    if (/見積|下見|現調/.test(work) || /見積|下見|現調/.test(t)) return { big:'作業', mid:'見積もり', small:work };
+    if (/設置|取付|取付け|搬入|搬出|入替|入れ替え/.test(work) || /設置|取付|搬入|搬出|入替|入れ替え/.test(t)) return { big:'作業', mid:'設置・搬入', small:work };
+
+    // ⑥ I列：商品名から分類
+    return classifyProductFromText(productRaw);
+  }
+
+  function addAgg(map, cls, count, amount, slip){
+    const key = `${cls.big}||${cls.mid}`;
+    if (!map.has(key)) {
+      map.set(key, { big:cls.big, mid:cls.mid, count:0, amount:0, slips:new Set(), small:new Map() });
+    }
+    const item = map.get(key);
+    item.count += count;
+    item.amount += amount;
+    if (slip) item.slips.add(slip);
+
+    const smallKey = cls.small || cls.mid || cls.big;
+    if (!item.small.has(smallKey)) item.small.set(smallKey, { label:smallKey, count:0, amount:0 });
+    const sm = item.small.get(smallKey);
+    sm.count += count;
+    sm.amount += amount;
+  }
+
+  function sourceRows(){
+    const s = window.STATE || {};
+    const ym = selectedYM();
+
+    const candidates = [];
+    if (Array.isArray(s.productAddressData)) candidates.push(...s.productAddressData.filter(x=>!ym || x.ym===ym));
+    if (Array.isArray(s.workerCsvData)) candidates.push(...s.workerCsvData.filter(x=>!ym || x.ym===ym));
+    if (Array.isArray(s.fieldCsvData)) candidates.push(...s.fieldCsvData.filter(x=>!ym || x.ym===ym));
+    if (Array.isArray(s.fieldData)) candidates.push(...s.fieldData.filter(x=>!ym || x.ym===ym));
+
+    const rows = [];
+
+    candidates.forEach(rec => {
+      if (!rec) return;
+      if (Array.isArray(rec.rows)) rows.push(...rec.rows);
+      if (Array.isArray(rec.data)) rows.push(...rec.data);
+      if (Array.isArray(rec.items)) rows.push(...rec.items);
+      if (rec.rawRows && Array.isArray(rec.rawRows)) rows.push(...rec.rawRows);
+
+      // productAddressData の集計済み rows がない場合の保険
+      if (rec.products && typeof rec.products === 'object') {
+        Object.values(rec.products).forEach(v => {
+          if (Array.isArray(v)) rows.push(...v);
+          else if (v && typeof v === 'object') rows.push(v);
+        });
+      }
+    });
+
+    // 重複しすぎる場合の最低限の重複除外
+    const seen = new Set();
+    return rows.filter((r,idx)=>{
+      const key = [
+        getSlip(r) || idx,
+        getWorkText(r),
+        getProductText(r),
+        getAmount(r),
+        getBillingType(r)
+      ].join('||');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   function selectedYM(){
     const sel = document.getElementById('field-common-month-select');
     if (sel && sel.value) return sel.value;
-    return (window.STATE && STATE.selYM) || safeArray(STATE?.productAddressData).at(-1)?.ym || '';
-  }
-  function productRecord(ym){ return safeArray(STATE?.productAddressData).find(d => d && d.ym === ym) || null; }
-
-  function ensureSelector(){
-    if (typeof window.setupFieldCommonSelectors === 'function') {
-      try { window.setupFieldCommonSelectors(); } catch(e){ console.warn('[field_product] selector setup failed', e); }
-    }
+    const s = window.STATE || {};
+    return s.selYM || safeArray(s.productAddressData).at(-1)?.ym || safeArray(s.workerCsvData).at(-1)?.ym || '';
   }
 
-  function extractBracketUnits(rawProduct){
-    const raw = clean(rawProduct);
-    if (!raw) return ['未設定'];
-    const units = [];
-    const re = /【([^】]+)】/g;
-    let m;
-    while ((m = re.exec(raw)) !== null) {
-      const item = clean(m[1]);
-      if (item) units.push(item);
-    }
-    return units.length ? units : [raw];
-  }
+  function aggregate(){
+    const rows = sourceRows();
+    const map = new Map();
+    let totalAmount = 0;
+    let totalCount = 0;
+    const slipSet = new Set();
+    let excludedAmount = 0;
 
-  function extractFridgeVolume(text){
-    const s = toHalf(compact(text));
-    const candidates = [];
+    rows.forEach(row => {
+      const work = getWorkText(row);
+      const product = getProductText(row);
+      const amount = getAmount(row);
+      const slip = getSlip(row);
 
-    // 500L / 500Ｌ / 500リットル / 500〜599L のような容量表記を優先
-    for (const m of s.matchAll(/(\d{2,4})\s*(?:L|Ｌ|リットル|ﾘｯﾄﾙ)/gi)) {
-      let n = Number(m[1]);
-      if (n >= 10 && n <= 99) n = n * 10; // 50Lのように登録されているケースは500L扱い
-      if (n >= 80 && n <= 900) candidates.push(n);
-    }
+      if (isKansen(work)) {
+        excludedAmount += amount;
+        return;
+      }
 
-    // 500〜599 / 500-599 のような範囲表記
-    for (const m of s.matchAll(/(\d{2,4})\s*[〜~\-ー]\s*(\d{2,4})/g)) {
-      let n1 = Number(m[1]);
-      let n2 = Number(m[2]);
-      if (n1 >= 10 && n1 <= 99) n1 *= 10;
-      if (n2 >= 10 && n2 <= 99) n2 *= 10;
-      if (n1 >= 80 && n1 <= 900) candidates.push(n1);
-      if (n2 >= 80 && n2 <= 900) candidates.push(n2);
-    }
+      const cls = classifyByWorkFirst(work, product);
+      totalAmount += amount;
+      totalCount += 1;
+      if (slip) slipSet.add(slip);
 
-    // 型番や商品名に 50 / 55 のような2桁、500 のような3桁がある場合。
-    // 冷蔵庫判定後だけ使うため、2桁は容量として×10する。
-    for (const m of s.matchAll(/(\d{2,4})/g)) {
-      let n = Number(m[1]);
-      if (!Number.isFinite(n)) continue;
-      if (n >= 10 && n <= 99) n = n * 10;
-      if (n >= 80 && n <= 900) candidates.push(n);
-    }
-
-    if (!candidates.length) return 0;
-    // 型番に複数数字がある場合は、一番大きい容量候補を採用
-    return Math.max(...candidates);
-  }
-
-  function volumeBand(text){
-    const v = extractFridgeVolume(text);
-    if (v >= 600) return '600L以上';
-    if (v >= 500) return '500〜599L';
-    if (v >= 400) return '400〜499L';
-    if (v >= 300) return '300〜399L';
-    if (v >= 200) return '200〜299L';
-    if (v >= 100) return '100〜199L';
-    return '容量不明';
-  }
-
-  function classifyProductUnit(unit){
-    const raw = clean(unit) || '未設定';
-    const s = toHalf(compact(raw));
-
-    function containsAny(re){ return re.test(s); }
-    function detectItemMiddle(){
-      if (containsAny(/冷蔵|冷凍|レイゾウコ|フリーザ|冷凍庫/)) return '冷蔵庫';
-      if (containsAny(/洗濯|ドラム|乾燥|センタク/)) return '洗濯機';
-      if (containsAny(/テレビ|TV|液晶|有機|有機EL|OLED/)) return 'テレビ';
-      if (containsAny(/エアコン|空調/)) return 'エアコン';
-      if (containsAny(/レンジ|オーブン|電子レンジ/)) return 'レンジ';
-      if (containsAny(/炊飯/)) return '炊飯器';
-      return 'その他';
-    }
-
-    // 最優先：クレーン系。
-    // ここを先頭にしないと、冷蔵庫・搬入・設置・その他へ吸われるため、必ず最初に判定する。
-    // NFKC後の表記ゆれ：ｸﾚｰﾝ→クレーン、ﾕﾆｯｸ→ユニック、全角英数→半角。
-    if (containsAny(/クレ.?ン|クーレン|ユニック|UNIC|吊り?|吊上|吊上げ|吊下|吊下げ|クレ-ン/i)) {
-      return { major:'クレーン', middle:'クレーン作業', minor:raw, order:5 };
-    }
-
-    // リサイクルの文字が入るものは商品ではなくリサイクル扱い。
-    // 中分類は後続の冷蔵庫・洗濯機・テレビなどで一般的に分類する。
-    if (containsAny(/リサイクル|Recycle/i)) {
-      const middle = detectItemMiddle();
-      return { major:'リサイクル', middle, minor:raw, order:300 };
-    }
-
-    // 作業系は商品カテゴリとは分ける
-    if (containsAny(/下見|見積|見積もり|見積り|下検|現調/)) {
-      return { major:'作業', middle:'見積もり', minor:raw, order:410 };
-    }
-    if (containsAny(/階段|段上|段上げ/)) {
-      return { major:'作業', middle:'階段上げ', minor:raw, order:420 };
-    }
-
-    if (!raw || raw === '未設定' || containsAny(/未設定|不明/)) {
-      return { major:'付帯作業・その他', middle:'未設定', minor:raw || '未設定', order:900 };
-    }
-
-    // 一般的な商品カテゴリ
-    if (containsAny(/冷蔵|冷凍|レイゾウコ|フリーザ|冷凍庫/)) {
-      const band = volumeBand(s);
-      const orderMap = { '600L以上':10, '500〜599L':11, '400〜499L':12, '300〜399L':13, '200〜299L':14, '100〜199L':15, '容量不明':19 };
-      return { major:'冷蔵庫', middle:band, minor:raw, order:orderMap[band] ?? 19 };
-    }
-    if (containsAny(/洗濯|ドラム|乾燥|センタク/)) {
-      if (containsAny(/ドラム/)) return { major:'洗濯機', middle:'ドラム式', minor:raw, order:20 };
-      if (containsAny(/乾燥/)) return { major:'洗濯機', middle:'乾燥機', minor:raw, order:21 };
-      return { major:'洗濯機', middle:'全自動・縦型', minor:raw, order:22 };
-    }
-    if (containsAny(/テレビ|TV|液晶|有機|有機EL|OLED/)) {
-      if (containsAny(/有機|有機EL|OLED/)) return { major:'テレビ', middle:'有機EL・液晶', minor:raw, order:30 };
-      if (containsAny(/液晶/)) return { major:'テレビ', middle:'有機EL・液晶', minor:raw, order:30 };
-      return { major:'テレビ', middle:'テレビ', minor:raw, order:31 };
-    }
-    if (containsAny(/エアコン|空調/)) return { major:'エアコン', middle:'エアコン', minor:raw, order:40 };
-    if (containsAny(/レンジ|オーブン|電子レンジ/)) return { major:'レンジ', middle:'レンジ', minor:raw, order:50 };
-    if (containsAny(/炊飯/)) return { major:'炊飯器', middle:'炊飯器', minor:raw, order:60 };
-    if (containsAny(/照明|シーリング/)) return { major:'照明', middle:'照明', minor:raw, order:70 };
-
-    return { major:'付帯作業・その他', middle:'その他', minor:raw, order:800 };
-  }
-
-  function blankNode(label){ return { label, count:0, amount:0, order:999, children:new Map() }; }
-  function addMap(map, label, amount, count, order){
-    if (!map.has(label)) map.set(label, blankNode(label));
-    const item = map.get(label);
-    item.count += num(count || 1);
-    item.amount += num(amount);
-    item.order = Math.min(item.order ?? 999, order ?? 999);
-    return item;
-  }
-  function sortRows(a,b){ return b.amount - a.amount || b.count - a.count || (a.order ?? 999) - (b.order ?? 999) || String(a.label).localeCompare(String(b.label),'ja'); }
-  function pct(v,total){ return total > 0 ? num(v) / total * 100 : 0; }
-
-  function fallbackWorkTexts(t){
-    const texts = [];
-
-    // 商品・住所CSVの保存形はバージョンにより差があるため、複数候補を順に拾う。
-    // ユーザー指定：商品名が空欄の場合はN列の作業内容から補完。
-    // ただし現行保存データでは workDetails / works / firstRow に入っているケースがあるため、ここで吸収する。
-    safeArray(t?.workDetails).forEach(d => {
-      const w = clean(d?.work || d?.label || d?.name);
-      if (w) texts.push(w);
-    });
-    Object.keys(t?.works || {}).forEach(w => {
-      const x = clean(w);
-      if (x) texts.push(x);
+      addAgg(map, cls, 1, amount, slip);
     });
 
-    // N列=0始まり13番目、R列=0始まり17番目も保険で見る。
-    const row = safeArray(t?.firstRow || t?.representativeRow || []);
-    [13, 17].forEach(idx => {
-      const x = clean(row[idx]);
-      if (x) texts.push(x);
+    const list = Array.from(map.values()).map(x => ({
+      ...x,
+      slipCount: x.slips.size || x.count,
+      smallList: Array.from(x.small.values()).sort((a,b)=>b.amount-a.amount || b.count-a.count)
+    })).sort((a,b)=>b.amount-a.amount || b.count-a.count);
+
+    const bigMap = new Map();
+    list.forEach(x=>{
+      if (!bigMap.has(x.big)) bigMap.set(x.big, { big:x.big, amount:0, count:0, mids:[] });
+      const b = bigMap.get(x.big);
+      b.amount += x.amount;
+      b.count += x.count;
+      b.mids.push(x);
     });
+    const bigList = Array.from(bigMap.values()).sort((a,b)=>b.amount-a.amount || b.count-a.count);
 
-    return Array.from(new Set(texts.filter(Boolean)));
-  }
-
-  function productSourceUnits(t){
-    const product = clean(t?.product);
-
-    // ① 商品名がある場合は【】単位で最優先分類
-    if (product) return extractBracketUnits(product);
-
-    // ② 商品名が空欄の場合は、作業内容から補完
-    const workTexts = fallbackWorkTexts(t);
-    if (workTexts.length) return workTexts.flatMap(x => extractBracketUnits(x));
-
-    // ③ 最後の保険。既存カテゴリは商品名空欄由来の可能性があるため、分類不能なら未設定に寄せる。
-    const fallback = clean(t?.category || t?.sizeBucket);
-    return fallback ? [fallback] : ['未設定'];
-  }
-
-  function buildRows(rec){
-    const majorMap = new Map();
-    safeArray(rec?.tickets).forEach(t => {
-      const units = productSourceUnits(t);
-      const baseAmount = num(t.amount);
-      const splitAmount = units.length > 0 ? baseAmount / units.length : baseAmount;
-      units.forEach(unit => {
-        const c = classifyProductUnit(unit);
-        const major = addMap(majorMap, c.major, splitAmount, 1, c.order);
-        const middle = addMap(major.children, c.middle, splitAmount, 1, c.order);
-        addMap(middle.children, c.minor, splitAmount, 1, c.order);
-      });
-    });
-    return [...majorMap.values()].sort(sortRows);
+    return { rows, list, bigList, totalAmount, totalCount, slipCount:slipSet.size || totalCount, excludedAmount, ym:selectedYM() };
   }
 
   function ensureStyles(){
-    if (document.getElementById('field-product-bracket-style-20260502')) return;
+    if (document.getElementById('field-product-nfirst-style')) return;
     const st = document.createElement('style');
-    st.id = 'field-product-bracket-style-20260502';
+    st.id = 'field-product-nfirst-style';
     st.textContent = `
-      .fp-kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:14px}
-      .fp-kpi{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);border-top:5px solid #1a4d7c;padding:16px;min-height:104px;overflow:hidden}
-      .fp-kpi.green{border-top-color:#059669}.fp-kpi.amber{border-top-color:#f97316}
-      .fp-kpi-label{font-size:12px;font-weight:900;color:#334155;margin-bottom:8px}
-      .fp-kpi-value{font-size:28px;font-weight:900;color:#0f172a;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .fp-kpi-sub{font-size:12px;color:#8291a7;font-weight:800;margin-top:8px;line-height:1.45}
+      .fp-note{font-size:12px;color:#64748b;margin:0 0 14px;line-height:1.7}
+      .fp-kpi{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:14px}
+      .fp-kpi .kpi-card{min-height:94px}
       .fp-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
-      .fp-card{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
-      .fp-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px;align-items:center}
-      .fp-title{font-size:15px;font-weight:900;color:#18324f}.fp-sub{font-size:12px;color:#8291a7;font-weight:800;margin-top:3px}
-      .fp-body{padding:14px 16px}.fp-note{font-size:12px;color:#64748b;line-height:1.7;margin:0 0 12px 2px}
-      .fp-bar-row{display:grid;grid-template-columns:30px minmax(120px,210px) minmax(160px,1fr) minmax(120px,160px);gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #edf2f7}
-      .fp-rank{width:24px;height:24px;border-radius:999px;background:#e8f1fb;color:#1a4d7c;font-weight:900;display:flex;align-items:center;justify-content:center;font-size:12px}
-      .fp-name{font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fp-track{height:13px;background:#e5e7eb;border-radius:999px;overflow:hidden}.fp-fill{height:100%;background:#1a4d7c;border-radius:999px}
-      .fp-val{text-align:right;font-size:12px;font-weight:900}.fp-val span{display:block;color:#8291a7;font-size:11px;margin-top:2px}
-      .fp-detail details{border:1px solid var(--border);border-radius:14px;background:#fff;margin-bottom:10px;overflow:hidden}.fp-detail summary{cursor:pointer;list-style:none;padding:13px 16px;background:#f8fafc;display:flex;justify-content:space-between;gap:12px;align-items:center;font-weight:900}.fp-detail summary::-webkit-details-marker{display:none}
-      .fp-pill{display:inline-flex;border:1px solid #dbe3ee;background:#fff;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:900;color:#334155;margin-left:4px}.fp-detail-body{padding:12px 16px}
-      .fp-table{width:100%;border-collapse:collapse}.fp-table th,.fp-table td{border-bottom:1px solid #edf2f7;padding:8px;font-size:13px}.fp-table th{background:#f3f6fb;text-align:left;font-weight:900}.fp-table .r{text-align:right}
-      @media(max-width:1200px){.fp-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fp-grid{grid-template-columns:1fr}.fp-bar-row{grid-template-columns:30px minmax(100px,160px) minmax(120px,1fr) minmax(90px,120px)}}`;
+      .fp-bar-row{display:grid;grid-template-columns:minmax(120px,220px) 1fr minmax(120px,150px);gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid #eef2f7}
+      .fp-bar-name{font-weight:900;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .fp-track{height:16px;background:#e5e7eb;border-radius:999px;overflow:hidden}
+      .fp-fill{height:100%;border-radius:999px;background:#1a4d7c}
+      .fp-val{text-align:right;font-weight:900;color:#0f172a;white-space:nowrap}
+      .fp-sub{font-size:12px;color:#64748b;font-weight:700}
+      .fp-detail-card{border:1px solid #dbe3ee;border-radius:14px;margin:10px 0;background:#fff;overflow:hidden}
+      .fp-detail-head{display:grid;grid-template-columns:30px 1fr auto auto;gap:10px;align-items:center;padding:12px 14px;background:#f8fafc;cursor:pointer}
+      .fp-detail-head:hover{background:#f1f5f9}
+      .fp-plus{font-weight:900;color:#1a4d7c;font-size:18px}
+      .fp-detail-title{font-size:15px;font-weight:900;color:#0f172a}
+      .fp-pill{display:inline-flex;align-items:center;border:1px solid #dbe3ee;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:800;background:#fff;color:#334155}
+      .fp-detail-body{display:none;padding:12px 18px 16px}
+      .fp-detail-card.open .fp-detail-body{display:block}
+      .fp-detail-card.open .fp-plus{transform:rotate(45deg)}
+      .fp-mini-table{width:100%;border-collapse:collapse;font-size:12px}
+      .fp-mini-table th{background:#f3f6fb;color:#334155;text-align:left;padding:8px}
+      .fp-mini-table td{border-bottom:1px solid #e5e7eb;padding:8px}
+      .fp-mini-table .r{text-align:right}
+      @media(max-width:1200px){.fp-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}.fp-grid{grid-template-columns:1fr}.fp-bar-row{grid-template-columns:1fr}.fp-val{text-align:left}}
+    `;
     document.head.appendChild(st);
   }
 
-  function bars(rows,total,limit){
-    const list = rows.slice(0, limit || rows.length);
-    if (!list.length) return '<div style="padding:40px;text-align:center;color:var(--text3);font-weight:800">データなし</div>';
-    const max = Math.max(...list.map(r=>r.amount), 1);
-    return list.map((r,i)=>`<div class="fp-bar-row"><div class="fp-rank">${i+1}</div><div class="fp-name" title="${esc(r.label)}">${esc(r.label)}</div><div class="fp-track"><div class="fp-fill" style="width:${Math.max(2,r.amount/max*100).toFixed(1)}%"></div></div><div class="fp-val">${fmtK(r.amount)}千円<span>${fmt(r.count)}点 / ${fmt1(pct(r.amount,total))}%</span></div></div>`).join('');
+  function kpiCard(label, value, sub, accent='navy'){
+    return `<div class="kpi-card accent-${accent}"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${esc(value)}</div>${sub?`<div class="kpi-sub">${esc(sub)}</div>`:''}</div>`;
+  }
+
+  function renderKpi(result){
+    const area = document.getElementById('f-product-kpi') || createBeforeFirstCard('f-product-kpi','fp-kpi');
+    const top = result.bigList[0];
+    const avg = result.slipCount ? result.totalAmount / result.slipCount : 0;
+    area.innerHTML = [
+      kpiCard('対象月', ymText(result.ym), '商品カテゴリ分析'),
+      kpiCard('商品売上', `${fmtK(result.totalAmount)}千円`, '幹線料除外後', 'green'),
+      kpiCard('原票数', fmt(result.slipCount), '原票番号ユニーク'),
+      kpiCard('平均単価', `${fmt(avg)}円`, '売上 ÷ 原票数', 'amber'),
+      kpiCard('最大カテゴリ', top ? top.big : '—', top ? `${fmtK(top.amount)}千円 / ${pct(top.amount,result.totalAmount)}` : '', 'navy')
+    ].join('');
+  }
+
+  function createBeforeFirstCard(id, cls){
+    const view = document.getElementById('view-field-product');
+    const el = document.createElement('div');
+    el.id = id;
+    el.className = cls;
+    if (view) {
+      const firstCard = view.querySelector('.card');
+      view.insertBefore(el, firstCard || view.firstChild);
+    }
+    return el;
+  }
+
+  function renderBars(result){
+    const card1 = document.querySelector('#view-field-product .card:nth-of-type(1) .card-body') || document.querySelector('#view-field-product .card .card-body');
+    if (!card1) return;
+    const max = Math.max(...result.bigList.map(x=>x.amount),1);
+    card1.innerHTML = `<div class="fp-grid" style="grid-template-columns:1fr">
+      <div>
+        <div class="card-title" style="margin-bottom:8px">大分類別 売上構成</div>
+        ${result.bigList.map((x,i)=>`
+          <div class="fp-bar-row">
+            <div class="fp-bar-name">${i+1}. ${esc(x.big)}<div class="fp-sub">${fmt(x.count)}点 / ${pct(x.amount,result.totalAmount)}</div></div>
+            <div class="fp-track"><div class="fp-fill" style="width:${Math.max(2,x.amount/max*100).toFixed(1)}%;background:${COLORS[i%COLORS.length]}"></div></div>
+            <div class="fp-val">${fmtK(x.amount)}千円</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  function renderDetail(result){
+    const tbody = document.getElementById('f-product-tbody');
+    const table = tbody ? tbody.closest('table') : null;
+    if (!tbody || !table) return;
+    const thead = table.querySelector('thead tr');
+    if (thead) thead.innerHTML = `<th>分類</th><th class="r">商品点数</th><th class="r">売上（千円）</th><th class="r">構成比</th>`;
+    tbody.innerHTML = result.bigList.map((big,idx)=>{
+      const mids = big.mids.sort((a,b)=>b.amount-a.amount || b.count-a.count);
+      const body = mids.map(mid=>`
+        <div class="fp-detail-card">
+          <div class="fp-detail-head" onclick="this.parentElement.classList.toggle('open')">
+            <div class="fp-plus">＋</div>
+            <div class="fp-detail-title">${esc(mid.mid || mid.big)}</div>
+            <div class="fp-pill">${fmtK(mid.amount)}千円</div>
+            <div class="fp-pill">${fmt(mid.count)}点</div>
+          </div>
+          <div class="fp-detail-body">
+            <table class="fp-mini-table">
+              <thead><tr><th>小分類・元表記</th><th class="r">商品点数</th><th class="r">売上</th><th class="r">構成比</th></tr></thead>
+              <tbody>${mid.smallList.slice(0,80).map(s=>`<tr><td>${esc(s.label)}</td><td class="r">${fmt(s.count)}</td><td class="r">${fmtK(s.amount)}千円</td><td class="r">${pct(s.amount,result.totalAmount)}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>
+        </div>`).join('');
+
+      return `<tr><td colspan="4" style="padding:0;border:0">
+        <div class="fp-detail-card ${idx===0?'open':''}">
+          <div class="fp-detail-head" onclick="this.parentElement.classList.toggle('open')">
+            <div class="fp-plus">＋</div>
+            <div class="fp-detail-title">${esc(big.big)}</div>
+            <div class="fp-pill">${fmtK(big.amount)}千円</div>
+            <div class="fp-pill">${fmt(big.count)}点</div>
+          </div>
+          <div class="fp-detail-body">${body}</div>
+        </div>
+      </td></tr>`;
+    }).join('');
   }
 
   function render(){
-    ensureSelector();
     ensureStyles();
-    const pane = document.getElementById('fpane-product');
-    if (!pane) return;
-    const ym = selectedYM();
-    const rec = productRecord(ym);
-    if (!rec || !safeArray(rec.tickets).length) {
-      pane.innerHTML = `<div class="fp-note">商品・住所CSVを読み込むと、商品カテゴリ分析を表示します。</div><div class="fp-card"><div class="fp-body" style="padding:44px;text-align:center;color:var(--text3);font-weight:800">選択月の商品カテゴリデータがありません。</div></div>`;
-      return;
+    const result = aggregate();
+
+    const view = document.getElementById('view-field-product');
+    if (!view) return;
+
+    let note = document.getElementById('field-product-note');
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'field-product-note';
+      note.className = 'fp-note';
+      const first = view.querySelector('.card');
+      view.insertBefore(note, first || view.firstChild);
     }
-    const majors = buildRows(rec);
-    const totalAmount = majors.reduce((s,r)=>s+r.amount,0);
-    const totalCount = majors.reduce((s,r)=>s+r.count,0);
-    const top = majors[0] || blankNode('-');
-    const avg = totalCount ? totalAmount / totalCount : 0;
-    const mids = majors.flatMap(m => [...m.children.values()].map(x => ({...x, major:m.label}))).sort(sortRows);
-    pane.innerHTML = `<div class="fp-note">商品名は【】単位で分解し、一般的な商品分類（冷蔵庫・洗濯機・テレビ等）を基本に、大分類 → 中分類 → 小分類で整理しています。冷蔵庫は2桁数字も容量として補正し、クレーン・ユニック・吊り系は最優先でクレーンへ分類します。</div>
-      <div class="fp-kpi-grid">
-        <div class="fp-kpi"><div class="fp-kpi-label">対象月</div><div class="fp-kpi-value">${esc(ymText(ym))}</div><div class="fp-kpi-sub">商品カテゴリ分析</div></div>
-        <div class="fp-kpi green"><div class="fp-kpi-label">商品売上</div><div class="fp-kpi-value">${fmtK(totalAmount)}千円</div><div class="fp-kpi-sub">商品・住所CSV 原票ベース</div></div>
-        <div class="fp-kpi"><div class="fp-kpi-label">商品点数</div><div class="fp-kpi-value">${fmt(totalCount)}</div><div class="fp-kpi-sub">【】分解後の点数</div></div>
-        <div class="fp-kpi amber"><div class="fp-kpi-label">平均単価</div><div class="fp-kpi-value">${fmt(avg)}円</div><div class="fp-kpi-sub">商品売上 ÷ 商品点数</div></div>
-        <div class="fp-kpi"><div class="fp-kpi-label">最大カテゴリ</div><div class="fp-kpi-value">${esc(top.label)}</div><div class="fp-kpi-sub">${fmtK(top.amount)}千円 / ${fmt1(pct(top.amount,totalAmount))}%</div></div>
-      </div>
-      <div class="fp-grid">
-        <div class="fp-card"><div class="fp-head"><div><div class="fp-title">大分類別 売上構成</div><div class="fp-sub">冷蔵庫・洗濯機・テレビなど</div></div></div><div class="fp-body">${bars(majors,totalAmount)}</div></div>
-        <div class="fp-card"><div class="fp-head"><div><div class="fp-title">中分類 上位</div><div class="fp-sub">冷蔵庫容量帯・商品種別</div></div></div><div class="fp-body">${bars(mids,totalAmount,12)}</div></div>
-      </div>
-      <div class="fp-card fp-detail"><div class="fp-head"><div><div class="fp-title">商品カテゴリ別 詳細</div><div class="fp-sub">クリックで中分類・小分類を確認</div></div><span class="fp-pill">上位：${esc(top.label)} ${fmtK(top.amount)}千円</span></div><div class="fp-body">
-      ${majors.map((m,idx)=>{ const children=[...m.children.values()].sort(sortRows); return `<details ${idx<3?'open':''}><summary><span>＋ ${esc(m.label)} <span class="fp-pill">${fmtK(m.amount)}千円</span> <span class="fp-pill">${fmt(m.count)}点</span></span><span>${fmt1(pct(m.amount,totalAmount))}%</span></summary><div class="fp-detail-body">${children.map(mid=>{ const minors=[...mid.children.values()].sort(sortRows).slice(0,30); return `<details style="margin-bottom:8px" ${children.length<=4?'open':''}><summary><span>${esc(mid.label)} <span class="fp-pill">${fmtK(mid.amount)}千円</span> <span class="fp-pill">${fmt(mid.count)}点</span></span><span>${fmt1(pct(mid.amount,totalAmount))}%</span></summary><div class="fp-detail-body"><table class="fp-table"><thead><tr><th>小分類・元表記</th><th class="r">商品点数</th><th class="r">売上</th><th class="r">構成比</th></tr></thead><tbody>${minors.map(mi=>`<tr><td>${esc(mi.label)}</td><td class="r">${fmt(mi.count)}</td><td class="r">${fmtK(mi.amount)}千円</td><td class="r">${fmt1(pct(mi.amount,totalAmount))}%</td></tr>`).join('')}</tbody></table></div></details>`; }).join('')}</div></details>`; }).join('')}</div></div>`;
+    note.textContent = '商品カテゴリは、N列の作業内容を優先して分類し、分類できない場合のみ商品名で補完しています。クレーン・ユニック・手吊り系は最優先でクレーンに集約します。';
+
+    renderKpi(result);
+    renderBars(result);
+    renderDetail(result);
   }
 
-  function renderSoon(){ clearTimeout(window.__fieldProductBracketTimer); window.__fieldProductBracketTimer = setTimeout(()=>{ try { render(); } catch(e){ console.error('[field_product]', e); } }, 80); }
-  window.FIELD_PRODUCT_UI = { render, renderSoon };
-  if (window.FIELD_CSV_REBUILD) FIELD_CSV_REBUILD.renderProduct = render;
-  if (window.NAV && typeof NAV.go === 'function' && !NAV.__fieldProductBracketWrapped20260502) {
-    const oldGo = NAV.go.bind(NAV);
-    NAV.go = function(el){ const r = oldGo(el); renderSoon(); return r; };
-    NAV.__fieldProductBracketWrapped20260502 = true;
+  function hook(){
+    const old = window.FIELD_PRODUCT_UI && window.FIELD_PRODUCT_UI.render;
+    window.FIELD_PRODUCT_UI = window.FIELD_PRODUCT_UI || {};
+    window.FIELD_PRODUCT_UI.render = render;
+    window.FIELD_PRODUCT_UI.refresh = render;
+
+    const oldNavGo = window.NAV && window.NAV.go;
+    if (oldNavGo && !window.__FIELD_PRODUCT_NAV_HOOKED_20260502__) {
+      window.__FIELD_PRODUCT_NAV_HOOKED_20260502__ = true;
+      window.NAV.go = function(el){
+        const ret = oldNavGo.apply(this, arguments);
+        setTimeout(()=>{
+          const active = document.querySelector('.view.active');
+          if (active && active.id === 'view-field-product') render();
+        }, 80);
+        return ret;
+      };
+    }
+
+    document.addEventListener('change', e => {
+      if (e.target && (e.target.id === 'field-common-month-select' || e.target.id === 'field-common-year-select')) {
+        setTimeout(()=>{
+          const active = document.querySelector('.view.active');
+          if (active && active.id === 'view-field-product') render();
+        }, 80);
+      }
+    });
+
+    setTimeout(()=>{
+      const active = document.querySelector('.view.active');
+      if (active && active.id === 'view-field-product') render();
+    }, 200);
   }
-  document.addEventListener('change', (e)=>{ if (e.target && (e.target.id === 'field-common-month-select' || e.target.id === 'field-common-fy-select')) renderSoon(); }, true);
-  document.addEventListener('DOMContentLoaded', renderSoon);
-  setTimeout(renderSoon, 300);
-  setTimeout(renderSoon, 900);
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hook);
+  else hook();
+
 })();
