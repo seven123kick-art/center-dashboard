@@ -6,6 +6,7 @@
    ・冷蔵庫は容量帯で中分類。2桁数字は末尾に0を補って容量扱い（例：50 → 500L）
    ・リサイクル文字を含むものは大分類「リサイクル」、中分類は冷蔵庫/洗濯機/テレビ等で判定
    ・複数商品が1原票に入る場合は、売上を商品点数で按分して合計売上を崩さない
+   ・商品名が空欄の場合は、作業内容（N列想定／保存済みworkDetails等）から分類を補完
    ・表示対象（年度/月）セレクターを商品カテゴリ分析にも必ず表示
 */
 'use strict';
@@ -177,10 +178,50 @@
   function sortRows(a,b){ return b.amount - a.amount || b.count - a.count || (a.order ?? 999) - (b.order ?? 999) || String(a.label).localeCompare(String(b.label),'ja'); }
   function pct(v,total){ return total > 0 ? num(v) / total * 100 : 0; }
 
+  function fallbackWorkTexts(t){
+    const texts = [];
+
+    // 商品・住所CSVの保存形はバージョンにより差があるため、複数候補を順に拾う。
+    // ユーザー指定：商品名が空欄の場合はN列の作業内容から補完。
+    // ただし現行保存データでは workDetails / works / firstRow に入っているケースがあるため、ここで吸収する。
+    safeArray(t?.workDetails).forEach(d => {
+      const w = clean(d?.work || d?.label || d?.name);
+      if (w) texts.push(w);
+    });
+    Object.keys(t?.works || {}).forEach(w => {
+      const x = clean(w);
+      if (x) texts.push(x);
+    });
+
+    // N列=0始まり13番目、R列=0始まり17番目も保険で見る。
+    const row = safeArray(t?.firstRow || t?.representativeRow || []);
+    [13, 17].forEach(idx => {
+      const x = clean(row[idx]);
+      if (x) texts.push(x);
+    });
+
+    return Array.from(new Set(texts.filter(Boolean)));
+  }
+
+  function productSourceUnits(t){
+    const product = clean(t?.product);
+
+    // ① 商品名がある場合は【】単位で最優先分類
+    if (product) return extractBracketUnits(product);
+
+    // ② 商品名が空欄の場合は、作業内容から補完
+    const workTexts = fallbackWorkTexts(t);
+    if (workTexts.length) return workTexts.flatMap(x => extractBracketUnits(x));
+
+    // ③ 最後の保険。既存カテゴリは商品名空欄由来の可能性があるため、分類不能なら未設定に寄せる。
+    const fallback = clean(t?.category || t?.sizeBucket);
+    return fallback ? [fallback] : ['未設定'];
+  }
+
   function buildRows(rec){
     const majorMap = new Map();
     safeArray(rec?.tickets).forEach(t => {
-      const units = extractBracketUnits(t.product || t.category || t.sizeBucket || '未設定');
+      const units = productSourceUnits(t);
       const baseAmount = num(t.amount);
       const splitAmount = units.length > 0 ? baseAmount / units.length : baseAmount;
       units.forEach(unit => {
