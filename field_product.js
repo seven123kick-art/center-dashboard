@@ -1,4 +1,4 @@
-/* field_product.js : 商品カテゴリ分析 完全版（一般分類＋【】単位分解＋冷蔵庫容量補正版）
+/* field_product.js : 商品カテゴリ分析 完全版（一般分類＋表記ゆれ強化＋【】分解＋冷蔵庫容量補正版）
    2026-05-02
    ・Chart.jsに依存しないHTMLバー表示
    ・商品名は 【商品名】 単位で一度分解してから分類
@@ -7,6 +7,8 @@
    ・リサイクル文字を含むものは大分類「リサイクル」、中分類は冷蔵庫/洗濯機/テレビ等で判定
    ・複数商品が1原票に入る場合は、売上を商品点数で按分して合計売上を崩さない
    ・商品名が空欄の場合は、作業内容（N列想定／保存済みworkDetails等）から分類を補完
+   ・クレーン/ｸﾚｰﾝ/クレ－ン/クーレン/ユニック等の表記ゆれをクレーンへ統一
+   ・リサイクル、テレビ、冷蔵庫、洗濯機なども全角/半角・カナ揺れを吸収
    ・表示対象（年度/月）セレクターを商品カテゴリ分析にも必ず表示
 */
 'use strict';
@@ -107,61 +109,76 @@
 
   function classifyProductUnit(unit){
     const raw = clean(unit) || '未設定';
-    const s = toHalf(compact(raw));
 
-    function containsAny(re){ return re.test(s); }
+    // 表記ゆれ対策：全角/半角、半角カナ、長音・ハイフン違いを吸収してから分類する。
+    // 例：ｸﾚｰﾝ / クレ－ン / ｸﾚ-ﾝ / クーレン、ﾕﾆｯｸ / ユニック、ﾘｻｲｸﾙ / リサイクル 等。
+    const base = toHalf(compact(raw));
+    const upper = base.toUpperCase();
+    const noMarks = upper.replace(/[‐‑‒–—―ーｰ－\-~〜～]/g, '');
+    const hira = noMarks.replace(/[ぁ-ん]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60));
+
+    function has(...patterns){
+      return patterns.some(p => {
+        if (p instanceof RegExp) return p.test(base) || p.test(upper) || p.test(noMarks) || p.test(hira);
+        const x = String(p).toUpperCase();
+        return upper.includes(x) || noMarks.includes(x) || hira.includes(x);
+      });
+    }
+
     function detectItemMiddle(){
-      if (containsAny(/冷蔵|冷凍|レイゾウコ|ﾚｲｿﾞｳｺ|フリーザ|冷凍庫/)) return '冷蔵庫';
-      if (containsAny(/洗濯|ドラム|乾燥|センタク|ｾﾝﾀｸ/)) return '洗濯機';
-      if (containsAny(/テレビ|TV|ＴＶ|液晶|有機|有機EL|有機ＥＬ/)) return 'テレビ';
-      if (containsAny(/エアコン|空調/)) return 'エアコン';
-      if (containsAny(/レンジ|オーブン|電子レンジ/)) return 'レンジ';
-      if (containsAny(/炊飯/)) return '炊飯器';
+      if (has('冷蔵','冷凍','冷蔵庫','冷凍庫','レイゾウコ','フリーザ','FREEZER','REFRIGERATOR')) return '冷蔵庫';
+      if (has('洗濯','洗濯機','センタク','ドラム','乾燥機','WASHER','DRYER')) return '洗濯機';
+      if (has('テレビ','テレビ','TV','ＴＶ','液晶','有機','有機EL','OLED')) return 'テレビ';
+      if (has('エアコン','空調','AC','AIRCON')) return 'エアコン';
+      if (has('レンジ','オーブン','電子レンジ','MICROWAVE','OVEN')) return 'レンジ';
+      if (has('炊飯','炊飯器')) return '炊飯器';
+      if (has('照明','シーリング','ライト')) return '照明';
       return 'その他';
     }
 
     // リサイクルの文字が入るものは商品ではなくリサイクル扱い。
-    // 中分類は後続の冷蔵庫・洗濯機・テレビなどで一般的に分類する。
-    if (containsAny(/リサイクル|ﾘｻｲｸﾙ|Recycle/i)) {
+    // 全角/半角や英字表記を吸収し、中分類は後続の商品種別で分類する。
+    if (has('リサイクル','リサイク','RECYCLE','Rサイクル')) {
       const middle = detectItemMiddle();
       return { major:'リサイクル', middle, minor:raw, order:300 };
     }
 
-    // 作業系は商品カテゴリとは分ける
-    if (containsAny(/下見|見積|見積もり|見積り|下検|現調/)) {
+    // 作業系は商品カテゴリとは分ける。表記ゆれを強めに吸収する。
+    if (has('下見','見積','見積もり','見積り','下検','現調','現地調査')) {
       return { major:'作業', middle:'見積もり', minor:raw, order:410 };
     }
-    if (containsAny(/階段|段上|段上げ/)) {
+    if (has('階段','階上','段上','段上げ','階段上げ','階段作業')) {
       return { major:'作業', middle:'階段上げ', minor:raw, order:420 };
     }
-    if (containsAny(/クレーン|クーレン|ユニック|UNIC|吊|吊り|吊上|吊上げ/i)) {
+    if (has('クレーン','クレン','クーレン','ユニック','UNIC','UNIQ','吊','吊り','吊上','吊上げ','吊込み','吊込')) {
       return { major:'クレーン', middle:'クレーン', minor:raw, order:430 };
     }
+    if (has('設置','取付','取り付け','取外','取外し','取はずし','工事','部材','ニップル','マット','搬入','搬出')) {
+      return { major:'付帯作業・その他', middle:'付帯作業', minor:raw, order:700 };
+    }
 
-    if (!raw || raw === '未設定' || containsAny(/未設定|不明/)) {
+    if (!raw || raw === '未設定' || has('未設定','不明','空欄','NONE','NULL')) {
       return { major:'付帯作業・その他', middle:'未設定', minor:raw || '未設定', order:900 };
     }
 
-    // 一般的な商品カテゴリ
-    if (containsAny(/冷蔵|冷凍|レイゾウコ|ﾚｲｿﾞｳｺ|フリーザ|冷凍庫/)) {
-      const band = volumeBand(s);
+    // 一般的な商品カテゴリ。全角/半角・カナ表記ゆれを吸収する。
+    if (has('冷蔵','冷凍','冷蔵庫','冷凍庫','レイゾウコ','フリーザ','FREEZER','REFRIGERATOR')) {
+      const band = volumeBand(base);
       const orderMap = { '600L以上':10, '500〜599L':11, '400〜499L':12, '300〜399L':13, '200〜299L':14, '100〜199L':15, '容量不明':19 };
       return { major:'冷蔵庫', middle:band, minor:raw, order:orderMap[band] ?? 19 };
     }
-    if (containsAny(/洗濯|ドラム|乾燥|センタク|ｾﾝﾀｸ/)) {
-      if (containsAny(/ドラム/)) return { major:'洗濯機', middle:'ドラム式', minor:raw, order:20 };
-      if (containsAny(/乾燥/)) return { major:'洗濯機', middle:'乾燥機', minor:raw, order:21 };
+    if (has('洗濯','洗濯機','センタク','ドラム','乾燥機','WASHER','DRYER')) {
+      if (has('ドラム')) return { major:'洗濯機', middle:'ドラム式', minor:raw, order:20 };
+      if (has('乾燥機','乾燥')) return { major:'洗濯機', middle:'乾燥機', minor:raw, order:21 };
       return { major:'洗濯機', middle:'全自動・縦型', minor:raw, order:22 };
     }
-    if (containsAny(/テレビ|TV|ＴＶ|液晶|有機|有機EL|有機ＥＬ/)) {
-      if (containsAny(/有機|有機EL|有機ＥＬ/)) return { major:'テレビ', middle:'有機EL・液晶', minor:raw, order:30 };
-      if (containsAny(/液晶/)) return { major:'テレビ', middle:'有機EL・液晶', minor:raw, order:30 };
-      return { major:'テレビ', middle:'テレビ', minor:raw, order:31 };
+    if (has('テレビ','TV','ＴＶ','液晶','有機','有機EL','OLED')) {
+      return { major:'テレビ', middle:'有機EL・液晶', minor:raw, order:30 };
     }
-    if (containsAny(/エアコン|空調/)) return { major:'エアコン', middle:'エアコン', minor:raw, order:40 };
-    if (containsAny(/レンジ|オーブン|電子レンジ/)) return { major:'レンジ', middle:'レンジ', minor:raw, order:50 };
-    if (containsAny(/炊飯/)) return { major:'炊飯器', middle:'炊飯器', minor:raw, order:60 };
-    if (containsAny(/照明|シーリング/)) return { major:'照明', middle:'照明', minor:raw, order:70 };
+    if (has('エアコン','空調','AC','AIRCON')) return { major:'エアコン', middle:'エアコン', minor:raw, order:40 };
+    if (has('レンジ','オーブン','電子レンジ','MICROWAVE','OVEN')) return { major:'レンジ', middle:'レンジ', minor:raw, order:50 };
+    if (has('炊飯','炊飯器')) return { major:'炊飯器', middle:'炊飯器', minor:raw, order:60 };
+    if (has('照明','シーリング','ライト')) return { major:'照明', middle:'照明', minor:raw, order:70 };
 
     return { major:'付帯作業・その他', middle:'その他', minor:raw, order:800 };
   }
