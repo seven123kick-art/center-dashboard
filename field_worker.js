@@ -145,7 +145,7 @@
       if (selector && selector.parentNode === view) selector.insertAdjacentElement('afterend', note);
       else view.insertBefore(note, view.firstChild);
     }
-    note.innerHTML = '※金額はM列の「請求／直収」で分け、幹線料金を除外して表示しています。';
+    note.innerHTML = '※金額は「請求／直収」で分け、幹線料金を除外して表示しています。';
   }
 
   function makeKpi(rec, rows, ym){
@@ -251,10 +251,11 @@
       #view-field-worker .grid2 > .card:nth-child(1){order:1!important}
       #view-field-worker .grid2 > .card:nth-child(2){order:2!important}
       .worker-amount-note{margin:-2px 0 14px;color:#64748b;font-size:12px;line-height:1.6;padding:0 4px}
-      .worker-back-btn{display:inline-flex;align-items:center;gap:7px;margin:0 0 12px;padding:8px 14px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#334155;font-size:13px;font-weight:900;cursor:pointer;box-shadow:0 2px 6px rgba(15,23,42,.06);transition:background .15s ease,border-color .15s ease,transform .08s ease,box-shadow .15s ease}
+      .worker-back-btn{display:inline-flex;align-items:center;gap:7px;margin:16px auto 0;padding:9px 16px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#334155;font-size:13px;font-weight:900;cursor:pointer;box-shadow:0 2px 6px rgba(15,23,42,.06);transition:background .15s ease,border-color .15s ease,transform .08s ease,box-shadow .15s ease}
       .worker-back-btn:hover{background:#f1f5f9;border-color:#93c5fd;box-shadow:0 4px 10px rgba(15,23,42,.08)}
       .worker-back-btn:active{transform:translateY(1px);box-shadow:0 1px 4px rgba(15,23,42,.08)}
       .worker-back-btn:focus-visible{outline:3px solid rgba(37,99,235,.25);outline-offset:2px}
+      .worker-back-area{display:flex;justify-content:center;margin-top:16px;padding-top:14px;border-top:1px solid #edf2f7}
       .worker-detail-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
       .worker-detail-summary span{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:#f8fafc;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;color:#334155}
       .worker-chart-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;height:auto}
@@ -307,7 +308,7 @@
     if (!body) return;
     if (!document.getElementById('worker-size-bars') || !document.getElementById('worker-other-bars') || !document.getElementById('worker-direct-bars')) {
       body.style.height = 'auto'; body.style.position = 'relative';
-      body.innerHTML = `<button type="button" class="worker-back-btn" onclick="FIELD_WORKER_UI.backToRanking()">← 作業者ランキングへ戻る</button><div class="worker-selected-hero" id="worker-selected-hero"></div><div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系（①〜⑦）</div><div class="worker-chart-wrap" id="worker-size-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他（表記統合）</div><div class="worker-chart-wrap" id="worker-other-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">直収（M列=直収）</div><div class="worker-chart-wrap" id="worker-direct-bars"></div></div></div>`;
+      body.innerHTML = `<div class="worker-selected-hero" id="worker-selected-hero"></div><div class="worker-detail-summary" id="worker-detail-summary"></div><div class="worker-chart-grid"><div class="worker-chart-card"><div class="worker-chart-title">サイズ系（①〜⑦）</div><div class="worker-chart-wrap" id="worker-size-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">その他（表記統合）</div><div class="worker-chart-wrap" id="worker-other-bars"></div></div><div class="worker-chart-card"><div class="worker-chart-title">直収</div><div class="worker-chart-wrap" id="worker-direct-bars"></div></div></div><div class="worker-back-area"><button type="button" class="worker-back-btn" onclick="FIELD_WORKER_UI.backToRanking()">← 作業者ランキングへ戻る</button></div>`;
     }
     const hero = document.getElementById('worker-selected-hero');
     const summary = document.getElementById('worker-detail-summary');
