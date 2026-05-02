@@ -1,61 +1,58 @@
-/* field_product.js
-   商品カテゴリ分析：復旧・安定版 2026-05-02
-   - field_core.js の旧描画に上書きされても、商品カテゴリ分析表示中は本ファイル側で再描画
-   - N/R列相当の「作業内容」を優先して、クレーン・リサイクル・廃材・作業系を判定
-   - 通常のサイズ配送料は、商品名がある場合は商品名分類を優先
-   - 商品名が空欄の場合は、作業内容から補完
-   - クレーン／ユニック／手吊り／吊り系は最優先
-   - 「ユニック含まず」はクレーン扱いしない
-   - Chart.js 依存なし。HTMLバーで表示
+/* field_product.js : 商品カテゴリ分析 完全安定版
+   2026-05-02
+   原因対策：
+   1) field_core側の旧描画に戻されても商品カテゴリ画面表示中は再描画
+   2) 年度/月は「YYYYMM」を基準にし、登録済みデータ月だけ表示
+   3) STATEだけでなく localStorage 全体から workerCsvData / productAddressData 相当を探索
+   4) 商品・住所CSVが見つかれば R列作業内容＋U列金額を優先
+   5) 商品・住所CSVがなくても作業者CSVの works から暫定表示
+   6) クレーン／ユニック／手吊り／吊り系は最優先でクレーン分類
 */
 'use strict';
 
 (function(){
-  const MODULE_KEY = '__FIELD_PRODUCT_STABLE_WORKFIRST_20260502_V2__';
-  window[MODULE_KEY] = true;
+  const FLAG = '__FIELD_PRODUCT_ROBUST_FINAL_20260502__';
+  window[FLAG] = true;
 
-  const MONTHS = ['04','05','06','07','08','09','10','11','12','01','02','03'];
   const COLORS = ['#1a4d7c','#e05b4d','#198754','#b85c00','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#ea580c'];
+  const MONTH_ORDER = ['04','05','06','07','08','09','10','11','12','01','02','03'];
+  let timer = null;
 
-  let renderTimer = null;
-  let forceUntil = 0;
+  function arr(v){ return Array.isArray(v) ? v : []; }
+  function obj(v){ return v && typeof v === 'object' && !Array.isArray(v); }
+  function esc(v){ return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function num(v){
+    const s = String(v ?? '').normalize('NFKC').replace(/,/g,'').replace(/[円¥\s　]/g,'').replace(/[^0-9.\-]/g,'');
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function fmt(v){ return Math.round(num(v)).toLocaleString('ja-JP'); }
+  function fmtK(v){ return Math.round(num(v)/1000).toLocaleString('ja-JP'); }
+  function pct(v,total){ return total ? (num(v)/total*100).toFixed(1)+'%' : '0.0%'; }
 
-  function safeArray(v){ return Array.isArray(v) ? v : []; }
-  function n(v){
-    const s = String(v ?? '').replace(/,/g,'').replace(/[円¥\s　]/g,'').replace(/[^0-9.\-]/g,'');
-    const num = Number(s);
-    return Number.isFinite(num) ? num : 0;
+  function normYM(v){
+    const s = String(v ?? '').normalize('NFKC');
+    const d = s.replace(/[^\d]/g,'');
+    if (d.length >= 6) return d.slice(0,6);
+    return '';
   }
-  function esc(v){
-    return String(v ?? '')
-      .replace(/&/g,'&amp;')
-      .replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;');
+  function ymText(ym){
+    const y = String(ym||'').slice(0,4);
+    const m = Number(String(ym||'').slice(4,6));
+    return y && m ? `${y}年${m}月` : '—';
   }
-  function fmt(v){ return Math.round(n(v)).toLocaleString('ja-JP'); }
-  function fmtK(v){ return Math.round(n(v) / 1000).toLocaleString('ja-JP'); }
-  function pct(v,total){ return total ? (n(v) / total * 100).toFixed(1) + '%' : '0.0%'; }
-  function ymLabel2(ym){
-    if (typeof ymLabel === 'function') return ymLabel(ym);
-    const s = String(ym || '');
-    if (s.length >= 6) return `${s.slice(0,4)}年${Number(s.slice(4,6))}月`;
-    return s || '未選択';
-  }
-  function fiscalYearFromYM2(ym){
-    const y = Number(String(ym || '').slice(0,4));
-    const m = Number(String(ym || '').slice(4,6));
-    if (!y || !m) return String(new Date().getFullYear());
+  function fiscalYear(ym){
+    const y = Number(String(ym||'').slice(0,4));
+    const m = Number(String(ym||'').slice(4,6));
+    if (!y || !m) return '';
     return String(m <= 3 ? y - 1 : y);
   }
-  function ymFromFiscalMonth(fy, mm){
-    fy = Number(String(fy || '').replace(/年度/g,''));
-    mm = String(mm || '04').padStart(2,'0');
-    const year = ['01','02','03'].includes(mm) ? fy + 1 : fy;
-    return `${year}${mm}`;
+  function fyMonthSort(a,b){
+    const ma = String(a).slice(4,6), mb = String(b).slice(4,6);
+    return MONTH_ORDER.indexOf(ma) - MONTH_ORDER.indexOf(mb);
   }
-  function normalizeText(text){
-    return String(text || '')
+  function normalizeText(v){
+    return String(v ?? '')
       .normalize('NFKC')
       .toLowerCase()
       .replace(/[‐‑‒–—―ー－]/g,'-')
@@ -63,139 +60,187 @@
       .replace(/　+/g,'');
   }
 
-  function viewActive(){
+  function active(){
     const v = document.getElementById('view-field-product');
     return !!(v && v.classList.contains('active'));
   }
 
-  function ensureCsvState(){
-    if (!window.STATE) window.STATE = {};
-    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
-    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
-
-    // field_core.js は localStorage の mgmt5_<center>_workerCsvData / productAddressData に保存する。
-    // 商品カテゴリ単体で描画するときに STATE 側へまだ反映されていないケースがあるため、ここで補完する。
+  function localJSON(key){
     try {
-      const prefix = (window.STORE && STORE._p) ? STORE._p : `mgmt5_${(window.CENTER && CENTER.id) || 'toda'}_`;
-      if (!STATE.workerCsvData.length) {
-        const w = localStorage.getItem(prefix + 'workerCsvData');
-        if (w) STATE.workerCsvData = JSON.parse(w) || [];
-      }
-      if (!STATE.productAddressData.length) {
-        const p = localStorage.getItem(prefix + 'productAddressData');
-        if (p) STATE.productAddressData = JSON.parse(p) || [];
-      }
-    } catch(e) {}
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      if (!/^[\[{]/.test(raw.trim())) return null;
+      return JSON.parse(raw);
+    } catch(e) { return null; }
   }
 
-  function getYms(){
-    ensureCsvState();
-    const s = window.STATE || {};
+  function collectRecords(){
+    const out = { product:[], worker:[] };
+    const seen = new Set();
+
+    function pushProduct(x, source){
+      if (!obj(x)) return;
+      const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name);
+      const has = arr(x.tickets).length || arr(x.rows).length || arr(x.data).length || arr(x.rawRows).length || obj(x.products);
+      if (!ym || !has) return;
+      const key = `p:${source}:${ym}:${arr(x.tickets).length}:${arr(x.rows).length}:${arr(x.data).length}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.product.push({ ...x, ym, __source:source });
+    }
+
+    function pushWorker(x, source){
+      if (!obj(x)) return;
+      const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name);
+      const has = obj(x.workers) || arr(x.rows).length || arr(x.data).length || arr(x.rawRows).length;
+      if (!ym || !has) return;
+      const key = `w:${source}:${ym}:${Object.keys(x.workers||{}).length}:${arr(x.rows).length}:${arr(x.data).length}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.worker.push({ ...x, ym, __source:source });
+    }
+
+    const st = window.STATE || {};
+    arr(st.productAddressData).forEach((x,i)=>pushProduct(x, `STATE.productAddressData.${i}`));
+    arr(st.workerCsvData).forEach((x,i)=>pushWorker(x, `STATE.workerCsvData.${i}`));
+    arr(st.fieldData).forEach((x,i)=>{ pushProduct(x, `STATE.fieldData.${i}`); pushWorker(x, `STATE.fieldData.${i}`); });
+
+    // localStorage全体を探索。キー名に依存しない。
+    try {
+      for (let i=0; i<localStorage.length; i++){
+        const key = localStorage.key(i);
+        const parsed = localJSON(key);
+        if (!parsed) continue;
+
+        if (Array.isArray(parsed)) {
+          parsed.forEach((x,idx)=>{
+            pushProduct(x, `${key}.${idx}`);
+            pushWorker(x, `${key}.${idx}`);
+          });
+        } else if (obj(parsed)) {
+          pushProduct(parsed, key);
+          pushWorker(parsed, key);
+
+          Object.keys(parsed).forEach(k=>{
+            const v = parsed[k];
+            if (Array.isArray(v)) {
+              v.forEach((x,idx)=>{
+                pushProduct(x, `${key}.${k}.${idx}`);
+                pushWorker(x, `${key}.${k}.${idx}`);
+              });
+            }
+          });
+        }
+      }
+    } catch(e) {}
+
+    out.product.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+    out.worker.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+    return out;
+  }
+
+  function allYMs(){
+    const rec = collectRecords();
     const yms = new Set();
-    safeArray(s.productAddressData).forEach(d => d && d.ym && yms.add(String(d.ym)));
-    safeArray(s.workerCsvData).forEach(d => d && d.ym && yms.add(String(d.ym)));
+    rec.product.forEach(x=>x.ym && yms.add(x.ym));
+    rec.worker.forEach(x=>x.ym && yms.add(x.ym));
     return [...yms].sort();
   }
 
-  function latestYM(){
-    const yms = getYms();
-    return yms[yms.length - 1] || (window.STATE && STATE.selYM) || '';
-  }
-
-  function hasDataYM(ym){
-    return getYms().includes(String(ym || ''));
-  }
-
   function selectedYM(){
-    ensureCsvState();
-    const latest = latestYM();
+    const yms = allYMs();
+    const latest = yms[yms.length-1] || '';
 
-    // 商品カテゴリ画面内の月セレクトは、値に YYYYMM を直接持たせる
     const localMonth = document.getElementById('fp-product-month-select');
-    if (localMonth && localMonth.value && hasDataYM(localMonth.value)) return localMonth.value;
+    if (localMonth && normYM(localMonth.value) && yms.includes(normYM(localMonth.value))) return normYM(localMonth.value);
 
-    // field_core.js の共通セレクトも、月側は YYYYMM を値に持つ
-    const commonMonth = document.getElementById('field-common-month-select');
-    if (commonMonth && commonMonth.value && hasDataYM(commonMonth.value)) return commonMonth.value;
+    const common = document.getElementById('field-common-month-select');
+    if (common && normYM(common.value) && yms.includes(normYM(common.value))) return normYM(common.value);
 
-    if (window.STATE && STATE.selYM && hasDataYM(STATE.selYM)) return STATE.selYM;
+    const st = window.STATE || {};
+    if (normYM(st.selYM) && yms.includes(normYM(st.selYM))) return normYM(st.selYM);
+
+    // 画面上の最終データ表記から拾う保険
+    const sub = document.getElementById('page-sub')?.textContent || '';
+    const m = sub.match(/(\d{4})年\s*(\d{1,2})月/);
+    if (m) {
+      const ym = `${m[1]}${String(m[2]).padStart(2,'0')}`;
+      if (yms.includes(ym)) return ym;
+    }
 
     return latest;
   }
 
-  function productRecord(ym){
-    const s = window.STATE || {};
-    return safeArray(s.productAddressData).find(d => String(d.ym) === String(ym))
-        || safeArray(s.fieldData).find(d => String(d.ym) === String(ym) && safeArray(d.tickets).length);
+  function getRecordsForYM(ym){
+    const rec = collectRecords();
+    return {
+      product: rec.product.filter(x=>x.ym === ym),
+      worker: rec.worker.filter(x=>x.ym === ym)
+    };
   }
 
-  function workerRecord(ym){
-    const s = window.STATE || {};
-    return safeArray(s.workerCsvData).find(d => String(d.ym) === String(ym));
+  function textFrom(row, keys){
+    if (!row) return '';
+    for (const k of keys){
+      const v = row[k];
+      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
+    }
+    return '';
+  }
+  function amountFrom(row){
+    return num(row?.amount ?? row?.price ?? row?.value ?? row?.金額 ?? row?.['金額'] ?? row?.U ?? row?.['U列'] ?? row?.Q ?? row?.['Q列']);
+  }
+  function slipFrom(row){
+    return String(row?.slip ?? row?.slipNo ?? row?.slip_no ?? row?.invoiceNo ?? row?.原票番号 ?? row?.['原票番号'] ?? row?.I ?? row?.['I列'] ?? '').trim();
+  }
+  function workFrom(row){
+    return textFrom(row, ['work','workContent','work_content','作業内容','作業名','R列','R','N列','N','label','name','content']);
+  }
+  function productFrom(row){
+    return textFrom(row, ['product','productName','product_name','商品名','商品','P列','P','I列商品','firstProduct']);
   }
 
-  function getWorkTextFromDetail(d){
-    if (!d) return '';
-    return String(d.work ?? d.workContent ?? d.work_content ?? d['作業内容'] ?? d.label ?? d.name ?? '');
+  function isKansen(t){
+    const s = normalizeText(t);
+    return s.includes('幹線') || s.includes('中継');
   }
-
-  function getAmountFromDetail(d){
-    if (!d) return 0;
-    return n(d.amount ?? d.price ?? d.value ?? d['金額']);
-  }
-
-  function isKansen(workRaw){
-    const t = normalizeText(workRaw);
-    return t.includes('幹線') || t.includes('中継');
-  }
-
-  function isCrane(workRaw){
-    const raw = String(workRaw || '');
-    const t = normalizeText(raw);
+  function isCrane(t){
+    const raw = String(t||'');
+    const s = normalizeText(raw);
     if (!raw.trim()) return false;
-    if (t.includes('ユニック含まず') || t.includes('unic含まず')) return false;
-
-    return (
-      /クレーン|ｸﾚｰﾝ|クレ－ン|クレ-ン|クーレン|ﾕﾆｯｸ|ユニック|手吊り|手吊|吊り|吊|UNIC/i.test(raw)
-      || /クレ-ン|クーレン|ユニック|手吊|吊|unic/i.test(t)
-    );
+    if (s.includes('ユニック含まず') || s.includes('unic含まず')) return false;
+    return /クレーン|ｸﾚｰﾝ|クレ－ン|クレ-ン|クーレン|ユニック|ﾕﾆｯｸ|UNIC|手吊り|手吊|吊り|吊/i.test(raw)
+      || /クレ-ン|クーレン|ユニック|unic|手吊|吊/i.test(s);
   }
-
-  function isRecycle(workRaw){
-    const raw = String(workRaw || '');
-    const t = normalizeText(raw);
-    return /リサイクル|ﾘｻｲｸﾙ|家電リサイクル|リサイクル料|リサイクル料金/i.test(raw) || t.includes('リサイクル');
+  function isRecycle(t){
+    const raw = String(t||'');
+    const s = normalizeText(raw);
+    return /リサイクル|ﾘｻｲｸﾙ|家電リサイクル|リサイクル料/i.test(raw) || s.includes('リサイクル');
   }
-
-  function isWaste(workRaw){
-    const raw = String(workRaw || '');
-    const t = normalizeText(raw);
-    return /廃材|廃材処理|廃材引取|廃材引取り|廃材引取料/i.test(raw) || t.includes('廃材');
+  function isWaste(t){
+    const raw = String(t||'');
+    const s = normalizeText(raw);
+    return /廃材|廃材処理|廃材引取|廃材引取り/i.test(raw) || s.includes('廃材');
   }
-
-  function isEstimate(workRaw){
-    const t = normalizeText(workRaw);
-    return t.includes('見積') || t.includes('下見') || t.includes('現調');
+  function isEstimate(t){
+    const s = normalizeText(t);
+    return s.includes('見積') || s.includes('下見') || s.includes('現調');
   }
-
-  function isStairs(workRaw){
-    const t = normalizeText(workRaw);
-    return t.includes('階段') || t.includes('段上げ');
+  function isStairs(t){
+    const s = normalizeText(t);
+    return s.includes('階段') || s.includes('段上げ');
   }
-
-  function isInstallWork(workRaw){
-    const t = normalizeText(workRaw);
-    return t.includes('設置') || t.includes('取付') || t.includes('取付け') || t.includes('搬入') || t.includes('搬出') || t.includes('入替') || t.includes('入れ替え');
+  function isInstall(t){
+    const s = normalizeText(t);
+    return s.includes('設置') || s.includes('取付') || s.includes('搬入') || s.includes('搬出') || s.includes('入替') || s.includes('入れ替え');
   }
-
-  function isSizeDelivery(workRaw){
-    const raw = String(workRaw || '');
-    const t = normalizeText(raw);
-    return /サイズ\s*[①②③④⑤⑥⑦1-7]/.test(raw) || /サイズ[①②③④⑤⑥⑦1-7]/.test(t);
+  function isSize(t){
+    const raw = String(t||'');
+    const s = normalizeText(raw);
+    return /サイズ\s*[①②③④⑤⑥⑦1-7]/.test(raw) || /サイズ[①②③④⑤⑥⑦1-7]/.test(s);
   }
-
-  function sizeMid(workRaw){
-    const raw = String(workRaw || '');
+  function sizeMid(t){
+    const raw = String(t||'');
     const m = raw.match(/サイズ\s*([①②③④⑤⑥⑦1-7])/);
     if (!m) return 'サイズその他';
     const map = {'①':'①','②':'②','③':'③','④':'④','⑤':'⑤','⑥':'⑥','⑦':'⑦','1':'①','2':'②','3':'③','4':'④','5':'⑤','6':'⑥','7':'⑦'};
@@ -203,32 +248,30 @@
   }
 
   function bracketParts(text){
-    const s = String(text || '');
-    const parts = [];
+    const s = String(text||'');
+    const res = [];
     const re = /【([^】]+)】/g;
     let m;
     while ((m = re.exec(s)) !== null) {
-      if (m[1] && m[1].trim()) parts.push(m[1].trim());
+      if (m[1] && m[1].trim()) res.push(m[1].trim());
     }
-    return parts.length ? parts : (s.trim() ? [s.trim()] : []);
+    return res.length ? res : (s.trim() ? [s.trim()] : []);
   }
 
-  function refrigeratorVolume(text){
-    const s = String(text || '').normalize('NFKC');
+  function fridgeVolume(text){
+    const s = String(text||'').normalize('NFKC');
     let v = 0;
-
-    const explicit = s.match(/([1-9]\d{2})\s*l/i) || s.match(/([1-9]\d{2})\s*Ｌ/i);
-    if (explicit) v = Number(explicit[1]);
+    const m3 = s.match(/([1-9]\d{2})\s*l/i) || s.match(/([1-9]\d{2})\s*L/i);
+    if (m3) v = Number(m3[1]);
 
     if (!v) {
-      const nums = Array.from(s.matchAll(/(?:^|[^0-9])([1-9]\d)(?:[^0-9]|$)/g)).map(x => Number(x[1]));
-      const p = nums.find(x => x >= 20 && x <= 99);
+      const nums2 = Array.from(s.matchAll(/(?:^|[^0-9])([1-9]\d)(?:[^0-9]|$)/g)).map(x=>Number(x[1]));
+      const p = nums2.find(x=>x>=20 && x<=99);
       if (p) v = p * 10;
     }
-
     if (!v) {
-      const nums3 = Array.from(s.matchAll(/(?:^|[^0-9])([1-9]\d{2})(?:[^0-9]|$)/g)).map(x => Number(x[1]));
-      const p = nums3.find(x => x >= 100 && x <= 900);
+      const nums3 = Array.from(s.matchAll(/(?:^|[^0-9])([1-9]\d{2})(?:[^0-9]|$)/g)).map(x=>Number(x[1]));
+      const p = nums3.find(x=>x>=100 && x<=900);
       if (p) v = p;
     }
 
@@ -241,180 +284,210 @@
     return '700L以上';
   }
 
-  function classifyProductText(productRaw){
-    const raw = String(productRaw || '');
-    const t = normalizeText(raw);
+  function classifyProductOnly(product){
+    const raw = String(product||'');
+    const s = normalizeText(raw);
+    if (!raw.trim()) return {big:'付帯作業・その他', mid:'未設定', small:'未設定'};
 
-    if (!raw.trim()) return { big:'付帯作業・その他', mid:'未設定', small:'未設定' };
-
-    if (isCrane(raw)) return { big:'クレーン', mid:'クレーン作業', small:raw };
+    if (isCrane(raw)) return {big:'クレーン', mid:'クレーン作業', small:raw};
 
     if (isRecycle(raw)) {
-      if (/冷蔵|ﾚｲｿﾞｳ|冷凍/.test(raw) || /冷蔵|冷凍/.test(t)) return { big:'リサイクル', mid:'冷蔵庫', small:raw };
-      if (/洗濯|センタク|ドラム|乾燥/.test(raw) || /洗濯|ドラム|乾燥/.test(t)) return { big:'リサイクル', mid:'洗濯機', small:raw };
-      if (/テレビ|TV|ＴＶ|液晶|有機|OLED/i.test(raw) || /テレビ|tv|液晶|有機|oled/.test(t)) return { big:'リサイクル', mid:'テレビ', small:raw };
-      return { big:'リサイクル', mid:'その他', small:raw };
+      if (/冷蔵|ﾚｲｿﾞｳ|冷凍/.test(raw) || /冷蔵|冷凍/.test(s)) return {big:'リサイクル', mid:'冷蔵庫', small:raw};
+      if (/洗濯|センタク|ドラム|乾燥/.test(raw) || /洗濯|ドラム|乾燥/.test(s)) return {big:'リサイクル', mid:'洗濯機', small:raw};
+      if (/テレビ|TV|ＴＶ|液晶|有機|OLED/i.test(raw) || /テレビ|tv|液晶|有機|oled/.test(s)) return {big:'リサイクル', mid:'テレビ', small:raw};
+      return {big:'リサイクル', mid:'その他', small:raw};
     }
 
-    if (/冷蔵|ﾚｲｿﾞｳ|冷凍/.test(raw) || /冷蔵|冷凍/.test(t)) return { big:'冷蔵庫', mid:refrigeratorVolume(raw), small:raw };
-    if (/洗濯|センタク|ドラム|乾燥/.test(raw) || /洗濯|ドラム|乾燥/.test(t)) return { big:'洗濯機', mid:(/ドラム|乾燥/.test(raw) || /ドラム|乾燥/.test(t)) ? 'ドラム・乾燥機' : '洗濯機', small:raw };
-    if (/テレビ|TV|ＴＶ|液晶|有機|OLED/i.test(raw) || /テレビ|tv|液晶|有機|oled/.test(t)) return { big:'テレビ', mid:'テレビ', small:raw };
-    if (/エアコン|空調/.test(raw) || /エアコン|空調/.test(t)) return { big:'エアコン', mid:'エアコン', small:raw };
-    if (/レンジ|オーブン/.test(raw) || /レンジ|オーブン/.test(t)) return { big:'レンジ', mid:'レンジ', small:raw };
-    if (/炊飯/.test(raw) || /炊飯/.test(t)) return { big:'炊飯器', mid:'炊飯器', small:raw };
+    if (/冷蔵|ﾚｲｿﾞｳ|冷凍/.test(raw) || /冷蔵|冷凍/.test(s)) return {big:'冷蔵庫', mid:fridgeVolume(raw), small:raw};
+    if (/洗濯|センタク|ドラム|乾燥/.test(raw) || /洗濯|ドラム|乾燥/.test(s)) return {big:'洗濯機', mid:(/ドラム|乾燥/.test(raw)||/ドラム|乾燥/.test(s))?'ドラム・乾燥機':'洗濯機', small:raw};
+    if (/テレビ|TV|ＴＶ|液晶|有機|OLED/i.test(raw) || /テレビ|tv|液晶|有機|oled/.test(s)) return {big:'テレビ', mid:'テレビ', small:raw};
+    if (/エアコン|空調/.test(raw) || /エアコン|空調/.test(s)) return {big:'エアコン', mid:'エアコン', small:raw};
+    if (/レンジ|オーブン/.test(raw) || /レンジ|オーブン/.test(s)) return {big:'レンジ', mid:'レンジ', small:raw};
+    if (/炊飯/.test(raw) || /炊飯/.test(s)) return {big:'炊飯器', mid:'炊飯器', small:raw};
 
-    return { big:'付帯作業・その他', mid:'その他', small:raw };
+    return {big:'付帯作業・その他', mid:'その他', small:raw};
   }
 
-  function classify(workRaw, productRaw){
-    const work = String(workRaw || '');
+  function classify(work, product){
+    const w = String(work||'');
 
-    // 最優先：商品ではない売上・作業系
-    if (isCrane(work)) {
+    if (isCrane(w)) {
       let mid = 'クレーン作業';
-      if (isEstimate(work)) mid = 'クレーン見積もり';
-      else if (normalizeText(work).includes('差額')) mid = 'クレーン差額';
-      else if (isInstallWork(work)) mid = 'クレーン搬入';
-      return { big:'クレーン', mid, small:work || 'クレーン' };
+      if (isEstimate(w)) mid = 'クレーン見積もり';
+      else if (normalizeText(w).includes('差額')) mid = 'クレーン差額';
+      else if (isInstall(w)) mid = 'クレーン搬入';
+      return {big:'クレーン', mid, small:w || 'クレーン'};
     }
 
-    if (isRecycle(work)) {
-      const wt = normalizeText(work);
-      if (/冷蔵|ﾚｲｿﾞｳ|冷凍/.test(work) || /冷蔵|冷凍/.test(wt)) return { big:'リサイクル', mid:'冷蔵庫', small:work };
-      if (/洗濯|センタク|ドラム|乾燥/.test(work) || /洗濯|ドラム|乾燥/.test(wt)) return { big:'リサイクル', mid:'洗濯機', small:work };
-      if (/テレビ|TV|ＴＶ|液晶|有機|OLED/i.test(work) || /テレビ|tv|液晶|有機|oled/.test(wt)) return { big:'リサイクル', mid:'テレビ', small:work };
-      return { big:'リサイクル', mid:'その他', small:work };
+    if (isRecycle(w)) {
+      const s = normalizeText(w);
+      if (/冷蔵|ﾚｲｿﾞｳ|冷凍/.test(w) || /冷蔵|冷凍/.test(s)) return {big:'リサイクル', mid:'冷蔵庫', small:w};
+      if (/洗濯|センタク|ドラム|乾燥/.test(w) || /洗濯|ドラム|乾燥/.test(s)) return {big:'リサイクル', mid:'洗濯機', small:w};
+      if (/テレビ|TV|ＴＶ|液晶|有機|OLED/i.test(w) || /テレビ|tv|液晶|有機|oled/.test(s)) return {big:'リサイクル', mid:'テレビ', small:w};
+      return {big:'リサイクル', mid:'その他', small:w};
     }
 
-    if (isWaste(work)) return { big:'廃材', mid:'廃材', small:work };
+    if (isWaste(w)) return {big:'廃材', mid:'廃材', small:w};
+    if (isStairs(w)) return {big:'作業', mid:'階段上げ', small:w};
+    if (isEstimate(w)) return {big:'作業', mid:'見積もり', small:w};
 
-    if (isStairs(work)) return { big:'作業', mid:'階段上げ', small:work };
-    if (isEstimate(work)) return { big:'作業', mid:'見積もり', small:work };
+    const parts = bracketParts(product);
+    if (parts.length) return classifyProductOnly(parts[0]);
 
-    // 商品名がある通常配送は、サイズ配送料ではなく商品名を優先
-    const productParts = bracketParts(productRaw);
-    if (productParts.length) {
-      return classifyProductText(productParts[0]);
-    }
+    if (isSize(w)) return {big:'配送', mid:sizeMid(w), small:w};
+    if (isInstall(w)) return {big:'作業', mid:'設置・搬入', small:w};
 
-    // 商品名がない場合だけ作業内容で補完
-    if (isSizeDelivery(work)) return { big:'配送', mid:sizeMid(work), small:work };
-    if (isInstallWork(work)) return { big:'作業', mid:'設置・搬入', small:work };
-
-    return classifyProductText(work || productRaw || '');
+    return classifyProductOnly(w || product || '');
   }
 
-  function addToMap(map, cls, count, amount){
+  function add(map, cls, count, amount){
     const key = `${cls.big}||${cls.mid}`;
-    if (!map.has(key)) {
-      map.set(key, { big:cls.big, mid:cls.mid, count:0, amount:0, small:new Map() });
-    }
+    if (!map.has(key)) map.set(key, {big:cls.big, mid:cls.mid, count:0, amount:0, small:new Map()});
     const m = map.get(key);
     m.count += count;
     m.amount += amount;
-    const smallLabel = cls.small || cls.mid || cls.big;
-    if (!m.small.has(smallLabel)) m.small.set(smallLabel, { label:smallLabel, count:0, amount:0 });
-    const s = m.small.get(smallLabel);
-    s.count += count;
-    s.amount += amount;
+    const sk = cls.small || cls.mid || cls.big;
+    if (!m.small.has(sk)) m.small.set(sk, {label:sk, count:0, amount:0});
+    const sm = m.small.get(sk);
+    sm.count += count;
+    sm.amount += amount;
+  }
+
+  function rowsFromProductRecord(rec){
+    const rows = [];
+
+    arr(rec?.tickets).forEach(t=>{
+      const product = t.product || t.productName || t.product_name || '';
+      const slip = t.slip || t.slipNo || '';
+      const details = arr(t.workDetails).length
+        ? arr(t.workDetails)
+        : Object.entries(t.works || {}).map(([work, amount])=>({work, amount}));
+
+      if (details.length) {
+        details.forEach(d=>rows.push({
+          slip,
+          product,
+          work: workFrom(d),
+          amount: amountFrom(d)
+        }));
+      } else {
+        rows.push({
+          slip,
+          product,
+          work: '',
+          amount: amountFrom(t)
+        });
+      }
+    });
+
+    const rawRows = [
+      ...arr(rec?.rows),
+      ...arr(rec?.data),
+      ...arr(rec?.rawRows),
+      ...arr(rec?.items)
+    ];
+    rawRows.forEach(r=>rows.push({
+      slip: slipFrom(r),
+      product: productFrom(r),
+      work: workFrom(r),
+      amount: amountFrom(r)
+    }));
+
+    return rows.filter(r=>r.product || r.work || r.amount);
+  }
+
+  function rowsFromWorkerRecord(rec){
+    const rows = [];
+    Object.values(rec?.workers || {}).forEach(w=>{
+      Object.entries(w.works || {}).forEach(([work, v])=>{
+        const amount = obj(v) ? amountFrom(v) : num(v);
+        rows.push({slip:'', product:'', work, amount});
+      });
+      Object.entries(w.chartWorks || {}).forEach(([work, v])=>{
+        if (w.works && w.works[work]) return;
+        const amount = obj(v) ? amountFrom(v) : num(v);
+        rows.push({slip:'', product:'', work, amount});
+      });
+    });
+
+    const rawRows = [
+      ...arr(rec?.rows),
+      ...arr(rec?.data),
+      ...arr(rec?.rawRows),
+      ...arr(rec?.items)
+    ];
+    rawRows.forEach(r=>rows.push({
+      slip: slipFrom(r),
+      product: productFrom(r),
+      work: workFrom(r),
+      amount: amountFrom(r)
+    }));
+
+    return rows.filter(r=>r.product || r.work || r.amount);
   }
 
   function aggregate(){
-    ensureCsvState();
     const ym = selectedYM();
-    const rec = productRecord(ym);
-    const worker = workerRecord(ym);
+    const records = getRecordsForYM(ym);
+    let rows = [];
+
+    // 商品・住所CSVがあればそれを優先。なければ作業者CSVを保険利用。
+    records.product.forEach(r=>{ rows.push(...rowsFromProductRecord(r)); });
+    if (!rows.length) records.worker.forEach(r=>{ rows.push(...rowsFromWorkerRecord(r)); });
 
     const map = new Map();
     let totalAmount = 0;
     let totalCount = 0;
-    let excludedAmount = 0;
     const slips = new Set();
+    let excluded = 0;
 
-    if (rec && safeArray(rec.tickets).length) {
-      safeArray(rec.tickets).forEach(t => {
-        if (t.slip) slips.add(String(t.slip));
+    rows.forEach(r=>{
+      if (isKansen(r.work)) {
+        excluded += r.amount;
+        return;
+      }
 
-        const details = safeArray(t.workDetails).length
-          ? safeArray(t.workDetails)
-          : Object.entries(t.works || {}).map(([work, amount]) => ({ work, amount }));
+      const cls = classify(r.work, r.product);
+      add(map, cls, 1, r.amount);
+      totalAmount += r.amount;
+      totalCount += 1;
+      if (r.slip) slips.add(String(r.slip));
+    });
 
-        if (details.length) {
-          details.forEach(d => {
-            const work = getWorkTextFromDetail(d);
-            const amount = getAmountFromDetail(d);
-            if (isKansen(work)) {
-              excludedAmount += amount;
-              return;
-            }
-            const cls = classify(work, t.product || '');
-            addToMap(map, cls, 1, amount);
-            totalAmount += amount;
-            totalCount += 1;
-          });
-        } else {
-          const amount = n(t.amount);
-          const cls = classify('', t.product || '');
-          addToMap(map, cls, 1, amount);
-          totalAmount += amount;
-          totalCount += 1;
-        }
-      });
-    } else if (worker && worker.workers) {
-      // 保険：商品住所CSVがない場合は作業者CSVの works から表示
-      Object.values(worker.workers).forEach(w => {
-        Object.entries(w.works || {}).forEach(([work, obj]) => {
-          const amount = typeof obj === 'object' ? n(obj.amount) : n(obj);
-          if (isKansen(work)) {
-            excludedAmount += amount;
-            return;
-          }
-          const cls = classify(work, '');
-          addToMap(map, cls, 1, amount);
-          totalAmount += amount;
-          totalCount += 1;
-        });
-      });
-    }
-
-    const mids = Array.from(map.values()).map(x => ({
-      ...x,
-      smallList: Array.from(x.small.values()).sort((a,b)=>b.amount-a.amount || b.count-a.count)
+    const mids = [...map.values()].map(m=>({
+      ...m,
+      smallList:[...m.small.values()].sort((a,b)=>b.amount-a.amount || b.count-a.count)
     })).sort((a,b)=>b.amount-a.amount || b.count-a.count);
 
     const bigMap = new Map();
-    mids.forEach(m => {
-      if (!bigMap.has(m.big)) bigMap.set(m.big, { big:m.big, amount:0, count:0, mids:[] });
+    mids.forEach(m=>{
+      if (!bigMap.has(m.big)) bigMap.set(m.big,{big:m.big, amount:0, count:0, mids:[]});
       const b = bigMap.get(m.big);
       b.amount += m.amount;
       b.count += m.count;
       b.mids.push(m);
     });
 
-    const bigs = Array.from(bigMap.values()).sort((a,b)=>b.amount-a.amount || b.count-a.count);
+    const bigs = [...bigMap.values()].sort((a,b)=>b.amount-a.amount || b.count-a.count);
 
     return {
       ym,
-      rec,
-      worker,
-      mids,
+      rows,
       bigs,
+      mids,
       totalAmount,
       totalCount,
-      slipCount: slips.size || (rec ? n(rec.uniqueCount) : totalCount),
-      excludedAmount
+      slipCount: slips.size || totalCount,
+      excluded
     };
   }
 
   function ensureStyle(){
-    if (document.getElementById('field-product-stable-style-v2')) return;
+    if (document.getElementById('field-product-final-style')) return;
     const st = document.createElement('style');
-    st.id = 'field-product-stable-style-v2';
+    st.id = 'field-product-final-style';
     st.textContent = `
-      #view-field-product .fp-selector-card{
-        background:#fff;border:1px solid #dbe3ee;border-radius:16px;padding:16px 18px;margin-bottom:14px;
-        display:flex;justify-content:space-between;gap:12px;align-items:center;box-shadow:0 10px 24px rgba(15,23,42,.06)
-      }
+      #view-field-product .fp-selector-card{background:#fff;border:1px solid #dbe3ee;border-radius:16px;padding:16px 18px;margin-bottom:14px;display:flex;justify-content:space-between;gap:12px;align-items:center;box-shadow:0 10px 24px rgba(15,23,42,.06)}
       #view-field-product .fp-selector-title{font-size:16px;font-weight:900;color:#0f172a;margin-bottom:6px}
       #view-field-product .fp-selector-sub{font-size:12px;color:#8493a8;font-weight:700}
       #view-field-product .fp-selector-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -442,40 +515,27 @@
       #view-field-product .fp-detail-title{font-size:15px;font-weight:900;color:#0f172a}
       #view-field-product .fp-pill{display:inline-flex;align-items:center;border:1px solid #dbe3ee;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:800;background:#fff;color:#334155;white-space:nowrap}
       #view-field-product .fp-detail-body{display:none;padding:12px 18px 16px}
-      #view-field-product .fp-detail-card.open .fp-detail-body{display:block}
+      #view-field-product .fp-detail-card.open>.fp-detail-body{display:block}
       #view-field-product .fp-detail-card.open>.fp-detail-head .fp-plus{transform:rotate(45deg)}
       #view-field-product .fp-mini-table{width:100%;border-collapse:collapse;font-size:12px}
       #view-field-product .fp-mini-table th{background:#f3f6fb;color:#334155;text-align:left;padding:8px}
       #view-field-product .fp-mini-table td{border-bottom:1px solid #e5e7eb;padding:8px}
       #view-field-product .fp-mini-table .r{text-align:right}
-      @media(max-width:1200px){
-        #view-field-product .fp-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}
-        #view-field-product .fp-grid{grid-template-columns:1fr}
-        #view-field-product .fp-bar-row{grid-template-columns:1fr}
-        #view-field-product .fp-val{text-align:left}
-        #view-field-product .fp-selector-card{display:block}
-        #view-field-product .fp-selector-controls{margin-top:12px}
-      }
+      @media(max-width:1200px){#view-field-product .fp-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}#view-field-product .fp-grid{grid-template-columns:1fr}#view-field-product .fp-bar-row{grid-template-columns:1fr}#view-field-product .fp-val{text-align:left}#view-field-product .fp-selector-card{display:block}#view-field-product .fp-selector-controls{margin-top:12px}}
     `;
     document.head.appendChild(st);
   }
 
-  function kpi(label, value, sub, accent='navy'){
-    return `<div class="kpi-card accent-${accent}">
-      <div class="kpi-label">${esc(label)}</div>
-      <div class="kpi-value">${esc(value)}</div>
-      ${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}
-    </div>`;
+  function kpi(label,value,sub,accent='navy'){
+    return `<div class="kpi-card accent-${accent}"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${esc(value)}</div>${sub?`<div class="kpi-sub">${esc(sub)}</div>`:''}</div>`;
   }
 
-  function renderSelector(result){
-    const yms = getYms();
-    const ym = result.ym || latestYM();
-    const curFY = fiscalYearFromYM2(ym);
-    const years = [...new Set(yms.map(fiscalYearFromYM2))].sort((a,b)=>Number(b)-Number(a));
-    const fyList = years.length ? years : (curFY ? [curFY] : []);
-    const monthYms = yms.filter(x => fiscalYearFromYM2(x) === curFY);
-    const monthOptions = monthYms.length ? monthYms : (ym ? [ym] : []);
+  function selectorHTML(result){
+    const yms = allYMs();
+    const ym = result.ym || yms[yms.length-1] || '';
+    const fy = fiscalYear(ym);
+    const years = [...new Set(yms.map(fiscalYear).filter(Boolean))].sort((a,b)=>Number(b)-Number(a));
+    const months = yms.filter(x=>fiscalYear(x)===fy).sort(fyMonthSort);
 
     return `<div class="fp-selector-card">
       <div>
@@ -484,19 +544,15 @@
       </div>
       <div class="fp-selector-controls">
         <label>対象年度</label>
-        <select id="fp-product-year-select">
-          ${fyList.map(y=>`<option value="${esc(y)}" ${String(y)===String(curFY)?'selected':''}>${esc(y)}年度</option>`).join('')}
-        </select>
+        <select id="fp-product-year-select">${(years.length?years:[fy]).map(y=>`<option value="${esc(y)}" ${y===fy?'selected':''}>${esc(y)}年度</option>`).join('')}</select>
         <label>対象月</label>
-        <select id="fp-product-month-select">
-          ${monthOptions.map(x=>`<option value="${esc(x)}" ${String(x)===String(ym)?'selected':''}>${esc(ymLabel2(x))}</option>`).join('') || '<option value="">データなし</option>'}
-        </select>
+        <select id="fp-product-month-select">${(months.length?months:[ym]).filter(Boolean).map(x=>`<option value="${esc(x)}" ${x===ym?'selected':''}>${esc(ymText(x))}</option>`).join('') || '<option value="">データなし</option>'}</select>
       </div>
     </div>`;
   }
 
   function render(){
-    if (!viewActive()) return;
+    if (!active()) return;
 
     ensureStyle();
     const view = document.getElementById('view-field-product');
@@ -508,188 +564,125 @@
     const top = result.bigs[0];
 
     view.innerHTML = `
-      ${renderSelector(result)}
-      <div class="fp-note">
-        商品カテゴリは、作業内容を優先して分類しています。クレーン・ユニック・手吊り系は最優先でクレーンへ集約し、通常の商品配送は商品名で補完します。
-      </div>
+      ${selectorHTML(result)}
+      <div class="fp-note">商品カテゴリは、作業内容を優先して分類しています。クレーン・ユニック・手吊り系は最優先でクレーンへ集約し、通常の商品配送は商品名で補完します。</div>
 
       <div class="fp-kpi">
-        ${kpi('対象月', ymLabel2(result.ym), '商品カテゴリ分析')}
+        ${kpi('対象月', ymText(result.ym), '商品カテゴリ分析')}
         ${kpi('商品売上', `${fmtK(result.totalAmount)}千円`, '幹線料除外後', 'green')}
         ${kpi('原票数', fmt(result.slipCount), '原票番号ユニーク')}
-        ${kpi('平均単価', `${fmt(result.slipCount ? result.totalAmount / result.slipCount : 0)}円`, '売上 ÷ 原票数', 'amber')}
+        ${kpi('平均単価', `${fmt(result.slipCount ? result.totalAmount/result.slipCount : 0)}円`, '売上 ÷ 原票数', 'amber')}
         ${kpi('最大カテゴリ', top ? top.big : '—', top ? `${fmtK(top.amount)}千円 / ${pct(top.amount,result.totalAmount)}` : '', 'navy')}
       </div>
 
       <div class="fp-grid">
         <div class="fp-card">
-          <div class="fp-card-head">
-            <div class="fp-card-title">大分類別 売上構成</div>
-            <div class="fp-card-sub">クレーン・リサイクル・商品分類を整理</div>
-          </div>
+          <div class="fp-card-head"><div class="fp-card-title">大分類別 売上構成</div><div class="fp-card-sub">クレーン・リサイクル・商品分類を整理</div></div>
           <div class="fp-card-body">
             ${result.bigs.length ? result.bigs.map((x,i)=>`
               <div class="fp-bar-row">
                 <div class="fp-bar-name">${i+1}. ${esc(x.big)}<div class="fp-sub">${fmt(x.count)}点 / ${pct(x.amount,result.totalAmount)}</div></div>
                 <div class="fp-track"><div class="fp-fill" style="width:${Math.max(2,x.amount/maxBig*100).toFixed(1)}%;background:${COLORS[i%COLORS.length]}"></div></div>
                 <div class="fp-val">${fmtK(x.amount)}千円</div>
-              </div>`).join('') : `<div style="padding:24px;text-align:center;color:#8493a8">データなし</div>`}
+              </div>`).join('') : '<div style="padding:24px;text-align:center;color:#8493a8">データなし</div>'}
           </div>
         </div>
-
         <div class="fp-card">
-          <div class="fp-card-head">
-            <div class="fp-card-title">中分類 上位</div>
-            <div class="fp-card-sub">容量帯・作業区分別</div>
-          </div>
+          <div class="fp-card-head"><div class="fp-card-title">中分類 上位</div><div class="fp-card-sub">容量帯・作業区分別</div></div>
           <div class="fp-card-body">
             ${result.mids.length ? result.mids.slice(0,12).map((x,i)=>`
               <div class="fp-bar-row">
                 <div class="fp-bar-name">${i+1}. ${esc(x.mid || x.big)}<div class="fp-sub">${esc(x.big)} / ${fmt(x.count)}点</div></div>
                 <div class="fp-track"><div class="fp-fill" style="width:${Math.max(2,x.amount/maxMid*100).toFixed(1)}%;background:${COLORS[i%COLORS.length]}"></div></div>
                 <div class="fp-val">${fmtK(x.amount)}千円</div>
-              </div>`).join('') : `<div style="padding:24px;text-align:center;color:#8493a8">データなし</div>`}
+              </div>`).join('') : '<div style="padding:24px;text-align:center;color:#8493a8">データなし</div>'}
           </div>
         </div>
       </div>
 
       <div class="fp-card">
-        <div class="fp-card-head">
-          <div class="fp-card-title">商品カテゴリ別詳細</div>
-          <div class="fp-card-sub">大分類 → 中分類 → 元表記を開閉できます</div>
-        </div>
+        <div class="fp-card-head"><div class="fp-card-title">商品カテゴリ別詳細</div><div class="fp-card-sub">大分類 → 中分類 → 元表記を開閉できます</div></div>
         <div class="fp-card-body">
-          ${result.bigs.length ? result.bigs.map((big,idx)=>{
-            const mids = big.mids.sort((a,b)=>b.amount-a.amount || b.count-a.count);
-            return `<div class="fp-detail-card ${idx===0?'open':''}">
+          ${result.bigs.length ? result.bigs.map((big,idx)=>`
+            <div class="fp-detail-card ${idx===0?'open':''}">
               <div class="fp-detail-head" onclick="this.parentElement.classList.toggle('open')">
-                <div class="fp-plus">＋</div>
-                <div class="fp-detail-title">${esc(big.big)}</div>
-                <div class="fp-pill">${fmtK(big.amount)}千円</div>
-                <div class="fp-pill">${fmt(big.count)}点</div>
+                <div class="fp-plus">＋</div><div class="fp-detail-title">${esc(big.big)}</div><div class="fp-pill">${fmtK(big.amount)}千円</div><div class="fp-pill">${fmt(big.count)}点</div>
               </div>
               <div class="fp-detail-body">
-                ${mids.map(mid=>`
+                ${big.mids.sort((a,b)=>b.amount-a.amount||b.count-a.count).map(mid=>`
                   <div class="fp-detail-card">
                     <div class="fp-detail-head" onclick="this.parentElement.classList.toggle('open')">
-                      <div class="fp-plus">＋</div>
-                      <div class="fp-detail-title">${esc(mid.mid || mid.big)}</div>
-                      <div class="fp-pill">${fmtK(mid.amount)}千円</div>
-                      <div class="fp-pill">${fmt(mid.count)}点</div>
+                      <div class="fp-plus">＋</div><div class="fp-detail-title">${esc(mid.mid || mid.big)}</div><div class="fp-pill">${fmtK(mid.amount)}千円</div><div class="fp-pill">${fmt(mid.count)}点</div>
                     </div>
                     <div class="fp-detail-body">
                       <table class="fp-mini-table">
                         <thead><tr><th>小分類・元表記</th><th class="r">商品点数</th><th class="r">売上</th><th class="r">構成比</th></tr></thead>
-                        <tbody>
-                          ${mid.smallList.slice(0,100).map(s=>`<tr><td>${esc(s.label)}</td><td class="r">${fmt(s.count)}</td><td class="r">${fmtK(s.amount)}千円</td><td class="r">${pct(s.amount,result.totalAmount)}</td></tr>`).join('')}
-                        </tbody>
+                        <tbody>${mid.smallList.slice(0,100).map(s=>`<tr><td>${esc(s.label)}</td><td class="r">${fmt(s.count)}</td><td class="r">${fmtK(s.amount)}千円</td><td class="r">${pct(s.amount,result.totalAmount)}</td></tr>`).join('')}</tbody>
                       </table>
                     </div>
                   </div>`).join('')}
               </div>
-            </div>`;
-          }).join('') : `<div style="padding:24px;text-align:center;color:#8493a8">データなし</div>`}
+            </div>`).join('') : '<div style="padding:24px;text-align:center;color:#8493a8">データなし</div>'}
         </div>
       </div>
     `;
 
-    const yearSel = document.getElementById('fp-product-year-select');
-    const monthSel = document.getElementById('fp-product-month-select');
+    const fySel = document.getElementById('fp-product-year-select');
+    const ymSel = document.getElementById('fp-product-month-select');
+    if (fySel) fySel.onchange = () => {
+      const yms = allYMs().filter(x=>fiscalYear(x)===fySel.value).sort(fyMonthSort);
+      const next = yms[yms.length-1] || allYMs().at(-1) || '';
+      if (window.STATE) STATE.selYM = next;
+      const common = document.getElementById('field-common-month-select');
+      if (common && [...common.options].some(o=>o.value===next)) common.value = next;
+      rerender();
+    };
+    if (ymSel) ymSel.onchange = () => {
+      if (window.STATE) STATE.selYM = ymSel.value;
+      const common = document.getElementById('field-common-month-select');
+      if (common && [...common.options].some(o=>o.value===ymSel.value)) common.value = ymSel.value;
+      rerender();
+    };
 
-    if (yearSel) {
-      yearSel.onchange = () => {
-        const yms = getYms().filter(x => fiscalYearFromYM2(x) === yearSel.value);
-        const nextYM = yms[yms.length - 1] || latestYM();
-        if (window.STATE) {
-          STATE.fiscalYear = yearSel.value;
-          STATE.selYM = nextYM;
-        }
-        const commonFY = document.getElementById('field-common-fy-select');
-        const commonMonth = document.getElementById('field-common-month-select');
-        if (commonFY) commonFY.value = yearSel.value;
-        if (commonMonth && [...commonMonth.options].some(o=>o.value===nextYM)) commonMonth.value = nextYM;
-        forceRenderSoon();
-      };
-    }
-
-    if (monthSel) {
-      monthSel.onchange = () => {
-        if (window.STATE) {
-          STATE.selYM = monthSel.value;
-          STATE.fiscalYear = fiscalYearFromYM2(monthSel.value);
-        }
-        const commonFY = document.getElementById('field-common-fy-select');
-        const commonMonth = document.getElementById('field-common-month-select');
-        if (commonFY) commonFY.value = fiscalYearFromYM2(monthSel.value);
-        if (commonMonth && [...commonMonth.options].some(o=>o.value===monthSel.value)) commonMonth.value = monthSel.value;
-        forceRenderSoon();
-      };
-    }
-
-    view.dataset.productStableRendered = '1';
+    view.dataset.fieldProductFinal = '1';
   }
 
-  function forceRenderSoon(){
-    clearTimeout(renderTimer);
-    renderTimer = setTimeout(render, 50);
-    forceUntil = Date.now() + 2500;
-  }
-
-  function startActiveLoop(){
-    setInterval(() => {
-      if (!viewActive()) return;
-      const view = document.getElementById('view-field-product');
-      if (!view) return;
-
-      const notOurScreen = view.dataset.productStableRendered !== '1'
-        || !!view.querySelector('#f-product-tbody')
-        || view.textContent.includes('商品カテゴリ別売上') && !view.querySelector('.fp-selector-card');
-
-      if (Date.now() < forceUntil || notOurScreen) render();
-    }, 350);
+  function rerender(){
+    clearTimeout(timer);
+    timer = setTimeout(render, 40);
   }
 
   function hook(){
-    const oldNavGo = window.NAV && window.NAV.go;
-    if (oldNavGo && !window.__FIELD_PRODUCT_STABLE_NAV_PATCHED_V2__) {
-      window.__FIELD_PRODUCT_STABLE_NAV_PATCHED_V2__ = true;
-      window.NAV.go = function(el){
-        const ret = oldNavGo.apply(this, arguments);
-        const viewName = el && el.dataset ? el.dataset.view : '';
-        if (viewName === 'field-product') forceRenderSoon();
+    if (window.NAV && typeof NAV.go === 'function' && !window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__) {
+      window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__ = true;
+      const old = NAV.go.bind(NAV);
+      NAV.go = function(el){
+        const ret = old.apply(this, arguments);
+        if (el && el.dataset && el.dataset.view === 'field-product') rerender();
         return ret;
       };
     }
 
-    // FIELD_CSV_REBUILD.refresh が呼ばれた後にも再描画
-    if (window.FIELD_CSV_REBUILD && typeof window.FIELD_CSV_REBUILD.refresh === 'function' && !window.__FIELD_PRODUCT_REFRESH_PATCHED_V2__) {
-      window.__FIELD_PRODUCT_REFRESH_PATCHED_V2__ = true;
-      const oldRefresh = window.FIELD_CSV_REBUILD.refresh.bind(window.FIELD_CSV_REBUILD);
-      window.FIELD_CSV_REBUILD.refresh = function(){
-        const ret = oldRefresh.apply(this, arguments);
-        forceRenderSoon();
-        return ret;
-      };
-    }
-
-    document.addEventListener('change', e => {
+    document.addEventListener('change', e=>{
       const id = e.target && e.target.id;
-      if (id === 'field-common-month-select' || id === 'field-common-year-select') forceRenderSoon();
+      if (id === 'field-common-month-select' || id === 'field-common-year-select' || id === 'field-common-fy-select') rerender();
     });
 
-    document.addEventListener('click', e => {
-      const nav = e.target && e.target.closest ? e.target.closest('.nav-item[data-view="field-product"]') : null;
-      if (nav) forceRenderSoon();
-    });
+    setInterval(()=>{
+      if (!active()) return;
+      const view = document.getElementById('view-field-product');
+      if (!view) return;
+      const oldUI = view.dataset.fieldProductFinal !== '1' || view.querySelector('#f-product-tbody') || view.querySelector('#c-product-bar');
+      if (oldUI) render();
+    }, 300);
 
-    startActiveLoop();
-    forceRenderSoon();
-    window.addEventListener('load', forceRenderSoon);
+    rerender();
+    window.addEventListener('load', rerender);
   }
 
   window.FIELD_PRODUCT_UI = window.FIELD_PRODUCT_UI || {};
   window.FIELD_PRODUCT_UI.render = render;
-  window.FIELD_PRODUCT_UI.refresh = forceRenderSoon;
+  window.FIELD_PRODUCT_UI.refresh = rerender;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hook);
   else hook();
