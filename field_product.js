@@ -82,20 +82,31 @@
     return yms[yms.length - 1] || (window.STATE && STATE.selYM) || '';
   }
 
+  function hasDataYM(ym){
+    return getYms().includes(String(ym || ''));
+  }
+
   function selectedYM(){
+    const yms = getYms();
+    const latest = latestYM();
+
     const localMonth = document.getElementById('fp-product-month-select');
     const localYear = document.getElementById('fp-product-year-select');
     if (localMonth && localYear && localMonth.value && localYear.value) {
-      return ymFromFiscalMonth(localYear.value, localMonth.value);
+      const ym = ymFromFiscalMonth(localYear.value, localMonth.value);
+      if (hasDataYM(ym)) return ym;
+      return latest;
     }
 
     const commonMonth = document.getElementById('field-common-month-select');
     const commonYear = document.getElementById('field-common-year-select');
     if (commonMonth && commonYear && commonMonth.value && commonYear.value) {
-      return ymFromFiscalMonth(commonYear.value, commonMonth.value);
+      const ym = ymFromFiscalMonth(commonYear.value, commonMonth.value);
+      if (hasDataYM(ym)) return ym;
+      return latest;
     }
 
-    return latestYM();
+    return latest;
   }
 
   function productRecord(ym){
