@@ -1,9 +1,10 @@
-/* field_product.js : 商品カテゴリ分析 完全版（【】単位分解＋リサイクル/作業系分類強化版）
+/* field_product.js : 商品カテゴリ分析 完全版（一般分類＋【】単位分解＋冷蔵庫容量補正版）
    2026-05-02
    ・Chart.jsに依存しないHTMLバー表示
    ・商品名は 【商品名】 単位で一度分解してから分類
-   ・例：【冷蔵庫（５００～５９９Ｌ）(GRA500GTTH)】→ 冷蔵庫 / 500〜599L / 元表記
-   ・リサイクルは商品ではなく「リサイクル」大分類へ、後続表記で冷蔵庫/洗濯機/テレビ等に中分類
+   ・一般的な商品カテゴリへ戻し、冷蔵庫/洗濯機/テレビ等を主軸に整理
+   ・冷蔵庫は容量帯で中分類。2桁数字は末尾に0を補って容量扱い（例：50 → 500L）
+   ・リサイクル文字を含むものは大分類「リサイクル」、中分類は冷蔵庫/洗濯機/テレビ等で判定
    ・複数商品が1原票に入る場合は、売上を商品点数で按分して合計売上を崩さない
    ・表示対象（年度/月）セレクターを商品カテゴリ分析にも必ず表示
 */
@@ -57,16 +58,49 @@
     return units.length ? units : [raw];
   }
 
-  function volumeBand(text){
+  function extractFridgeVolume(text){
     const s = toHalf(compact(text));
-    const nums = [...s.matchAll(/(\d{2,4})/g)].map(m => Number(m[1])).filter(n => Number.isFinite(n));
-    const max = nums.length ? Math.max(...nums) : 0;
-    if (max >= 600) return '600L以上';
-    if (max >= 500) return '500〜599L';
-    if (max >= 400) return '400〜499L';
-    if (max >= 300) return '300〜399L';
-    if (max >= 200) return '200〜299L';
-    if (max >= 100) return '100〜199L';
+    const candidates = [];
+
+    // 500L / 500Ｌ / 500リットル / 500〜599L のような容量表記を優先
+    for (const m of s.matchAll(/(\d{2,4})\s*(?:L|Ｌ|リットル|ﾘｯﾄﾙ)/gi)) {
+      let n = Number(m[1]);
+      if (n >= 10 && n <= 99) n = n * 10; // 50Lのように登録されているケースは500L扱い
+      if (n >= 80 && n <= 900) candidates.push(n);
+    }
+
+    // 500〜599 / 500-599 のような範囲表記
+    for (const m of s.matchAll(/(\d{2,4})\s*[〜~\-ー]\s*(\d{2,4})/g)) {
+      let n1 = Number(m[1]);
+      let n2 = Number(m[2]);
+      if (n1 >= 10 && n1 <= 99) n1 *= 10;
+      if (n2 >= 10 && n2 <= 99) n2 *= 10;
+      if (n1 >= 80 && n1 <= 900) candidates.push(n1);
+      if (n2 >= 80 && n2 <= 900) candidates.push(n2);
+    }
+
+    // 型番や商品名に 50 / 55 のような2桁、500 のような3桁がある場合。
+    // 冷蔵庫判定後だけ使うため、2桁は容量として×10する。
+    for (const m of s.matchAll(/(\d{2,4})/g)) {
+      let n = Number(m[1]);
+      if (!Number.isFinite(n)) continue;
+      if (n >= 10 && n <= 99) n = n * 10;
+      if (n >= 80 && n <= 900) candidates.push(n);
+    }
+
+    if (!candidates.length) return 0;
+    // 型番に複数数字がある場合は、一番大きい容量候補を採用
+    return Math.max(...candidates);
+  }
+
+  function volumeBand(text){
+    const v = extractFridgeVolume(text);
+    if (v >= 600) return '600L以上';
+    if (v >= 500) return '500〜599L';
+    if (v >= 400) return '400〜499L';
+    if (v >= 300) return '300〜399L';
+    if (v >= 200) return '200〜299L';
+    if (v >= 100) return '100〜199L';
     return '容量不明';
   }
 
@@ -75,57 +109,56 @@
     const s = toHalf(compact(raw));
 
     function containsAny(re){ return re.test(s); }
-    function itemMiddle(){
-      if (containsAny(/冷蔵|冷凍|レイゾウコ|フリーザ/)) return '冷蔵庫';
-      if (containsAny(/洗濯|ドラム|乾燥|センタク/)) return '洗濯機';
-      if (containsAny(/テレビ|TV|ＴＶ|液晶|有機|有機EL/)) return 'テレビ';
+    function detectItemMiddle(){
+      if (containsAny(/冷蔵|冷凍|レイゾウコ|ﾚｲｿﾞｳｺ|フリーザ|冷凍庫/)) return '冷蔵庫';
+      if (containsAny(/洗濯|ドラム|乾燥|センタク|ｾﾝﾀｸ/)) return '洗濯機';
+      if (containsAny(/テレビ|TV|ＴＶ|液晶|有機|有機EL|有機ＥＬ/)) return 'テレビ';
       if (containsAny(/エアコン|空調/)) return 'エアコン';
       if (containsAny(/レンジ|オーブン|電子レンジ/)) return 'レンジ';
       if (containsAny(/炊飯/)) return '炊飯器';
       return 'その他';
     }
 
-    // リサイクルの文字が入るものは「商品」ではなく、リサイクル系の作業として扱う。
-    // その後ろにある冷蔵庫・洗濯機・テレビ等の表記で中分類する。
+    // リサイクルの文字が入るものは商品ではなくリサイクル扱い。
+    // 中分類は後続の冷蔵庫・洗濯機・テレビなどで一般的に分類する。
     if (containsAny(/リサイクル|ﾘｻｲｸﾙ|Recycle/i)) {
-      return { major:'リサイクル', middle:itemMiddle(), minor:raw, order:300 };
+      const middle = detectItemMiddle();
+      return { major:'リサイクル', middle, minor:raw, order:300 };
     }
 
-    // 見積もり・下見は作業系で統一。
+    // 作業系は商品カテゴリとは分ける
     if (containsAny(/下見|見積|見積もり|見積り|下検|現調/)) {
       return { major:'作業', middle:'見積もり', minor:raw, order:410 };
     }
-
-    // 階段が入るものは階段上げ。
     if (containsAny(/階段|段上|段上げ/)) {
       return { major:'作業', middle:'階段上げ', minor:raw, order:420 };
     }
-
-    // クレーン表記ゆれ対応。クーレンは誤字として吸収、ユニックもクレーン扱い。
     if (containsAny(/クレーン|クーレン|ユニック|UNIC|吊|吊り|吊上|吊上げ/i)) {
       return { major:'クレーン', middle:'クレーン', minor:raw, order:430 };
     }
 
-    // 未設定は商品カテゴリではなく付帯作業・その他に逃がす。
-    if (!raw || raw === '未設定' || containsAny(/未設定|不明|その他/)) {
-      return { major:'付帯作業・その他', middle:'未設定・その他', minor:raw || '未設定', order:900 };
+    if (!raw || raw === '未設定' || containsAny(/未設定|不明/)) {
+      return { major:'付帯作業・その他', middle:'未設定', minor:raw || '未設定', order:900 };
     }
 
-    // 商品系
-    if (containsAny(/冷蔵|冷凍|レイゾウコ|フリーザ/)) {
+    // 一般的な商品カテゴリ
+    if (containsAny(/冷蔵|冷凍|レイゾウコ|ﾚｲｿﾞｳｺ|フリーザ|冷凍庫/)) {
       const band = volumeBand(s);
       const orderMap = { '600L以上':10, '500〜599L':11, '400〜499L':12, '300〜399L':13, '200〜299L':14, '100〜199L':15, '容量不明':19 };
       return { major:'冷蔵庫', middle:band, minor:raw, order:orderMap[band] ?? 19 };
     }
-    if (containsAny(/洗濯|ドラム|乾燥|センタク/)) {
+    if (containsAny(/洗濯|ドラム|乾燥|センタク|ｾﾝﾀｸ/)) {
       if (containsAny(/ドラム/)) return { major:'洗濯機', middle:'ドラム式', minor:raw, order:20 };
       if (containsAny(/乾燥/)) return { major:'洗濯機', middle:'乾燥機', minor:raw, order:21 };
-      return { major:'洗濯機', middle:'洗濯機', minor:raw, order:22 };
+      return { major:'洗濯機', middle:'全自動・縦型', minor:raw, order:22 };
     }
-    // 液晶・有機ELもテレビに統合。
-    if (containsAny(/テレビ|TV|ＴＶ|液晶|有機|有機EL/)) return { major:'テレビ', middle:'テレビ', minor:raw, order:30 };
-    if (containsAny(/レンジ|オーブン|電子レンジ/)) return { major:'レンジ', middle:'レンジ', minor:raw, order:40 };
-    if (containsAny(/エアコン|空調/)) return { major:'エアコン', middle:'エアコン', minor:raw, order:50 };
+    if (containsAny(/テレビ|TV|ＴＶ|液晶|有機|有機EL|有機ＥＬ/)) {
+      if (containsAny(/有機|有機EL|有機ＥＬ/)) return { major:'テレビ', middle:'有機EL・液晶', minor:raw, order:30 };
+      if (containsAny(/液晶/)) return { major:'テレビ', middle:'有機EL・液晶', minor:raw, order:30 };
+      return { major:'テレビ', middle:'テレビ', minor:raw, order:31 };
+    }
+    if (containsAny(/エアコン|空調/)) return { major:'エアコン', middle:'エアコン', minor:raw, order:40 };
+    if (containsAny(/レンジ|オーブン|電子レンジ/)) return { major:'レンジ', middle:'レンジ', minor:raw, order:50 };
     if (containsAny(/炊飯/)) return { major:'炊飯器', middle:'炊飯器', minor:raw, order:60 };
     if (containsAny(/照明|シーリング/)) return { major:'照明', middle:'照明', minor:raw, order:70 };
 
@@ -211,7 +244,7 @@
     const top = majors[0] || blankNode('-');
     const avg = totalCount ? totalAmount / totalCount : 0;
     const mids = majors.flatMap(m => [...m.children.values()].map(x => ({...x, major:m.label}))).sort(sortRows);
-    pane.innerHTML = `<div class="fp-note">商品名は【】単位で分解し、大分類 → 中分類 → 小分類で整理しています。リサイクル・見積もり・階段上げ・クレーン系は商品ではなく作業系カテゴリとして整理します。</div>
+    pane.innerHTML = `<div class="fp-note">商品名は【】単位で分解し、一般的な商品分類（冷蔵庫・洗濯機・テレビ等）を基本に、大分類 → 中分類 → 小分類で整理しています。冷蔵庫は2桁数字も容量として補正して分類します。</div>
       <div class="fp-kpi-grid">
         <div class="fp-kpi"><div class="fp-kpi-label">対象月</div><div class="fp-kpi-value">${esc(ymText(ym))}</div><div class="fp-kpi-sub">商品カテゴリ分析</div></div>
         <div class="fp-kpi green"><div class="fp-kpi-label">商品売上</div><div class="fp-kpi-value">${fmtK(totalAmount)}千円</div><div class="fp-kpi-sub">商品・住所CSV 原票ベース</div></div>
@@ -220,8 +253,8 @@
         <div class="fp-kpi"><div class="fp-kpi-label">最大カテゴリ</div><div class="fp-kpi-value">${esc(top.label)}</div><div class="fp-kpi-sub">${fmtK(top.amount)}千円 / ${fmt1(pct(top.amount,totalAmount))}%</div></div>
       </div>
       <div class="fp-grid">
-        <div class="fp-card"><div class="fp-head"><div><div class="fp-title">大分類別 売上構成</div><div class="fp-sub">冷蔵庫・洗濯機など</div></div></div><div class="fp-body">${bars(majors,totalAmount)}</div></div>
-        <div class="fp-card"><div class="fp-head"><div><div class="fp-title">中分類 上位</div><div class="fp-sub">容量帯・形式別</div></div></div><div class="fp-body">${bars(mids,totalAmount,12)}</div></div>
+        <div class="fp-card"><div class="fp-head"><div><div class="fp-title">大分類別 売上構成</div><div class="fp-sub">冷蔵庫・洗濯機・テレビなど</div></div></div><div class="fp-body">${bars(majors,totalAmount)}</div></div>
+        <div class="fp-card"><div class="fp-head"><div><div class="fp-title">中分類 上位</div><div class="fp-sub">冷蔵庫容量帯・商品種別</div></div></div><div class="fp-body">${bars(mids,totalAmount,12)}</div></div>
       </div>
       <div class="fp-card fp-detail"><div class="fp-head"><div><div class="fp-title">商品カテゴリ別 詳細</div><div class="fp-sub">クリックで中分類・小分類を確認</div></div><span class="fp-pill">上位：${esc(top.label)} ${fmtK(top.amount)}千円</span></div><div class="fp-body">
       ${majors.map((m,idx)=>{ const children=[...m.children.values()].sort(sortRows); return `<details ${idx<3?'open':''}><summary><span>＋ ${esc(m.label)} <span class="fp-pill">${fmtK(m.amount)}千円</span> <span class="fp-pill">${fmt(m.count)}点</span></span><span>${fmt1(pct(m.amount,totalAmount))}%</span></summary><div class="fp-detail-body">${children.map(mid=>{ const minors=[...mid.children.values()].sort(sortRows).slice(0,30); return `<details style="margin-bottom:8px" ${children.length<=4?'open':''}><summary><span>${esc(mid.label)} <span class="fp-pill">${fmtK(mid.amount)}千円</span> <span class="fp-pill">${fmt(mid.count)}点</span></span><span>${fmt1(pct(mid.amount,totalAmount))}%</span></summary><div class="fp-detail-body"><table class="fp-table"><thead><tr><th>小分類・元表記</th><th class="r">商品点数</th><th class="r">売上</th><th class="r">構成比</th></tr></thead><tbody>${minors.map(mi=>`<tr><td>${esc(mi.label)}</td><td class="r">${fmt(mi.count)}</td><td class="r">${fmtK(mi.amount)}千円</td><td class="r">${fmt1(pct(mi.amount,totalAmount))}%</td></tr>`).join('')}</tbody></table></div></details>`; }).join('')}</div></details>`; }).join('')}</div></div>`;
