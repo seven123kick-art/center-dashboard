@@ -2592,7 +2592,8 @@ const CAPACITY_UI = {
   judge(used, cap) {
     const rate = cap > 0 ? used / cap * 100 : 0;
     if (cap <= 0) return { rate:0, status:'未設定', cls:'unset' };
-    if (rate >= 120) return { rate, status:'逼迫', cls:'over' };
+    if (rate >= 130) return { rate, status:'逼迫', cls:'over' };
+    if (rate >= 110) return { rate, status:'警戒', cls:'alert' };
     if (rate >= 100) return { rate, status:'注意', cls:'full' };
     if (rate >= 80) return { rate, status:'適正', cls:'good' };
     return { rate, status:'余裕あり', cls:'ok' };
@@ -2687,7 +2688,7 @@ const CAPACITY_UI = {
           <div class="capx-kpi blue"><span>実績件数</span><b>${fmt(totalActual)}</b><em>原票</em></div>
           <div class="capx-kpi green"><span>月キャパ</span><b>${fmt(totalCap)}</b><em>${hasCap?'登録済':'未登録'}</em></div>
           <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${pct(j.rate)}</b><em>${esc(j.status)}</em></div>
-          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>延べ発生数</em></div>
+          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>土日 ${fmt(weekendShare)}% / 最大 ${worstOver ? esc(worstOver.area) + ' ' + pct(worstOver.rate) : '—'}</em></div>
         </div>
 
         <div class="capx-tabs">
@@ -2805,6 +2806,22 @@ const CAPACITY_UI = {
     if (!row) return `<div class="capx-empty">対象データがありません</div>`;
     const diff = this.n(row.count) - this.n(row.cap);
     const cities = Object.entries(row.cities || {}).sort((a,b)=>b[1]-a[1]);
+    const w = this.dow(row.date);
+    const isWeekend = [0,6].includes(w);
+    const topCity = cities[0] ? cities[0][0] : '';
+    const secondCity = cities[1] ? cities[1][0] : '';
+    const rate = row.cap > 0 ? row.rate : 0;
+
+    const actions = [];
+    if (diff > 0) {
+      actions.push(`当日キャパに対して ${fmt(diff)}件超過。追加便・応援・時間帯制限の検討対象です。`);
+      if (isWeekend) actions.push('土日超過のため、平日振替可能な案件・時間指定の前倒し/後倒しを確認してください。');
+      if (topCity) actions.push(`${topCity} の集中が大きい場合、同一方面の便分割・時間帯調整を優先してください。`);
+      if (secondCity) actions.push(`${topCity} と ${secondCity} の組み合わせで積載・走行効率が悪い場合は、地区分けの見直し候補です。`);
+      if (rate >= 130) actions.push('逼迫レベルのため、翌月以降の通常キャパ設定または荷主別受注上限の見直し対象です。');
+    } else {
+      actions.push('当日のキャパ超過はありません。余力がある場合は近接地区の吸収候補として確認できます。');
+    }
 
     return `<div class="capx-cause-inner">
       <div class="capx-cause-title">
@@ -2816,6 +2833,10 @@ const CAPACITY_UI = {
         <div><span>日キャパ</span><b>${fmt(row.cap)}件</b></div>
         <div class="${diff > 0 ? 'danger' : 'ok'}"><span>差分</span><b>${diff > 0 ? '+' : ''}${fmt(diff)}件</b></div>
         <div><span>使用率</span><b>${row.cap > 0 ? pct(row.rate) : '-'}</b></div>
+      </div>
+      <div class="capx-action-box">
+        <h5>対応判断</h5>
+        ${actions.map(a=>`<div class="capx-action-item">・${esc(a)}</div>`).join('')}
       </div>
       <h5>市区町村別 原因内訳</h5>
       <div class="capx-cause-list">
@@ -4480,6 +4501,56 @@ document.addEventListener('DOMContentLoaded', async () => {
     @media(max-width:1200px){
       .capx-weekday-grid{grid-template-columns:repeat(2,minmax(150px,1fr));}
       .capx-section-head{flex-direction:column;}
+    }
+  `;
+  document.head.appendChild(st);
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-final-decision-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-final-decision-style';
+  st.textContent = `
+    .capacity-status.alert{
+      background:#fed7aa!important;
+      color:#9a3412!important;
+      border:1px solid #fdba74!important;
+    }
+    .capx-risk-alert td{background:#fff7ed!important;}
+    .capx-kpi.alert:before{background:#f97316!important;}
+    .capx-day.alert{background:#fff7ed!important;}
+    .capx-weekday-card.alert{background:#fff7ed!important;border-color:#fdba74!important;}
+    .capx-action-box{
+      border:1px solid #fed7aa;
+      background:#fff7ed;
+      border-radius:16px;
+      padding:12px 14px;
+      display:grid;
+      gap:7px;
+    }
+    .capx-action-box h5{
+      margin:0;
+      font-size:14px;
+      font-weight:950;
+      color:#9a3412;
+    }
+    .capx-action-item{
+      font-size:13px;
+      font-weight:850;
+      color:#7c2d12;
+      line-height:1.5;
+    }
+    .capx-city-hint{
+      border:1px solid #bfdbfe;
+      background:#eff6ff;
+      color:#1e3a8a;
+      border-radius:14px;
+      padding:12px 14px;
+      font-size:13px;
+      font-weight:900;
+      line-height:1.5;
+      margin-bottom:10px;
     }
   `;
   document.head.appendChild(st);
