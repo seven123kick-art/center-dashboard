@@ -2633,7 +2633,7 @@ const CAPACITY_UI = {
 
     const actual = this.buildActual();
     const rows = this.areaRows();
-    const daily = this.dailyRows();
+    const daily = this.dailyRows(); window.__CAPACITY_LAST_DAILY_ROWS = daily;
     this._lastRows = rows;
     this._lastDailyRows = daily;
 
@@ -2687,7 +2687,7 @@ const CAPACITY_UI = {
           <div class="capx-kpi blue"><span>実績件数</span><b>${fmt(totalActual)}</b><em>原票</em></div>
           <div class="capx-kpi green"><span>月キャパ</span><b>${fmt(totalCap)}</b><em>${hasCap?'登録済':'未登録'}</em></div>
           <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${pct(j.rate)}</b><em>${esc(j.status)}</em></div>
-          <div class="capx-kpi amber"><span>日別超過</span><b>${fmt(overDays)}</b><em>日・地区</em></div>
+          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>地区×日</em></div>
         </div>
 
         <div class="capx-tabs">
@@ -2712,7 +2712,7 @@ const CAPACITY_UI = {
     return `<div class="capx-grid">
       <div class="capx-card">
         <h3>地区別 月キャパ使用状況</h3>
-        <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">実績</th><th class="r">1日基準</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">実績</th><th class="r">基準キャパ</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
           ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td></tr>`).join('')}
         </tbody></table></div>
       </div>
@@ -4095,3 +4095,182 @@ document.addEventListener('DOMContentLoaded', async () => {
 /* =====================================================================
    現場明細 CSV完全再構築版（field.jsへ分割）
 ===================================================================== */
+
+
+  function capacityDailyCauseHtml(row){
+    if (!row) return '<div class="capx-empty">対象データがありません</div>';
+
+    const over = Number(row.count || 0) - Number(row.cap || 0);
+    const cities = Array.isArray(row.cities) ? row.cities : [];
+    const cityHtml = cities.length
+      ? cities.map((c,i)=>`
+          <div class="capx-cause-row">
+            <b>${i+1}</b>
+            <span>${esc(c.city || '')}</span>
+            <em>${fmt(c.count || 0)}件</em>
+          </div>
+        `).join('')
+      : '<div class="capx-empty">市区町村内訳なし</div>';
+
+    return `
+      <div class="capx-cause-box">
+        <div class="capx-cause-head">
+          <div>
+            <h3>${esc(row.date || '')} / ${esc(row.area || '')}</h3>
+            <p>日別超過の原因を、市区町村別の件数で確認します。</p>
+          </div>
+          <button type="button" class="capx-cause-close" id="capx-cause-close">閉じる</button>
+        </div>
+        <div class="capx-cause-kpis">
+          <div><span>実績</span><b>${fmt(row.count || 0)}件</b></div>
+          <div><span>日キャパ</span><b>${fmt(row.cap || 0)}件</b></div>
+          <div class="${over > 0 ? 'danger' : 'ok'}"><span>差分</span><b>${over > 0 ? '+' : ''}${fmt(over)}件</b></div>
+          <div><span>使用率</span><b>${row.cap > 0 ? pct(row.rate || 0) : '-'}</b></div>
+        </div>
+        <div class="capx-cause-list">
+          ${cityHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  function openCapacityDailyCause(key){
+    const parts = String(key || '').split('__');
+    const date = parts[0] || '';
+    const area = parts.slice(1).join('__') || '';
+
+    let rows = [];
+    try {
+      if (window.CAPACITY_UI && typeof CAPACITY_UI.dailyRows === 'function') {
+        rows = CAPACITY_UI.dailyRows();
+      }
+    } catch(e) {}
+
+    if (!Array.isArray(rows) || !rows.length) {
+      rows = window.__CAPACITY_LAST_DAILY_ROWS || [];
+    }
+
+    const row = rows.find(r => String(r.date) === date && String(r.area) === area);
+    let panel = document.getElementById('capx-cause-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'capx-cause-panel';
+      document.body.appendChild(panel);
+    }
+    panel.innerHTML = capacityDailyCauseHtml(row);
+    panel.classList.add('open');
+
+    const close = document.getElementById('capx-cause-close');
+    if (close) close.addEventListener('click', ()=>panel.classList.remove('open'));
+  }
+
+
+(function(){
+  if (window.__CAPACITY_DAILY_CAUSE_BIND__) return;
+  window.__CAPACITY_DAILY_CAUSE_BIND__ = true;
+  document.addEventListener('click', function(e){
+    const btn = e.target && e.target.closest ? e.target.closest('[data-capx-daily-detail]') : null;
+    if (!btn) return;
+    e.preventDefault();
+    if (typeof openCapacityDailyCause === 'function') {
+      openCapacityDailyCause(btn.getAttribute('data-capx-daily-detail'));
+    }
+  });
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-cause-drill-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-cause-drill-style';
+  st.textContent = `
+    .capx-mini-detail{
+      margin-left:8px;
+      border:1px solid #cbd5e1;
+      background:#fff;
+      color:#1d4ed8;
+      border-radius:999px;
+      padding:4px 9px;
+      font-size:11px;
+      font-weight:900;
+      cursor:pointer;
+    }
+    #capx-cause-panel{
+      position:fixed;
+      right:24px;
+      top:84px;
+      width:min(460px, calc(100vw - 48px));
+      max-height:calc(100vh - 120px);
+      overflow:auto;
+      z-index:9999;
+      display:none;
+    }
+    #capx-cause-panel.open{display:block;}
+    .capx-cause-box{
+      background:#fff;
+      border:1px solid #dbe3ee;
+      border-radius:20px;
+      box-shadow:0 24px 60px rgba(15,23,42,.22);
+      overflow:hidden;
+      color:#0f172a;
+      font-family:'Meiryo','Yu Gothic',sans-serif;
+    }
+    .capx-cause-head{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:flex-start;
+      padding:18px 20px;
+      background:#f8fafc;
+      border-bottom:1px solid #e5e7eb;
+    }
+    .capx-cause-head h3{margin:0;font-size:17px;font-weight:950;}
+    .capx-cause-head p{margin:5px 0 0;color:#64748b;font-size:12px;font-weight:850;}
+    .capx-cause-close{
+      border:1px solid #cbd5e1;
+      background:#fff;
+      border-radius:999px;
+      padding:7px 12px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .capx-cause-kpis{
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:8px;
+      padding:14px;
+      background:#fff;
+    }
+    .capx-cause-kpis>div{
+      border:1px solid #e5e7eb;
+      border-radius:14px;
+      padding:10px;
+      background:#f8fafc;
+    }
+    .capx-cause-kpis>div.danger{background:#fef2f2;border-color:#fecaca;}
+    .capx-cause-kpis>div.ok{background:#ecfdf5;border-color:#bbf7d0;}
+    .capx-cause-kpis span{display:block;color:#64748b;font-size:11px;font-weight:900;margin-bottom:5px;}
+    .capx-cause-kpis b{font-size:17px;font-weight:950;}
+    .capx-cause-list{display:grid;gap:8px;padding:14px;}
+    .capx-cause-row{
+      display:grid;
+      grid-template-columns:32px 1fr 72px;
+      gap:8px;
+      align-items:center;
+      border:1px solid #eef2f7;
+      border-radius:12px;
+      padding:9px 10px;
+      background:#fff;
+    }
+    .capx-cause-row b{
+      width:24px;height:24px;border-radius:999px;
+      background:#eaf3ff;color:#1d4ed8;
+      display:flex;align-items:center;justify-content:center;
+      font-size:12px;
+    }
+    .capx-cause-row span{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .capx-cause-row em{text-align:right;font-style:normal;font-weight:950;}
+  `;
+  document.head.appendChild(st);
+})();
