@@ -2646,7 +2646,17 @@ const CAPACITY_UI = {
     const totalActual = rows.reduce((s,r)=>s+this.n(r.count),0);
     const totalCap = rows.reduce((s,r)=>s+this.n(r.cap),0);
     const j = this.judge(totalActual,totalCap);
-    const overDays = daily.filter(r=>r.cap > 0 && r.rate >= 100).length;
+
+    // 日別超過サマリー
+    // ここで必ず定義してからKPIカードで使う。未定義変数で画面全体が止まらないようにする。
+    const dailyRows = Array.isArray(daily) ? daily : [];
+    const overList = dailyRows.filter(r => r && this.n(r.cap) > 0 && this.n(r.rate) >= 100);
+    const overDays = overList.length;
+    const weekendOver = overList.filter(r => [0,6].includes(this.dow(r.date))).length;
+    const weekendShare = overDays ? Math.round(weekendOver / overDays * 100) : 0;
+    const weekdayShare = overDays ? 100 - weekendShare : 0;
+    const worstOver = overList.slice().sort((a,b)=>this.n(b.rate)-this.n(a.rate))[0] || null;
+
     const hasCap = !!(STATE.capacity?.areas && Object.keys(STATE.capacity.areas).length);
     const yms = [...new Set((STATE.productAddressData || []).map(r=>r.ym).filter(Boolean))].sort().reverse();
     const curYM = actual.ym || this.getYM();
