@@ -10,12 +10,14 @@
 'use strict';
 
 (function(){
-  const FLAG = '__FIELD_AREA_CITY_ONLY_20260503__';
+  const FLAG = '__FIELD_AREA_CITY_PRO_V2_20260503__';
   if (window[FLAG]) return;
   window[FLAG] = true;
 
   let timer = null;
   let rendering = false;
+  let selectedFY = '';
+  let selectedYMState = '';
 
   function arr(v){ return Array.isArray(v) ? v : []; }
   function obj(v){ return v && typeof v === 'object' && !Array.isArray(v); }
@@ -51,6 +53,19 @@
     const m = Number(String(ym || '').slice(4,6));
     return m ? `${m}月` : '—';
   }
+
+  function fiscalFromYM(ym){
+    const y = Number(String(ym || '').slice(0,4));
+    const m = Number(String(ym || '').slice(4,6));
+    if (!y || !m) return '';
+    return String(m >= 4 ? y : y - 1);
+  }
+  function fiscalOrderYM(ym){
+    const m = Number(String(ym || '').slice(4,6));
+    if (!m) return 0;
+    return m >= 4 ? m : m + 12;
+  }
+
   function active(){
     const v = document.getElementById('view-field-area');
     return !!(v && v.classList.contains('active'));
@@ -134,18 +149,12 @@
       amount: num(t.amount || t.sales || t.value || t['金額'] || t['売上'])
     };
     const resolved = resolveArea(base);
-
-    // 重要：過去取込データには、field_core.js側で住所文字列から作った pref/city/area が残っている。
-    // ここで既存値を優先すると「埼玉県蕨中央5-」「埼玉県さいたま市」のように崩れるため、
-    // 郵便番号マスタで解決できた場合は resolved を最優先にする。
-    const storedPref = clean(t.pref || t.prefecture || t['都道府県']);
-    const storedCity = clean(t.city || t.municipality || t['市区町村']);
-    const pref = (resolved.pref && resolved.pref !== '未設定') ? resolved.pref : (storedPref || '未設定');
-    const city = (resolved.city && resolved.city !== '未設定') ? resolved.city : (storedCity || '未設定');
+    const pref = clean(t.pref || t.prefecture || t['都道府県']) || resolved.pref;
+    const city = clean(t.city || t.municipality || t['市区町村']) || resolved.city;
+    const town = clean(t.town || t['町域'] || t['町名']) || resolved.town || '';
     const cityLabel = pref === '未設定' ? city : pref + city;
-
-    // 集計単位は市区町村固定。町域・番地は表示名にも集計キーにも使わない。
-    return { ...base, pref, city, town:'', area: cityLabel || '未設定', townLabel: cityLabel || '未設定', zipStatus: resolved.zipStatus || 'UNKNOWN' };
+    const townLabel = town ? cityLabel + town : cityLabel;
+    return { ...base, pref: pref || '未設定', city: city || '未設定', town, area: cityLabel || '未設定', townLabel: townLabel || cityLabel || '未設定', zipStatus: resolved.zipStatus || 'UNKNOWN' };
   }
 
   function normalizeProductRecord(x, source){
@@ -225,20 +234,29 @@
 
   function allYMs(){ return [...new Set(collectProductRecords().map(x=>x.ym).filter(Boolean))].sort(); }
 
+  function yearsFromYMs(yms){
+    return [...new Set(yms.map(fiscalFromYM).filter(Boolean))].sort().reverse();
+  }
+  function monthsForFY(yms, fy){
+    return yms.filter(ym => fiscalFromYM(ym) === String(fy)).sort((a,b)=>fiscalOrderYM(a)-fiscalOrderYM(b));
+  }
+
   function selectedYM(){
     const yms = allYMs();
-    const latest = yms[yms.length - 1] || '';
-    const common = document.getElementById('field-common-month-select');
-    if (common && normYM(common.value) && yms.includes(normYM(common.value))) return normYM(common.value);
-    const st = window.STATE || {};
-    if (normYM(st.selYM) && yms.includes(normYM(st.selYM))) return normYM(st.selYM);
-    const sub = document.getElementById('page-sub')?.textContent || '';
-    const m = sub.match(/(\d{4})年\s*(\d{1,2})月/);
-    if (m) {
-      const ym = `${m[1]}${String(m[2]).padStart(2,'0')}`;
-      if (yms.includes(ym)) return ym;
+    if (!yms.length) return '';
+
+    const years = yearsFromYMs(yms);
+    if (!selectedFY || !years.includes(String(selectedFY))) {
+      const latest = yms[yms.length - 1];
+      selectedFY = fiscalFromYM(latest) || years[0] || '';
     }
-    return latest;
+
+    const months = monthsForFY(yms, selectedFY);
+    if (!selectedYMState || !months.includes(String(selectedYMState))) {
+      selectedYMState = months[months.length - 1] || yms[yms.length - 1] || '';
+    }
+
+    return selectedYMState;
   }
 
   function getRecordForYM(ym){
@@ -279,9 +297,7 @@
       let label = nt.area || '未設定';
       if (level === 'pref') {
         key = nt.pref || '未設定';
-        label = key;
-      } else {
-        // 市区町村固定。町域・番地は集計しない。
+        label = key; else if (level === 'city') {
         key = nt.area || '未設定';
         label = key;
       }
@@ -317,7 +333,21 @@
   }
 
   function getMode(){
-    return document.getElementById('field-area-view-mode')?.value || 'ranking';
+    const v = document.getElementById('field-area-view-mode')?.value;
+    return v === 'pref' || v === 'history' ? v : 'overall';
+  }
+  function setMode(v){
+    const sel = document.getElementById('field-area-view-mode');
+    if (!sel) return;
+    const allowed = ['overall','pref','history'];
+    if (!allowed.includes(v)) v = 'overall';
+    if (![...sel.options].some(o=>o.value === v)) {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v;
+      sel.appendChild(opt);
+    }
+    sel.value = v;
   }
   function getSortMode(){
     return document.getElementById('field-area-sort-mode')?.value || 'count';
@@ -326,10 +356,37 @@
     return document.getElementById('map-metric-sel')?.value || 'count';
   }
 
+
+  function selectorHtml(ym){
+    const yms = allYMs();
+    const years = yearsFromYMs(yms);
+    const fy = fiscalFromYM(ym);
+    const months = monthsForFY(yms, fy);
+    return `
+      <div class="fa-selector">
+        <div>
+          <div class="fa-selector-title">分析条件</div>
+          <div class="fa-selector-sub">年度・月を選択してエリア別の件数構成と売上構成を確認</div>
+        </div>
+        <div class="fa-selector-controls">
+          <label>年度
+            <select id="fa-fy-select">
+              ${years.map(y=>`<option value="${esc(y)}" ${String(y)===String(fy)?'selected':''}>${esc(y)}年度</option>`).join('')}
+            </select>
+          </label>
+          <label>月
+            <select id="fa-ym-select">
+              ${months.map(m=>`<option value="${esc(m)}" ${String(m)===String(ym)?'selected':''}>${esc(ymText(m))}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+      </div>`;
+  }
+
   function controlsHtml(mode, sortMode, metric){
     return `
       <div class="fa-tabs">
-        <button class="fa-tab ${mode === 'ranking' ? 'active' : ''}" data-fa-mode="ranking">市区町村</button>
+        <button class="fa-tab ${mode === 'overall' ? 'active' : ''}" data-fa-mode="overall">市区町村</button>
         <button class="fa-tab ${mode === 'pref' ? 'active' : ''}" data-fa-mode="pref">都道府県</button>
         <button class="fa-tab ${mode === 'history' ? 'active' : ''}" data-fa-mode="history">月別推移</button>
       </div>
@@ -362,9 +419,9 @@
           ${issueCount > 0 ? `<div class="fa-issue">要確認 ${fmt(issueCount)}件</div>` : ''}
         </div>
         <div class="fa-kpis">
-          <div class="fa-kpi"><div>原票件数</div><strong>${fmt(t.count)}</strong><span>件</span></div>
-          <div class="fa-kpi"><div>売上</div><strong>${fmtK(t.amount)}</strong><span>千円</span></div>
-          <div class="fa-kpi"><div>エリア数</div><strong>${fmt(rows.length)}</strong><span>地区</span></div>
+          <div class="fa-kpi"><div>原票件数</div><strong>${fmt(t.count)}件</strong></div>
+          <div class="fa-kpi"><div>売上</div><strong>${fmtK(t.amount)}千円</strong></div>
+          <div class="fa-kpi"><div>エリア数</div><strong>${fmt(rows.length)}地区</strong></div>
           <div class="fa-kpi wide"><div>最多エリア</div><strong>${top ? esc(top.label) : '—'}</strong><span>${top ? `${fmt(top.count)}件 / ${fmtK(top.amount)}千円` : ''}</span></div>
         </div>
       </div>`;
@@ -429,7 +486,7 @@
     const limited = rows.slice(0,30);
     return `
       <div class="fa-body">
-        <div class="fa-section-title">市区町村別ランキング TOP${limited.length}</div>
+        <div class="fa-section-title">エリア別ランキング TOP${limited.length}</div>
         ${barRowsHtml(limited, metric, t.count, t.amount)}
         ${tableHtml(limited, t.count, t.amount)}
       </div>`;
@@ -503,16 +560,13 @@
 
       box.innerHTML = '<div class="fa-empty">エリア分析を読み込み中...</div>';
       await ensureZipParts(rec);
-      // 分割郵便番号マスタ読込後に、同じ年月のレコードを再取得する。
-      // 初回取得時はマスタ未読込で住所フォールバックになっているため、ここで郵便番号優先に作り直す。
-      const readyRec = getRecordForYM(ym) || rec;
 
       const mode = getMode();
       const sortMode = getSortMode();
       const metric = getMetric();
       const level = mode === 'pref' ? 'pref' : 'city';
 
-      let rows = buildRows(readyRec, level);
+      let rows = buildRows(rec, level);
       rows = sortRows(rows, sortMode);
 
       if (!rows.length) {
@@ -526,19 +580,18 @@
       }
 
       box.innerHTML = `
+        ${selectorHtml(ym)}
         ${summaryHtml(ym, rows)}
         <div class="fa-toolbar">${controlsHtml(mode, sortMode, metric)}</div>
       `;
 
       if (mode === 'history') {
-        let records = collectProductRecords();
-        await Promise.all(records.map(r => ensureZipParts(r)));
-        records = collectProductRecords();
+        const records = collectProductRecords();
         box.insertAdjacentHTML('beforeend', historyHtml(records, ym));
       } else if (mode === 'pref') {
         box.insertAdjacentHTML('beforeend', prefHtml(rows, metric, sortMode));
       } else {
-        box.insertAdjacentHTML('beforeend', rankingHtml(rows, metric));
+        box.insertAdjacentHTML('beforeend', rankingHtml(rows, metric).replace('エリア別ランキング', '市区町村別ランキング'));
       }
 
       bindInlineControls();
@@ -557,12 +610,35 @@
   }
 
   function bindInlineControls(){
+
+    const fySel = document.getElementById('fa-fy-select');
+    const ymSel = document.getElementById('fa-ym-select');
+
+    if (fySel && !fySel.__faBound) {
+      fySel.__faBound = true;
+      fySel.addEventListener('change', ()=>{
+        selectedFY = fySel.value;
+        const yms = allYMs();
+        const ms = monthsForFY(yms, selectedFY);
+        selectedYMState = ms[ms.length - 1] || '';
+        render();
+      });
+    }
+
+    if (ymSel && !ymSel.__faBound) {
+      ymSel.__faBound = true;
+      ymSel.addEventListener('change', ()=>{
+        selectedYMState = ymSel.value;
+        selectedFY = fiscalFromYM(selectedYMState);
+        render();
+      });
+    }
+
     document.querySelectorAll('[data-fa-mode]').forEach(btn=>{
       if (btn.__faBound) return;
       btn.__faBound = true;
       btn.addEventListener('click', ()=>{
-        const sel = document.getElementById('field-area-view-mode');
-        if (sel) sel.value = btn.dataset.faMode;
+        setMode(btn.dataset.faMode);
         render();
       });
     });
@@ -593,7 +669,15 @@
     const style = document.createElement('style');
     style.id = 'field-area-pro-style';
     style.textContent = `
+      #view-field-area #fpane-map > .card > .card-header > div:last-child{display:none!important}
+      #view-field-area #fpane-map > .card > .card-header .card-title + div{display:none!important}
       #field-map{height:auto!important;min-height:260px;border-radius:18px!important;border:1px solid #e5e7eb;overflow:hidden;background:#fff}
+      #field-map .fa-selector{margin:0;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+      #field-map .fa-selector-title{font-size:14px;font-weight:950;color:#0f172a}
+      #field-map .fa-selector-sub{font-size:12px;color:#64748b;font-weight:800;margin-top:3px}
+      #field-map .fa-selector-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+      #field-map .fa-selector-controls label{font-size:12px;color:#475569;font-weight:950}
+      #field-map .fa-selector-controls select{margin-left:6px;border:1px solid #cbd5e1;border-radius:12px;padding:9px 32px 9px 12px;background:#fff;color:#0f172a;font-weight:900}
       #field-map .fa-summary{padding:18px 20px 16px;border-bottom:1px solid #e5e7eb;background:linear-gradient(180deg,#ffffff,#f8fafc)}
       #field-map .fa-headline{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}
       #field-map .fa-title{font-size:20px;font-weight:950;color:#0f172a;letter-spacing:.01em}
@@ -650,6 +734,22 @@
   }
 
   function install(){
+
+    const modeSel = document.getElementById('field-area-view-mode');
+    if (modeSel) {
+      [...modeSel.options].forEach(o=>{
+        if (o.value === 'overall') o.textContent = '市区町村';
+        if (o.value === 'pref') o.textContent = '都道府県';
+      });
+      if (![...modeSel.options].some(o=>o.value === 'history')) {
+        const op = document.createElement('option');
+        op.value = 'history';
+        op.textContent = '月別推移';
+        modeSel.appendChild(op);
+      }
+      if (!['overall','pref','history'].includes(modeSel.value)) modeSel.value = 'overall';
+    }
+
     window.FIELD_AREA_UI = { render };
     window.FIELD_UI = window.FIELD_UI || {};
     window.FIELD_UI.renderMap = render;
