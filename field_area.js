@@ -134,12 +134,18 @@
       amount: num(t.amount || t.sales || t.value || t['金額'] || t['売上'])
     };
     const resolved = resolveArea(base);
-    const pref = clean(t.pref || t.prefecture || t['都道府県']) || resolved.pref;
-    const city = clean(t.city || t.municipality || t['市区町村']) || resolved.city;
-    const town = clean(t.town || t['町域'] || t['町名']) || resolved.town || '';
+
+    // 重要：過去取込データには、field_core.js側で住所文字列から作った pref/city/area が残っている。
+    // ここで既存値を優先すると「埼玉県蕨中央5-」「埼玉県さいたま市」のように崩れるため、
+    // 郵便番号マスタで解決できた場合は resolved を最優先にする。
+    const storedPref = clean(t.pref || t.prefecture || t['都道府県']);
+    const storedCity = clean(t.city || t.municipality || t['市区町村']);
+    const pref = (resolved.pref && resolved.pref !== '未設定') ? resolved.pref : (storedPref || '未設定');
+    const city = (resolved.city && resolved.city !== '未設定') ? resolved.city : (storedCity || '未設定');
     const cityLabel = pref === '未設定' ? city : pref + city;
-    const townLabel = town ? cityLabel + town : cityLabel;
-    return { ...base, pref: pref || '未設定', city: city || '未設定', town, area: cityLabel || '未設定', townLabel: townLabel || cityLabel || '未設定', zipStatus: resolved.zipStatus || 'UNKNOWN' };
+
+    // 集計単位は市区町村固定。町域・番地は表示名にも集計キーにも使わない。
+    return { ...base, pref, city, town:'', area: cityLabel || '未設定', townLabel: cityLabel || '未設定', zipStatus: resolved.zipStatus || 'UNKNOWN' };
   }
 
   function normalizeProductRecord(x, source){
@@ -273,7 +279,9 @@
       let label = nt.area || '未設定';
       if (level === 'pref') {
         key = nt.pref || '未設定';
-        label = key; else if (level === 'city') {
+        label = key;
+      } else {
+        // 市区町村固定。町域・番地は集計しない。
         key = nt.area || '未設定';
         label = key;
       }
@@ -495,13 +503,16 @@
 
       box.innerHTML = '<div class="fa-empty">エリア分析を読み込み中...</div>';
       await ensureZipParts(rec);
+      // 分割郵便番号マスタ読込後に、同じ年月のレコードを再取得する。
+      // 初回取得時はマスタ未読込で住所フォールバックになっているため、ここで郵便番号優先に作り直す。
+      const readyRec = getRecordForYM(ym) || rec;
 
       const mode = getMode();
       const sortMode = getSortMode();
       const metric = getMetric();
       const level = mode === 'pref' ? 'pref' : 'city';
 
-      let rows = buildRows(rec, level);
+      let rows = buildRows(readyRec, level);
       rows = sortRows(rows, sortMode);
 
       if (!rows.length) {
@@ -520,7 +531,9 @@
       `;
 
       if (mode === 'history') {
-        const records = collectProductRecords();
+        let records = collectProductRecords();
+        await Promise.all(records.map(r => ensureZipParts(r)));
+        records = collectProductRecords();
         box.insertAdjacentHTML('beforeend', historyHtml(records, ym));
       } else if (mode === 'pref') {
         box.insertAdjacentHTML('beforeend', prefHtml(rows, metric, sortMode));
