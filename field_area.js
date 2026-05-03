@@ -14,6 +14,8 @@
   window[FLAG] = true;
 
   let rendering = false;
+  let selectedFY = '';
+  let selectedYMState = '';
   let guardTimer = null;
   let observer = null;
 
@@ -61,6 +63,22 @@
   function monthText(ym){
     const m = Number(String(ym || '').slice(4,6));
     return m ? `${m}月` : '—';
+  }
+  function fiscalFromYM(ym){
+    const y = Number(String(ym || '').slice(0,4));
+    const m = Number(String(ym || '').slice(4,6));
+    if (!y || !m) return '';
+    return String(m >= 4 ? y : y - 1);
+  }
+  function fiscalMonthOrder(ym){
+    const m = Number(String(ym || '').slice(4,6));
+    return m >= 4 ? m : m + 12;
+  }
+  function fiscalYears(yms){
+    return [...new Set((yms || []).map(fiscalFromYM).filter(Boolean))].sort().reverse();
+  }
+  function monthsForFY(yms, fy){
+    return (yms || []).filter(ym => fiscalFromYM(ym) === String(fy)).sort((a,b)=>fiscalMonthOrder(a)-fiscalMonthOrder(b));
   }
   function fiscalFromYM(ym){
     const y = Number(String(ym || '').slice(0,4));
@@ -254,15 +272,40 @@
   }
 
   function selectedYM(){
+    const yms = allYMs();
+    if (!yms.length) return '';
+
     const common = document.getElementById('field-common-month-select');
     const commonYM = normYM(common?.value);
-    const yms = allYMs();
-    if (commonYM && yms.includes(commonYM)) return commonYM;
+    if (!selectedYMState && commonYM && yms.includes(commonYM)) {
+      selectedYMState = commonYM;
+      selectedFY = fiscalFromYM(commonYM);
+    }
 
-    const stateYM = normYM(window.STATE?.selYM);
-    if (stateYM && yms.includes(stateYM)) return stateYM;
+    if (!selectedYMState) {
+      const stateYM = normYM(window.STATE?.selYM);
+      if (stateYM && yms.includes(stateYM)) {
+        selectedYMState = stateYM;
+        selectedFY = fiscalFromYM(stateYM);
+      }
+    }
 
-    return yms[yms.length - 1] || '';
+    if (!selectedYMState || !yms.includes(selectedYMState)) {
+      selectedYMState = yms[yms.length - 1] || '';
+      selectedFY = fiscalFromYM(selectedYMState);
+    }
+
+    const years = fiscalYears(yms);
+    if (!selectedFY || !years.includes(String(selectedFY))) {
+      selectedFY = fiscalFromYM(selectedYMState) || years[0] || '';
+    }
+
+    const months = monthsForFY(yms, selectedFY);
+    if (months.length && !months.includes(selectedYMState)) {
+      selectedYMState = months[months.length - 1];
+    }
+
+    return selectedYMState;
   }
 
   function selectedRecord(ym){
@@ -382,6 +425,34 @@
   function setMetric(v){
     const sel = document.getElementById('map-metric-sel');
     if (sel) sel.value = v;
+  }
+
+
+  function selectorHtml(ym){
+    const yms = allYMs();
+    const years = fiscalYears(yms);
+    const fy = fiscalFromYM(ym) || selectedFY || years[0] || '';
+    const months = monthsForFY(yms, fy);
+
+    return `
+      <div class="fa3-selector">
+        <div>
+          <strong>表示対象</strong>
+          <span>年度順：4月 → 翌年3月 ／ 年度・月を共通管理</span>
+        </div>
+        <div class="fa3-selector-controls">
+          <label>対象年度
+            <select id="fa3-fy-select">
+              ${years.map(y=>`<option value="${esc(y)}" ${String(y)===String(fy)?'selected':''}>${esc(y)}年度</option>`).join('')}
+            </select>
+          </label>
+          <label>対象月
+            <select id="fa3-ym-select">
+              ${months.map(m=>`<option value="${esc(m)}" ${String(m)===String(ym)?'selected':''}>${esc(ymText(m))}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+      </div>`;
   }
 
   function cardHtml(ym, rows){
@@ -541,6 +612,7 @@
 
       box.innerHTML = `
         <div class="fa-area-v3">
+          ${selectorHtml(ym)}
           ${cardHtml(ym, rows)}
           ${toolbarHtml(mode, sortMode, metric)}
           ${mode === 'history'
@@ -566,6 +638,37 @@
   }
 
   function bindControls(){
+    const fySel = document.getElementById('fa3-fy-select');
+    const ymSel = document.getElementById('fa3-ym-select');
+
+    if (fySel && !fySel.__fa3Bound) {
+      fySel.__fa3Bound = true;
+      fySel.addEventListener('change', ()=>{
+        selectedFY = fySel.value;
+        const months = monthsForFY(allYMs(), selectedFY);
+        selectedYMState = months[months.length - 1] || '';
+        const commonFy = document.getElementById('field-common-fy-select');
+        if (commonFy) commonFy.value = selectedFY;
+        const commonYm = document.getElementById('field-common-month-select');
+        if (commonYm && selectedYMState) commonYm.value = selectedYMState;
+        setTimeout(render, 0);
+      });
+    }
+
+    if (ymSel && !ymSel.__fa3Bound) {
+      ymSel.__fa3Bound = true;
+      ymSel.addEventListener('change', ()=>{
+        selectedYMState = ymSel.value;
+        selectedFY = fiscalFromYM(selectedYMState);
+        const commonFy = document.getElementById('field-common-fy-select');
+        if (commonFy) commonFy.value = selectedFY;
+        const commonYm = document.getElementById('field-common-month-select');
+        if (commonYm) commonYm.value = selectedYMState;
+        if (window.STATE) STATE.selYM = selectedYMState;
+        setTimeout(render, 0);
+      });
+    }
+
     document.querySelectorAll('[data-fa3-mode]').forEach(btn=>{
       if (btn.__fa3Bound) return;
       btn.__fa3Bound = true;
@@ -663,6 +766,13 @@
 
       #field-map{height:auto!important;min-height:260px;border:0!important;border-radius:0!important;background:#fff!important;overflow:visible!important}
       #field-map .fa-area-v3{background:#fff}
+      #field-map .fa3-selector{margin:0;padding:18px 20px;border-bottom:1px solid #e5e7eb;background:linear-gradient(180deg,#f8fbff,#eef5ff);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+      #field-map .fa3-selector strong{display:block;font-size:15px;font-weight:950;color:#0f172a;margin-bottom:4px}
+      #field-map .fa3-selector span{display:block;font-size:12px;color:#64748b;font-weight:850}
+      #field-map .fa3-selector-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+      #field-map .fa3-selector-controls label{font-size:12px;color:#334155;font-weight:950}
+      #field-map .fa3-selector-controls select{margin-left:7px;border:1px solid #cbd5e1;border-radius:13px;padding:10px 34px 10px 13px;background:#fff;color:#0f172a;font-weight:900;box-shadow:0 8px 18px rgba(15,23,42,.05)}
+
       #field-map .fa3-summary{padding:18px 20px 16px;border-bottom:1px solid #e5e7eb;background:linear-gradient(180deg,#ffffff,#f8fafc)}
       #field-map .fa3-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
       #field-map .fa3-title{font-size:22px;font-weight:950;color:#0f172a;letter-spacing:.01em}
@@ -670,7 +780,16 @@
       #field-map .fa3-warn{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:950;white-space:nowrap}
 
       #field-map .fa3-kpis{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr)) minmax(260px,1.25fr);gap:12px}
-      #field-map .fa3-kpi{background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:16px 18px;box-shadow:0 10px 24px rgba(15,23,42,.055);min-width:0}
+      #field-map .fa3-kpi{position:relative;background:linear-gradient(180deg,#ffffff,#f8fafc);border:1px solid #dbe3ee;border-radius:18px;padding:16px 18px 16px 20px;box-shadow:0 10px 24px rgba(15,23,42,.055);min-width:0;overflow:hidden}
+      #field-map .fa3-kpi:before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:#2563eb}
+      #field-map .fa3-kpi:nth-child(1){background:linear-gradient(180deg,#eff6ff,#ffffff)}
+      #field-map .fa3-kpi:nth-child(1):before{background:#2563eb}
+      #field-map .fa3-kpi:nth-child(2){background:linear-gradient(180deg,#ecfdf5,#ffffff)}
+      #field-map .fa3-kpi:nth-child(2):before{background:#16a34a}
+      #field-map .fa3-kpi:nth-child(3){background:linear-gradient(180deg,#fff7ed,#ffffff)}
+      #field-map .fa3-kpi:nth-child(3):before{background:#f97316}
+      #field-map .fa3-kpi:nth-child(4){background:linear-gradient(180deg,#f5f3ff,#ffffff)}
+      #field-map .fa3-kpi:nth-child(4):before{background:#7c3aed}
       #field-map .fa3-kpi span{display:block;font-size:12px;color:#64748b;font-weight:950;margin-bottom:8px}
       #field-map .fa3-kpi b{display:block;font-size:25px;color:#0f172a;font-weight:950;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       #field-map .fa3-kpi em{display:block;font-style:normal;font-size:12px;color:#64748b;font-weight:850;margin-top:6px}
@@ -716,7 +835,7 @@
 
       @media (max-width:900px){
         #field-map .fa3-kpis{grid-template-columns:repeat(2,minmax(130px,1fr))}
-        #field-map .fa3-toolbar{align-items:flex-start;flex-direction:column}
+        #field-map .fa3-toolbar,#field-map .fa3-selector{align-items:flex-start;flex-direction:column}
         #field-map .fa3-row{grid-template-columns:1fr;gap:7px;border-bottom:1px solid #eef2f7;padding-bottom:11px}
         #field-map .fa3-val{text-align:left}
       }
