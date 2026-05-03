@@ -2688,7 +2688,7 @@ const CAPACITY_UI = {
           <div class="capx-kpi blue"><span>実績件数</span><b>${fmt(totalActual)}</b><em>原票</em></div>
           <div class="capx-kpi green"><span>月キャパ</span><b>${fmt(totalCap)}</b><em>${hasCap?'登録済':'未登録'}</em></div>
           <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${pct(j.rate)}</b><em>${esc(j.status)}</em></div>
-          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>土日 ${fmt(weekendShare)}% / 最大 ${worstOver ? esc(worstOver.area) + ' ' + pct(worstOver.rate) : '—'}</em></div>
+          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>土日 ${fmt(typeof weekendShare !== 'undefined' ? weekendShare : 0)}% / 最大 ${(typeof worstOver !== 'undefined' && worstOver) ? esc(worstOver.area) + ' ' + pct(worstOver.rate) : '—'}</em></div>
         </div>
 
         <div class="capx-tabs">
@@ -2737,7 +2737,7 @@ const CAPACITY_UI = {
           </div>
           <div class="capx-cal-summary">
             <span class="danger">超過 ${fmt(over.length)}件</span>
-            <span class="full">土日比率 ${fmt(weekendShare)}%</span>
+            <span class="full">土日比率 ${fmt(typeof weekendShare !== 'undefined' ? weekendShare : 0)}%</span>
           </div>
         </div>
         <div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th><th>原因</th></tr></thead><tbody>
