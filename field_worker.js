@@ -166,7 +166,7 @@
       <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">平均件数/日</div><div class="kpi-value">${workDayCount ? fmt1(avgCount) : '—'}件</div></div>
-      <div class="kpi-card accent-amber kpi-card-amount"><div class="kpi-label">平均売上/日</div><div class="kpi-value-row"><div class="kpi-value">${workDayCount ? fmtK(avgTotalSales) : '—'}千円</div><div class="kpi-side-breakdown"><span>売上 ${fmtK(avgSales)}千</span><span>直収 ${fmtK(avgDirect)}千</span></div></div><div class="kpi-month-note">月間 ${fmtK(totalAmount)}千円</div></div>`;
+      <div class="kpi-card accent-amber kpi-card-amount"><div class="kpi-label">平均売上/日</div><div class="kpi-value">${workDayCount ? fmtK(avgTotalSales) : '—'}千円</div><div class="kpi-sub kpi-amount-breakdown">売上 ${fmtK(avgSales)}千　直収 ${fmtK(avgDirect)}千</div></div>`;
   }
 
   function renderStatusNotice(){
@@ -252,11 +252,14 @@
       #view-field-worker .grid2 > .card:nth-child(2){order:2!important}
       .worker-amount-note{margin:-2px 0 14px;color:#64748b;font-size:12px;line-height:1.6;padding:0 4px}
 
-      .kpi-card-amount{display:flex;flex-direction:column;justify-content:flex-start}
-      .kpi-value-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-top:10px}
-      .kpi-card-amount .kpi-value{line-height:1.08;white-space:nowrap}
-      .kpi-side-breakdown{display:flex;flex-direction:column;align-items:flex-end;gap:4px;padding-top:2px;color:#7f8fa6;font-size:12px;font-weight:900;line-height:1.25;white-space:nowrap}
-      .kpi-month-note{margin-top:10px;color:#94a3b8;font-size:12px;font-weight:900;line-height:1.25}
+      #view-field-worker #f-kpi-worker{align-items:stretch!important;gap:16px!important}
+      #view-field-worker #f-kpi-worker .kpi-card{min-height:148px!important;padding:20px 22px!important;display:flex!important;flex-direction:column!important;justify-content:flex-start!important}
+      #view-field-worker #f-kpi-worker .kpi-label{font-size:13px!important;font-weight:900!important;line-height:1.25!important;margin:0 0 14px!important;color:#1f2a44!important}
+      #view-field-worker #f-kpi-worker .kpi-value{font-size:31px!important;font-weight:950!important;line-height:1.08!important;letter-spacing:.01em!important;margin:0!important;color:#0f172a!important}
+      #view-field-worker #f-kpi-worker .kpi-sub{font-size:12px!important;font-weight:900!important;line-height:1.35!important;color:#8aa0bb!important;margin-top:12px!important}
+      #view-field-worker #f-kpi-worker .kpi-amount-breakdown{white-space:nowrap!important}
+      #view-field-worker #f-kpi-worker .kpi-card-amount{align-items:flex-start!important;text-align:left!important}
+      @media(max-width:1180px){#view-field-worker #f-kpi-worker{grid-template-columns:repeat(2,minmax(0,1fr))!important}#view-field-worker #f-kpi-worker .kpi-amount-breakdown{white-space:normal!important}}
       .worker-back-btn{display:inline-flex;align-items:center;gap:7px;margin:16px auto 0;padding:9px 16px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#334155;font-size:13px;font-weight:900;cursor:pointer;box-shadow:0 2px 6px rgba(15,23,42,.06);transition:background .15s ease,border-color .15s ease,transform .08s ease,box-shadow .15s ease}
       .worker-back-btn:hover{background:#f1f5f9;border-color:#93c5fd;box-shadow:0 4px 10px rgba(15,23,42,.08)}
       .worker-back-btn:active{transform:translateY(1px);box-shadow:0 1px 4px rgba(15,23,42,.08)}
