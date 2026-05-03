@@ -2687,17 +2687,18 @@ const CAPACITY_UI = {
           <div class="capx-kpi blue"><span>実績件数</span><b>${fmt(totalActual)}</b><em>原票</em></div>
           <div class="capx-kpi green"><span>月キャパ</span><b>${fmt(totalCap)}</b><em>${hasCap?'登録済':'未登録'}</em></div>
           <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${pct(j.rate)}</b><em>${esc(j.status)}</em></div>
-          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>地区×日</em></div>
+          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>延べ発生数</em></div>
         </div>
 
         <div class="capx-tabs">
           ${[
-            ['monthly','月別使用状況'],['daily','日別超過'],['calendar','カレンダー'],['mapping','地区マッピング'],['master','通常キャパ'],['unmatched','未分類']
+            ['monthly','月別使用状況'],['daily','日別超過'],['weekday','曜日分析'],['calendar','カレンダー'],['mapping','地区マッピング'],['master','通常キャパ'],['unmatched','未分類']
           ].map(([k,l])=>`<button type="button" class="${this._tab===k?'active':''}" data-capx-tab="${k}">${l}</button>`).join('')}
         </div>
 
         ${this._tab==='monthly'?this.monthlyHtml(rows):''}
         ${this._tab==='daily'?this.dailyHtml(daily, actual):''}
+        ${this._tab==='weekday'?this.weekdayHtml(daily, actual):''}
         ${this._tab==='calendar'?this.calendarHtml(daily, actual):''}
         ${this._tab==='mapping'?this.mappingHtml(actual):''}
         ${this._tab==='master'?this.masterHtml():''}
@@ -2722,9 +2723,118 @@ const CAPACITY_UI = {
 
   dailyHtml(rows, actual) {
     if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
-    return `<div class="capx-card"><h3>日別キャパ超過チェック</h3><div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr class="capx-risk-${esc(r.cls)}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td></tr>`).join('')}
-    </tbody></table></div></div>`;
+    const over = rows.filter(r=>r.cap > 0 && r.rate >= 100);
+    const weekendOver = over.filter(r=>[0,6].includes(this.dow(r.date))).length;
+    const weekendShare = over.length ? Math.round(weekendOver / over.length * 100) : 0;
+
+    return `<div class="capx-grid">
+      <div class="capx-card">
+        <div class="capx-section-head">
+          <div>
+            <h3>日別超過（原因確認）</h3>
+            <p class="capx-note2">地区×日単位で、どの日・どの地区が詰まったかを確認します。</p>
+          </div>
+          <div class="capx-cal-summary">
+            <span class="danger">超過 ${fmt(over.length)}件</span>
+            <span class="full">土日比率 ${fmt(weekendShare)}%</span>
+          </div>
+        </div>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th><th>原因</th></tr></thead><tbody>
+          ${rows.map((r,i)=>`<tr class="capx-risk-${esc(r.cls)}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td><td><button type="button" class="capx-mini-detail" data-capx-daily-cause="${i}">見る</button></td></tr>`).join('')}
+        </tbody></table></div>
+      </div>
+      <div class="capx-card">
+        <h3>原因ドリルダウン</h3>
+        <div id="capacity-daily-cause-box" class="capx-empty">右端の「見る」をクリックしてください</div>
+      </div>
+    </div>`;
+  },
+
+  weekdayHtml(rows, actual) {
+    if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
+
+    const names = ['日','月','火','水','木','金','土'];
+    const map = new Map();
+
+    rows.forEach(r=>{
+      const w = this.dow(r.date);
+      if (!map.has(w)) map.set(w, { w, count:0, cap:0, over:0, items:[] });
+      const x = map.get(w);
+      x.count += this.n(r.count);
+      x.cap += this.n(r.cap);
+      if (r.cap > 0 && r.rate >= 100) x.over += 1;
+      x.items.push(r);
+    });
+
+    const list = Array.from({length:7},(_,w)=>{
+      const x = map.get(w) || { w, count:0, cap:0, over:0, items:[] };
+      const j = this.judge(x.count, x.cap);
+      const worst = x.items.slice().sort((a,b)=>b.rate-a.rate)[0];
+      return { ...x, rate:j.rate, status:j.status, cls:j.cls, worst };
+    });
+
+    return `<div class="capx-card">
+      <div class="capx-section-head">
+        <div>
+          <h3>曜日分析</h3>
+          <p class="capx-note2">曜日ごとの偏りを見ます。土日だけ逼迫しているか、平日に寄っているかを確認します。</p>
+        </div>
+      </div>
+      <div class="capx-weekday-grid">
+        ${list.map(x=>`
+          <div class="capx-weekday-card ${esc(x.cls)}">
+            <div class="capx-weekday-top">
+              <b>${names[x.w]}曜日</b>
+              <span class="capacity-status ${esc(x.cls)}">${esc(x.status)}</span>
+            </div>
+            <div class="capx-weekday-main">
+              <strong>${x.cap > 0 ? pct(x.rate) : '-'}</strong>
+              <span>${fmt(x.count)}件 / ${fmt(x.cap)}件</span>
+            </div>
+            <div class="capx-weekday-sub">
+              <span>超過 ${fmt(x.over)}件</span>
+              <span>${x.worst ? `最大 ${esc(x.worst.area)} ${x.worst.cap > 0 ? pct(x.worst.rate) : '-'}` : '最大 —'}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+  },
+
+  dailyCauseHtml(row) {
+    if (!row) return `<div class="capx-empty">対象データがありません</div>`;
+    const diff = this.n(row.count) - this.n(row.cap);
+    const cities = Object.entries(row.cities || {}).sort((a,b)=>b[1]-a[1]);
+
+    return `<div class="capx-cause-inner">
+      <div class="capx-cause-title">
+        <h4>${esc(this.dateLabel(row.date))} / ${esc(row.area)}</h4>
+        <p>${row.estimated ? '※月間件数をカレンダー日数で割った推定値です。' : '実日付データをもとにした集計です。'}</p>
+      </div>
+      <div class="capx-cause-kpis">
+        <div><span>実績</span><b>${fmt(row.count)}件</b></div>
+        <div><span>日キャパ</span><b>${fmt(row.cap)}件</b></div>
+        <div class="${diff > 0 ? 'danger' : 'ok'}"><span>差分</span><b>${diff > 0 ? '+' : ''}${fmt(diff)}件</b></div>
+        <div><span>使用率</span><b>${row.cap > 0 ? pct(row.rate) : '-'}</b></div>
+      </div>
+      <h5>市区町村別 原因内訳</h5>
+      <div class="capx-cause-list">
+        ${cities.length ? cities.map(([c,n],i)=>`
+          <div class="capx-cause-row">
+            <b>${i+1}</b>
+            <span>${esc(c)}</span>
+            <em>${fmt(n)}件</em>
+          </div>
+        `).join('') : '<div class="capx-empty">市区町村内訳なし</div>'}
+      </div>
+    </div>`;
+  },
+
+  showDailyCause(idx) {
+    const row = this._lastDailyRows[Number(idx)];
+    const box = document.getElementById('capacity-daily-cause-box');
+    if (!box || !row) return;
+    box.innerHTML = this.dailyCauseHtml(row);
   },
 
   calendarHtml(rows, actual) {
@@ -2866,6 +2976,7 @@ const CAPACITY_UI = {
 
     document.querySelectorAll('[data-capx-tab]').forEach(btn=>btn.addEventListener('click',()=>{ this._tab=btn.dataset.capxTab; this.render(); }));
     document.querySelectorAll('[data-capx-detail]').forEach(btn=>btn.addEventListener('click',()=>this.showCities(Number(btn.dataset.capxDetail))));
+    document.querySelectorAll('[data-capx-daily-cause]').forEach(btn=>btn.addEventListener('click',()=>this.showDailyCause(Number(btn.dataset.capxDailyCause))));
     document.querySelectorAll('[data-capx-cal-detail]').forEach(btn=>btn.addEventListener('click',()=>{
       const box = document.getElementById('capx-calendar-detail');
       if (!box) return;
@@ -4271,6 +4382,105 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     .capx-cause-row span{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .capx-cause-row em{text-align:right;font-style:normal;font-weight:950;}
+  `;
+  document.head.appendChild(st);
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-decision-ui-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-decision-ui-style';
+  st.textContent = `
+    .capx-section-head{
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      align-items:flex-start;
+      margin-bottom:12px;
+    }
+    .capx-mini-detail{
+      border:1px solid #cbd5e1;
+      background:#fff;
+      color:#1d4ed8;
+      border-radius:999px;
+      padding:5px 10px;
+      font-size:12px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .capx-weekday-grid{
+      display:grid;
+      grid-template-columns:repeat(7,minmax(150px,1fr));
+      gap:10px;
+    }
+    .capx-weekday-card{
+      border:1px solid #dbe3ee;
+      border-radius:18px;
+      padding:14px;
+      background:#fff;
+      box-shadow:0 8px 18px rgba(15,23,42,.045);
+      display:grid;
+      gap:10px;
+    }
+    .capx-weekday-card.over{background:#fef2f2;border-color:#fecaca;}
+    .capx-weekday-card.full{background:#fff7ed;border-color:#fed7aa;}
+    .capx-weekday-card.good{background:#eff6ff;border-color:#bfdbfe;}
+    .capx-weekday-card.ok{background:#ecfdf5;border-color:#bbf7d0;}
+    .capx-weekday-card.unset{background:#f8fafc;border-color:#cbd5e1;}
+    .capx-weekday-top{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      align-items:center;
+    }
+    .capx-weekday-top b{font-size:15px;font-weight:950;}
+    .capx-weekday-main strong{display:block;font-size:26px;font-weight:950;line-height:1.1;}
+    .capx-weekday-main span{display:block;margin-top:5px;color:#64748b;font-size:12px;font-weight:900;}
+    .capx-weekday-sub{display:grid;gap:4px;color:#475569;font-size:12px;font-weight:850;}
+    .capx-cause-inner{display:grid;gap:14px;}
+    .capx-cause-title h4{margin:0;font-size:17px;font-weight:950;}
+    .capx-cause-title p{margin:5px 0 0;color:#64748b;font-size:12px;font-weight:850;}
+    .capx-cause-kpis{
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:8px;
+    }
+    .capx-cause-kpis>div{
+      border:1px solid #e5e7eb;
+      border-radius:14px;
+      padding:10px;
+      background:#f8fafc;
+    }
+    .capx-cause-kpis>div.danger{background:#fef2f2;border-color:#fecaca;}
+    .capx-cause-kpis>div.ok{background:#ecfdf5;border-color:#bbf7d0;}
+    .capx-cause-kpis span{display:block;color:#64748b;font-size:11px;font-weight:900;margin-bottom:5px;}
+    .capx-cause-kpis b{font-size:17px;font-weight:950;}
+    .capx-cause-inner h5{margin:0;font-size:14px;font-weight:950;}
+    .capx-cause-list{display:grid;gap:8px;}
+    .capx-cause-row{
+      display:grid;
+      grid-template-columns:32px 1fr 72px;
+      gap:8px;
+      align-items:center;
+      border:1px solid #eef2f7;
+      border-radius:12px;
+      padding:9px 10px;
+      background:#fff;
+    }
+    .capx-cause-row b{
+      width:24px;height:24px;border-radius:999px;
+      background:#eaf3ff;color:#1d4ed8;
+      display:flex;align-items:center;justify-content:center;
+      font-size:12px;
+    }
+    .capx-cause-row span{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .capx-cause-row em{text-align:right;font-style:normal;font-weight:950;}
+    @media(max-width:1200px){
+      .capx-weekday-grid{grid-template-columns:repeat(2,minmax(150px,1fr));}
+      .capx-section-head{flex-direction:column;}
+    }
   `;
   document.head.appendChild(st);
 })();
