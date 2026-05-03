@@ -47,6 +47,40 @@
 ════════════════════════════════════════════════════════════════ */
 'use strict';
 
+function capRateText(used, cap){
+  const c = Number(cap || 0);
+  if (!c) return '-';
+  const rate = Number(used || 0) / c * 100;
+  return Number.isFinite(rate) ? rate.toFixed(1) + '%' : '-';
+}
+
+function capStatusText(used, cap){
+  const c = Number(cap || 0);
+  if (!c) return '未設定';
+  const rate = Number(used || 0) / c * 100;
+  if (rate < 80) return '余裕あり';
+  if (rate <= 100) return '適正';
+  if (rate <= 120) return '余裕少';
+  return '要調整';
+}
+
+function capStatusClass(used, cap){
+  const c = Number(cap || 0);
+  if (!c) return 'unset';
+  const rate = Number(used || 0) / c * 100;
+  if (rate < 80) return 'good';
+  if (rate <= 100) return 'ok';
+  if (rate <= 120) return 'warn';
+  return 'danger';
+}
+
+function capSortWeight(area){
+  const s = String(area || '');
+  if (/その他|未分類|未設定/.test(s)) return 1;
+  return 0;
+}
+
+
 
 /* ════════ ASSET LOADER（重い外部ライブラリは必要時だけ読む） ════════ */
 const ASSETS = {
@@ -2609,7 +2643,7 @@ const CAPACITY_UI = {
       const one = this.baseDailyCap(this.ymDate(actual.ym,1), area);
       const j = this.judge(a.count, cap);
       return { ...a, cap, oneDay:one, rate:j.rate, status:j.status, cls:j.cls };
-    }).sort((a,b)=>b.rate-a.rate || b.count-a.count);
+    }).sort((a,b)=>capSortWeight(a.area)-capSortWeight(b.area) || b.rate-a.rate || b.count-a.count);
   },
 
   dailyRows() {
@@ -2715,7 +2749,7 @@ const CAPACITY_UI = {
       <div class="capx-card">
         <h3>地区別 月キャパ使用状況</h3>
         <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">実績</th><th class="r">1日基準</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
-          ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${pct(r.rate)}%</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td></tr>`).join('')}
+          ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${capRateText(r.count, r.cap)}</td><td><span class="capacity-status ${esc(capStatusClass(r.count, r.cap))}">${esc(r.status)}</span></td></tr>`).join('')}
         </tbody></table></div>
       </div>
       <div class="capx-card"><h3>市区町村内訳</h3><div id="capacity-detail-box" class="capx-empty">地区をクリックしてください</div></div>
@@ -2725,7 +2759,7 @@ const CAPACITY_UI = {
   dailyHtml(rows, actual) {
     if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
     return `<div class="capx-card"><h3>日別キャパ超過チェック</h3><div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr class="capx-risk-${esc(r.cls)}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r">${pct(r.rate)}%</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td></tr>`).join('')}
+      ${rows.map(r=>`<tr class="capx-risk-${esc(capStatusClass(r.count, r.cap))}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r">${capRateText(r.count, r.cap)}</td><td><span class="capacity-status ${esc(capStatusClass(r.count, r.cap))}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td></tr>`).join('')}
     </tbody></table></div></div>`;
   },
 
@@ -2791,7 +2825,7 @@ const CAPACITY_UI = {
 
   calendarDetailHtml(date, rows) {
     const c = STATE.capacity.calendar?.[date] || {};
-    const list = rows.filter(r=>r.date === date).sort((a,b)=>b.rate-a.rate || b.count-a.count);
+    const list = rows.filter(r=>r.date === date).sort((a,b)=>capSortWeight(a.area)-capSortWeight(b.area) || b.rate-a.rate || b.count-a.count);
     const total = list.reduce((s,r)=>s+this.n(r.count),0);
     const worst = list[0];
 
@@ -2822,7 +2856,7 @@ const CAPACITY_UI = {
       </div>
 
       <div class="capx-cal-area-list">
-        ${list.length ? list.map(r=>`<div class="capx-cal-area-row ${esc(r.cls)}">
+        ${list.length ? list.map(r=>`<div class="capx-cal-area-row ${esc(capStatusClass(r.count, r.cap))}">
           <span>${esc(r.area)}</span>
           <b>${fmt(r.count)}件</b>
           <em>${fmt(r.cap)}枠</em>
@@ -4097,3 +4131,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 /* =====================================================================
    現場明細 CSV完全再構築版（field.jsへ分割）
 ===================================================================== */
+
+
+(function(){
+  if (document.getElementById('capacity-zero-fix-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-zero-fix-style';
+  st.textContent = `
+    .badge.unset,.cap-badge.unset,.capacity-badge.unset{
+      background:#f1f5f9!important;
+      color:#64748b!important;
+      border:1px solid #cbd5e1!important;
+    }
+  `;
+  document.head.appendChild(st);
+})();
