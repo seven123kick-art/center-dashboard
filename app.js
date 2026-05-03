@@ -2732,25 +2732,104 @@ const CAPACITY_UI = {
   calendarHtml(rows, actual) {
     const ym = actual.ym || this.getYM();
     const riskByDate = new Map();
+    const areaListByDate = new Map();
+
     rows.forEach(r=>{
+      if (!areaListByDate.has(r.date)) areaListByDate.set(r.date, []);
+      areaListByDate.get(r.date).push(r);
+
       const prev = riskByDate.get(r.date);
-      if (!prev || r.rate > prev.rate) riskByDate.set(r.date,r);
+      if (!prev || r.rate > prev.rate) riskByDate.set(r.date, r);
     });
+
     const firstDow = this.dow(this.ymDate(ym,1));
     const cells = [];
     for (let i=0;i<firstDow;i++) cells.push(null);
     for (let d=1; d<=this.daysInYM(ym); d++) cells.push(this.ymDate(ym,d));
     while (cells.length % 7) cells.push(null);
-    return `<div class="capx-card"><h3>カレンダー（日別超過＋補正）</h3><div class="capx-calendar">
-      ${['日','月','火','水','木','金','土'].map((d,i)=>`<div class="capx-week ${i===0?'sun':i===6?'sat':''}">${d}</div>`).join('')}
-      ${cells.map(date=>{
-        if(!date) return `<div class="capx-day blank"></div>`;
-        const c = STATE.capacity.calendar?.[date] || {};
-        const risk = riskByDate.get(date);
-        const cls = risk ? risk.cls : (this.isWeekend(date) ? 'weekend' : '');
-        return `<div class="capx-day ${esc(cls)}"><div class="capx-daytop"><b>${Number(date.slice(8,10))}</b><span>${risk?`${fmt(risk.count)}件 / ${pct(risk.rate)}%`:'0件'}</span></div><select data-capx-cal-date="${date}" data-capx-cal-field="type"><option value="normal" ${(c.type||'normal')==='normal'?'selected':''}>通常</option><option value="holiday" ${c.type==='holiday'?'selected':''}>祝日</option><option value="busy" ${c.type==='busy'?'selected':''}>繁忙日</option><option value="limit" ${c.type==='limit'?'selected':''}>制限日</option><option value="special" ${c.type==='special'?'selected':''}>特殊日</option></select><input type="number" data-capx-cal-date="${date}" data-capx-cal-field="adjust" value="${esc(c.adjust||0)}" placeholder="補正"><input data-capx-cal-date="${date}" data-capx-cal-field="memo" value="${esc(c.memo||'')}" placeholder="メモ"></div>`;
-      }).join('')}
-    </div></div>`;
+
+    const overDays = [...riskByDate.values()].filter(r=>r.rate > 100).length;
+    const warnDays = [...riskByDate.values()].filter(r=>r.rate >= 80 && r.rate <= 100).length;
+
+    return `<div class="capx-card capx-calendar-card">
+      <div class="capx-cal-head">
+        <div>
+          <h3>カレンダー（日別超過）</h3>
+          <p class="capx-note2">一覧は日付・件数・状態だけ表示します。補正は日付をクリックして右側で編集します。</p>
+        </div>
+        <div class="capx-cal-summary">
+          <span class="danger">超過 ${fmt(overDays)}日</span>
+          <span class="full">注意 ${fmt(warnDays)}日</span>
+        </div>
+      </div>
+
+      <div class="capx-calendar-layout">
+        <div class="capx-calendar-simple">
+          ${['日','月','火','水','木','金','土'].map((d,i)=>`<div class="capx-week ${i===0?'sun':i===6?'sat':''}">${d}</div>`).join('')}
+          ${cells.map(date=>{
+            if(!date) return `<div class="capx-day-simple blank"></div>`;
+            const c = STATE.capacity.calendar?.[date] || {};
+            const risk = riskByDate.get(date);
+            const cls = risk ? risk.cls : (this.isWeekend(date) ? 'weekend' : 'empty');
+            const total = (areaListByDate.get(date) || []).reduce((s,r)=>s+this.n(r.count),0);
+            const rateText = risk && risk.cap > 0 ? `${pct(risk.rate)}%` : (risk ? '要確認' : '');
+            return `<button type="button" class="capx-day-simple ${esc(cls)}" data-capx-cal-detail="${date}">
+              <span class="day-no">${Number(date.slice(8,10))}</span>
+              <strong>${total ? fmt(total)+'件' : '0件'}</strong>
+              <em>${rateText}</em>
+              ${c.adjust ? `<i>${this.n(c.adjust)>0?'+':''}${fmt(c.adjust)}</i>` : ''}
+            </button>`;
+          }).join('')}
+        </div>
+
+        <div class="capx-cal-detail" id="capx-calendar-detail">
+          <div class="capx-empty small">日付をクリックすると、補正入力と地区別内訳を表示します。</div>
+        </div>
+      </div>
+    </div>`;
+  },
+
+  calendarDetailHtml(date, rows) {
+    const c = STATE.capacity.calendar?.[date] || {};
+    const list = rows.filter(r=>r.date === date).sort((a,b)=>b.rate-a.rate || b.count-a.count);
+    const total = list.reduce((s,r)=>s+this.n(r.count),0);
+    const worst = list[0];
+
+    return `<div class="capx-cal-detail-inner">
+      <div class="capx-cal-detail-title">
+        <div>
+          <b>${esc(this.dateLabel(date))}</b>
+          <span>${fmt(total)}件${worst ? ` / 最大 ${pct(worst.rate)}%` : ''}</span>
+        </div>
+      </div>
+
+      <div class="capx-cal-edit">
+        <label>区分
+          <select data-capx-cal-date="${date}" data-capx-cal-field="type">
+            <option value="normal" ${(c.type||'normal')==='normal'?'selected':''}>通常</option>
+            <option value="holiday" ${c.type==='holiday'?'selected':''}>祝日</option>
+            <option value="busy" ${c.type==='busy'?'selected':''}>繁忙日</option>
+            <option value="limit" ${c.type==='limit'?'selected':''}>制限日</option>
+            <option value="special" ${c.type==='special'?'selected':''}>特殊日</option>
+          </select>
+        </label>
+        <label>キャパ補正
+          <input type="number" data-capx-cal-date="${date}" data-capx-cal-field="adjust" value="${esc(c.adjust||0)}" placeholder="例：-10 / +20">
+        </label>
+        <label>メモ
+          <input data-capx-cal-date="${date}" data-capx-cal-field="memo" value="${esc(c.memo||'')}" placeholder="例：祝日・人員制限など">
+        </label>
+      </div>
+
+      <div class="capx-cal-area-list">
+        ${list.length ? list.map(r=>`<div class="capx-cal-area-row ${esc(r.cls)}">
+          <span>${esc(r.area)}</span>
+          <b>${fmt(r.count)}件</b>
+          <em>${fmt(r.cap)}枠</em>
+          <strong>${r.cap > 0 ? pct(r.rate)+'%' : '要確認'}</strong>
+        </div>`).join('') : '<div class="capx-empty small">この日の実績はありません</div>'}
+      </div>
+    </div>`;
   },
 
   mappingHtml(actual) {
@@ -2768,6 +2847,17 @@ const CAPACITY_UI = {
     return `<div class="capx-card"><h3>未分類住所・市区町村</h3><div class="scroll-x"><table class="tbl"><thead><tr><th>住所・市区町村</th><th class="r">件数</th></tr></thead><tbody>${rows.length?rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="r">${fmt(v)}</td></tr>`).join(''):'<tr><td colspan="2" class="capx-empty">未分類はありません</td></tr>'}</tbody></table></div></div>`;
   },
 
+  bindCalendarDetailInputs() {
+    document.querySelectorAll('#capx-calendar-detail [data-capx-cal-date]').forEach(inp=>inp.addEventListener('change',()=>{
+      const date = inp.dataset.capxCalDate, field = inp.dataset.capxCalField;
+      STATE.capacity.calendar = STATE.capacity.calendar || {};
+      STATE.capacity.calendar[date] = STATE.capacity.calendar[date] || {};
+      STATE.capacity.calendar[date][field] = inp.type === 'number' ? this.n(inp.value) : inp.value;
+      STORE.save();
+      this.render();
+    }));
+  },
+
   bind() {
     const ym = document.getElementById('capacity-ym');
     if (ym) ym.addEventListener('change', ()=>this.render());
@@ -2778,6 +2868,12 @@ const CAPACITY_UI = {
 
     document.querySelectorAll('[data-capx-tab]').forEach(btn=>btn.addEventListener('click',()=>{ this._tab=btn.dataset.capxTab; this.render(); }));
     document.querySelectorAll('[data-capx-detail]').forEach(btn=>btn.addEventListener('click',()=>this.showCities(Number(btn.dataset.capxDetail))));
+    document.querySelectorAll('[data-capx-cal-detail]').forEach(btn=>btn.addEventListener('click',()=>{
+      const box = document.getElementById('capx-calendar-detail');
+      if (!box) return;
+      box.innerHTML = this.calendarDetailHtml(btn.dataset.capxCalDetail, this._lastDailyRows || []);
+      this.bindCalendarDetailInputs();
+    }));
     document.querySelectorAll('[data-capx-cal-date]').forEach(inp=>inp.addEventListener('change',()=>{
       const date = inp.dataset.capxCalDate, field = inp.dataset.capxCalField;
       STATE.capacity.calendar = STATE.capacity.calendar || {};
@@ -2865,7 +2961,24 @@ const CAPACITY_UI = {
     const st = document.createElement('style');
     st.id = 'capacity-ui-fixed-style';
     st.textContent = `
-      .capx{display:grid;gap:14px}.capx-card{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:18px}.capx-control{border-top:3px solid var(--navy)}.capx-headline{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.capx h2{margin:0;font-size:22px;font-weight:900}.capx h3{margin:0 0 12px;font-size:16px;font-weight:900}.capx p{margin:4px 0 0;color:var(--text2);font-size:12px;font-weight:700}.capx-cond{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.capx-cond label{font-size:11px;color:var(--text2);font-weight:800}.capx-cond select,.capx-cond input{display:block;margin-top:4px;min-width:160px}.capx-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.capx-note,.capx-note2{font-size:11px;color:var(--text3);line-height:1.7;margin-top:8px}.capx-kpis{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.capx-kpi{position:relative;background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px 18px;box-shadow:0 10px 22px rgba(15,23,42,.05);overflow:hidden}.capx-kpi:before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:#2563eb}.capx-kpi.green:before{background:#059669}.capx-kpi.over:before{background:#dc2626}.capx-kpi.amber:before{background:#f97316}.capx-kpi span{display:block;color:var(--text2);font-size:12px;font-weight:900;margin-bottom:6px}.capx-kpi b{font-size:28px;font-weight:900;color:var(--text)}.capx-kpi em{display:block;font-style:normal;color:var(--text2);font-size:12px;font-weight:800;margin-top:4px}.capx-tabs{display:flex;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:16px;padding:12px}.capx-tabs button{border:1px solid var(--border2);background:#fff;border-radius:999px;padding:10px 16px;font-weight:900;cursor:pointer}.capx-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}.capx-grid{display:grid;grid-template-columns:minmax(620px,1.4fr) minmax(320px,.8fr);gap:14px}.capx-link{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer}.capx-risk-over td{background:#fff7f7}.capx-risk-full td{background:#fffaf0}.capx-empty{text-align:center;color:var(--text3);font-weight:800;padding:22px}.capx-calendar{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:8px;background:#f8fafc;padding:10px;border-radius:14px}.capx-week{text-align:center;font-size:12px;font-weight:900;background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px}.capx-week.sun{color:#b91c1c}.capx-week.sat{color:#1d4ed8}.capx-day{min-height:140px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:9px;display:grid;gap:7px}.capx-day.weekend{background:#eff6ff}.capx-day.ok{background:#ecfdf5}.capx-day.full{background:#fff7ed}.capx-day.over{background:#fef2f2}.capx-day.blank{background:transparent;border:0}.capx-daytop{display:flex;justify-content:space-between;gap:8px}.capx-daytop b{font-size:18px}.capx-daytop span{font-size:11px;font-weight:800;color:var(--text2)}.capx-city{display:grid;grid-template-columns:32px 1fr 80px;gap:8px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-bottom:7px}.capx-city b{color:#1d4ed8}.capx-city span{font-weight:900}.capx-city em{font-style:normal;text-align:right;font-weight:900}@media(max-width:900px){.capx-headline{flex-direction:column}.capx-kpis{grid-template-columns:repeat(2,1fr)}.capx-grid{grid-template-columns:1fr}.capx-calendar{grid-template-columns:repeat(2,1fr)}.capx-week{display:none}}
+      .capx{display:grid;gap:14px}.capx-card{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:18px}.capx-control{border-top:3px solid var(--navy)}.capx-headline{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.capx h2{margin:0;font-size:22px;font-weight:900}.capx h3{margin:0 0 12px;font-size:16px;font-weight:900}.capx p{margin:4px 0 0;color:var(--text2);font-size:12px;font-weight:700}.capx-cond{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.capx-cond label{font-size:11px;color:var(--text2);font-weight:800}.capx-cond select,.capx-cond input{display:block;margin-top:4px;min-width:160px}.capx-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.capx-note,.capx-note2{font-size:11px;color:var(--text3);line-height:1.7;margin-top:8px}.capx-kpis{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.capx-kpi{position:relative;background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px 18px;box-shadow:0 10px 22px rgba(15,23,42,.05);overflow:hidden}.capx-kpi:before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:#2563eb}.capx-kpi.green:before{background:#059669}.capx-kpi.over:before{background:#dc2626}.capx-kpi.amber:before{background:#f97316}.capx-kpi span{display:block;color:var(--text2);font-size:12px;font-weight:900;margin-bottom:6px}.capx-kpi b{font-size:28px;font-weight:900;color:var(--text)}.capx-kpi em{display:block;font-style:normal;color:var(--text2);font-size:12px;font-weight:800;margin-top:4px}.capx-tabs{display:flex;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:16px;padding:12px}.capx-tabs button{border:1px solid var(--border2);background:#fff;border-radius:999px;padding:10px 16px;font-weight:900;cursor:pointer}.capx-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}.capx-grid{display:grid;grid-template-columns:minmax(620px,1.4fr) minmax(320px,.8fr);gap:14px}.capx-link{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer}.capx-risk-over td{background:#fff7f7}.capx-risk-full td{background:#fffaf0}.capx-empty{text-align:center;color:var(--text3);font-weight:800;padding:22px}.capx-calendar{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:8px;background:#f8fafc;padding:10px;border-radius:14px}.capx-week{text-align:center;font-size:12px;font-weight:900;background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px}.capx-week.sun{color:#b91c1c}.capx-week.sat{color:#1d4ed8}.capx-day{min-height:140px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:9px;display:grid;gap:7px}.capx-day.weekend{background:#eff6ff}.capx-day.ok{background:#ecfdf5}.capx-day.full{background:#fff7ed}.capx-day.over{background:#fef2f2}.capx-day.blank{background:transparent;border:0}.capx-daytop{display:flex;justify-content:space-between;gap:8px}.capx-daytop b{font-size:18px}.capx-daytop span{font-size:11px;font-weight:800;color:var(--text2)}.capx-city{display:grid;grid-template-columns:32px 1fr 80px;gap:8px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-bottom:7px}.capx-city b{color:#1d4ed8}.capx-city span{font-weight:900}.capx-city em{font-style:normal;text-align:right;font-weight:900}
+      .capx-calendar-card{padding:18px!important}
+      .capx-cal-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}
+      .capx-cal-summary{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+      .capx-cal-summary span{display:inline-flex;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:900;border:1px solid var(--border)}
+      .capx-cal-summary .danger{background:#fee2e2;color:#991b1b;border-color:#fecaca}.capx-cal-summary .full{background:#fff7ed;color:#9a3412;border-color:#fed7aa}
+      .capx-calendar-layout{display:grid;grid-template-columns:minmax(620px,1.3fr) minmax(320px,.7fr);gap:14px;align-items:start}
+      .capx-calendar-simple{display:grid;grid-template-columns:repeat(7,minmax(88px,1fr));gap:8px;background:#f8fafc;padding:10px;border-radius:16px;border:1px solid var(--border)}
+      .capx-day-simple{min-height:92px;border:1px solid var(--border);border-radius:14px;background:#fff;display:grid;grid-template-rows:auto 1fr auto;gap:3px;padding:10px;text-align:left;cursor:pointer;position:relative;box-shadow:0 8px 18px rgba(15,23,42,.04)}
+      .capx-day-simple:hover{transform:translateY(-1px);box-shadow:0 12px 24px rgba(15,23,42,.08)}
+      .capx-day-simple .day-no{font-size:18px;font-weight:900;color:#0f172a}.capx-day-simple strong{font-size:18px;font-weight:900;align-self:center}.capx-day-simple em{font-size:11px;font-style:normal;font-weight:900;color:#64748b}.capx-day-simple i{position:absolute;right:8px;top:8px;border-radius:999px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-size:10px;font-style:normal;font-weight:900;padding:2px 6px}
+      .capx-day-simple.empty{background:#fff;color:#94a3b8}.capx-day-simple.weekend{background:#f8fafc}.capx-day-simple.ok{background:#eff6ff;border-color:#bfdbfe}.capx-day-simple.full{background:#fff7ed;border-color:#fed7aa}.capx-day-simple.over{background:#fef2f2;border-color:#fecaca}.capx-day-simple.blank{visibility:hidden;box-shadow:none;border:0;background:transparent;cursor:default}
+      .capx-cal-detail{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(15,23,42,.05);min-height:260px;overflow:hidden}
+      .capx-empty.small{padding:28px 18px;font-size:13px}.capx-cal-detail-inner{display:grid;gap:14px;padding:16px}.capx-cal-detail-title{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:10px}.capx-cal-detail-title b{display:block;font-size:18px;font-weight:900}.capx-cal-detail-title span{display:block;font-size:12px;color:var(--text2);font-weight:800;margin-top:3px}
+      .capx-cal-edit{display:grid;gap:10px}.capx-cal-edit label{display:grid;gap:5px;font-size:12px;font-weight:900;color:var(--text2)}.capx-cal-edit select,.capx-cal-edit input{width:100%;min-width:0}
+      .capx-cal-area-list{display:grid;gap:8px}.capx-cal-area-row{display:grid;grid-template-columns:1fr 70px 70px 70px;gap:8px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:9px 10px;background:#fff}.capx-cal-area-row span{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.capx-cal-area-row b,.capx-cal-area-row em,.capx-cal-area-row strong{text-align:right;font-style:normal;font-weight:900}.capx-cal-area-row.over{background:#fff7f7}.capx-cal-area-row.full{background:#fffaf0}
+      @media(max-width:900px){.capx-cal-head{flex-direction:column}.capx-calendar-layout{grid-template-columns:1fr}.capx-calendar-simple{grid-template-columns:repeat(2,minmax(120px,1fr))}.capx-week{display:none}.capx-cal-area-row{grid-template-columns:1fr 60px}.capx-cal-area-row em,.capx-cal-area-row strong{text-align:left}}
+      @media(max-width:900px){.capx-headline{flex-direction:column}.capx-kpis{grid-template-columns:repeat(2,1fr)}.capx-grid{grid-template-columns:1fr}.capx-calendar{grid-template-columns:repeat(2,1fr)}.capx-week{display:none}}
     `;
     document.head.appendChild(st);
   }
