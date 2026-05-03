@@ -2572,7 +2572,7 @@ const CAPACITY_UI = {
       }
     });
 
-    // 日付がない月次CSVの場合は、月件数÷稼働日数を日別推定として展開する。
+    // 日付がない月次CSVの場合は、月件数÷カレンダー積み上げを日別推定として展開する。
     if (!hasDate) {
       const days = this.getDays();
       byArea.forEach(a=>{
@@ -2695,13 +2695,13 @@ const CAPACITY_UI = {
                   ${(yms.length?yms:[curYM]).map(ym=>`<option value="${esc(ym)}" ${ym===curYM?'selected':''}>${esc(ymLabel(ym))}</option>`).join('')}
                 </select>
               </label>
-              <label>稼働日数
+              <label>カレンダー積み上げ
                 <input id="capacity-days" type="number" min="1" max="31" value="${esc(document.getElementById('capacity-days')?.value || '26')}">
               </label>
               <label>表示基準
                 <select id="capacity-base">
                   ${[
-                    ['calendar','カレンダー日別積上げ'],['weekday','平日キャパ×稼働日数'],['weekend','土日キャパ×稼働日数'],['max','大きい方×稼働日数']
+                    ['calendar','カレンダー日別積上げ'],['weekday','平日キャパ×カレンダー積み上げ'],['weekend','土日キャパ×カレンダー積み上げ'],['max','大きい方×カレンダー積み上げ']
                   ].map(([v,l])=>`<option value="${v}" ${this.getBaseMode()===v?'selected':''}>${l}</option>`).join('')}
                 </select>
               </label>
@@ -2716,7 +2716,7 @@ const CAPACITY_UI = {
             <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()">キャパマスタ削除</button>
             <span id="capacity-msg">${hasCap ? `キャパ登録済：${Object.keys(STATE.capacity.areas).length}地区 / ${esc(STATE.capacity.sourceFile || '')}` : 'キャパExcelが未登録です'}</span>
           </div>
-          <div class="capx-note">商品・住所CSVは原票番号でユニーク化済みデータを使用します。日付がない月間CSVの場合、日別超過は「月間件数÷稼働日数」の推定表示です。</div>
+          <div class="capx-note">商品・住所CSVは原票番号でユニーク化済みデータを使用します。日付がない月間CSVの場合、日別超過は「月間件数÷カレンダー積み上げ」の推定表示です。</div>
         </div>
 
         <div class="capx-kpis">
@@ -4146,3 +4146,149 @@ document.addEventListener('DOMContentLoaded', async () => {
   `;
   document.head.appendChild(st);
 })();
+
+
+
+(function(){
+  if (document.getElementById('capacity-week7-fix-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-week7-fix-style';
+  st.textContent = `
+    /* 週7稼働・日別積み上げ方式ではカレンダー積み上げ入力は使わない */
+    #capacity-workdays,
+    #cap-workdays,
+    #capacityOperatingDays,
+    #capOperatingDays,
+    input[name="capacityWorkdays"],
+    input[name="operatingDays"],
+    label:has(#capacity-workdays),
+    label:has(#cap-workdays),
+    label:has(#capacityOperatingDays),
+    label:has(#capOperatingDays){
+      display:none!important;
+    }
+  `;
+  document.head.appendChild(st);
+})();
+
+
+
+/* =========================
+  キャパ分析：週7稼働・日別カレンダー積み上げ方式
+  - カレンダー積み上げ入力は使わない
+  - 月キャパは1日ごとのキャパを合計
+  - 日別補正は localStorage の既存補正も考慮
+========================= */
+window.CAPACITY_WEEK7 = window.CAPACITY_WEEK7 || {};
+
+CAPACITY_WEEK7.toDateKey = function(ym, day){
+  const y = String(ym || '').replace(/[^0-9]/g,'').slice(0,4);
+  const m = String(ym || '').replace(/[^0-9]/g,'').slice(4,6);
+  return `${y}-${m}-${String(day).padStart(2,'0')}`;
+};
+
+CAPACITY_WEEK7.daysInMonth = function(ym){
+  const s = String(ym || '').replace(/[^0-9]/g,'');
+  const y = Number(s.slice(0,4));
+  const m = Number(s.slice(4,6));
+  if (!y || !m) return 0;
+  return new Date(y, m, 0).getDate();
+};
+
+CAPACITY_WEEK7.dayType = function(dateStr){
+  try {
+    const stores = [
+      'capacity_calendar_adjustments',
+      'field_capacity_calendar_v4',
+      'field_capacity_b_calendar_v1',
+      'field_capacity_calendar_safe_v1'
+    ];
+    for (const key of stores) {
+      const obj = JSON.parse(localStorage.getItem(key) || '{}');
+      if (obj && obj[dateStr] && obj[dateStr].type) return obj[dateStr].type;
+    }
+  } catch(e) {}
+  return 'normal';
+};
+
+CAPACITY_WEEK7.dayAdjust = function(dateStr){
+  try {
+    const stores = [
+      'capacity_calendar_adjustments',
+      'field_capacity_calendar_v4',
+      'field_capacity_b_calendar_v1',
+      'field_capacity_calendar_safe_v1'
+    ];
+    for (const key of stores) {
+      const obj = JSON.parse(localStorage.getItem(key) || '{}');
+      if (obj && obj[dateStr] && obj[dateStr].adjust != null) {
+        const n = Number(String(obj[dateStr].adjust).replace(/,/g,''));
+        return Number.isFinite(n) ? n : 0;
+      }
+    }
+  } catch(e) {}
+  return 0;
+};
+
+CAPACITY_WEEK7.isWeekend = function(dateStr){
+  const d = new Date(dateStr + 'T00:00:00');
+  const w = d.getDay();
+  return w === 0 || w === 6;
+};
+
+CAPACITY_WEEK7.baseDailyCap = function(area, dateStr, masterRows){
+  const row = (masterRows || []).find(r => String(r.area || r.地区 || '').trim() === String(area || '').trim());
+  if (!row) return 0;
+
+  const type = CAPACITY_WEEK7.dayType(dateStr);
+  const holidayLike = CAPACITY_WEEK7.isWeekend(dateStr) || type === 'holiday';
+
+  const weekday = Number(String(row.weekday ?? row.平日 ?? row.weekdayCap ?? 0).replace(/,/g,''));
+  const weekend = Number(String(row.weekend ?? row.土日 ?? row.weekendCap ?? 0).replace(/,/g,''));
+
+  return holidayLike
+    ? (Number.isFinite(weekend) ? weekend : 0)
+    : (Number.isFinite(weekday) ? weekday : 0);
+};
+
+CAPACITY_WEEK7.dailyCap = function(area, dateStr, masterRows){
+  return Math.max(0, CAPACITY_WEEK7.baseDailyCap(area, dateStr, masterRows) + CAPACITY_WEEK7.dayAdjust(dateStr));
+};
+
+CAPACITY_WEEK7.monthCap = function(area, ym, masterRows){
+  const days = CAPACITY_WEEK7.daysInMonth(ym);
+  let total = 0;
+  for (let d=1; d<=days; d++) {
+    total += CAPACITY_WEEK7.dailyCap(area, CAPACITY_WEEK7.toDateKey(ym, d), masterRows);
+  }
+  return total;
+};
+
+CAPACITY_WEEK7.rateText = function(used, cap){
+  const c = Number(cap || 0);
+  if (!c) return '-';
+  return ((Number(used || 0) / c) * 100).toFixed(1) + '%';
+};
+
+CAPACITY_WEEK7.statusText = function(used, cap){
+  const c = Number(cap || 0);
+  if (!c) return '未設定';
+  const r = (Number(used || 0) / c) * 100;
+  if (r < 80) return '余裕あり';
+  if (r <= 100) return '適正';
+  if (r <= 120) return '注意';
+  return '逼迫';
+};
+
+CAPACITY_WEEK7.statusClass = function(used, cap){
+  const c = Number(cap || 0);
+  if (!c) return 'unset';
+  const r = (Number(used || 0) / c) * 100;
+  if (r < 80) return 'good';
+  if (r <= 100) return 'ok';
+  if (r <= 120) return 'warn';
+  return 'danger';
+};
+
+
+window.CAPACITY_CALC_MODE = 'WEEK7_DAILY_SUM';
