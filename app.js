@@ -47,40 +47,6 @@
 ════════════════════════════════════════════════════════════════ */
 'use strict';
 
-function capRateText(used, cap){
-  const c = Number(cap || 0);
-  if (!c) return '-';
-  const rate = Number(used || 0) / c * 100;
-  return Number.isFinite(rate) ? rate.toFixed(1) + '%' : '-';
-}
-
-function capStatusText(used, cap){
-  const c = Number(cap || 0);
-  if (!c) return '未設定';
-  const rate = Number(used || 0) / c * 100;
-  if (rate < 80) return '余裕あり';
-  if (rate <= 100) return '適正';
-  if (rate <= 120) return '余裕少';
-  return '要調整';
-}
-
-function capStatusClass(used, cap){
-  const c = Number(cap || 0);
-  if (!c) return 'unset';
-  const rate = Number(used || 0) / c * 100;
-  if (rate < 80) return 'good';
-  if (rate <= 100) return 'ok';
-  if (rate <= 120) return 'warn';
-  return 'danger';
-}
-
-function capSortWeight(area){
-  const s = String(area || '');
-  if (/その他|未分類|未設定/.test(s)) return 1;
-  return 0;
-}
-
-
 
 /* ════════ ASSET LOADER（重い外部ライブラリは必要時だけ読む） ════════ */
 const ASSETS = {
@@ -2388,11 +2354,13 @@ const CAPACITY_UI = {
   },
 
   getDays() {
-    return Math.max(1, parseInt(document.getElementById('capacity-days')?.value || '26', 10) || 26);
+    // 週7稼働前提：月キャパは日別カレンダーを1日ずつ積み上げるため、手入力の稼働日数は使わない
+    const ym = this.getYM();
+    return this.daysInYM(ym) || 0;
   },
 
   getBaseMode() {
-    return document.getElementById('capacity-base')?.value || 'calendar';
+    return 'calendar';
   },
 
   ymDate(ym, d) {
@@ -2572,9 +2540,9 @@ const CAPACITY_UI = {
       }
     });
 
-    // 日付がない月次CSVの場合は、月件数÷カレンダー積み上げを日別推定として展開する。
+    // 日付がない月次CSVの場合は、月件数÷カレンダー日数で日別推定として展開する。
     if (!hasDate) {
-      const days = this.getDays();
+      const days = this.daysInYM(ym);
       byArea.forEach(a=>{
         const avg = a.count / days;
         for (let d=1; d<=days; d++) {
@@ -2613,23 +2581,20 @@ const CAPACITY_UI = {
   },
 
   monthlyCap(ym, area) {
-    const mode = this.getBaseMode();
-    const days = this.getDays();
-    if (mode === 'weekday' || mode === 'weekend' || mode === 'max') {
-      return this.baseDailyCap(this.ymDate(ym,1), area) * days;
-    }
     let total = 0;
     const last = this.daysInYM(ym);
-    for (let d=1; d<=last; d++) total += this.dailyCap(this.ymDate(ym,d), area);
+    for (let d=1; d<=last; d++) {
+      total += this.dailyCap(this.ymDate(ym,d), area);
+    }
     return total;
   },
 
   judge(used, cap) {
-    const rate = cap > 0 ? used / cap * 100 : (used > 0 ? 999 : 0);
-    if (cap <= 0 && used > 0) return { rate, status:'要確認', cls:'over' };
-    if (rate >= 120) return { rate, status:'要調整', cls:'over' };
-    if (rate >= 100) return { rate, status:'超過', cls:'over' };
-    if (rate >= 80) return { rate, status:'余裕少', cls:'full' };
+    const rate = cap > 0 ? used / cap * 100 : 0;
+    if (cap <= 0) return { rate:0, status:'未設定', cls:'unset' };
+    if (rate >= 120) return { rate, status:'逼迫', cls:'over' };
+    if (rate >= 100) return { rate, status:'注意', cls:'full' };
+    if (rate >= 80) return { rate, status:'適正', cls:'good' };
     return { rate, status:'余裕あり', cls:'ok' };
   },
 
@@ -2643,7 +2608,11 @@ const CAPACITY_UI = {
       const one = this.baseDailyCap(this.ymDate(actual.ym,1), area);
       const j = this.judge(a.count, cap);
       return { ...a, cap, oneDay:one, rate:j.rate, status:j.status, cls:j.cls };
-    }).sort((a,b)=>capSortWeight(a.area)-capSortWeight(b.area) || b.rate-a.rate || b.count-a.count);
+    }).sort((a,b)=>{
+      const aw = /その他|未分類|未設定/.test(a.area) ? 1 : 0;
+      const bw = /その他|未分類|未設定/.test(b.area) ? 1 : 0;
+      return aw-bw || b.rate-a.rate || b.count-a.count;
+    });
   },
 
   dailyRows() {
@@ -2676,7 +2645,7 @@ const CAPACITY_UI = {
     const totalActual = rows.reduce((s,r)=>s+this.n(r.count),0);
     const totalCap = rows.reduce((s,r)=>s+this.n(r.cap),0);
     const j = this.judge(totalActual,totalCap);
-    const overDays = daily.filter(r=>r.rate >= 100).length;
+    const overDays = daily.filter(r=>r.cap > 0 && r.rate >= 100).length;
     const hasCap = !!(STATE.capacity?.areas && Object.keys(STATE.capacity.areas).length);
     const yms = [...new Set((STATE.productAddressData || []).map(r=>r.ym).filter(Boolean))].sort().reverse();
     const curYM = actual.ym || this.getYM();
@@ -2695,14 +2664,9 @@ const CAPACITY_UI = {
                   ${(yms.length?yms:[curYM]).map(ym=>`<option value="${esc(ym)}" ${ym===curYM?'selected':''}>${esc(ymLabel(ym))}</option>`).join('')}
                 </select>
               </label>
-              <label>カレンダー積み上げ
-                <input id="capacity-days" type="number" min="1" max="31" value="${esc(document.getElementById('capacity-days')?.value || '26')}">
-              </label>
               <label>表示基準
-                <select id="capacity-base">
-                  ${[
-                    ['calendar','カレンダー日別積上げ'],['weekday','平日キャパ×カレンダー積み上げ'],['weekend','土日キャパ×カレンダー積み上げ'],['max','大きい方×カレンダー積み上げ']
-                  ].map(([v,l])=>`<option value="${v}" ${this.getBaseMode()===v?'selected':''}>${l}</option>`).join('')}
+                <select id="capacity-base" disabled>
+                  <option value="calendar" selected>カレンダー日別積み上げ</option>
                 </select>
               </label>
             </div>
@@ -2716,13 +2680,13 @@ const CAPACITY_UI = {
             <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()">キャパマスタ削除</button>
             <span id="capacity-msg">${hasCap ? `キャパ登録済：${Object.keys(STATE.capacity.areas).length}地区 / ${esc(STATE.capacity.sourceFile || '')}` : 'キャパExcelが未登録です'}</span>
           </div>
-          <div class="capx-note">商品・住所CSVは原票番号でユニーク化済みデータを使用します。日付がない月間CSVの場合、日別超過は「月間件数÷カレンダー積み上げ」の推定表示です。</div>
+          <div class="capx-note">商品・住所CSVは原票番号でユニーク化済みデータを使用します。日付がない月間CSVの場合、日別超過は「月間件数÷カレンダー日数」の推定表示です。</div>
         </div>
 
         <div class="capx-kpis">
           <div class="capx-kpi blue"><span>実績件数</span><b>${fmt(totalActual)}</b><em>原票</em></div>
           <div class="capx-kpi green"><span>月キャパ</span><b>${fmt(totalCap)}</b><em>${hasCap?'登録済':'未登録'}</em></div>
-          <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${pct(j.rate)}%</b><em>${esc(j.status)}</em></div>
+          <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${pct(j.rate)}</b><em>${esc(j.status)}</em></div>
           <div class="capx-kpi amber"><span>日別超過</span><b>${fmt(overDays)}</b><em>日・地区</em></div>
         </div>
 
@@ -2749,7 +2713,7 @@ const CAPACITY_UI = {
       <div class="capx-card">
         <h3>地区別 月キャパ使用状況</h3>
         <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">実績</th><th class="r">1日基準</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
-          ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${capRateText(r.count, r.cap)}</td><td><span class="capacity-status ${esc(capStatusClass(r.count, r.cap))}">${esc(r.status)}</span></td></tr>`).join('')}
+          ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td></tr>`).join('')}
         </tbody></table></div>
       </div>
       <div class="capx-card"><h3>市区町村内訳</h3><div id="capacity-detail-box" class="capx-empty">地区をクリックしてください</div></div>
@@ -2759,7 +2723,7 @@ const CAPACITY_UI = {
   dailyHtml(rows, actual) {
     if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
     return `<div class="capx-card"><h3>日別キャパ超過チェック</h3><div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr class="capx-risk-${esc(capStatusClass(r.count, r.cap))}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r">${capRateText(r.count, r.cap)}</td><td><span class="capacity-status ${esc(capStatusClass(r.count, r.cap))}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td></tr>`).join('')}
+      ${rows.map(r=>`<tr class="capx-risk-${esc(r.cls)}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td></tr>`).join('')}
     </tbody></table></div></div>`;
   },
 
@@ -2782,8 +2746,8 @@ const CAPACITY_UI = {
     for (let d=1; d<=this.daysInYM(ym); d++) cells.push(this.ymDate(ym,d));
     while (cells.length % 7) cells.push(null);
 
-    const overDays = [...riskByDate.values()].filter(r=>r.rate > 100).length;
-    const warnDays = [...riskByDate.values()].filter(r=>r.rate >= 80 && r.rate <= 100).length;
+    const overDays = [...riskByDate.values()].filter(r=>r.cap > 0 && r.rate > 100).length;
+    const warnDays = [...riskByDate.values()].filter(r=>r.cap > 0 && r.rate >= 80 && r.rate <= 100).length;
 
     return `<div class="capx-card capx-calendar-card">
       <div class="capx-cal-head">
@@ -2806,7 +2770,7 @@ const CAPACITY_UI = {
             const risk = riskByDate.get(date);
             const cls = risk ? risk.cls : (this.isWeekend(date) ? 'weekend' : 'empty');
             const total = (areaListByDate.get(date) || []).reduce((s,r)=>s+this.n(r.count),0);
-            const rateText = risk && risk.cap > 0 ? `${pct(risk.rate)}%` : (risk ? '要確認' : '');
+            const rateText = risk && risk.cap > 0 ? `${pct(risk.rate)}` : (risk ? '未設定' : '');
             return `<button type="button" class="capx-day-simple ${esc(cls)}" data-capx-cal-detail="${date}">
               <span class="day-no">${Number(date.slice(8,10))}</span>
               <strong>${total ? fmt(total)+'件' : '0件'}</strong>
@@ -2825,7 +2789,7 @@ const CAPACITY_UI = {
 
   calendarDetailHtml(date, rows) {
     const c = STATE.capacity.calendar?.[date] || {};
-    const list = rows.filter(r=>r.date === date).sort((a,b)=>capSortWeight(a.area)-capSortWeight(b.area) || b.rate-a.rate || b.count-a.count);
+    const list = rows.filter(r=>r.date === date).sort((a,b)=>b.rate-a.rate || b.count-a.count);
     const total = list.reduce((s,r)=>s+this.n(r.count),0);
     const worst = list[0];
 
@@ -2833,7 +2797,7 @@ const CAPACITY_UI = {
       <div class="capx-cal-detail-title">
         <div>
           <b>${esc(this.dateLabel(date))}</b>
-          <span>${fmt(total)}件${worst ? ` / 最大 ${pct(worst.rate)}%` : ''}</span>
+          <span>${fmt(total)}件${worst ? ` / 最大 ${pct(worst.rate)}` : ''}</span>
         </div>
       </div>
 
@@ -2856,11 +2820,11 @@ const CAPACITY_UI = {
       </div>
 
       <div class="capx-cal-area-list">
-        ${list.length ? list.map(r=>`<div class="capx-cal-area-row ${esc(capStatusClass(r.count, r.cap))}">
+        ${list.length ? list.map(r=>`<div class="capx-cal-area-row ${esc(r.cls)}">
           <span>${esc(r.area)}</span>
           <b>${fmt(r.count)}件</b>
           <em>${fmt(r.cap)}枠</em>
-          <strong>${r.cap > 0 ? pct(r.rate)+'%' : '要確認'}</strong>
+          <strong>${r.cap > 0 ? pct(r.rate) : '未設定'}</strong>
         </div>`).join('') : '<div class="capx-empty small">この日の実績はありません</div>'}
       </div>
     </div>`;
@@ -2995,7 +2959,7 @@ const CAPACITY_UI = {
     const st = document.createElement('style');
     st.id = 'capacity-ui-fixed-style';
     st.textContent = `
-      .capx{display:grid;gap:14px}.capx-card{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:18px}.capx-control{border-top:3px solid var(--navy)}.capx-headline{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.capx h2{margin:0;font-size:22px;font-weight:900}.capx h3{margin:0 0 12px;font-size:16px;font-weight:900}.capx p{margin:4px 0 0;color:var(--text2);font-size:12px;font-weight:700}.capx-cond{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.capx-cond label{font-size:11px;color:var(--text2);font-weight:800}.capx-cond select,.capx-cond input{display:block;margin-top:4px;min-width:160px}.capx-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.capx-note,.capx-note2{font-size:11px;color:var(--text3);line-height:1.7;margin-top:8px}.capx-kpis{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.capx-kpi{position:relative;background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px 18px;box-shadow:0 10px 22px rgba(15,23,42,.05);overflow:hidden}.capx-kpi:before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:#2563eb}.capx-kpi.green:before{background:#059669}.capx-kpi.over:before{background:#dc2626}.capx-kpi.amber:before{background:#f97316}.capx-kpi span{display:block;color:var(--text2);font-size:12px;font-weight:900;margin-bottom:6px}.capx-kpi b{font-size:28px;font-weight:900;color:var(--text)}.capx-kpi em{display:block;font-style:normal;color:var(--text2);font-size:12px;font-weight:800;margin-top:4px}.capx-tabs{display:flex;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:16px;padding:12px}.capx-tabs button{border:1px solid var(--border2);background:#fff;border-radius:999px;padding:10px 16px;font-weight:900;cursor:pointer}.capx-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}.capx-grid{display:grid;grid-template-columns:minmax(620px,1.4fr) minmax(320px,.8fr);gap:14px}.capx-link{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer}.capx-risk-over td{background:#fff7f7}.capx-risk-full td{background:#fffaf0}.capx-empty{text-align:center;color:var(--text3);font-weight:800;padding:22px}.capx-calendar{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:8px;background:#f8fafc;padding:10px;border-radius:14px}.capx-week{text-align:center;font-size:12px;font-weight:900;background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px}.capx-week.sun{color:#b91c1c}.capx-week.sat{color:#1d4ed8}.capx-day{min-height:140px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:9px;display:grid;gap:7px}.capx-day.weekend{background:#eff6ff}.capx-day.ok{background:#ecfdf5}.capx-day.full{background:#fff7ed}.capx-day.over{background:#fef2f2}.capx-day.blank{background:transparent;border:0}.capx-daytop{display:flex;justify-content:space-between;gap:8px}.capx-daytop b{font-size:18px}.capx-daytop span{font-size:11px;font-weight:800;color:var(--text2)}.capx-city{display:grid;grid-template-columns:32px 1fr 80px;gap:8px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-bottom:7px}.capx-city b{color:#1d4ed8}.capx-city span{font-weight:900}.capx-city em{font-style:normal;text-align:right;font-weight:900}
+      .capx{display:grid;gap:14px}.capx-card{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:18px}.capx-control{border-top:3px solid var(--navy)}.capx-headline{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.capx h2{margin:0;font-size:22px;font-weight:900}.capx h3{margin:0 0 12px;font-size:16px;font-weight:900}.capx p{margin:4px 0 0;color:var(--text2);font-size:12px;font-weight:700}.capx-cond{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.capx-cond label{font-size:11px;color:var(--text2);font-weight:800}.capx-cond select,.capx-cond input{display:block;margin-top:4px;min-width:160px}.capx-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.capx-note,.capx-note2{font-size:11px;color:var(--text3);line-height:1.7;margin-top:8px}.capx-kpis{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.capx-kpi{position:relative;background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px 18px;box-shadow:0 10px 22px rgba(15,23,42,.05);overflow:hidden}.capx-kpi:before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:#2563eb}.capx-kpi.green:before{background:#059669}.capx-kpi.over:before{background:#dc2626}.capx-kpi.full:before{background:#f97316}.capx-kpi.good:before{background:#2563eb}.capx-kpi.unset:before{background:#94a3b8}.capx-kpi.amber:before{background:#f97316}.capx-kpi span{display:block;color:var(--text2);font-size:12px;font-weight:900;margin-bottom:6px}.capx-kpi b{font-size:28px;font-weight:900;color:var(--text)}.capx-kpi em{display:block;font-style:normal;color:var(--text2);font-size:12px;font-weight:800;margin-top:4px}.capx-tabs{display:flex;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:16px;padding:12px}.capx-tabs button{border:1px solid var(--border2);background:#fff;border-radius:999px;padding:10px 16px;font-weight:900;cursor:pointer}.capx-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}.capx-grid{display:grid;grid-template-columns:minmax(620px,1.4fr) minmax(320px,.8fr);gap:14px}.capx-link{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer}.capx-risk-over td{background:#fff7f7}.capx-risk-full td{background:#fffaf0}.capx-risk-good td{background:#eff6ff}.capx-risk-unset td{background:#f8fafc}.capx-empty{text-align:center;color:var(--text3);font-weight:800;padding:22px}.capx-calendar{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:8px;background:#f8fafc;padding:10px;border-radius:14px}.capx-week{text-align:center;font-size:12px;font-weight:900;background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px}.capx-week.sun{color:#b91c1c}.capx-week.sat{color:#1d4ed8}.capx-day{min-height:140px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:9px;display:grid;gap:7px}.capx-day.weekend{background:#eff6ff}.capx-day.ok{background:#ecfdf5}.capx-day.good{background:#eff6ff}.capx-day.full{background:#fff7ed}.capx-day.over{background:#fef2f2}.capx-day.unset{background:#f8fafc}.capx-day.blank{background:transparent;border:0}.capx-daytop{display:flex;justify-content:space-between;gap:8px}.capx-daytop b{font-size:18px}.capx-daytop span{font-size:11px;font-weight:800;color:var(--text2)}.capx-city{display:grid;grid-template-columns:32px 1fr 80px;gap:8px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-bottom:7px}.capx-city b{color:#1d4ed8}.capx-city span{font-weight:900}.capx-city em{font-style:normal;text-align:right;font-weight:900}.capacity-status{display:inline-flex;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:900}.capacity-status.ok{background:#dcfce7;color:#166534}.capacity-status.good{background:#dbeafe;color:#1e40af}.capacity-status.full{background:#ffedd5;color:#9a3412}.capacity-status.over{background:#fee2e2;color:#991b1b}.capacity-status.unset{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
       .capx-calendar-card{padding:18px!important}
       .capx-cal-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}
       .capx-cal-summary{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -4131,164 +4095,3 @@ document.addEventListener('DOMContentLoaded', async () => {
 /* =====================================================================
    現場明細 CSV完全再構築版（field.jsへ分割）
 ===================================================================== */
-
-
-(function(){
-  if (document.getElementById('capacity-zero-fix-style')) return;
-  const st = document.createElement('style');
-  st.id = 'capacity-zero-fix-style';
-  st.textContent = `
-    .badge.unset,.cap-badge.unset,.capacity-badge.unset{
-      background:#f1f5f9!important;
-      color:#64748b!important;
-      border:1px solid #cbd5e1!important;
-    }
-  `;
-  document.head.appendChild(st);
-})();
-
-
-
-(function(){
-  if (document.getElementById('capacity-week7-fix-style')) return;
-  const st = document.createElement('style');
-  st.id = 'capacity-week7-fix-style';
-  st.textContent = `
-    /* 週7稼働・日別積み上げ方式ではカレンダー積み上げ入力は使わない */
-    #capacity-workdays,
-    #cap-workdays,
-    #capacityOperatingDays,
-    #capOperatingDays,
-    input[name="capacityWorkdays"],
-    input[name="operatingDays"],
-    label:has(#capacity-workdays),
-    label:has(#cap-workdays),
-    label:has(#capacityOperatingDays),
-    label:has(#capOperatingDays){
-      display:none!important;
-    }
-  `;
-  document.head.appendChild(st);
-})();
-
-
-
-/* =========================
-  キャパ分析：週7稼働・日別カレンダー積み上げ方式
-  - カレンダー積み上げ入力は使わない
-  - 月キャパは1日ごとのキャパを合計
-  - 日別補正は localStorage の既存補正も考慮
-========================= */
-window.CAPACITY_WEEK7 = window.CAPACITY_WEEK7 || {};
-
-CAPACITY_WEEK7.toDateKey = function(ym, day){
-  const y = String(ym || '').replace(/[^0-9]/g,'').slice(0,4);
-  const m = String(ym || '').replace(/[^0-9]/g,'').slice(4,6);
-  return `${y}-${m}-${String(day).padStart(2,'0')}`;
-};
-
-CAPACITY_WEEK7.daysInMonth = function(ym){
-  const s = String(ym || '').replace(/[^0-9]/g,'');
-  const y = Number(s.slice(0,4));
-  const m = Number(s.slice(4,6));
-  if (!y || !m) return 0;
-  return new Date(y, m, 0).getDate();
-};
-
-CAPACITY_WEEK7.dayType = function(dateStr){
-  try {
-    const stores = [
-      'capacity_calendar_adjustments',
-      'field_capacity_calendar_v4',
-      'field_capacity_b_calendar_v1',
-      'field_capacity_calendar_safe_v1'
-    ];
-    for (const key of stores) {
-      const obj = JSON.parse(localStorage.getItem(key) || '{}');
-      if (obj && obj[dateStr] && obj[dateStr].type) return obj[dateStr].type;
-    }
-  } catch(e) {}
-  return 'normal';
-};
-
-CAPACITY_WEEK7.dayAdjust = function(dateStr){
-  try {
-    const stores = [
-      'capacity_calendar_adjustments',
-      'field_capacity_calendar_v4',
-      'field_capacity_b_calendar_v1',
-      'field_capacity_calendar_safe_v1'
-    ];
-    for (const key of stores) {
-      const obj = JSON.parse(localStorage.getItem(key) || '{}');
-      if (obj && obj[dateStr] && obj[dateStr].adjust != null) {
-        const n = Number(String(obj[dateStr].adjust).replace(/,/g,''));
-        return Number.isFinite(n) ? n : 0;
-      }
-    }
-  } catch(e) {}
-  return 0;
-};
-
-CAPACITY_WEEK7.isWeekend = function(dateStr){
-  const d = new Date(dateStr + 'T00:00:00');
-  const w = d.getDay();
-  return w === 0 || w === 6;
-};
-
-CAPACITY_WEEK7.baseDailyCap = function(area, dateStr, masterRows){
-  const row = (masterRows || []).find(r => String(r.area || r.地区 || '').trim() === String(area || '').trim());
-  if (!row) return 0;
-
-  const type = CAPACITY_WEEK7.dayType(dateStr);
-  const holidayLike = CAPACITY_WEEK7.isWeekend(dateStr) || type === 'holiday';
-
-  const weekday = Number(String(row.weekday ?? row.平日 ?? row.weekdayCap ?? 0).replace(/,/g,''));
-  const weekend = Number(String(row.weekend ?? row.土日 ?? row.weekendCap ?? 0).replace(/,/g,''));
-
-  return holidayLike
-    ? (Number.isFinite(weekend) ? weekend : 0)
-    : (Number.isFinite(weekday) ? weekday : 0);
-};
-
-CAPACITY_WEEK7.dailyCap = function(area, dateStr, masterRows){
-  return Math.max(0, CAPACITY_WEEK7.baseDailyCap(area, dateStr, masterRows) + CAPACITY_WEEK7.dayAdjust(dateStr));
-};
-
-CAPACITY_WEEK7.monthCap = function(area, ym, masterRows){
-  const days = CAPACITY_WEEK7.daysInMonth(ym);
-  let total = 0;
-  for (let d=1; d<=days; d++) {
-    total += CAPACITY_WEEK7.dailyCap(area, CAPACITY_WEEK7.toDateKey(ym, d), masterRows);
-  }
-  return total;
-};
-
-CAPACITY_WEEK7.rateText = function(used, cap){
-  const c = Number(cap || 0);
-  if (!c) return '-';
-  return ((Number(used || 0) / c) * 100).toFixed(1) + '%';
-};
-
-CAPACITY_WEEK7.statusText = function(used, cap){
-  const c = Number(cap || 0);
-  if (!c) return '未設定';
-  const r = (Number(used || 0) / c) * 100;
-  if (r < 80) return '余裕あり';
-  if (r <= 100) return '適正';
-  if (r <= 120) return '注意';
-  return '逼迫';
-};
-
-CAPACITY_WEEK7.statusClass = function(used, cap){
-  const c = Number(cap || 0);
-  if (!c) return 'unset';
-  const r = (Number(used || 0) / c) * 100;
-  if (r < 80) return 'good';
-  if (r <= 100) return 'ok';
-  if (r <= 120) return 'warn';
-  return 'danger';
-};
-
-
-window.CAPACITY_CALC_MODE = 'WEEK7_DAILY_SUM';
