@@ -552,82 +552,33 @@
 
 
 
-  function centerKey(){
-    const q = String(location.search || '').toLowerCase();
-    const path = String(location.pathname || '').toLowerCase();
+  function normalizeAreaCardLabel(label){
+    const s = String(label || '').replace(/\s+/g,'');
 
-    if (q.includes('kitasaitama') || q.includes('kita') || q.includes('north') || path.includes('kitasaitama')) return 'kitasaitama';
-    if (q.includes('toda') || path.includes('toda')) return 'toda';
+    if (!s || s === '未設定') return 'その他|未分類';
 
-    const centerText = [
-      document.getElementById('page-sub')?.textContent || '',
-      document.body?.textContent?.slice(0, 3000) || ''
-    ].join(' ');
+    const tokyoWard = s.match(/東京都(.+?区)/);
+    if (tokyoWard) return `東京都${tokyoWard[1]}|${tokyoWard[1]}方面`;
 
-    if (/北埼玉/.test(centerText)) return 'kitasaitama';
-    return 'toda';
+    const saitamaWard = s.match(/埼玉県さいたま市(.+?区)/);
+    if (saitamaWard) return `さいたま市${saitamaWard[1]}|さいたま市${saitamaWard[1]}方面`;
+
+    const prefCity = s.match(/^(埼玉県|東京都|群馬県|栃木県|茨城県|千葉県|神奈川県)(.+?市)/);
+    if (prefCity) return `${prefCity[2]}|${prefCity[2]}方面`;
+
+    const prefTown = s.match(/^(埼玉県|東京都|群馬県|栃木県|茨城県|千葉県|神奈川県)(.+?[町村])/);
+    if (prefTown) return `${prefTown[2]}|${prefTown[2]}方面`;
+
+    if (/千葉県|神奈川県/.test(s)) return 'その他|千葉・神奈川ほか';
+    if (/群馬県/.test(s)) return '群馬その他|群馬方面';
+    if (/栃木県/.test(s)) return '栃木その他|栃木方面';
+    if (/茨城県/.test(s)) return '茨城その他|茨城方面';
+
+    return `${s}|${s}方面`;
   }
 
   function areaGroupOf(label){
-    const s = String(label || '');
-    const center = centerKey();
-
-    // 戸田センター：実運用上、埼玉南・東京北を主軸にまとめる
-    if (center === 'toda') {
-      if (/さいたま市|戸田市|蕨市|川口市|朝霞市|和光市|志木市|新座市/.test(s))
-        return '埼玉南|戸田・蕨・川口・さいたま方面';
-
-      if (/板橋区|北区|豊島区|練馬区|文京区/.test(s))
-        return '東京北|板橋・北・豊島・練馬方面';
-
-      if (/足立区|荒川区|台東区|墨田区|江東区|葛飾区|江戸川区/.test(s))
-        return '東京東|足立・荒川・台東・墨田方面';
-
-      if (/新宿区|中野区|杉並区|世田谷区|渋谷区|目黒区|大田区|品川区|港区|中央区|千代田区/.test(s))
-        return '東京その他|都心・城南・城西方面';
-
-      if (/川越市|所沢市|入間市|狭山市|ふじみ野市|富士見市|三芳町/.test(s))
-        return '埼玉西|川越・所沢・入間方面';
-
-      if (/上尾市|桶川市|北本市|鴻巣市|蓮田市|伊奈町|久喜市/.test(s))
-        return '埼玉北|上尾・桶川・北本方面';
-
-      if (/越谷市|草加市|三郷市|八潮市|春日部市|吉川市/.test(s))
-        return '埼玉東|越谷・草加・三郷方面';
-
-      // 千葉・神奈川は戸田では独立カードにしない
-      if (/千葉県|神奈川県/.test(s))
-        return 'その他|千葉・神奈川ほか';
-
-      return 'その他|その他・未分類';
-    }
-
-    // 北埼玉センター：埼玉北と北関東方面を主軸にまとめる
-    if (/上尾市|桶川市|北本市|鴻巣市|久喜市|蓮田市|伊奈町|白岡市|加須市|羽生市|行田市|熊谷市|深谷市|本庄市/.test(s))
-      return '埼玉北|上尾・桶川・北本・鴻巣方面';
-
-    if (/川越市|東松山市|坂戸市|鶴ヶ島市|日高市|毛呂山町|越生町|滑川町|嵐山町|小川町|吉見町|川島町/.test(s))
-      return '埼玉西・比企|東松山・坂戸・小川方面';
-
-    if (/さいたま市|川口市|戸田市|蕨市|朝霞市|和光市|志木市|新座市/.test(s))
-      return '埼玉南|さいたま・川口・戸田方面';
-
-    if (/高崎市|前橋市|伊勢崎市|太田市|館林市|藤岡市|富岡市|安中市|桐生市|みどり市|群馬県/.test(s))
-      return '群馬|高崎・伊勢崎・太田方面';
-
-    if (/足利市|佐野市|栃木市|小山市|宇都宮市|鹿沼市|栃木県/.test(s))
-      return '栃木|足利・佐野・小山方面';
-
-    if (/古河市|結城市|筑西市|坂東市|境町|茨城県/.test(s))
-      return '茨城|古河・県西方面';
-
-    if (/東京都/.test(s))
-      return '東京|東京方面';
-
-    if (/千葉県|神奈川県/.test(s))
-      return 'その他|千葉・神奈川ほか';
-
-    return 'その他|その他・未分類';
+    return normalizeAreaCardLabel(label);
   }
 
   function groupRowsFromCityRows(cityRows){
@@ -670,45 +621,41 @@
   }
 
   function areaDistributionHtml(cityRows, metric){
-    const groups = groupRowsFromCityRows(cityRows);
-    if (!groups.length) return '';
+    const groupsRaw = groupRowsFromCityRows(cityRows);
+    if (!groupsRaw.length) return '';
 
     const key = metric === 'amount' ? 'amount' : 'count';
-    const max = Math.max(...groups.map(g=>Number(g[key] || 0)), 1);
     const totalCount = cityRows.reduce((s,r)=>s+Number(r.count||0),0);
     const totalAmount = cityRows.reduce((s,r)=>s+Number(r.amount||0),0);
-    const center = centerKey();
 
-    const layout = center === 'kitasaitama'
-      ? [
-          ['埼玉北', '埼玉西・比企', '群馬'],
-          ['埼玉南', '栃木', '茨城'],
-          ['東京', 'その他', '']
-        ]
-      : [
-          ['埼玉西', '埼玉北', '東京北'],
-          ['埼玉南', '埼玉東', '東京東'],
-          ['東京その他', 'その他', '']
-        ];
+    const sorted = groupsRaw.slice().sort((a,b)=>Number(b[key]||0)-Number(a[key]||0) || b.count-a.count || a.label.localeCompare(b.label,'ja'));
+    const main = sorted.slice(0, 11);
+    const rest = sorted.slice(11);
 
-    const by = new Map(groups.map(g=>[g.label,g]));
-    const title = center === 'kitasaitama' ? '配送エリア分布（北埼玉）' : '配送エリア分布（戸田）';
+    if (rest.length) {
+      main.push({
+        label:'その他',
+        sub:'少数エリアまとめ',
+        count:rest.reduce((s,g)=>s+Number(g.count||0),0),
+        amount:rest.reduce((s,g)=>s+Number(g.amount||0),0),
+        children:rest.flatMap(g=>g.children || []).sort((a,b)=>b.count-a.count || b.amount-a.amount || a.label.localeCompare(b.label,'ja'))
+      });
+    }
+
+    const max = Math.max(...main.map(g=>Number(g[key] || 0)), 1);
 
     return `
       <div class="fa3-map-block">
         <div class="fa3-map-head">
           <div>
-            <div class="fa3-section map">${esc(title)}</div>
-            <p>配送圏を実務単位でまとめています。色が濃いほど${metric === 'amount' ? '売上' : '件数'}が多いエリアです。</p>
+            <div class="fa3-section map">主要市区町村分布</div>
+            <p>郵便番号から市区町村・区単位で自動分類します。新しい住所も原則自動でカード化し、少数はその他に集約します。</p>
           </div>
           <div class="fa3-map-legend"><span></span><em>少</em><i></i><i></i><i></i><i></i><em>多</em></div>
         </div>
 
-        <div class="fa3-map-grid">
-          ${layout.flatMap(row=>row.map(name=>{
-            if (!name) return '<div class="fa3-map-cell blank"></div>';
-
-            const g = by.get(name) || { label:name, sub:'', count:0, amount:0, children:[] };
+        <div class="fa3-map-grid city-auto">
+          ${main.map(g=>{
             const val = Number(g[key] || 0);
             const lv = heatLevel(val, max);
             const share = metric === 'amount' ? fmtPct(g.amount,totalAmount) : fmtPct(g.count,totalCount);
@@ -717,8 +664,8 @@
             return `
               <details class="fa3-map-cell ${lv}">
                 <summary>
-                  <strong>${esc(name)}</strong>
-                  <small class="fa3-map-sub">${esc(g.sub || '該当なし')}</small>
+                  <strong>${esc(g.label)}</strong>
+                  <small class="fa3-map-sub">${esc(g.sub || g.label + '方面')}</small>
                   <b>${fmt(g.count)}件</b>
                   <span>${fmtK(g.amount)}千円 / ${share}%</span>
                   <small>${top ? '最多：' + esc(top.label) : '—'}</small>
@@ -734,7 +681,7 @@
                   `).join('') || '<div class="fa3-map-drill-empty">該当データなし</div>'}
                 </div>
               </details>`;
-          })).join('')}
+          }).join('')}
         </div>
       </div>`;
   }
@@ -1123,6 +1070,22 @@
       #field-map .fa3-map-cell.lv5{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-color:#1d4ed8}
       #field-map .fa3-map-cell.blank{visibility:hidden;box-shadow:none;border:none;background:transparent}
 
+      #field-map .fa3-map-cell summary{list-style:none;cursor:pointer;display:flex;flex-direction:column;gap:6px;height:100%;outline:none}
+      #field-map .fa3-map-cell summary::-webkit-details-marker{display:none}
+      #field-map .fa3-map-cell[open]{box-shadow:0 12px 26px rgba(15,23,42,.14)}
+      #field-map .fa3-map-sub{font-size:11px!important;font-weight:900!important;opacity:.92!important;white-space:normal!important;line-height:1.35}
+      #field-map .fa3-map-drill{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.55);display:grid;gap:6px}
+      #field-map .fa3-map-cell.lv1 .fa3-map-drill,#field-map .fa3-map-cell.lv2 .fa3-map-drill,#field-map .fa3-map-cell.lv3 .fa3-map-drill{border-top-color:rgba(30,58,138,.16)}
+      #field-map .fa3-map-drill-row{display:grid;grid-template-columns:24px minmax(0,1fr);grid-template-areas:'rank name' 'rank nums';gap:4px 8px;align-items:center;border-radius:10px;padding:8px;background:rgba(255,255,255,.28)}
+      #field-map .fa3-map-cell.lv1 .fa3-map-drill-row,#field-map .fa3-map-cell.lv2 .fa3-map-drill-row,#field-map .fa3-map-cell.lv3 .fa3-map-drill-row{background:rgba(255,255,255,.72)}
+      #field-map .fa3-map-drill-row i{grid-area:rank;font-style:normal;width:24px;height:24px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.75);font-size:11px;font-weight:950}
+      #field-map .fa3-map-drill-row em{grid-area:name;font-style:normal;font-size:12px;font-weight:950;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+      #field-map .fa3-map-drill-row b{grid-area:nums;font-size:12px;font-weight:950;text-align:left}
+      #field-map .fa3-map-drill-row span{grid-area:nums;font-size:12px;font-weight:950;text-align:right;justify-self:end}
+      #field-map .fa3-map-drill-empty{font-size:12px;font-weight:900;opacity:.8}
+
+
+      #field-map .fa3-map-grid.city-auto{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
       #field-map .fa3-map-cell summary{list-style:none;cursor:pointer;display:flex;flex-direction:column;gap:6px;height:100%;outline:none}
       #field-map .fa3-map-cell summary::-webkit-details-marker{display:none}
       #field-map .fa3-map-cell[open]{box-shadow:0 12px 26px rgba(15,23,42,.14)}
