@@ -2698,7 +2698,7 @@ const CAPACITY_UI = {
           <div class="capx-kpi blue"><span>実績件数</span><b>${fmt(totalActual)}</b><em>原票</em></div>
           <div class="capx-kpi green"><span>月キャパ</span><b>${fmt(totalCap)}</b><em>${hasCap?'登録済':'未登録'}</em></div>
           <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${pct(j.rate)}</b><em>${esc(j.status)}</em></div>
-          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>土日 ${fmt(weekendShare)}% / 平日 ${fmt(weekdayShare)}% / 最大 ${worstOver ? esc(worstOver.area) + ' ' + pct(worstOver.rate) : '—'}</em></div>
+          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>土日 ${fmt(weekendShare)}% / 平日 ${fmt(weekdayShare)}% / 最大 ${worstOver ? esc(worstOver.area) + ' +' + fmt(this.n(worstOver.count)-this.n(worstOver.cap)) + '件（' + pct(worstOver.rate) + '）' : '—'}</em></div>
         </div>
 
         <div class="capx-tabs">
@@ -2758,8 +2758,8 @@ const CAPACITY_UI = {
             <span>${worst ? `最大 ${esc(worst.area)} ${pct(worst.rate)}` : '最大 —'}</span>
           </div>
         </div>
-        <div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th></tr></thead><tbody>
-          ${rows.map((r,i)=>`<tr class="capx-risk-${esc(r.cls)} capx-click-row ${i===0?'selected':''}" data-capx-daily-row="${i}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td></tr>`).join('')}
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">差分</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th></tr></thead><tbody>
+          ${rows.map((r,i)=>`<tr class="capx-risk-${esc(r.cls)} capx-click-row ${i===0?'selected':''}" data-capx-daily-row="${i}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r"><b class="capx-diff ${this.n(r.count)-this.n(r.cap)>0?'plus':'minus'}">${this.n(r.count)-this.n(r.cap)>0?'+':''}${fmt(this.n(r.count)-this.n(r.cap))}</b></td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td></tr>`).join('')}
         </tbody></table></div>
       </div>
       <div class="capx-card">
@@ -2834,7 +2834,7 @@ const CAPACITY_UI = {
         <div><span>実績</span><b>${fmt(row.count)}件</b></div>
         <div><span>日キャパ</span><b>${fmt(row.cap)}件</b></div>
         <div class="${diff > 0 ? 'danger' : 'ok'}"><span>差分</span><b>${diff > 0 ? '+' : ''}${fmt(diff)}件</b></div>
-        <div><span>使用率</span><b>${row.cap > 0 ? pct(row.rate) : '-'}</b></div>
+        <div><span>超過倍率</span><b>${row.cap > 0 ? (this.n(row.count)/this.n(row.cap)).toFixed(1) + '倍' : '-'}</b></div>
       </div>
       <h5>市区町村別 原因内訳</h5>
       <div class="capx-cause-list">
@@ -4509,6 +4509,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     .capx-cal-summary span.good{background:#eff6ff;color:#1e40af;border-color:#bfdbfe;}
     .capx-cause-kpis>div.danger{background:#fef2f2!important;border-color:#fecaca!important;}
     .capx-cause-kpis>div.ok{background:#ecfdf5!important;border-color:#bbf7d0!important;}
+  `;
+  document.head.appendChild(st);
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-diff-focus-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-diff-focus-style';
+  st.textContent = `
+    .capx-diff{
+      display:inline-flex;
+      justify-content:flex-end;
+      min-width:54px;
+      font-weight:950;
+      font-size:14px;
+    }
+    .capx-diff.plus{
+      color:#991b1b;
+    }
+    .capx-diff.minus{
+      color:#166534;
+    }
+    .capx-cause-kpis div:nth-child(3){
+      background:#fef2f2;
+      border-color:#fecaca;
+    }
+    .capx-kpi.amber em{
+      line-height:1.35;
+    }
   `;
   document.head.appendChild(st);
 })();
