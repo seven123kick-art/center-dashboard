@@ -550,12 +550,55 @@
       </div>`;
   }
 
-  function rankingHtml(rows, metric, title){
+
+  function prefDetailHtml(record, metric, sortMode){
+    const prefRows = sortRows(buildRows(record, 'pref'), sortMode);
+    const cityRows = sortRows(buildRows(record, 'city'), sortMode);
+    const total = totals(cityRows);
+    const key = metric === 'amount' ? 'amount' : 'count';
+    const maxPref = Math.max(...prefRows.map(r=>Number(r[key] || 0)), 1);
+
+    return `
+      <div class="fa3-pref-detail">
+        <div class="fa3-pref-title">都道府県別 詳細</div>
+        ${prefRows.map((p,idx)=>{
+          const cities = cityRows
+            .filter(c => c.label && (c.label.startsWith(p.label) || p.label === '未設定'))
+            .slice(0,20);
+
+          const w = Math.max(2, Math.round(Number(p[key] || 0) / maxPref * 100));
+          const share = metric === 'amount' ? fmtPct(p.amount,total.amount) : fmtPct(p.count,total.count);
+
+          return `
+            <details class="fa3-pref-card" ${idx < 3 ? 'open' : ''}>
+              <summary>
+                <div class="fa3-pref-main">
+                  <span>${esc(p.label)}</span>
+                  <small>${fmt(p.count)}件 / ${fmtK(p.amount)}千円 / ${share}%</small>
+                </div>
+                <div class="fa3-pref-bar"><i style="width:${w}%"></i></div>
+              </summary>
+              <div class="fa3-pref-cities">
+                ${cities.map((c,i)=>`
+                  <div class="fa3-pref-city">
+                    <b>${i + 1}</b>
+                    <span>${esc(c.label)}</span>
+                    <em>${fmt(c.count)}件</em>
+                    <small>${fmtK(c.amount)}千円</small>
+                  </div>
+                `).join('')}
+              </div>
+            </details>`;
+        }).join('')}
+      </div>`;
+  }
+
+  function rankingHtml(rows, metric, title, record, mode, sortMode){
     return `
       <div class="fa3-body">
         <div class="fa3-section">${esc(title)}</div>
         ${barsHtml(rows, metric)}
-        ${tableHtml(rows)}
+        ${mode === 'overall' ? prefDetailHtml(record, metric, sortMode) : ''}
       </div>`;
   }
 
@@ -617,7 +660,7 @@
           ${toolbarHtml(mode, sortMode, metric)}
           ${mode === 'history'
             ? historyHtml(rawRecords(), ym)
-            : rankingHtml(rows, metric, mode === 'pref' ? '都道府県別構成' : '市区町村別ランキング')}
+            : rankingHtml(rows, metric, mode === 'pref' ? '都道府県別構成' : '市区町村別ランキング', record, mode, sortMode)}
         </div>`;
 
       bindControls();
@@ -815,7 +858,24 @@
       #field-map .fa3-val span{font-weight:850;color:#64748b;margin-right:10px}
       #field-map .fa3-val em{font-style:normal;color:#1d4ed8;font-weight:950}
 
-      #field-map .fa3-table-wrap{margin-top:20px;max-height:460px;overflow:auto;border:1px solid #e5e7eb;border-radius:16px}
+
+      #field-map .fa3-pref-detail{margin-top:22px;border-top:1px solid #e5e7eb;padding-top:18px}
+      #field-map .fa3-pref-title{font-size:16px;font-weight:950;color:#0f172a;margin:0 0 12px;border-left:4px solid #16a34a;padding-left:10px}
+      #field-map .fa3-pref-card{border:1px solid #e2e8f0;border-radius:16px;background:#fff;margin:10px 0;overflow:hidden;box-shadow:0 8px 20px rgba(15,23,42,.04)}
+      #field-map .fa3-pref-card summary{cursor:pointer;list-style:none;padding:13px 16px;background:#f8fafc;display:grid;grid-template-columns:minmax(220px,320px) 1fr;gap:16px;align-items:center}
+      #field-map .fa3-pref-card summary::-webkit-details-marker{display:none}
+      #field-map .fa3-pref-main span{display:block;font-size:15px;font-weight:950;color:#0f172a}
+      #field-map .fa3-pref-main small{display:block;margin-top:4px;font-size:12px;color:#64748b;font-weight:850}
+      #field-map .fa3-pref-bar{height:16px;background:#e2e8f0;border-radius:999px;overflow:hidden}
+      #field-map .fa3-pref-bar i{display:block;height:100%;background:linear-gradient(90deg,#0f766e,#22c55e);border-radius:999px}
+      #field-map .fa3-pref-cities{padding:10px 16px 14px;display:grid;gap:8px}
+      #field-map .fa3-pref-city{display:grid;grid-template-columns:34px 1fr 90px 110px;gap:10px;align-items:center;padding:8px 10px;border-radius:12px;background:#fff;border:1px solid #eef2f7}
+      #field-map .fa3-pref-city b{width:24px;height:24px;border-radius:999px;background:#ecfdf5;color:#15803d;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+      #field-map .fa3-pref-city span{font-size:13px;font-weight:900;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #field-map .fa3-pref-city em{font-style:normal;font-size:13px;font-weight:950;color:#0f172a;text-align:right}
+      #field-map .fa3-pref-city small{font-size:13px;font-weight:850;color:#64748b;text-align:right}
+
+      #field-map .fa3-table-wrap{display:none;margin-top:20px;max-height:460px;overflow:auto;border:1px solid #e5e7eb;border-radius:16px}
       #field-map .fa3-table{width:100%;border-collapse:collapse;min-width:760px}
       #field-map .fa3-table th{background:#f8fafc;color:#334155;font-size:12px;text-align:left;padding:12px 14px;border-bottom:1px solid #e5e7eb}
       #field-map .fa3-table td{font-size:13px;color:#0f172a;padding:12px 14px;border-bottom:1px solid #e5e7eb}
@@ -838,6 +898,9 @@
         #field-map .fa3-toolbar,#field-map .fa3-selector{align-items:flex-start;flex-direction:column}
         #field-map .fa3-row{grid-template-columns:1fr;gap:7px;border-bottom:1px solid #eef2f7;padding-bottom:11px}
         #field-map .fa3-val{text-align:left}
+        #field-map .fa3-pref-card summary{grid-template-columns:1fr}
+        #field-map .fa3-pref-city{grid-template-columns:30px 1fr;gap:8px}
+        #field-map .fa3-pref-city em,#field-map .fa3-pref-city small{text-align:left}
       }
     `;
     document.head.appendChild(st);
