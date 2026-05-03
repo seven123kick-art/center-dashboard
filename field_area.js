@@ -1,4 +1,4 @@
-/* field_area.js : エリア分析ビュー 都道府県・市区町村・町域対応・実務UI版
+/* field_area.js : エリア分析ビュー 市区町村固定・実務UI版
    2026-05-03
    目的：
    - エリア別の件数構成・売上構成を見やすく表示
@@ -10,7 +10,7 @@
 'use strict';
 
 (function(){
-  const FLAG = '__FIELD_AREA_PREF_CITY_TOWN_20260503__';
+  const FLAG = '__FIELD_AREA_CITY_ONLY_20260503__';
   if (window[FLAG]) return;
   window[FLAG] = true;
 
@@ -273,11 +273,7 @@
       let label = nt.area || '未設定';
       if (level === 'pref') {
         key = nt.pref || '未設定';
-        label = key;
-      } else if (level === 'town') {
-        key = nt.townLabel || nt.area || '未設定';
-        label = key;
-      } else if (level === 'city') {
+        label = key; else if (level === 'city') {
         key = nt.area || '未設定';
         label = key;
       }
@@ -327,7 +323,6 @@
       <div class="fa-tabs">
         <button class="fa-tab ${mode === 'ranking' ? 'active' : ''}" data-fa-mode="ranking">市区町村</button>
         <button class="fa-tab ${mode === 'pref' ? 'active' : ''}" data-fa-mode="pref">都道府県</button>
-        <button class="fa-tab ${mode === 'town' ? 'active' : ''}" data-fa-mode="town">町域</button>
         <button class="fa-tab ${mode === 'history' ? 'active' : ''}" data-fa-mode="history">月別推移</button>
       </div>
       <div class="fa-control-right">
@@ -426,7 +421,7 @@
     const limited = rows.slice(0,30);
     return `
       <div class="fa-body">
-        <div class="fa-section-title">エリア別ランキング TOP${limited.length}</div>
+        <div class="fa-section-title">市区町村別ランキング TOP${limited.length}</div>
         ${barRowsHtml(limited, metric, t.count, t.amount)}
         ${tableHtml(limited, t.count, t.amount)}
       </div>`;
@@ -445,7 +440,7 @@
 
   function historyHtml(records, currentYM){
     const byYM = records.map(rec=>{
-      const rows = buildRows(rec, 'area');
+      const rows = buildRows(rec, 'city');
       const t = totals(rows);
       return { ym:rec.ym, count:t.count, amount:t.amount, top: rows.sort((a,b)=>b.count-a.count)[0] };
     }).sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
@@ -504,7 +499,7 @@
       const mode = getMode();
       const sortMode = getSortMode();
       const metric = getMetric();
-      const level = mode === 'pref' ? 'pref' : (mode === 'town' ? 'town' : 'city');
+      const level = mode === 'pref' ? 'pref' : 'city';
 
       let rows = buildRows(rec, level);
       rows = sortRows(rows, sortMode);
@@ -529,10 +524,8 @@
         box.insertAdjacentHTML('beforeend', historyHtml(records, ym));
       } else if (mode === 'pref') {
         box.insertAdjacentHTML('beforeend', prefHtml(rows, metric, sortMode));
-      } else if (mode === 'town') {
-        box.insertAdjacentHTML('beforeend', rankingHtml(rows, metric).replace('エリア別ランキング', '町域別ランキング'));
       } else {
-        box.insertAdjacentHTML('beforeend', rankingHtml(rows, metric).replace('エリア別ランキング', '市区町村別ランキング'));
+        box.insertAdjacentHTML('beforeend', rankingHtml(rows, metric));
       }
 
       bindInlineControls();
