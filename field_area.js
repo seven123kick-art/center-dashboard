@@ -554,29 +554,61 @@
 
   function areaGroupOf(label){
     const s = String(label || '');
-    if (s.includes('板橋区') || s.includes('北区') || s.includes('豊島区') || s.includes('文京区') || s.includes('練馬区')) return '東京北';
-    if (s.includes('江東区') || s.includes('墨田区') || s.includes('台東区') || s.includes('荒川区') || s.includes('足立区')) return '東京東';
-    if (s.includes('大田区') || s.includes('品川区') || s.includes('港区') || s.includes('世田谷区') || s.includes('新宿区')) return '東京南西';
-    if (s.includes('さいたま市') || s.includes('戸田市') || s.includes('蕨市') || s.includes('川口市') || s.includes('朝霞市') || s.includes('和光市') || s.includes('志木市') || s.includes('新座市')) return '埼玉南';
-    if (s.includes('川越市') || s.includes('所沢市') || s.includes('入間市') || s.includes('狭山市') || s.includes('ふじみ野市') || s.includes('富士見市')) return '埼玉西';
-    if (s.includes('上尾市') || s.includes('桶川市') || s.includes('北本市') || s.includes('鴻巣市') || s.includes('久喜市') || s.includes('蓮田市')) return '埼玉北';
-    if (s.includes('越谷市') || s.includes('草加市') || s.includes('三郷市') || s.includes('八潮市') || s.includes('春日部市')) return '埼玉東';
-    if (s.includes('千葉県')) return '千葉';
-    if (s.includes('神奈川県')) return '神奈川';
-    return 'その他';
+
+    if (s.includes('板橋区') || s.includes('北区') || s.includes('豊島区') || s.includes('文京区') || s.includes('練馬区'))
+      return '東京北|板橋・北・豊島・練馬方面';
+
+    if (s.includes('江東区') || s.includes('墨田区') || s.includes('台東区') || s.includes('荒川区') || s.includes('足立区'))
+      return '東京東|江東・墨田・台東・足立方面';
+
+    if (s.includes('大田区') || s.includes('品川区') || s.includes('港区') || s.includes('世田谷区') || s.includes('新宿区'))
+      return '東京南西|品川・大田・世田谷方面';
+
+    if (s.includes('さいたま市') || s.includes('戸田市') || s.includes('蕨市') || s.includes('川口市') || s.includes('朝霞市') || s.includes('和光市') || s.includes('志木市') || s.includes('新座市'))
+      return '埼玉南|戸田・蕨・川口・さいたま方面';
+
+    if (s.includes('川越市') || s.includes('所沢市') || s.includes('入間市') || s.includes('狭山市') || s.includes('ふじみ野市') || s.includes('富士見市'))
+      return '埼玉西|川越・所沢・入間方面';
+
+    if (s.includes('上尾市') || s.includes('桶川市') || s.includes('北本市') || s.includes('鴻巣市') || s.includes('久喜市') || s.includes('蓮田市'))
+      return '埼玉北|上尾・桶川・北本方面';
+
+    if (s.includes('越谷市') || s.includes('草加市') || s.includes('三郷市') || s.includes('八潮市') || s.includes('春日部市'))
+      return '埼玉東|越谷・草加・三郷方面';
+
+    if (s.includes('千葉県')) return '千葉|千葉方面';
+    if (s.includes('神奈川県')) return '神奈川|神奈川方面';
+
+    return 'その他|その他・未分類';
   }
 
   function groupRowsFromCityRows(cityRows){
     const m = new Map();
+
     (cityRows || []).forEach(r=>{
-      const g = areaGroupOf(r.label);
-      if (!m.has(g)) m.set(g, { label:g, count:0, amount:0, children:[] });
-      const x = m.get(g);
+      const raw = areaGroupOf(r.label);
+      const [name, sub] = raw.split('|');
+
+      if (!m.has(name)) {
+        m.set(name, {
+          label:name,
+          sub:sub || '',
+          count:0,
+          amount:0,
+          children:[]
+        });
+      }
+
+      const x = m.get(name);
       x.count += Number(r.count || 0);
       x.amount += Number(r.amount || 0);
       x.children.push(r);
     });
-    return [...m.values()].sort((a,b)=>b.count-a.count || b.amount-a.amount || a.label.localeCompare(b.label,'ja'));
+
+    return [...m.values()].map(g=>{
+      g.children = (g.children || []).sort((a,b)=>b.count-a.count || b.amount-a.amount || a.label.localeCompare(b.label,'ja'));
+      return g;
+    }).sort((a,b)=>b.count-a.count || b.amount-a.amount || a.label.localeCompare(b.label,'ja'));
   }
 
   function heatLevel(value, max){
@@ -592,6 +624,7 @@
   function areaDistributionHtml(cityRows, metric){
     const groups = groupRowsFromCityRows(cityRows);
     if (!groups.length) return '';
+
     const key = metric === 'amount' ? 'amount' : 'count';
     const max = Math.max(...groups.map(g=>Number(g[key] || 0)), 1);
     const totalCount = cityRows.reduce((s,r)=>s+Number(r.count||0),0);
@@ -610,24 +643,39 @@
         <div class="fa3-map-head">
           <div>
             <div class="fa3-section map">配送エリア分布</div>
-            <p>色が濃いほど${metric === 'amount' ? '売上' : '件数'}が多いエリアです。</p>
+            <p>色が濃いほど${metric === 'amount' ? '売上' : '件数'}が多いエリアです。カードを開くと市区町村別に確認できます。</p>
           </div>
           <div class="fa3-map-legend"><span></span><em>少</em><i></i><i></i><i></i><i></i><em>多</em></div>
         </div>
+
         <div class="fa3-map-grid">
           ${layout.flatMap(row=>row.map(name=>{
-            const g = by.get(name) || { label:name, count:0, amount:0, children:[] };
+            const g = by.get(name) || { label:name, sub:'', count:0, amount:0, children:[] };
             const val = Number(g[key] || 0);
             const lv = heatLevel(val, max);
             const share = metric === 'amount' ? fmtPct(g.amount,totalAmount) : fmtPct(g.count,totalCount);
-            const top = (g.children || []).slice().sort((a,b)=>b.count-a.count)[0];
+            const top = (g.children || [])[0];
+
             return `
-              <div class="fa3-map-cell ${lv}">
-                <strong>${esc(name)}</strong>
-                <b>${fmt(g.count)}件</b>
-                <span>${fmtK(g.amount)}千円 / ${share}%</span>
-                <small>${top ? '最多：' + esc(top.label) : '—'}</small>
-              </div>`;
+              <details class="fa3-map-cell ${lv}">
+                <summary>
+                  <strong>${esc(name)}</strong>
+                  <small class="fa3-map-sub">${esc(g.sub || '該当なし')}</small>
+                  <b>${fmt(g.count)}件</b>
+                  <span>${fmtK(g.amount)}千円 / ${share}%</span>
+                  <small>${top ? '最多：' + esc(top.label) : '—'}</small>
+                </summary>
+                <div class="fa3-map-drill">
+                  ${(g.children || []).slice(0,10).map((c,i)=>`
+                    <div class="fa3-map-drill-row">
+                      <i>${i + 1}</i>
+                      <em>${esc(c.label)}</em>
+                      <b>${fmt(c.count)}件</b>
+                      <span>${fmtK(c.amount)}千円</span>
+                    </div>
+                  `).join('') || '<div class="fa3-map-drill-empty">該当データなし</div>'}
+                </div>
+              </details>`;
           })).join('')}
         </div>
       </div>`;
@@ -686,7 +734,7 @@
     return `
       <div class="fa3-pref-detail">
         <div class="fa3-pref-title">都道府県別 詳細</div>
-        ${prefRows.map((p,idx)=>{
+        ${prefRows.map((p)=>{
           const cities = cityRows
             .filter(c => c.label && (c.label.startsWith(p.label) || p.label === '未設定'))
             .slice(0,20);
@@ -1015,6 +1063,20 @@
       #field-map .fa3-map-cell.lv3{background:#93c5fd;color:#0f172a}
       #field-map .fa3-map-cell.lv4{background:#3b82f6;color:#fff;border-color:#2563eb}
       #field-map .fa3-map-cell.lv5{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-color:#1d4ed8}
+
+      #field-map .fa3-map-cell summary{list-style:none;cursor:pointer;display:flex;flex-direction:column;gap:6px;height:100%;outline:none}
+      #field-map .fa3-map-cell summary::-webkit-details-marker{display:none}
+      #field-map .fa3-map-cell[open]{box-shadow:0 12px 26px rgba(15,23,42,.14)}
+      #field-map .fa3-map-sub{font-size:11px!important;font-weight:900!important;opacity:.92!important;white-space:normal!important;line-height:1.35}
+      #field-map .fa3-map-drill{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.55);display:grid;gap:6px}
+      #field-map .fa3-map-cell.lv1 .fa3-map-drill,#field-map .fa3-map-cell.lv2 .fa3-map-drill,#field-map .fa3-map-cell.lv3 .fa3-map-drill{border-top-color:rgba(30,58,138,.16)}
+      #field-map .fa3-map-drill-row{display:grid;grid-template-columns:24px 1fr 70px 80px;gap:6px;align-items:center;border-radius:10px;padding:6px;background:rgba(255,255,255,.28)}
+      #field-map .fa3-map-cell.lv1 .fa3-map-drill-row,#field-map .fa3-map-cell.lv2 .fa3-map-drill-row,#field-map .fa3-map-cell.lv3 .fa3-map-drill-row{background:rgba(255,255,255,.72)}
+      #field-map .fa3-map-drill-row i{font-style:normal;width:22px;height:22px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.65);font-size:11px;font-weight:950}
+      #field-map .fa3-map-drill-row em{font-style:normal;font-size:12px;font-weight:950;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #field-map .fa3-map-drill-row b,#field-map .fa3-map-drill-row span{font-size:12px;font-weight:950;text-align:right}
+      #field-map .fa3-map-drill-empty{font-size:12px;font-weight:900;opacity:.8}
+
       #field-map .fa3-trend-list{display:grid;gap:12px}
       #field-map .fa3-trend-row{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:12px;align-items:end;border-bottom:1px solid #eef2f7;padding-bottom:10px}
       #field-map .fa3-trend-name{font-size:13px;font-weight:950;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1065,6 +1127,8 @@
         #field-map .fa3-two-col{grid-template-columns:1fr}
         #field-map .fa3-map-grid{grid-template-columns:1fr}
         #field-map .fa3-trend-row{grid-template-columns:1fr}
+        #field-map .fa3-map-drill-row{grid-template-columns:24px 1fr;gap:6px}
+        #field-map .fa3-map-drill-row b,#field-map .fa3-map-drill-row span{text-align:left}
         #field-map .fa3-pref-card summary{grid-template-columns:1fr}
         #field-map .fa3-pref-city{grid-template-columns:30px 1fr;gap:8px}
         #field-map .fa3-pref-city em,#field-map .fa3-pref-city small{text-align:left}
