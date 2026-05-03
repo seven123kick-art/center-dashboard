@@ -551,6 +551,131 @@
   }
 
 
+
+  function areaGroupOf(label){
+    const s = String(label || '');
+    if (s.includes('板橋区') || s.includes('北区') || s.includes('豊島区') || s.includes('文京区') || s.includes('練馬区')) return '東京北';
+    if (s.includes('江東区') || s.includes('墨田区') || s.includes('台東区') || s.includes('荒川区') || s.includes('足立区')) return '東京東';
+    if (s.includes('大田区') || s.includes('品川区') || s.includes('港区') || s.includes('世田谷区') || s.includes('新宿区')) return '東京南西';
+    if (s.includes('さいたま市') || s.includes('戸田市') || s.includes('蕨市') || s.includes('川口市') || s.includes('朝霞市') || s.includes('和光市') || s.includes('志木市') || s.includes('新座市')) return '埼玉南';
+    if (s.includes('川越市') || s.includes('所沢市') || s.includes('入間市') || s.includes('狭山市') || s.includes('ふじみ野市') || s.includes('富士見市')) return '埼玉西';
+    if (s.includes('上尾市') || s.includes('桶川市') || s.includes('北本市') || s.includes('鴻巣市') || s.includes('久喜市') || s.includes('蓮田市')) return '埼玉北';
+    if (s.includes('越谷市') || s.includes('草加市') || s.includes('三郷市') || s.includes('八潮市') || s.includes('春日部市')) return '埼玉東';
+    if (s.includes('千葉県')) return '千葉';
+    if (s.includes('神奈川県')) return '神奈川';
+    return 'その他';
+  }
+
+  function groupRowsFromCityRows(cityRows){
+    const m = new Map();
+    (cityRows || []).forEach(r=>{
+      const g = areaGroupOf(r.label);
+      if (!m.has(g)) m.set(g, { label:g, count:0, amount:0, children:[] });
+      const x = m.get(g);
+      x.count += Number(r.count || 0);
+      x.amount += Number(r.amount || 0);
+      x.children.push(r);
+    });
+    return [...m.values()].sort((a,b)=>b.count-a.count || b.amount-a.amount || a.label.localeCompare(b.label,'ja'));
+  }
+
+  function heatLevel(value, max){
+    if (!max) return 'lv1';
+    const r = value / max;
+    if (r >= .75) return 'lv5';
+    if (r >= .50) return 'lv4';
+    if (r >= .25) return 'lv3';
+    if (r >= .10) return 'lv2';
+    return 'lv1';
+  }
+
+  function areaDistributionHtml(cityRows, metric){
+    const groups = groupRowsFromCityRows(cityRows);
+    if (!groups.length) return '';
+    const key = metric === 'amount' ? 'amount' : 'count';
+    const max = Math.max(...groups.map(g=>Number(g[key] || 0)), 1);
+    const totalCount = cityRows.reduce((s,r)=>s+Number(r.count||0),0);
+    const totalAmount = cityRows.reduce((s,r)=>s+Number(r.amount||0),0);
+
+    const layout = [
+      ['埼玉北', '埼玉東', '東京北'],
+      ['埼玉西', '埼玉南', '東京東'],
+      ['その他', '神奈川', '千葉']
+    ];
+
+    const by = new Map(groups.map(g=>[g.label,g]));
+
+    return `
+      <div class="fa3-map-block">
+        <div class="fa3-map-head">
+          <div>
+            <div class="fa3-section map">配送エリア分布</div>
+            <p>色が濃いほど${metric === 'amount' ? '売上' : '件数'}が多いエリアです。</p>
+          </div>
+          <div class="fa3-map-legend"><span></span><em>少</em><i></i><i></i><i></i><i></i><em>多</em></div>
+        </div>
+        <div class="fa3-map-grid">
+          ${layout.flatMap(row=>row.map(name=>{
+            const g = by.get(name) || { label:name, count:0, amount:0, children:[] };
+            const val = Number(g[key] || 0);
+            const lv = heatLevel(val, max);
+            const share = metric === 'amount' ? fmtPct(g.amount,totalAmount) : fmtPct(g.count,totalCount);
+            const top = (g.children || []).slice().sort((a,b)=>b.count-a.count)[0];
+            return `
+              <div class="fa3-map-cell ${lv}">
+                <strong>${esc(name)}</strong>
+                <b>${fmt(g.count)}件</b>
+                <span>${fmtK(g.amount)}千円 / ${share}%</span>
+                <small>${top ? '最多：' + esc(top.label) : '—'}</small>
+              </div>`;
+          })).join('')}
+        </div>
+      </div>`;
+  }
+
+  function topAreaTrendHtml(records, currentYM, metric){
+    const current = records.find(r=>r.ym === currentYM) || records[records.length - 1];
+    if (!current) return '';
+    const currentRows = sortRows(buildRows(current, 'city'), 'count').slice(0,5);
+    if (!currentRows.length) return '';
+
+    const labels = currentRows.map(r=>r.label);
+    const rows = records.slice().sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+    const key = metric === 'amount' ? 'amount' : 'count';
+
+    let max = 1;
+    const series = labels.map(label=>{
+      const values = rows.map(rec=>{
+        const cityRows = buildRows(rec, 'city');
+        const hit = cityRows.find(r=>r.label === label);
+        const v = hit ? Number(hit[key] || 0) : 0;
+        max = Math.max(max, v);
+        return { ym:rec.ym, value:v };
+      });
+      return { label, values };
+    });
+
+    return `
+      <div class="fa3-trend-block">
+        <div class="fa3-section trend">主要エリア推移 TOP5</div>
+        <div class="fa3-trend-list">
+          ${series.map(s=>`
+            <div class="fa3-trend-row">
+              <div class="fa3-trend-name">${esc(s.label)}</div>
+              <div class="fa3-sparks">
+                ${s.values.map(v=>`
+                  <div class="fa3-spark" title="${esc(ymText(v.ym))}：${fmt(v.value)}">
+                    <i style="height:${Math.max(4, Math.round(v.value / max * 58))}px"></i>
+                    <span>${esc(monthText(v.ym))}</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+  }
+
   function prefDetailHtml(record, metric, sortMode){
     const prefRows = sortRows(buildRows(record, 'pref'), sortMode);
     const cityRows = sortRows(buildRows(record, 'city'), sortMode);
@@ -594,11 +719,18 @@
   }
 
   function rankingHtml(rows, metric, title, record, mode, sortMode){
+    const records = rawRecords();
     return `
       <div class="fa3-body">
         <div class="fa3-section">${esc(title)}</div>
         ${barsHtml(rows, metric)}
-        ${mode === 'overall' ? prefDetailHtml(record, metric, sortMode) : ''}
+        ${mode === 'overall' ? `
+          <div class="fa3-two-col">
+            ${areaDistributionHtml(rows, metric)}
+            ${topAreaTrendHtml(records, selectedYM(), metric)}
+          </div>
+          ${prefDetailHtml(record, metric, sortMode)}
+        ` : ''}
       </div>`;
   }
 
@@ -859,6 +991,38 @@
       #field-map .fa3-val em{font-style:normal;color:#1d4ed8;font-weight:950}
 
 
+
+      #field-map .fa3-two-col{display:grid;grid-template-columns:minmax(360px,1fr) minmax(360px,1fr);gap:16px;margin-top:22px}
+      #field-map .fa3-map-block,#field-map .fa3-trend-block{border:1px solid #e2e8f0;border-radius:18px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:16px}
+      #field-map .fa3-map-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}
+      #field-map .fa3-section.map,#field-map .fa3-section.trend{border-left-color:#0ea5e9;margin-bottom:4px}
+      #field-map .fa3-map-head p{margin:0;color:#64748b;font-size:12px;font-weight:850}
+      #field-map .fa3-map-legend{display:flex;align-items:center;gap:4px;font-size:11px;color:#64748b;font-weight:900;white-space:nowrap}
+      #field-map .fa3-map-legend span,#field-map .fa3-map-legend i{display:block;width:14px;height:9px;border-radius:999px}
+      #field-map .fa3-map-legend span{background:#dbeafe}
+      #field-map .fa3-map-legend i:nth-of-type(1){background:#bfdbfe}
+      #field-map .fa3-map-legend i:nth-of-type(2){background:#60a5fa}
+      #field-map .fa3-map-legend i:nth-of-type(3){background:#2563eb}
+      #field-map .fa3-map-legend i:nth-of-type(4){background:#1e3a8a}
+      #field-map .fa3-map-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+      #field-map .fa3-map-cell{min-height:112px;border-radius:16px;padding:12px;border:1px solid #dbeafe;display:flex;flex-direction:column;justify-content:space-between;box-shadow:inset 0 1px 0 rgba(255,255,255,.55)}
+      #field-map .fa3-map-cell strong{font-size:14px;font-weight:950}
+      #field-map .fa3-map-cell b{font-size:23px;font-weight:950;line-height:1}
+      #field-map .fa3-map-cell span{font-size:12px;font-weight:900}
+      #field-map .fa3-map-cell small{font-size:11px;font-weight:850;opacity:.9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #field-map .fa3-map-cell.lv1{background:#eff6ff;color:#1e3a8a}
+      #field-map .fa3-map-cell.lv2{background:#dbeafe;color:#1e3a8a}
+      #field-map .fa3-map-cell.lv3{background:#93c5fd;color:#0f172a}
+      #field-map .fa3-map-cell.lv4{background:#3b82f6;color:#fff;border-color:#2563eb}
+      #field-map .fa3-map-cell.lv5{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-color:#1d4ed8}
+      #field-map .fa3-trend-list{display:grid;gap:12px}
+      #field-map .fa3-trend-row{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:12px;align-items:end;border-bottom:1px solid #eef2f7;padding-bottom:10px}
+      #field-map .fa3-trend-name{font-size:13px;font-weight:950;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #field-map .fa3-sparks{display:flex;align-items:end;gap:8px;min-height:82px}
+      #field-map .fa3-spark{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;min-width:22px}
+      #field-map .fa3-spark i{width:16px;border-radius:999px 999px 3px 3px;background:linear-gradient(180deg,#60a5fa,#1d4ed8);display:block}
+      #field-map .fa3-spark span{font-size:10px;color:#64748b;font-weight:850}
+
       #field-map .fa3-pref-detail{margin-top:22px;border-top:1px solid #e5e7eb;padding-top:18px}
       #field-map .fa3-pref-title{font-size:16px;font-weight:950;color:#0f172a;margin:0 0 12px;border-left:4px solid #16a34a;padding-left:10px}
       #field-map .fa3-pref-card{border:1px solid #e2e8f0;border-radius:16px;background:#fff;margin:10px 0;overflow:hidden;box-shadow:0 8px 20px rgba(15,23,42,.04)}
@@ -898,6 +1062,9 @@
         #field-map .fa3-toolbar,#field-map .fa3-selector{align-items:flex-start;flex-direction:column}
         #field-map .fa3-row{grid-template-columns:1fr;gap:7px;border-bottom:1px solid #eef2f7;padding-bottom:11px}
         #field-map .fa3-val{text-align:left}
+        #field-map .fa3-two-col{grid-template-columns:1fr}
+        #field-map .fa3-map-grid{grid-template-columns:1fr}
+        #field-map .fa3-trend-row{grid-template-columns:1fr}
         #field-map .fa3-pref-card summary{grid-template-columns:1fr}
         #field-map .fa3-pref-city{grid-template-columns:30px 1fr;gap:8px}
         #field-map .fa3-pref-city em,#field-map .fa3-pref-city small{text-align:left}
