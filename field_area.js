@@ -1,461 +1,459 @@
-/* field_area.js : エリア分析ビュー 市区町村固定・実務UI版
-   2026-05-03
+/* field_area.js : エリア分析 市区町村固定・実務UI版
+   2026-05-03 修正版
    目的：
-   - エリア別の件数構成・売上構成を見やすく表示
-   - 商品カテゴリは表示しない
-   - 郵便番号OK等の検証情報は通常非表示
-   - 要確認がある場合のみ件数表示
-   - 表示切替：市区町村ランキング / 都道府県 / 月別推移
+   - field_core.js の旧 renderMap 表示を上書きし、エリア分析を市区町村単位に固定
+   - 郵便番号マスタを最優先し、町域・番地は集計に使わない
+   - 上部の表示形式プルダウンは非表示にし、画面内トグルに統一
+   - 年度・月は field_core.js の「表示対象」と連動
 */
 'use strict';
 
 (function(){
-  const FLAG = '__FIELD_AREA_CITY_PRO_V2_20260503__';
+  const FLAG = '__FIELD_AREA_CITY_FIXED_V3_20260503__';
   if (window[FLAG]) return;
   window[FLAG] = true;
 
-  let timer = null;
   let rendering = false;
-  let selectedFY = '';
-  let selectedYMState = '';
+  let guardTimer = null;
+  let observer = null;
 
   function arr(v){ return Array.isArray(v) ? v : []; }
   function obj(v){ return v && typeof v === 'object' && !Array.isArray(v); }
+  function clean(v){ return String(v ?? '').normalize('NFKC').trim(); }
   function esc(v){
     return String(v ?? '')
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
   }
-  function num(v){
-    const s = String(v ?? '').normalize('NFKC').replace(/,/g,'').replace(/[円¥\s　]/g,'').replace(/[^0-9.\-]/g,'');
+  function yen(v){
+    const s = String(v ?? '')
+      .normalize('NFKC')
+      .replace(/,/g,'')
+      .replace(/[円¥\s　]/g,'')
+      .replace(/[^0-9.\-]/g,'');
     const n = Number(s);
     return Number.isFinite(n) ? n : 0;
   }
-  function fmt(v){ return Math.round(num(v)).toLocaleString('ja-JP'); }
-  function fmtK(v){ return Math.round(num(v) / 1000).toLocaleString('ja-JP'); }
-  function fmt1(v){ const n = Number(v); return Number.isFinite(n) ? n.toFixed(1) : '0.0'; }
-  function pct(v,total){ return total ? (num(v) / total * 100) : 0; }
-  function clean(v){ return String(v ?? '').normalize('NFKC').trim(); }
+  function fmt(v){ return Math.round(Number(v || 0)).toLocaleString('ja-JP'); }
+  function fmtK(v){ return Math.round(Number(v || 0) / 1000).toLocaleString('ja-JP'); }
+  function fmtPct(v,total){
+    if (!total) return '0.0';
+    return (Number(v || 0) / Number(total || 0) * 100).toFixed(1);
+  }
   function normalizeZip(v){
-    if (window.JP_ZIP_LOADER && JP_ZIP_LOADER.normalizeZip) return JP_ZIP_LOADER.normalizeZip(v);
+    if (window.JP_ZIP_LOADER && typeof JP_ZIP_LOADER.normalizeZip === 'function') {
+      return JP_ZIP_LOADER.normalizeZip(v);
+    }
     const s = String(v ?? '').normalize('NFKC').replace(/[^0-9]/g,'');
     return s.length >= 7 ? s.slice(0,7) : '';
   }
   function normYM(v){
-    const d = String(v ?? '').normalize('NFKC').replace(/[^0-9]/g,'');
-    return d.length >= 6 ? d.slice(0,6) : '';
+    const s = String(v ?? '').normalize('NFKC').replace(/[^0-9]/g,'');
+    return s.length >= 6 ? s.slice(0,6) : '';
   }
   function ymText(ym){
     const y = String(ym || '').slice(0,4);
     const m = Number(String(ym || '').slice(4,6));
     return y && m ? `${y}年${m}月` : '—';
   }
-  function ymShort(ym){
+  function monthText(ym){
     const m = Number(String(ym || '').slice(4,6));
     return m ? `${m}月` : '—';
   }
-
   function fiscalFromYM(ym){
     const y = Number(String(ym || '').slice(0,4));
     const m = Number(String(ym || '').slice(4,6));
     if (!y || !m) return '';
     return String(m >= 4 ? y : y - 1);
   }
-  function fiscalOrderYM(ym){
+  function fiscalMonthOrder(ym){
     const m = Number(String(ym || '').slice(4,6));
-    if (!m) return 0;
     return m >= 4 ? m : m + 12;
   }
-
   function active(){
-    const v = document.getElementById('view-field-area');
-    return !!(v && v.classList.contains('active'));
-  }
-  function localJSON(key){
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      if (!/^[\[{]/.test(raw.trim())) return null;
-      return JSON.parse(raw);
-    } catch(e) { return null; }
+    const view = document.getElementById('view-field-area');
+    if (!view) return false;
+    return view.classList.contains('active') || (window.STATE && STATE.view === 'field-area');
   }
 
-  function splitPrefCity(text){
-    const t = clean(text).replace(/\s+/g,'');
-    if (!t) return { pref:'', city:'' };
+  function rawAt(row, idx){
+    return Array.isArray(row) ? clean(row[idx]) : '';
+  }
+  function ticketZip(t){
+    return normalizeZip(
+      t?.zip || t?.zipcode || t?.postCode || t?.postalCode ||
+      t?.['お届け先郵便番号'] || t?.['届け先郵便番号'] || t?.['郵便番号'] || t?.['L列'] ||
+      rawAt(t?.firstRow, 11) || rawAt(t?.representativeRow, 11) || rawAt(t?.row, 11) || rawAt(t?.raw, 11)
+    );
+  }
+  function ticketAddress(t){
+    return clean(
+      t?.address || t?.addr || t?.destinationAddress ||
+      t?.['住所'] || t?.['届け先住所'] || t?.['配送先住所'] || t?.['お届け先住所'] ||
+      rawAt(t?.firstRow, 13) || rawAt(t?.representativeRow, 13) || rawAt(t?.row, 13) || rawAt(t?.raw, 13)
+    );
+  }
+  function ticketSlip(t, idx){
+    return clean(t?.slip || t?.slipNo || t?.ticketNo || t?.invoiceNo || t?.['エスライン原票番号'] || t?.['原票番号']) || `__no_slip_${idx}`;
+  }
+  function ticketAmount(t){
+    return yen(t?.amount || t?.sales || t?.value || t?.['金額'] || t?.['売上']);
+  }
+
+  function splitAddressToCity(address){
+    const t = clean(address).replace(/\s+/g,'');
+    if (!t) return { pref:'未設定', city:'未設定', status:'NO_ADDRESS' };
+
     const prefMatch = t.match(/^(北海道|東京都|(?:京都|大阪)府|.{2,3}県)/);
-    const pref = prefMatch ? prefMatch[1] : '';
+    const pref = prefMatch ? prefMatch[1] : '未設定';
     const rest = prefMatch ? t.slice(pref.length) : t;
-    let city = '';
-    let town = '';
-    const wardCity = rest.match(/^(.+?市.+?区)(.*)$/);
-    const muni = rest.match(/^(.+?[市区町村])(.*)$/);
-    if (wardCity) { city = wardCity[1]; town = wardCity[2] || ''; }
-    else if (muni) { city = muni[1]; town = muni[2] || ''; }
-    return { pref, city, town };
+
+    const known = [
+      'さいたま市西区','さいたま市北区','さいたま市大宮区','さいたま市見沼区','さいたま市中央区',
+      'さいたま市桜区','さいたま市浦和区','さいたま市南区','さいたま市緑区','さいたま市岩槻区',
+      '蕨市','戸田市','川口市','朝霞市','和光市','志木市','新座市','富士見市','ふじみ野市',
+      '川越市','所沢市','狭山市','上尾市','桶川市','北本市','鴻巣市','入間市','草加市','越谷市',
+      '板橋区','北区','豊島区','練馬区','文京区','足立区','荒川区','台東区','江東区','大田区',
+      '世田谷区','新宿区','港区','墨田区','品川区'
+    ];
+    for (const name of known) {
+      if (rest.startsWith(name)) return { pref, city:name, status:'FALLBACK' };
+    }
+
+    // 「蕨中央5-」のように市が欠けた住所への最低限補正
+    if (pref === '埼玉県' && /^蕨/.test(rest)) return { pref, city:'蕨市', status:'FALLBACK' };
+    if (pref === '埼玉県' && /^戸田/.test(rest)) return { pref, city:'戸田市', status:'FALLBACK' };
+    if (pref === '埼玉県' && /^川口/.test(rest)) return { pref, city:'川口市', status:'FALLBACK' };
+    if (pref === '埼玉県' && /^朝霞/.test(rest)) return { pref, city:'朝霞市', status:'FALLBACK' };
+    if (pref === '埼玉県' && /^和光/.test(rest)) return { pref, city:'和光市', status:'FALLBACK' };
+    if (pref === '埼玉県' && /^志木/.test(rest)) return { pref, city:'志木市', status:'FALLBACK' };
+    if (pref === '埼玉県' && /^新座/.test(rest)) return { pref, city:'新座市', status:'FALLBACK' };
+
+    const wardCity = rest.match(/^(.+?市.+?区)/);
+    if (wardCity) return { pref, city:wardCity[1], status:'FALLBACK' };
+
+    const muni = rest.match(/^(.+?[市区町村])/);
+    if (muni) return { pref, city:muni[1], status:'FALLBACK' };
+
+    return { pref, city:'未設定', status:'FALLBACK' };
   }
 
-  function areaFromZip(zipRaw){
-    const zip = normalizeZip(zipRaw);
-    if (!zip) return null;
+  function areaFromZip(zip){
+    const z = normalizeZip(zip);
+    if (!z) return null;
 
     let hit = null;
-    if (window.JP_ZIP_LOADER && JP_ZIP_LOADER.get) hit = JP_ZIP_LOADER.get(zip);
-    else if (window.JP_ZIP_MASTER && typeof window.JP_ZIP_MASTER === 'object') hit = window.JP_ZIP_MASTER[zip];
+    if (window.JP_ZIP_LOADER && typeof JP_ZIP_LOADER.get === 'function') {
+      hit = JP_ZIP_LOADER.get(z);
+    } else if (window.JP_ZIP_MASTER && typeof JP_ZIP_MASTER === 'object') {
+      hit = JP_ZIP_MASTER[z];
+    }
 
     if (!hit) return null;
 
-    if (Array.isArray(hit)) return { zip, pref: clean(hit[0]) || '未設定', city: clean(hit[1]) || '未設定', town: clean(hit[2]) || '', zipStatus:'OK' };
+    if (Array.isArray(hit)) {
+      return {
+        pref: clean(hit[0]) || '未設定',
+        city: clean(hit[1]) || '未設定',
+        status:'OK'
+      };
+    }
 
     if (obj(hit)) {
-      const pref = clean(hit.pref || hit.prefecture || hit[0]);
-      const city = clean(hit.city || hit.municipality || hit.addr1 || hit[1]);
-      const town = clean(hit.town || hit.area || hit.addr2 || hit[2]);
-      return { zip, pref: pref || '未設定', city: city || '未設定', town: town || '', zipStatus:'OK' };
+      return {
+        pref: clean(hit.pref || hit.prefecture || hit[0]) || '未設定',
+        city: clean(hit.city || hit.municipality || hit.addr1 || hit[1]) || '未設定',
+        status:'OK'
+      };
     }
 
-    const p = splitPrefCity(hit);
-    return { zip, pref: p.pref || '未設定', city: p.city || '未設定', town: p.town || '', zipStatus:'OK' };
+    const p = splitAddressToCity(String(hit));
+    return { pref:p.pref, city:p.city, status:'OK' };
   }
 
-  function areaFromAddress(address){
-    const p = splitPrefCity(address);
+  function resolveTicket(t, idx){
+    const zip = ticketZip(t);
+    const address = ticketAddress(t);
+
+    // 最重要：既存の t.pref / t.city / t.area は使わない。
+    // 過去の住所パース結果が残っているため、郵便番号マスタを必ず優先する。
+    let area = areaFromZip(zip);
+
+    if (!area) {
+      area = splitAddressToCity(address);
+      area.status = zip ? 'ZIP_NOT_FOUND' : area.status;
+    }
+
+    const pref = area.pref || '未設定';
+    const city = area.city || '未設定';
+    const label = pref === '未設定' ? city : pref + city;
+
     return {
-      pref: p.pref || '未設定',
-      city: p.city || '未設定',
-      town: p.town || '',
-      zipStatus: address ? 'FALLBACK' : 'NO_ADDRESS'
+      slip: ticketSlip(t, idx),
+      zip,
+      address,
+      pref,
+      city,
+      label: label || '未設定',
+      amount: ticketAmount(t),
+      status: area.status || 'UNKNOWN'
     };
   }
 
-  function resolveArea(t){
-    const zipHit = areaFromZip(t.zip);
-    if (zipHit) return zipHit;
-    const fallback = areaFromAddress(t.address);
-    fallback.zip = normalizeZip(t.zip);
-    fallback.zipStatus = fallback.zip ? 'ZIP_NOT_FOUND' : 'NO_ZIP';
-    return fallback;
-  }
-
-  function normalizeTicket(t){
-    if (!obj(t)) return null;
-    const slip = clean(t.slip || t.slipNo || t.ticketNo || t.invoiceNo || t['エスライン原票番号'] || t['原票番号']);
-    const zip = normalizeZip(
-      t.zip || t.zipcode || t.postalCode || t.postCode ||
-      t['お届け先郵便番号'] || t['届け先郵便番号'] || t['郵便番号'] || t['L列']
-    );
-    const address = clean(t.address || t.addr || t.destinationAddress || t['住所'] || t['届け先住所'] || t['配送先住所'] || t['お届け先住所']);
-    const base = {
-      slip, zip, address,
-      amount: num(t.amount || t.sales || t.value || t['金額'] || t['売上'])
-    };
-    const resolved = resolveArea(base);
-    const pref = clean(t.pref || t.prefecture || t['都道府県']) || resolved.pref;
-    const city = clean(t.city || t.municipality || t['市区町村']) || resolved.city;
-    const town = clean(t.town || t['町域'] || t['町名']) || resolved.town || '';
-    const cityLabel = pref === '未設定' ? city : pref + city;
-    const townLabel = town ? cityLabel + town : cityLabel;
-    return { ...base, pref: pref || '未設定', city: city || '未設定', town, area: cityLabel || '未設定', townLabel: townLabel || cityLabel || '未設定', zipStatus: resolved.zipStatus || 'UNKNOWN' };
-  }
-
-  function normalizeProductRecord(x, source){
-    if (!obj(x)) return null;
-    const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name || source);
-    if (!ym) return null;
-
-    let tickets = [];
-    if (arr(x.tickets).length) tickets = x.tickets.map(normalizeTicket).filter(Boolean);
-    else if (arr(x.rows).length) tickets = x.rows.map(normalizeTicket).filter(Boolean);
-    else if (arr(x.data).length) tickets = x.data.map(normalizeTicket).filter(Boolean);
-    else if (arr(x.rawRows).length) tickets = x.rawRows.map(normalizeTicket).filter(Boolean);
-    if (!tickets.length) return null;
-
-    const bySlip = new Map();
-    const noSlip = [];
-    tickets.forEach((t,idx)=>{
-      const key = t.slip;
-      if (!key) { noSlip.push({ ...t, slip:`__no_slip_${idx}` }); return; }
-      if (!bySlip.has(key)) bySlip.set(key, { ...t });
-      else {
-        const base = bySlip.get(key);
-        base.amount += num(t.amount);
-        if (!base.zip && t.zip) base.zip = t.zip;
-        if (!base.address && t.address) base.address = t.address;
-        if (base.zipStatus !== 'OK' && t.zipStatus === 'OK') {
-          base.pref = t.pref; base.city = t.city; base.town = t.town; base.area = t.area; base.townLabel = t.townLabel; base.zipStatus = 'OK';
-        }
-      }
-    });
-
-    const uniqueTickets = [...bySlip.values(), ...noSlip];
-    return {
-      ...x, ym, __source: source,
-      tickets: uniqueTickets,
-      uniqueCount: Number(x.uniqueCount || uniqueTickets.length),
-      amount: Number(x.amount || uniqueTickets.reduce((s,t)=>s + num(t.amount),0))
-    };
-  }
-
-  function collectProductRecords(){
+  function rawRecords(){
     const out = [];
-    const seen = new Set();
 
-    function push(x, source){
-      const rec = normalizeProductRecord(x, source);
-      if (!rec) return;
-      const key = `${rec.ym}:${rec.tickets.length}:${rec.amount}:${source}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push(rec);
+    function pushRecord(x, source){
+      if (!obj(x)) return;
+      const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name || source);
+      const tickets = arr(x.tickets).length ? x.tickets
+        : arr(x.rows).length ? x.rows
+        : arr(x.data).length ? x.data
+        : arr(x.rawRows).length ? x.rawRows
+        : [];
+      if (!ym || !tickets.length) return;
+      out.push({ ...x, ym, tickets, __source:source });
     }
 
-    const st = window.STATE || {};
-    arr(st.productAddressData).forEach((x,i)=>push(x, `STATE.productAddressData.${i}`));
-    arr(st.fieldData).forEach((x,i)=>push(x, `STATE.fieldData.${i}`));
+    if (window.STATE) {
+      arr(STATE.productAddressData).forEach((x,i)=>pushRecord(x, `STATE.productAddressData.${i}`));
+      arr(STATE.fieldData).forEach((x,i)=>pushRecord(x, `STATE.fieldData.${i}`));
+    }
 
+    // 念のためローカル保存済みも見る
     try {
-      for (let i=0; i<localStorage.length; i++){
+      for (let i=0; i<localStorage.length; i++) {
         const key = localStorage.key(i);
-        const parsed = localJSON(key);
-        if (!parsed) continue;
-        if (Array.isArray(parsed)) parsed.forEach((x,idx)=>push(x, `${key}.${idx}`));
+        const raw = localStorage.getItem(key);
+        if (!raw || !/^[\[{]/.test(raw.trim())) continue;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) parsed.forEach((x,idx)=>pushRecord(x, `${key}.${idx}`));
         else if (obj(parsed)) {
-          push(parsed, key);
+          pushRecord(parsed, key);
           Object.keys(parsed).forEach(k=>{
             const v = parsed[k];
-            if (Array.isArray(v)) v.forEach((x,idx)=>push(x, `${key}.${k}.${idx}`));
+            if (Array.isArray(v)) v.forEach((x,idx)=>pushRecord(x, `${key}.${k}.${idx}`));
           });
         }
       }
     } catch(e) {}
 
-    out.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
-    return out;
+    const seen = new Set();
+    return out.filter(r=>{
+      const sig = `${r.ym}:${r.tickets.length}:${r.amount || ''}:${r.__source}`;
+      if (seen.has(sig)) return false;
+      seen.add(sig);
+      return true;
+    }).sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
   }
 
-  function allYMs(){ return [...new Set(collectProductRecords().map(x=>x.ym).filter(Boolean))].sort(); }
-
-  function yearsFromYMs(yms){
-    return [...new Set(yms.map(fiscalFromYM).filter(Boolean))].sort().reverse();
-  }
-  function monthsForFY(yms, fy){
-    return yms.filter(ym => fiscalFromYM(ym) === String(fy)).sort((a,b)=>fiscalOrderYM(a)-fiscalOrderYM(b));
+  function allYMs(){
+    return [...new Set(rawRecords().map(r=>r.ym).filter(Boolean))].sort();
   }
 
   function selectedYM(){
+    const common = document.getElementById('field-common-month-select');
+    const commonYM = normYM(common?.value);
     const yms = allYMs();
-    if (!yms.length) return '';
+    if (commonYM && yms.includes(commonYM)) return commonYM;
 
-    const years = yearsFromYMs(yms);
-    if (!selectedFY || !years.includes(String(selectedFY))) {
-      const latest = yms[yms.length - 1];
-      selectedFY = fiscalFromYM(latest) || years[0] || '';
-    }
+    const stateYM = normYM(window.STATE?.selYM);
+    if (stateYM && yms.includes(stateYM)) return stateYM;
 
-    const months = monthsForFY(yms, selectedFY);
-    if (!selectedYMState || !months.includes(String(selectedYMState))) {
-      selectedYMState = months[months.length - 1] || yms[yms.length - 1] || '';
-    }
-
-    return selectedYMState;
+    return yms[yms.length - 1] || '';
   }
 
-  function getRecordForYM(ym){
-    const list = collectProductRecords().filter(x=>x.ym === ym);
+  function selectedRecord(ym){
+    const list = rawRecords().filter(r=>r.ym === ym);
     if (!list.length) return null;
-    return list.sort((a,b)=>{
-      const at = arr(a.tickets).length, bt = arr(b.tickets).length;
-      if (bt !== at) return bt - at;
-      return String(b.__source || '').localeCompare(String(a.__source || ''));
-    })[0];
+    return list.sort((a,b)=>arr(b.tickets).length - arr(a.tickets).length)[0];
   }
 
-  async function ensureZipParts(rec){
-    const zips = arr(rec?.tickets).map(t => normalizeZip(
-      t.zip || t.zipcode || t.postalCode || t.postCode ||
-      t['お届け先郵便番号'] || t['届け先郵便番号'] || t['郵便番号'] || t['L列']
-    )).filter(Boolean);
-
-    if (window.JP_ZIP_LOADER && JP_ZIP_LOADER.loadForZips) {
+  async function ensureZipParts(record){
+    const zips = arr(record?.tickets).map(ticketZip).filter(Boolean);
+    if (window.JP_ZIP_LOADER && typeof JP_ZIP_LOADER.loadForZips === 'function') {
       await JP_ZIP_LOADER.loadForZips(zips);
     }
   }
 
-  function buildRows(rec, level){
+  function uniqueTickets(record){
     const map = new Map();
-    const zipIssues = { total:0, ok:0, noZip:0, notFound:0 };
+    arr(record?.tickets).forEach((t,idx)=>{
+      const r = resolveTicket(t, idx);
+      const key = r.slip || `__${idx}`;
+      if (!map.has(key)) map.set(key, r);
+      else {
+        const base = map.get(key);
+        base.amount += r.amount;
+        if (base.status !== 'OK' && r.status === 'OK') {
+          base.zip = r.zip;
+          base.address = r.address || base.address;
+          base.pref = r.pref;
+          base.city = r.city;
+          base.label = r.label;
+          base.status = 'OK';
+        }
+      }
+    });
+    return [...map.values()];
+  }
 
-    arr(rec?.tickets).forEach(t=>{
-      const nt = normalizeTicket(t);
-      if (!nt) return;
+  function buildRows(record, level){
+    const tickets = uniqueTickets(record);
+    const rows = new Map();
+    const issues = { total:0, ok:0, ng:0 };
 
-      zipIssues.total += 1;
-      if (nt.zipStatus === 'OK') zipIssues.ok += 1;
-      else if (nt.zipStatus === 'NO_ZIP') zipIssues.noZip += 1;
-      else zipIssues.notFound += 1;
+    tickets.forEach(t=>{
+      issues.total++;
+      if (t.status === 'OK') issues.ok++;
+      else issues.ng++;
 
-      let key = nt.area || '未設定';
-      let label = nt.area || '未設定';
-      if (level === 'pref') {
-        key = nt.pref || '未設定';
-        label = key; else if (level === 'city') {
-        key = nt.area || '未設定';
-        label = key;
+      const label = level === 'pref' ? (t.pref || '未設定') : (t.label || '未設定');
+      if (!rows.has(label)) {
+        rows.set(label, {
+          label,
+          count:0,
+          amount:0,
+          issue:0
+        });
       }
 
-      if (!map.has(key)) {
-        map.set(key, { label, pref:nt.pref || '未設定', city:nt.city || '未設定', town:nt.town || '', count:0, amount:0, zipNg:0 });
-      }
-      const row = map.get(key);
-      row.count += 1;
-      row.amount += num(nt.amount);
-      if (nt.zipStatus !== 'OK') row.zipNg += 1;
+      const r = rows.get(label);
+      r.count += 1;
+      r.amount += Number(t.amount || 0);
+      if (t.status !== 'OK') r.issue += 1;
     });
 
-    const rows = [...map.values()];
-    rows.__zipIssues = zipIssues;
-    return rows;
+    const list = [...rows.values()];
+    list.__issues = issues;
+    return list;
+  }
+
+  function sortRows(rows, mode){
+    const list = [...rows];
+    if (mode === 'amount') {
+      list.sort((a,b)=>b.amount - a.amount || b.count - a.count || a.label.localeCompare(b.label,'ja'));
+    } else if (mode === 'name') {
+      list.sort((a,b)=>a.label.localeCompare(b.label,'ja'));
+    } else {
+      list.sort((a,b)=>b.count - a.count || b.amount - a.amount || a.label.localeCompare(b.label,'ja'));
+    }
+    list.__issues = rows.__issues;
+    return list;
   }
 
   function totals(rows){
     return {
       count: rows.reduce((s,r)=>s + Number(r.count || 0),0),
       amount: rows.reduce((s,r)=>s + Number(r.amount || 0),0),
-      issues: rows.__zipIssues || { total:0, ok:0, noZip:0, notFound:0 }
+      issues: rows.__issues || { total:0, ok:0, ng:0 }
     };
-  }
-
-  function sortRows(rows, sortMode){
-    const list = [...rows];
-    if (sortMode === 'amount') list.sort((a,b)=>b.amount - a.amount || b.count - a.count || a.label.localeCompare(b.label,'ja'));
-    else if (sortMode === 'name') list.sort((a,b)=>a.label.localeCompare(b.label,'ja'));
-    else list.sort((a,b)=>b.count - a.count || b.amount - a.amount || a.label.localeCompare(b.label,'ja'));
-    return list;
   }
 
   function getMode(){
     const v = document.getElementById('field-area-view-mode')?.value;
-    return v === 'pref' || v === 'history' ? v : 'overall';
+    if (v === 'pref' || v === 'history') return v;
+    return 'overall';
   }
   function setMode(v){
     const sel = document.getElementById('field-area-view-mode');
-    if (!sel) return;
-    const allowed = ['overall','pref','history'];
-    if (!allowed.includes(v)) v = 'overall';
-    if (![...sel.options].some(o=>o.value === v)) {
-      const opt = document.createElement('option');
-      opt.value = v;
-      opt.textContent = v;
-      sel.appendChild(opt);
+    if (sel) {
+      if (![...sel.options].some(o=>o.value === v)) {
+        const op = document.createElement('option');
+        op.value = v;
+        op.textContent = v;
+        sel.appendChild(op);
+      }
+      sel.value = v;
     }
-    sel.value = v;
   }
   function getSortMode(){
     return document.getElementById('field-area-sort-mode')?.value || 'count';
   }
+  function setSortMode(v){
+    const sel = document.getElementById('field-area-sort-mode');
+    if (sel) sel.value = v;
+  }
   function getMetric(){
     return document.getElementById('map-metric-sel')?.value || 'count';
   }
-
-
-  function selectorHtml(ym){
-    const yms = allYMs();
-    const years = yearsFromYMs(yms);
-    const fy = fiscalFromYM(ym);
-    const months = monthsForFY(yms, fy);
-    return `
-      <div class="fa-selector">
-        <div>
-          <div class="fa-selector-title">分析条件</div>
-          <div class="fa-selector-sub">年度・月を選択してエリア別の件数構成と売上構成を確認</div>
-        </div>
-        <div class="fa-selector-controls">
-          <label>年度
-            <select id="fa-fy-select">
-              ${years.map(y=>`<option value="${esc(y)}" ${String(y)===String(fy)?'selected':''}>${esc(y)}年度</option>`).join('')}
-            </select>
-          </label>
-          <label>月
-            <select id="fa-ym-select">
-              ${months.map(m=>`<option value="${esc(m)}" ${String(m)===String(ym)?'selected':''}>${esc(ymText(m))}</option>`).join('')}
-            </select>
-          </label>
-        </div>
-      </div>`;
+  function setMetric(v){
+    const sel = document.getElementById('map-metric-sel');
+    if (sel) sel.value = v;
   }
 
-  function controlsHtml(mode, sortMode, metric){
-    return `
-      <div class="fa-tabs">
-        <button class="fa-tab ${mode === 'overall' ? 'active' : ''}" data-fa-mode="overall">市区町村</button>
-        <button class="fa-tab ${mode === 'pref' ? 'active' : ''}" data-fa-mode="pref">都道府県</button>
-        <button class="fa-tab ${mode === 'history' ? 'active' : ''}" data-fa-mode="history">月別推移</button>
-      </div>
-      <div class="fa-control-right">
-        <label>並び</label>
-        <select id="fa-sort-select">
-          <option value="count" ${sortMode === 'count' ? 'selected' : ''}>件数順</option>
-          <option value="amount" ${sortMode === 'amount' ? 'selected' : ''}>売上順</option>
-          <option value="name" ${sortMode === 'name' ? 'selected' : ''}>名称順</option>
-        </select>
-        <label>バー</label>
-        <select id="fa-metric-select">
-          <option value="count" ${metric === 'count' ? 'selected' : ''}>件数</option>
-          <option value="amount" ${metric === 'amount' ? 'selected' : ''}>売上</option>
-        </select>
-      </div>`;
-  }
-
-  function summaryHtml(ym, rows){
+  function cardHtml(ym, rows){
     const t = totals(rows);
     const top = rows[0];
-    const issueCount = Number(t.issues.noZip || 0) + Number(t.issues.notFound || 0);
     return `
-      <div class="fa-summary">
-        <div class="fa-headline">
+      <div class="fa3-summary">
+        <div class="fa3-title-row">
           <div>
-            <div class="fa-title">${esc(ymText(ym))} エリア分析</div>
-            <div class="fa-subtitle">件数構成と売上構成をエリア別に確認</div>
+            <div class="fa3-title">${esc(ymText(ym))} エリア分析</div>
+            <div class="fa3-sub">市区町村単位で件数構成・売上構成を確認</div>
           </div>
-          ${issueCount > 0 ? `<div class="fa-issue">要確認 ${fmt(issueCount)}件</div>` : ''}
+          ${t.issues.ng ? `<div class="fa3-warn">要確認 ${fmt(t.issues.ng)}件</div>` : ''}
         </div>
-        <div class="fa-kpis">
-          <div class="fa-kpi"><div>原票件数</div><strong>${fmt(t.count)}件</strong></div>
-          <div class="fa-kpi"><div>売上</div><strong>${fmtK(t.amount)}千円</strong></div>
-          <div class="fa-kpi"><div>エリア数</div><strong>${fmt(rows.length)}地区</strong></div>
-          <div class="fa-kpi wide"><div>最多エリア</div><strong>${top ? esc(top.label) : '—'}</strong><span>${top ? `${fmt(top.count)}件 / ${fmtK(top.amount)}千円` : ''}</span></div>
+        <div class="fa3-kpis">
+          <div class="fa3-kpi"><span>原票件数</span><b>${fmt(t.count)}件</b></div>
+          <div class="fa3-kpi"><span>売上</span><b>${fmtK(t.amount)}千円</b></div>
+          <div class="fa3-kpi"><span>エリア数</span><b>${fmt(rows.length)}地区</b></div>
+          <div class="fa3-kpi wide"><span>最多エリア</span><b>${top ? esc(top.label) : '—'}</b><em>${top ? `${fmt(top.count)}件 / ${fmtK(top.amount)}千円` : ''}</em></div>
         </div>
       </div>`;
   }
 
-  function barRowsHtml(rows, metric, totalCount, totalAmount){
+  function toolbarHtml(mode, sortMode, metric){
+    return `
+      <div class="fa3-toolbar">
+        <div class="fa3-tabs">
+          <button type="button" class="${mode === 'overall' ? 'active' : ''}" data-fa3-mode="overall">市区町村</button>
+          <button type="button" class="${mode === 'pref' ? 'active' : ''}" data-fa3-mode="pref">都道府県</button>
+          <button type="button" class="${mode === 'history' ? 'active' : ''}" data-fa3-mode="history">月別推移</button>
+        </div>
+        <div class="fa3-tools">
+          <label>並び
+            <select id="fa3-sort">
+              <option value="count" ${sortMode === 'count' ? 'selected' : ''}>件数順</option>
+              <option value="amount" ${sortMode === 'amount' ? 'selected' : ''}>売上順</option>
+              <option value="name" ${sortMode === 'name' ? 'selected' : ''}>名称順</option>
+            </select>
+          </label>
+          <label>バー
+            <select id="fa3-metric">
+              <option value="count" ${metric === 'count' ? 'selected' : ''}>件数</option>
+              <option value="amount" ${metric === 'amount' ? 'selected' : ''}>売上</option>
+            </select>
+          </label>
+        </div>
+      </div>`;
+  }
+
+  function barsHtml(rows, metric){
+    const t = totals(rows);
     const key = metric === 'amount' ? 'amount' : 'count';
-    if (!rows.length) return '<div class="fa-empty">データなし</div>';
     const max = Math.max(...rows.map(r=>Number(r[key] || 0)), 1);
-    return rows.map((r,i)=>{
+    const base = metric === 'amount' ? t.amount : t.count;
+
+    return rows.slice(0,30).map((r,i)=>{
       const val = Number(r[key] || 0);
       const w = Math.max(2, Math.round(val / max * 100));
-      const share = metric === 'amount' ? pct(r.amount,totalAmount) : pct(r.count,totalCount);
       return `
-        <div class="fa-row">
-          <div class="fa-label" title="${esc(r.label)}">
-            <span class="fa-rank">${i + 1}</span>
-            <span class="fa-name">${esc(r.label)}</span>
-          </div>
-          <div class="fa-track"><div class="fa-fill" style="width:${w}%"></div></div>
-          <div class="fa-value">
-            <b>${fmt(r.count)}件</b>
-            <span>${fmtK(r.amount)}千円</span>
-            <em>${fmt1(share)}%</em>
-          </div>
+        <div class="fa3-row">
+          <div class="fa3-name"><i>${i + 1}</i><span title="${esc(r.label)}">${esc(r.label)}</span></div>
+          <div class="fa3-track"><div style="width:${w}%"></div></div>
+          <div class="fa3-val"><b>${fmt(r.count)}件</b><span>${fmtK(r.amount)}千円</span><em>${fmtPct(val, base)}%</em></div>
         </div>`;
     }).join('');
   }
 
-  function tableHtml(rows, totalCount, totalAmount){
-    if (!rows.length) return '';
+  function tableHtml(rows){
+    const t = totals(rows);
     return `
-      <div class="fa-table-wrap">
-        <table class="tbl fa-table">
+      <div class="fa3-table-wrap">
+        <table class="fa3-table">
           <thead>
             <tr>
               <th>順位</th>
@@ -467,273 +465,148 @@
             </tr>
           </thead>
           <tbody>
-            ${rows.map((r,i)=>`
+            ${rows.slice(0,30).map((r,i)=>`
               <tr>
                 <td>${i + 1}</td>
                 <td>${esc(r.label)}</td>
                 <td class="r">${fmt(r.count)}</td>
-                <td class="r">${fmt1(pct(r.count,totalCount))}%</td>
+                <td class="r">${fmtPct(r.count, t.count)}%</td>
                 <td class="r">${fmtK(r.amount)}</td>
-                <td class="r">${fmt1(pct(r.amount,totalAmount))}%</td>
+                <td class="r">${fmtPct(r.amount, t.amount)}%</td>
               </tr>`).join('')}
           </tbody>
         </table>
       </div>`;
   }
 
-  function rankingHtml(rows, metric){
-    const t = totals(rows);
-    const limited = rows.slice(0,30);
+  function rankingHtml(rows, metric, title){
     return `
-      <div class="fa-body">
-        <div class="fa-section-title">エリア別ランキング TOP${limited.length}</div>
-        ${barRowsHtml(limited, metric, t.count, t.amount)}
-        ${tableHtml(limited, t.count, t.amount)}
-      </div>`;
-  }
-
-  function prefHtml(rows, metric, sortMode){
-    const t = totals(rows);
-    const limited = rows.slice(0,47);
-    return `
-      <div class="fa-body">
-        <div class="fa-section-title">都道府県別構成</div>
-        ${barRowsHtml(limited, metric, t.count, t.amount)}
-        ${tableHtml(limited, t.count, t.amount)}
+      <div class="fa3-body">
+        <div class="fa3-section">${esc(title)}</div>
+        ${barsHtml(rows, metric)}
+        ${tableHtml(rows)}
       </div>`;
   }
 
   function historyHtml(records, currentYM){
-    const byYM = records.map(rec=>{
-      const rows = buildRows(rec, 'city');
-      const t = totals(rows);
-      return { ym:rec.ym, count:t.count, amount:t.amount, top: rows.sort((a,b)=>b.count-a.count)[0] };
+    const rows = records.map(rec=>{
+      const cityRows = sortRows(buildRows(rec, 'city'), 'count');
+      const t = totals(cityRows);
+      return { ym:rec.ym, count:t.count, amount:t.amount, top:cityRows[0] };
     }).sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
 
-    const maxCount = Math.max(...byYM.map(x=>x.count), 1);
-    const maxAmount = Math.max(...byYM.map(x=>x.amount), 1);
+    const maxCount = Math.max(...rows.map(r=>r.count), 1);
+    const maxAmount = Math.max(...rows.map(r=>r.amount), 1);
 
     return `
-      <div class="fa-body">
-        <div class="fa-section-title">月別推移</div>
-        <div class="fa-history">
-          ${byYM.map(x=>{
-            const active = x.ym === currentYM ? ' active' : '';
-            return `
-              <div class="fa-month${active}">
-                <div class="fa-month-head">
-                  <b>${esc(ymShort(x.ym))}</b>
-                  <span>${fmt(x.count)}件 / ${fmtK(x.amount)}千円</span>
-                </div>
-                <div class="fa-mini">
-                  <div><span style="width:${Math.max(2, Math.round(x.count / maxCount * 100))}%"></span></div>
-                  <div><span style="width:${Math.max(2, Math.round(x.amount / maxAmount * 100))}%"></span></div>
-                </div>
-                <small>最多：${x.top ? esc(x.top.label) : '—'}</small>
-              </div>`;
-          }).join('')}
+      <div class="fa3-body">
+        <div class="fa3-section">月別推移</div>
+        <div class="fa3-history">
+          ${rows.map(r=>`
+            <div class="fa3-month ${r.ym === currentYM ? 'active' : ''}">
+              <div><b>${esc(monthText(r.ym))}</b><span>${fmt(r.count)}件 / ${fmtK(r.amount)}千円</span></div>
+              <p><i style="width:${Math.max(2, Math.round(r.count / maxCount * 100))}%"></i></p>
+              <p><i style="width:${Math.max(2, Math.round(r.amount / maxAmount * 100))}%"></i></p>
+              <small>最多：${r.top ? esc(r.top.label) : '—'}</small>
+            </div>`).join('')}
         </div>
-        <div class="fa-history-note">上段バー：件数 / 下段バー：売上</div>
+        <div class="fa3-note">上段バー：件数 / 下段バー：売上</div>
       </div>`;
   }
 
   async function render(){
-    if (rendering) return;
-    rendering = true;
     const box = document.getElementById('field-map');
-    const no = document.getElementById('map-no-data');
-    const debug = document.getElementById('map-debug-info');
-    if (!box) { rendering = false; return; }
+    if (!box || rendering) return;
 
+    rendering = true;
     ensureStyle();
 
     try {
       const ym = selectedYM();
-      const rec = getRecordForYM(ym);
+      const record = selectedRecord(ym);
 
-      if (!rec || !arr(rec.tickets).length) {
-        box.innerHTML = '<div class="fa-empty">商品・住所CSVを読み込んでください</div>';
-        if (no) no.style.display = 'none';
-        if (debug) debug.style.display = 'none';
+      if (!record) {
+        box.innerHTML = '<div class="fa3-empty">商品・住所CSVを読み込んでください</div>';
         return;
       }
 
-      box.innerHTML = '<div class="fa-empty">エリア分析を読み込み中...</div>';
-      await ensureZipParts(rec);
+      await ensureZipParts(record);
 
       const mode = getMode();
       const sortMode = getSortMode();
       const metric = getMetric();
       const level = mode === 'pref' ? 'pref' : 'city';
 
-      let rows = buildRows(rec, level);
-      rows = sortRows(rows, sortMode);
-
-      if (!rows.length) {
-        box.innerHTML = '<div class="fa-empty">住所・エリアを判定できるデータがありません</div>';
-        if (no) no.style.display = 'none';
-        if (debug) {
-          debug.style.display = 'block';
-          debug.textContent = `${ymText(ym)} の商品・住所CSVはありますが、住所列または郵便番号列を確認できません。`;
-        }
-        return;
-      }
+      let rows = sortRows(buildRows(record, level), sortMode);
 
       box.innerHTML = `
-        ${selectorHtml(ym)}
-        ${summaryHtml(ym, rows)}
-        <div class="fa-toolbar">${controlsHtml(mode, sortMode, metric)}</div>
-      `;
+        <div class="fa-area-v3">
+          ${cardHtml(ym, rows)}
+          ${toolbarHtml(mode, sortMode, metric)}
+          ${mode === 'history'
+            ? historyHtml(rawRecords(), ym)
+            : rankingHtml(rows, metric, mode === 'pref' ? '都道府県別構成' : '市区町村別ランキング')}
+        </div>`;
 
-      if (mode === 'history') {
-        const records = collectProductRecords();
-        box.insertAdjacentHTML('beforeend', historyHtml(records, ym));
-      } else if (mode === 'pref') {
-        box.insertAdjacentHTML('beforeend', prefHtml(rows, metric, sortMode));
-      } else {
-        box.insertAdjacentHTML('beforeend', rankingHtml(rows, metric).replace('エリア別ランキング', '市区町村別ランキング'));
-      }
+      bindControls();
 
-      bindInlineControls();
-
+      const no = document.getElementById('map-no-data');
       if (no) no.style.display = 'none';
+      const debug = document.getElementById('map-debug-info');
       if (debug) {
         debug.style.display = 'none';
         debug.textContent = '';
       }
     } catch(e) {
-      box.innerHTML = `<div class="fa-empty">エリア分析の表示でエラー：${esc(e.message || e)}</div>`;
       console.error(e);
+      box.innerHTML = `<div class="fa3-empty">エリア分析の表示でエラー：${esc(e.message || e)}</div>`;
     } finally {
       rendering = false;
     }
   }
 
-  function bindInlineControls(){
-
-    const fySel = document.getElementById('fa-fy-select');
-    const ymSel = document.getElementById('fa-ym-select');
-
-    if (fySel && !fySel.__faBound) {
-      fySel.__faBound = true;
-      fySel.addEventListener('change', ()=>{
-        selectedFY = fySel.value;
-        const yms = allYMs();
-        const ms = monthsForFY(yms, selectedFY);
-        selectedYMState = ms[ms.length - 1] || '';
-        render();
-      });
-    }
-
-    if (ymSel && !ymSel.__faBound) {
-      ymSel.__faBound = true;
-      ymSel.addEventListener('change', ()=>{
-        selectedYMState = ymSel.value;
-        selectedFY = fiscalFromYM(selectedYMState);
-        render();
-      });
-    }
-
-    document.querySelectorAll('[data-fa-mode]').forEach(btn=>{
-      if (btn.__faBound) return;
-      btn.__faBound = true;
+  function bindControls(){
+    document.querySelectorAll('[data-fa3-mode]').forEach(btn=>{
+      if (btn.__fa3Bound) return;
+      btn.__fa3Bound = true;
       btn.addEventListener('click', ()=>{
-        setMode(btn.dataset.faMode);
-        render();
+        setMode(btn.dataset.fa3Mode);
+        setTimeout(render, 0);
       });
     });
 
-    const sort = document.getElementById('fa-sort-select');
-    if (sort && !sort.__faBound) {
-      sort.__faBound = true;
+    const sort = document.getElementById('fa3-sort');
+    if (sort && !sort.__fa3Bound) {
+      sort.__fa3Bound = true;
       sort.addEventListener('change', ()=>{
-        const base = document.getElementById('field-area-sort-mode');
-        if (base) base.value = sort.value;
-        render();
+        setSortMode(sort.value);
+        setTimeout(render, 0);
       });
     }
 
-    const metric = document.getElementById('fa-metric-select');
-    if (metric && !metric.__faBound) {
-      metric.__faBound = true;
+    const metric = document.getElementById('fa3-metric');
+    if (metric && !metric.__fa3Bound) {
+      metric.__fa3Bound = true;
       metric.addEventListener('change', ()=>{
-        const base = document.getElementById('map-metric-sel');
-        if (base) base.value = metric.value;
-        render();
+        setMetric(metric.value);
+        setTimeout(render, 0);
       });
     }
   }
 
-  function ensureStyle(){
-    if (document.getElementById('field-area-pro-style')) return;
-    const style = document.createElement('style');
-    style.id = 'field-area-pro-style';
-    style.textContent = `
-      #view-field-area #fpane-map > .card > .card-header > div:last-child{display:none!important}
-      #view-field-area #fpane-map > .card > .card-header .card-title + div{display:none!important}
-      #field-map{height:auto!important;min-height:260px;border-radius:18px!important;border:1px solid #e5e7eb;overflow:hidden;background:#fff}
-      #field-map .fa-selector{margin:0;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
-      #field-map .fa-selector-title{font-size:14px;font-weight:950;color:#0f172a}
-      #field-map .fa-selector-sub{font-size:12px;color:#64748b;font-weight:800;margin-top:3px}
-      #field-map .fa-selector-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-      #field-map .fa-selector-controls label{font-size:12px;color:#475569;font-weight:950}
-      #field-map .fa-selector-controls select{margin-left:6px;border:1px solid #cbd5e1;border-radius:12px;padding:9px 32px 9px 12px;background:#fff;color:#0f172a;font-weight:900}
-      #field-map .fa-summary{padding:18px 20px 16px;border-bottom:1px solid #e5e7eb;background:linear-gradient(180deg,#ffffff,#f8fafc)}
-      #field-map .fa-headline{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}
-      #field-map .fa-title{font-size:20px;font-weight:950;color:#0f172a;letter-spacing:.01em}
-      #field-map .fa-subtitle{font-size:12px;color:#64748b;margin-top:5px;font-weight:800}
-      #field-map .fa-issue{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:950;white-space:nowrap}
-      #field-map .fa-kpis{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr)) minmax(220px,1.4fr);gap:10px}
-      #field-map .fa-kpi{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:13px 14px;box-shadow:0 8px 22px rgba(15,23,42,.05);min-width:0}
-      #field-map .fa-kpi div{font-size:11px;color:#64748b;font-weight:900;margin-bottom:6px}
-      #field-map .fa-kpi strong{display:block;font-size:22px;color:#0f172a;font-weight:950;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      #field-map .fa-kpi span{display:block;font-size:11px;color:#64748b;font-weight:800;margin-top:4px}
-      #field-map .fa-toolbar{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:13px 20px;border-bottom:1px solid #e5e7eb;background:#fff}
-      #field-map .fa-tabs{display:flex;gap:8px;flex-wrap:wrap}
-      #field-map .fa-tab{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:950;cursor:pointer}
-      #field-map .fa-tab.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff;box-shadow:0 8px 18px rgba(37,99,235,.22)}
-      #field-map .fa-control-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-      #field-map .fa-control-right label{font-size:12px;color:#64748b;font-weight:950}
-      #field-map .fa-control-right select{border:1px solid #cbd5e1;border-radius:12px;padding:8px 28px 8px 10px;font-weight:900;color:#0f172a;background:#fff}
-      #field-map .fa-body{padding:18px 20px}
-      #field-map .fa-section-title{font-size:16px;font-weight:950;color:#0f172a;margin:0 0 14px;border-left:4px solid #2563eb;padding-left:10px}
-      #field-map .fa-row{display:grid;grid-template-columns:minmax(220px,360px) minmax(280px,1fr) minmax(210px,260px);gap:18px;margin:12px 0;align-items:center}
-      #field-map .fa-label{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:950;color:#0f172a;min-width:0}
-      #field-map .fa-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      #field-map .fa-rank{width:26px;height:26px;border-radius:999px;background:#eaf3ff;color:#1d4ed8;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:950;flex:0 0 auto}
-      #field-map .fa-track{height:24px;background:#e2e8f0;border-radius:999px;overflow:hidden}
-      #field-map .fa-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#174f7f,#2563eb)}
-      #field-map .fa-value{font-size:14px;color:#0f172a;text-align:right;white-space:nowrap}
-      #field-map .fa-value b{font-weight:950;margin-right:10px}
-      #field-map .fa-value span{color:#64748b;font-weight:850;margin-right:10px}
-      #field-map .fa-value em{font-style:normal;color:#1d4ed8;font-weight:950}
-      #field-map .fa-table-wrap{margin-top:20px;max-height:460px;overflow:auto;border:1px solid #e5e7eb;border-radius:16px}
-      #field-map .fa-table{margin:0;min-width:760px}
-      #field-map .fa-table th{font-size:12px;color:#334155;background:#f8fafc}
-      #field-map .fa-table td{font-size:13px}
-      #field-map .fa-history{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
-      #field-map .fa-month{border:1px solid #e2e8f0;border-radius:16px;padding:13px;background:#fff;box-shadow:0 8px 20px rgba(15,23,42,.05)}
-      #field-map .fa-month.active{border-color:#2563eb;box-shadow:0 10px 24px rgba(37,99,235,.12)}
-      #field-map .fa-month-head{display:flex;justify-content:space-between;gap:8px;align-items:center}
-      #field-map .fa-month-head b{font-size:15px;color:#0f172a}
-      #field-map .fa-month-head span{font-size:12px;color:#64748b;font-weight:900}
-      #field-map .fa-mini{display:grid;gap:6px;margin:10px 0}
-      #field-map .fa-mini div{height:9px;background:#e2e8f0;border-radius:999px;overflow:hidden}
-      #field-map .fa-mini span{display:block;height:100%;background:linear-gradient(90deg,#174f7f,#2563eb);border-radius:999px}
-      #field-map .fa-month small{color:#64748b;font-weight:850}
-      #field-map .fa-history-note{font-size:12px;color:#64748b;font-weight:850;margin-top:10px}
-      #field-map .fa-empty{padding:46px;text-align:center;color:#64748b;font-weight:900}
-      @media (max-width:900px){
-        #field-map .fa-kpis{grid-template-columns:repeat(2,minmax(130px,1fr))}
-        #field-map .fa-toolbar{align-items:flex-start;flex-direction:column}
-        #field-map .fa-row{grid-template-columns:1fr;gap:7px;border-bottom:1px solid #eef2f7;padding-bottom:11px}
-        #field-map .fa-value{text-align:left}
-      }
-    `;
-    document.head.appendChild(style);
+  function bindExternalControls(){
+    ['field-common-fy-select','field-common-month-select','field-area-view-mode','field-area-sort-mode','map-metric-sel'].forEach(id=>{
+      const el = document.getElementById(id);
+      if (!el || el.__fa3ExternalBound) return;
+      el.__fa3ExternalBound = true;
+      el.addEventListener('change', ()=>setTimeout(render, 120));
+    });
   }
 
   function install(){
+    window.FIELD_AREA_UI = { render };
+    window.FIELD_UI = window.FIELD_UI || {};
+    window.FIELD_UI.renderMap = render;
 
     const modeSel = document.getElementById('field-area-view-mode');
     if (modeSel) {
@@ -750,36 +623,121 @@
       if (!['overall','pref','history'].includes(modeSel.value)) modeSel.value = 'overall';
     }
 
-    window.FIELD_AREA_UI = { render };
-    window.FIELD_UI = window.FIELD_UI || {};
-    window.FIELD_UI.renderMap = render;
+    bindExternalControls();
+  }
 
-    ['field-area-view-mode','field-area-sort-mode','map-metric-sel','field-common-month-select','field-common-fy-select'].forEach(id=>{
-      const el = document.getElementById(id);
-      if (!el || el.__fieldAreaBound) return;
-      el.__fieldAreaBound = true;
-      el.addEventListener('change', ()=>setTimeout(render, 0));
+  function ensureObserver(){
+    const box = document.getElementById('field-map');
+    if (!box || observer) return;
+
+    observer = new MutationObserver(()=>{
+      if (!active() || rendering) return;
+      if (!box.querySelector('.fa-area-v3') && box.textContent.trim()) {
+        setTimeout(render, 80);
+      }
     });
+    observer.observe(box, { childList:true, subtree:false });
   }
 
   function startGuard(){
-    if (timer) return;
-    timer = setInterval(()=>{
+    if (guardTimer) return;
+    guardTimer = setInterval(()=>{
       if (!active()) return;
       install();
+      ensureObserver();
       const box = document.getElementById('field-map');
-      if (!box) return;
-      const hasOwnUi = !!box.querySelector('.fa-summary, .fa-empty');
-      if (!hasOwnUi) render();
-    }, 500);
+      if (box && !box.querySelector('.fa-area-v3')) render();
+    }, 350);
+  }
+
+  function ensureStyle(){
+    if (document.getElementById('field-area-v3-style')) return;
+
+    const st = document.createElement('style');
+    st.id = 'field-area-v3-style';
+    st.textContent = `
+      #view-field-area #fpane-map > .card > .card-header > div:last-child{display:none!important}
+      #view-field-area #fpane-map > .card > .card-header .card-title + div{display:none!important}
+      #view-field-area #fpane-map > .card > .card-header{padding:16px 20px 10px!important}
+      #view-field-area #fpane-map > .card > .card-header .card-title{font-size:17px!important;font-weight:950!important;color:#0f172a!important}
+
+      #field-map{height:auto!important;min-height:260px;border:0!important;border-radius:0!important;background:#fff!important;overflow:visible!important}
+      #field-map .fa-area-v3{background:#fff}
+      #field-map .fa3-summary{padding:18px 20px 16px;border-bottom:1px solid #e5e7eb;background:linear-gradient(180deg,#ffffff,#f8fafc)}
+      #field-map .fa3-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
+      #field-map .fa3-title{font-size:22px;font-weight:950;color:#0f172a;letter-spacing:.01em}
+      #field-map .fa3-sub{font-size:12px;color:#64748b;margin-top:5px;font-weight:800}
+      #field-map .fa3-warn{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:950;white-space:nowrap}
+
+      #field-map .fa3-kpis{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr)) minmax(260px,1.25fr);gap:12px}
+      #field-map .fa3-kpi{background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:16px 18px;box-shadow:0 10px 24px rgba(15,23,42,.055);min-width:0}
+      #field-map .fa3-kpi span{display:block;font-size:12px;color:#64748b;font-weight:950;margin-bottom:8px}
+      #field-map .fa3-kpi b{display:block;font-size:25px;color:#0f172a;font-weight:950;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      #field-map .fa3-kpi em{display:block;font-style:normal;font-size:12px;color:#64748b;font-weight:850;margin-top:6px}
+
+      #field-map .fa3-toolbar{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fff}
+      #field-map .fa3-tabs{display:flex;gap:10px;flex-wrap:wrap}
+      #field-map .fa3-tabs button{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:10px 18px;font-size:14px;font-weight:950;cursor:pointer}
+      #field-map .fa3-tabs button.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff;box-shadow:0 8px 18px rgba(37,99,235,.22)}
+      #field-map .fa3-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+      #field-map .fa3-tools label{font-size:12px;color:#64748b;font-weight:950}
+      #field-map .fa3-tools select{margin-left:6px;border:1px solid #cbd5e1;border-radius:12px;padding:9px 32px 9px 12px;font-weight:900;color:#0f172a;background:#fff}
+
+      #field-map .fa3-body{padding:18px 20px}
+      #field-map .fa3-section{font-size:17px;font-weight:950;color:#0f172a;margin:0 0 14px;border-left:4px solid #2563eb;padding-left:10px}
+      #field-map .fa3-row{display:grid;grid-template-columns:minmax(260px,420px) minmax(300px,1fr) minmax(230px,280px);gap:18px;margin:12px 0;align-items:center}
+      #field-map .fa3-name{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:950;color:#0f172a;min-width:0}
+      #field-map .fa3-name i{width:28px;height:28px;border-radius:999px;background:#eaf3ff;color:#1d4ed8;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-style:normal;font-weight:950;flex:0 0 auto}
+      #field-map .fa3-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #field-map .fa3-track{height:25px;background:#e2e8f0;border-radius:999px;overflow:hidden}
+      #field-map .fa3-track div{height:100%;border-radius:999px;background:linear-gradient(90deg,#174f7f,#2563eb)}
+      #field-map .fa3-val{text-align:right;white-space:nowrap;font-size:15px}
+      #field-map .fa3-val b{font-weight:950;color:#0f172a;margin-right:10px}
+      #field-map .fa3-val span{font-weight:850;color:#64748b;margin-right:10px}
+      #field-map .fa3-val em{font-style:normal;color:#1d4ed8;font-weight:950}
+
+      #field-map .fa3-table-wrap{margin-top:20px;max-height:460px;overflow:auto;border:1px solid #e5e7eb;border-radius:16px}
+      #field-map .fa3-table{width:100%;border-collapse:collapse;min-width:760px}
+      #field-map .fa3-table th{background:#f8fafc;color:#334155;font-size:12px;text-align:left;padding:12px 14px;border-bottom:1px solid #e5e7eb}
+      #field-map .fa3-table td{font-size:13px;color:#0f172a;padding:12px 14px;border-bottom:1px solid #e5e7eb}
+      #field-map .fa3-table .r{text-align:right}
+
+      #field-map .fa3-history{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+      #field-map .fa3-month{border:1px solid #e2e8f0;border-radius:16px;padding:13px;background:#fff;box-shadow:0 8px 20px rgba(15,23,42,.05)}
+      #field-map .fa3-month.active{border-color:#2563eb;box-shadow:0 10px 24px rgba(37,99,235,.12)}
+      #field-map .fa3-month div{display:flex;justify-content:space-between;gap:8px;align-items:center}
+      #field-map .fa3-month b{font-size:15px;color:#0f172a}
+      #field-map .fa3-month span{font-size:12px;color:#64748b;font-weight:900}
+      #field-map .fa3-month p{height:9px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin:8px 0}
+      #field-map .fa3-month p i{display:block;height:100%;background:linear-gradient(90deg,#174f7f,#2563eb);border-radius:999px}
+      #field-map .fa3-month small{color:#64748b;font-weight:850}
+      #field-map .fa3-note{font-size:12px;color:#64748b;font-weight:850;margin-top:10px}
+      #field-map .fa3-empty{padding:46px;text-align:center;color:#64748b;font-weight:900}
+
+      @media (max-width:900px){
+        #field-map .fa3-kpis{grid-template-columns:repeat(2,minmax(130px,1fr))}
+        #field-map .fa3-toolbar{align-items:flex-start;flex-direction:column}
+        #field-map .fa3-row{grid-template-columns:1fr;gap:7px;border-bottom:1px solid #eef2f7;padding-bottom:11px}
+        #field-map .fa3-val{text-align:left}
+      }
+    `;
+    document.head.appendChild(st);
   }
 
   install();
   startGuard();
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', ()=>{ install(); if (active()) render(); });
+    document.addEventListener('DOMContentLoaded', ()=>{
+      install();
+      ensureObserver();
+      if (active()) render();
+    });
   } else {
-    setTimeout(()=>{ install(); if (active()) render(); }, 0);
+    setTimeout(()=>{
+      install();
+      ensureObserver();
+      if (active()) render();
+    }, 0);
   }
 })();
