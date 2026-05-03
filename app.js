@@ -735,24 +735,87 @@ const IMPORT = {
     try {
       await ASSETS.xlsx();
       if (!window.XLSX) { UI.toast('SheetJSが読み込まれていません','error'); return; }
+
       const buf = await file.arrayBuffer();
       const wb = window.XLSX.read(buf,{type:'array'});
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = window.XLSX.utils.sheet_to_json(ws,{header:1});
-      const areas = {};
-      for (const row of data) {
-        if (!row[0]) continue;
-        const name = String(row[0]).trim();
-        const max  = parseInt(String(row[1]||0).replace(/,/g,''));
-        if (name && max > 0) areas[name] = { max };
+      const data = window.XLSX.utils.sheet_to_json(ws,{header:1, defval:''});
+
+      function normAreaName(v){
+        return String(v || '')
+          .normalize('NFKC')
+          .replace(/\s+/g,'')
+          .replace(/_n/g,'_')
+          .replace(/＿n/g,'_')
+          .replace(/北\/板橋/g,'北/板')
+          .trim();
       }
-      if (!Object.keys(areas).length) { UI.toast('地区データが見つかりません（A列:地区名 B列:最大件数）','warn'); return; }
-      STATE.capacity = { areas, updatedAt: new Date().toISOString() };
+      function n(v){
+        const x = Number(String(v ?? '').normalize('NFKC').replace(/,/g,'').replace(/[^\d.-]/g,''));
+        return Number.isFinite(x) ? x : 0;
+      }
+      function isHeader(row){
+        const s = row.map(x=>String(x||'')).join('|');
+        return /地区.*名称|時間.*区分|平日|土日/.test(s);
+      }
+
+      const areas = {};
+      let rowCount = 0;
+
+      for (const row of data) {
+        if (!row || !row.some(c=>String(c||'').trim())) continue;
+        if (isHeader(row)) continue;
+
+        // 標準フォーマット：B列=地区名称1、F列=時間区分、G列=平日、H列=土日
+        let area = normAreaName(row[1]);
+        let time = String(row[5] || '').normalize('NFKC').trim() || 'ALL';
+        let weekday = n(row[6]);
+        let weekend = n(row[7]);
+
+        // 旧簡易フォーマット：A列=地区、B列=平日/最大、C列=土日
+        if ((!area || (!weekday && !weekend)) && row[0]) {
+          const a0 = normAreaName(row[0]);
+          const w0 = n(row[1]);
+          const e0 = n(row[2]);
+          if (a0 && (w0 || e0)) {
+            area = a0;
+            time = String(row[3] || 'ALL').normalize('NFKC').trim() || 'ALL';
+            weekday = w0;
+            weekend = e0 || w0;
+          }
+        }
+
+        if (!area || (!weekday && !weekend)) continue;
+        if (!areas[area]) areas[area] = { weekday:0, weekend:0, rows:[], max:0 };
+        areas[area].weekday += weekday;
+        areas[area].weekend += (weekend || weekday);
+        areas[area].max += Math.max(weekday, weekend || weekday);
+        areas[area].rows.push({ time, weekday, weekend:weekend || weekday });
+        rowCount++;
+      }
+
+      if (!Object.keys(areas).length) {
+        UI.toast('地区データが見つかりません（想定：B列=地区、F列=時間、G列=平日、H列=土日）','warn');
+        return;
+      }
+
+      STATE.capacity = STATE.capacity || {};
+      STATE.capacity.areas = areas;
+      STATE.capacity.updatedAt = new Date().toISOString();
+      STATE.capacity.sourceFile = file.name;
+      STATE.capacity.rowCount = rowCount;
+      STATE.capacity.mapping = STATE.capacity.mapping || CAPACITY_UI.defaultMapping();
+      STATE.capacity.calendar = STATE.capacity.calendar || {};
+
       STORE.save();
       CLOUD.pushCapacity().catch(()=>{});
       NAV.refresh();
-      UI.toast(`キャパ取込完了: ${Object.keys(areas).length}地区`);
-    } catch(e) { UI.toast('Excel読込エラー: '+e.message,'error'); }
+      UI.toast(`キャパ取込完了: ${Object.keys(areas).length}地区 / ${rowCount}行`);
+      if (window.CAPACITY_UI?.render) CAPACITY_UI.render();
+    } catch(e) {
+      console.error(e);
+      UI.toast('Excel読込エラー: '+e.message,'error');
+    }
   },
 
   deleteDataset(ym, type) {
@@ -2240,173 +2303,131 @@ function renderAlerts() {
     </div>`).join('');
 }
 
-/* ════════ §19 RENDER — Capacity / cleaned 2026-05-03 ═══════════════════ */
+/* ════════ §19 RENDER — Capacity（完全安定版） ═══════════════════ */
 const CAPACITY_UI = {
-  LS_STATE: 'capacity_ui_state_v20260503',
-  LS_MAP: 'capacity_area_map_v20260503',
+  _tab:'monthly',
+  _lastRows:[],
+  _lastDailyRows:[],
 
-  defaultMap: [
-    { pattern:'埼玉県さいたま市|さいたま市', area:'埼玉_さいたま', priority:30 },
-    { pattern:'埼玉県朝霞市|埼玉県志木市|埼玉県和光市|埼玉県新座市', area:'埼玉_志木朝霞', priority:30 },
-    { pattern:'埼玉県戸田市|埼玉県蕨市', area:'埼玉_蕨/戸田', priority:30 },
-    { pattern:'東京都板橋区|東京都北区', area:'東京_n北/板', priority:30 },
-    { pattern:'東京都豊島区|東京都文京区|東京都練馬区', area:'東京_n豊島/文京', priority:30 },
-    { pattern:'東京都足立区|東京都荒川区|東京都台東区|東京都墨田区|東京都江東区|東京都葛飾区|東京都江戸川区', area:'東京_東部', priority:20 },
-    { pattern:'東京都', area:'東京_その他', priority:5 },
-    { pattern:'埼玉県', area:'埼玉_その他', priority:5 },
-    { pattern:'千葉県|神奈川県|群馬県|栃木県|茨城県', area:'その他', priority:1 }
-  ],
+  defaultMapping() {
+    return [
+      { pattern:'埼玉県さいたま市|さいたま市', area:'埼玉_さいたま', priority:30 },
+      { pattern:'東京都板橋区|東京都北区', area:'東京_北/板', priority:30 },
+      { pattern:'東京都豊島区|東京都文京区|東京都練馬区', area:'東京_豊島/文京', priority:30 },
+      { pattern:'埼玉県戸田市|埼玉県蕨市|埼玉県川口市', area:'埼玉_蕨/戸田', priority:30 },
+      { pattern:'埼玉県志木市|埼玉県朝霞市|埼玉県和光市|埼玉県新座市', area:'埼玉_志木朝霞', priority:30 },
+      { pattern:'東京都足立区|東京都荒川区|東京都台東区|東京都墨田区|東京都江東区|東京都葛飾区|東京都江戸川区', area:'東京_東部', priority:20 },
+      { pattern:'東京都', area:'東京_その他', priority:5 },
+      { pattern:'埼玉県', area:'埼玉_その他', priority:5 },
+      { pattern:'千葉県|神奈川県|群馬県|栃木県|茨城県', area:'その他', priority:1 }
+    ];
+  },
 
-  _cacheKey: '',
-  _cache: null,
-  _lastRows: [],
+  ensureState() {
+    STATE.capacity = STATE.capacity || {};
+    STATE.capacity.areas = STATE.capacity.areas || {};
+    STATE.capacity.mapping = Array.isArray(STATE.capacity.mapping) && STATE.capacity.mapping.length ? STATE.capacity.mapping : this.defaultMapping();
+    STATE.capacity.calendar = STATE.capacity.calendar || {};
+  },
 
-  state() {
-    try {
-      const s = JSON.parse(localStorage.getItem(this.LS_STATE) || '{}');
-      return { tab:s.tab || 'summary', ym:s.ym || this.latestYM() || STATE.selYM || '', area:s.area || '' };
-    } catch(e) {
-      return { tab:'summary', ym:this.latestYM() || STATE.selYM || '', area:'' };
+  normArea(v) {
+    return String(v || '')
+      .normalize('NFKC')
+      .replace(/\s+/g,'')
+      .replace(/_n/g,'_')
+      .replace(/＿n/g,'_')
+      .replace(/北\/板橋/g,'北/板')
+      .trim();
+  },
+
+  n(v) {
+    const x = Number(String(v ?? '').normalize('NFKC').replace(/,/g,'').replace(/[^\d.-]/g,''));
+    return Number.isFinite(x) ? x : 0;
+  },
+
+  getYM() {
+    return document.getElementById('capacity-ym')?.value ||
+      (STATE.selYM || '') ||
+      ((STATE.productAddressData || []).at(-1)?.ym) ||
+      ((STATE.fieldData || []).at(-1)?.ym) ||
+      (latestDS()?.ym) || '';
+  },
+
+  getDays() {
+    return Math.max(1, parseInt(document.getElementById('capacity-days')?.value || '26', 10) || 26);
+  },
+
+  getBaseMode() {
+    return document.getElementById('capacity-base')?.value || 'calendar';
+  },
+
+  ymDate(ym, d) {
+    return `${String(ym).slice(0,4)}-${String(ym).slice(4,6)}-${String(d).padStart(2,'0')}`;
+  },
+
+  daysInYM(ym) {
+    const y = Number(String(ym).slice(0,4));
+    const m = Number(String(ym).slice(4,6));
+    return new Date(y, m, 0).getDate();
+  },
+
+  dow(dateStr) {
+    return new Date(dateStr + 'T00:00:00').getDay();
+  },
+
+  isWeekend(dateStr) {
+    const d = this.dow(dateStr);
+    return d === 0 || d === 6;
+  },
+
+  dateLabel(dateStr) {
+    const d = this.dow(dateStr);
+    return `${Number(dateStr.slice(5,7))}/${Number(dateStr.slice(8,10))}（${['日','月','火','水','木','金','土'][d]}）`;
+  },
+
+  parseDate(v, ym) {
+    if (v instanceof Date && !Number.isNaN(v.getTime())) {
+      return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}-${String(v.getDate()).padStart(2,'0')}`;
     }
-  },
-  setState(patch) {
-    const s = { ...this.state(), ...patch };
-    localStorage.setItem(this.LS_STATE, JSON.stringify(s));
-  },
-  maps() {
-    try {
-      const rows = JSON.parse(localStorage.getItem(this.LS_MAP) || 'null');
-      return Array.isArray(rows) && rows.length ? rows : this.defaultMap.slice();
-    } catch(e) { return this.defaultMap.slice(); }
-  },
-  saveMaps(rows) {
-    localStorage.setItem(this.LS_MAP, JSON.stringify(rows || []));
-    this._cacheKey = '';
-  },
-  esc(v){ return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); },
-  clean(v){ return String(v ?? '').normalize('NFKC').trim(); },
-  num(v){ const n=Number(String(v ?? '').normalize('NFKC').replace(/,/g,'').replace(/[^0-9.\-]/g,'')); return Number.isFinite(n)?n:0; },
-  fmt(v){ return Math.round(this.num(v)).toLocaleString('ja-JP'); },
-  pct(v){ return Number.isFinite(Number(v)) ? Number(v).toFixed(1) : '0.0'; },
-  normYM(v){ const s=String(v ?? '').replace(/[^0-9]/g,''); return s.length>=6?s.slice(0,6):''; },
-  ymLabelLocal(ym){ return typeof ymLabel === 'function' ? ymLabel(ym) : `${String(ym).slice(0,4)}年${Number(String(ym).slice(4,6))}月`; },
-  dateFromYM(ym,d){ return `${String(ym).slice(0,4)}-${String(ym).slice(4,6)}-${String(d).padStart(2,'0')}`; },
-  daysInYM(ym){ return new Date(Number(String(ym).slice(0,4)), Number(String(ym).slice(4,6)), 0).getDate(); },
-  dow(dateStr){ return new Date(dateStr + 'T00:00:00').getDay(); },
-  dowLabel(dateStr){ return ['日','月','火','水','木','金','土'][this.dow(dateStr)]; },
-  isWeekend(dateStr){ const d=this.dow(dateStr); return d===0 || d===6; },
-  normalizeDate(v, fallbackYM){
-    const s = String(v ?? '').normalize('NFKC').replace(/[^0-9]/g,'');
-    if (s.length >= 8) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
-    return this.dateFromYM(fallbackYM || this.state().ym || this.latestYM(), 1);
-  },
+    const raw = String(v ?? '').normalize('NFKC').trim();
+    if (!raw) return '';
 
-  latestYM() {
-    const yms = [];
-    (STATE.productAddressData || []).forEach(d=>{ const ym=this.normYM(d?.ym || d?.month || d?.date); if (ym) yms.push(ym); });
-    (STATE.fieldData || []).forEach(d=>{ const ym=this.normYM(d?.ym || d?.month || d?.date); if (ym) yms.push(ym); });
-    yms.sort();
-    return yms[yms.length-1] || '';
-  },
-
-  populateYMSel() {
-    const sel = document.getElementById('capacity-ym');
-    if (!sel) return;
-    const yms = [...new Set([...(STATE.productAddressData||[]).map(d=>this.normYM(d?.ym)), ...(STATE.fieldData||[]).map(d=>this.normYM(d?.ym))].filter(Boolean))].sort().reverse();
-    const keep = this.state().ym || yms[0] || '';
-    sel.innerHTML = yms.length ? yms.map(ym=>`<option value="${ym}">${this.esc(this.ymLabelLocal(ym))}</option>`).join('') : '<option value="">データなし</option>';
-    if (keep && yms.includes(keep)) sel.value = keep;
-  },
-
-  selectedRecord() {
-    const ym = document.getElementById('capacity-ym')?.value || this.state().ym || this.latestYM();
-    const product = (STATE.productAddressData || []).find(d=>this.normYM(d?.ym)===ym) || (STATE.productAddressData || []).at(-1);
-    if (product && Array.isArray(product.tickets) && product.tickets.length) return { ym:this.normYM(product.ym) || ym, tickets:product.tickets, source:'商品・住所CSV', rawCount: product.detailRows || product.rawRows || product.tickets.length };
-
-    const field = (STATE.fieldData || []).find(d=>this.normYM(d?.ym)===ym) || (STATE.fieldData || []).at(-1);
-    if (field && field.areas) return { ym:this.normYM(field.ym) || ym, legacyAreas:field.areas, source:'旧配送エリアCSV', rawCount:Object.values(field.areas).reduce((s,a)=>s+Number(a?.count||0),0) };
-    return null;
-  },
-
-  normalizeAreaName(v){
-    let s = this.clean(v).replace(/\s+/g,'');
-    s = s.replace('東京_n北/板','東京_n北/板').replace('東京北/板','東京_n北/板');
-    return s;
-  },
-
-  parseCapacityRows(data){
-    const areas = {};
-    const rows = Array.isArray(data) ? data : [];
-    for (let i=0; i<rows.length; i++) {
-      const row = rows[i] || [];
-      const rawArea = this.clean(row[1] || row[0]);
-      const area = this.normalizeAreaName(rawArea);
-      const time = this.clean(row[5] || row[2] || 'ALL');
-      const weekday = this.num(row[6] ?? row[1]);
-      const weekend = this.num(row[7] ?? row[2]);
-      if (!area || /地区名称|合計|総計/.test(area)) continue;
-      if (weekday <= 0 && weekend <= 0) continue;
-      if (!areas[area]) areas[area] = { weekday:0, weekend:0, rows:[] };
-      areas[area].weekday += weekday;
-      areas[area].weekend += weekend;
-      areas[area].rows.push({ time, weekday, weekend });
+    const serial = Number(raw);
+    if (Number.isFinite(serial) && serial > 20000 && serial < 80000) {
+      const dt = new Date(Math.round((serial - 25569) * 86400 * 1000));
+      if (!Number.isNaN(dt.getTime())) {
+        return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+      }
     }
-    return areas;
-  },
 
-  async importCapacityExcel(file) {
-    if (!file) return;
-    try {
-      await ASSETS.xlsx();
-      if (!window.XLSX) { UI.toast('SheetJSが読み込まれていません','error'); return; }
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf,{type:'array'});
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json(ws,{header:1, defval:''});
-      const areas = this.parseCapacityRows(data);
-      if (!Object.keys(areas).length) { UI.toast('キャパ地区データが見つかりません','warn'); return; }
-      STATE.capacity = { version:2, areas, updatedAt:new Date().toISOString(), fileName:file.name };
-      STORE.save();
-      if (CLOUD?.pushCapacity) CLOUD.pushCapacity().catch(()=>{});
-      UI.toast(`キャパ取込完了: ${Object.keys(areas).length}地区`);
-      this.render();
-    } catch(e) { UI.toast('Excel読込エラー: '+e.message,'error'); }
-  },
-
-  async importAreaCsv(files){
-    if (window.FIELD_PRODUCT_IMPORT2?.handleFiles) {
-      await FIELD_PRODUCT_IMPORT2.handleFiles(files);
-      this.populateYMSel();
-      this._cacheKey = '';
-      this.render();
-    } else {
-      UI.toast('配送エリアCSVは「データ取込＞現場明細データ」から取り込んでください','warn');
+    const nums = raw.replace(/[^0-9]/g,'');
+    if (nums.length >= 8) return `${nums.slice(0,4)}-${nums.slice(4,6)}-${nums.slice(6,8)}`;
+    if (nums.length >= 1 && nums.length <= 2 && ym) {
+      const d = Number(nums);
+      if (d >= 1 && d <= 31) return this.ymDate(ym, d);
     }
+    return '';
   },
 
-  clearMaster() {
-    if (!confirm('キャパマスタを削除しますか？')) return;
-    STATE.capacity = null;
-    STORE.save();
-    this.render();
+  ticketDate(t, ym) {
+    const d = this.parseDate(t.date || t.deliveryDate || t.workDate || t['日付'] || t['作業日'] || t['配達完了日'], ym);
+    if (d) return d;
+    const row = t.representativeRow || t.firstRow || t.row || t.raw;
+    if (Array.isArray(row)) {
+      const d2 = this.parseDate(row[0], ym);
+      if (d2) return d2;
+    }
+    return '';
   },
 
-  zipCity(zip){
-    const z = String(zip || '').replace(/[^0-9]/g,'').slice(0,7);
-    if (!z) return '';
-    try {
-      let hit = null;
-      if (window.JP_ZIP_LOADER?.get) hit = JP_ZIP_LOADER.get(z);
-      else if (window.JP_ZIP_MASTER) hit = JP_ZIP_MASTER[z];
-      if (!hit) return '';
-      if (Array.isArray(hit)) return this.clean(hit[0]) + this.clean(hit[1]);
-      if (typeof hit === 'object') return this.clean(hit.pref || hit.prefecture || hit[0]) + this.clean(hit.city || hit.municipality || hit.addr1 || hit[1]);
-      return this.cityFromAddress(String(hit));
-    } catch(e) { return ''; }
+  normalizeZip(v) {
+    if (window.JP_ZIP_LOADER?.normalizeZip) return JP_ZIP_LOADER.normalizeZip(v);
+    const s = String(v ?? '').replace(/[^0-9]/g,'');
+    return s.length >= 7 ? s.slice(0,7) : '';
   },
 
-  cityFromAddress(address){
-    const t = this.clean(address).replace(/\s+/g,'');
+  cityFromAddress(address) {
+    const t = String(address || '').normalize('NFKC').replace(/\s+/g,'').trim();
     if (!t) return '未設定';
     const prefMatch = t.match(/^(北海道|東京都|(?:京都|大阪)府|.{2,3}県)/);
     const pref = prefMatch ? prefMatch[1] : '';
@@ -2418,180 +2439,436 @@ const CAPACITY_UI = {
     return pref ? pref + rest.slice(0,8) : rest.slice(0,8);
   },
 
-  mapCity(city){
-    const c = this.clean(city);
-    const rules = this.maps().slice().sort((a,b)=>this.num(b.priority)-this.num(a.priority));
+  cityFromZip(zip) {
+    const z = this.normalizeZip(zip);
+    if (!z) return '';
+    let hit = null;
+    if (window.JP_ZIP_LOADER?.get) hit = JP_ZIP_LOADER.get(z);
+    else if (window.JP_ZIP_MASTER) hit = JP_ZIP_MASTER[z];
+    if (!hit) return '';
+    if (Array.isArray(hit)) return String(hit[0]||'') + String(hit[1]||'');
+    if (typeof hit === 'object') return String(hit.pref || hit.prefecture || hit[0] || '') + String(hit.city || hit.municipality || hit.addr1 || hit[1] || '');
+    return this.cityFromAddress(String(hit));
+  },
+
+  ticketCity(t) {
+    if (t.area) return String(t.area);
+    if (t.pref && t.city) return String(t.pref) + String(t.city);
+    const zc = this.cityFromZip(t.zip || t.zipcode || t.postalCode || t['郵便番号'] || t['お届け先郵便番号']);
+    if (zc) return zc;
+    const addr = t.address || t.addr || t.destinationAddress || t['住所'] || t['お届け先住所'];
+    if (addr) return this.cityFromAddress(addr);
+    const row = t.representativeRow || t.firstRow || t.row || t.raw;
+    if (Array.isArray(row)) {
+      const zc2 = this.cityFromZip(row[11]);
+      if (zc2) return zc2;
+      return this.cityFromAddress(row[13]);
+    }
+    return '未設定';
+  },
+
+  ticketSlip(t, idx) {
+    return String(t.slip || t.slipNo || t.ticketNo || t.invoiceNo || t['原票番号'] || t['エスライン原票番号'] || '').trim() || `no_${idx}`;
+  },
+
+  ticketShipper(t) {
+    return String(t.shipperName || t.shipper || t['荷主名'] || t['荷主名称'] || '未設定').trim() || '未設定';
+  },
+
+  mappedArea(city) {
+    const c = String(city || '').normalize('NFKC').trim();
+    const rules = (STATE.capacity?.mapping || this.defaultMapping()).slice().sort((a,b)=>this.n(b.priority)-this.n(a.priority));
     for (const r of rules) {
-      const parts = this.clean(r.pattern).split('|').map(x=>this.clean(x)).filter(Boolean);
-      if (parts.some(p=>c.includes(p))) return this.normalizeAreaName(r.area || '未分類');
+      const parts = String(r.pattern || '').normalize('NFKC').split('|').map(x=>x.trim()).filter(Boolean);
+      if (parts.some(p=>c.includes(p))) return this.normArea(r.area || '未分類');
     }
     return '未分類';
   },
 
-  aggregate(){
-    const record = this.selectedRecord();
-    if (!record) return null;
-    const days = Math.max(1, this.num(document.getElementById('capacity-days')?.value || 26));
-    const cacheKey = `${record.ym}:${record.source}:${record.rawCount}:${(STATE.capacity?.updatedAt)||''}:${days}:${JSON.stringify(this.maps())}`;
-    if (this._cache && this._cacheKey === cacheKey) return this._cache;
+  selectedProductRecord() {
+    const ym = this.getYM();
+    const list = STATE.productAddressData || [];
+    return list.find(r=>r.ym === ym) || list.at(-1) || null;
+  },
 
+  buildActual() {
+    const rec = this.selectedProductRecord();
+    if (!rec || !Array.isArray(rec.tickets) || !rec.tickets.length) {
+      return { ym:this.getYM(), source:'未取得', rawCount:0, tickets:[], byArea:new Map(), byDateArea:new Map(), unmatched:new Map(), hasDate:false };
+    }
+    const ym = rec.ym || this.getYM();
+    const uniq = new Map();
+    let hasDate = false;
+
+    rec.tickets.forEach((t, idx)=>{
+      const slip = this.ticketSlip(t, idx);
+      const dt = this.ticketDate(t, ym);
+      if (dt) hasDate = true;
+      const date = dt || '';
+      const city = this.ticketCity(t);
+      const area = this.mappedArea(city);
+      const shipper = this.ticketShipper(t);
+      const key = `${date || 'monthly'}__${slip}`;
+      if (!uniq.has(key)) uniq.set(key, { slip, date, city, area, shipper });
+    });
+
+    const tickets = [...uniq.values()];
     const byArea = new Map();
     const byDateArea = new Map();
     const unmatched = new Map();
-    const slips = new Set();
 
-    if (record.legacyAreas) {
-      Object.entries(record.legacyAreas).forEach(([areaName, val])=>{
-        const area = this.normalizeAreaName(areaName);
-        const count = Number(val?.count || 0);
-        byArea.set(area, { area, count, shippers:val?.shippers || {}, cities:new Map([[area,count]]) });
-      });
-    } else {
-      (record.tickets || []).forEach((t,idx)=>{
-        const slip = this.clean(t.slip || t.slipNo || t.ticketNo || t.invoiceNo || t['エスライン原票番号'] || t['原票番号'] || `row_${idx}`);
-        if (slips.has(slip)) return;
-        slips.add(slip);
-        const zipCity = this.zipCity(t.zip || t.zipcode || t.postCode || t.postalCode || t['お届け先郵便番号'] || t['郵便番号']);
-        const city = zipCity || this.clean(t.area) || (this.clean(t.pref) + this.clean(t.city)) || this.cityFromAddress(t.address || t['お届け先住所'] || t['住所']);
-        const area = this.mapCity(city);
-        const shipper = this.clean(t.shipper || t.shipperName || t['荷主'] || t['荷主名'] || '未設定');
-        const date = this.normalizeDate(t.date || t.deliveryDate || t['日付'] || t['配達完了日'], record.ym);
-        if (!byArea.has(area)) byArea.set(area,{area,count:0,shippers:{},cities:new Map()});
-        const ar = byArea.get(area);
-        ar.count++;
-        ar.shippers[shipper] = (ar.shippers[shipper]||0) + 1;
-        ar.cities.set(city, (ar.cities.get(city)||0)+1);
-        const dk = `${date}__${area}`;
-        if (!byDateArea.has(dk)) byDateArea.set(dk,{date,area,count:0,cities:new Map()});
-        const dr = byDateArea.get(dk); dr.count++; dr.cities.set(city,(dr.cities.get(city)||0)+1);
-        if (area === '未分類') unmatched.set(city, (unmatched.get(city)||0)+1);
-      });
-    }
+    tickets.forEach(t=>{
+      if (!byArea.has(t.area)) byArea.set(t.area,{ area:t.area, count:0, shippers:{}, cities:{} });
+      const a = byArea.get(t.area);
+      a.count++;
+      a.shippers[t.shipper] = (a.shippers[t.shipper] || 0) + 1;
+      a.cities[t.city] = (a.cities[t.city] || 0) + 1;
 
-    const ag = { record, days, byArea, byDateArea, unmatched };
-    this._cacheKey = cacheKey;
-    this._cache = ag;
-    return ag;
-  },
+      if (t.area === '未分類') {
+        const key = t.city || '未設定';
+        unmatched.set(key, (unmatched.get(key) || 0) + 1);
+      }
 
-  capForDay(dateStr, area){
-    const a = STATE.capacity?.areas?.[area];
-    if (!a) return 0;
-    const cal = this.calendar()[dateStr] || {};
-    const base = (this.isWeekend(dateStr) || cal.type === 'holiday') ? Number(a.weekend||0) : Number(a.weekday||0);
-    return Math.max(0, base + this.num(cal.adjust || 0));
-  },
-  capForMonth(ym, area){ let total=0; for(let d=1; d<=this.daysInYM(ym); d++) total += this.capForDay(this.dateFromYM(ym,d), area); return total; },
-  judge(used, cap){
-    const rate = cap>0 ? used/cap*100 : (used>0 ? 999 : 0);
-    if (cap<=0 && used>0) return {rate,label:'要確認',cls:'danger'};
-    if (rate<80) return {rate,label:'余裕あり',cls:'good'};
-    if (rate<=100) return {rate,label:'適正',cls:'ok'};
-    if (rate<=120) return {rate,label:'超過注意',cls:'warn'};
-    return {rate,label:'要調整',cls:'danger'};
-  },
-  calendar(){ try { return JSON.parse(localStorage.getItem('capacity_calendar_v20260503')||'{}'); } catch(e){ return {}; } },
-  saveCalendar(v){ localStorage.setItem('capacity_calendar_v20260503', JSON.stringify(v||{})); this._cacheKey=''; },
+      if (hasDate && t.date) {
+        const dk = `${t.date}__${t.area}`;
+        if (!byDateArea.has(dk)) byDateArea.set(dk,{ date:t.date, area:t.area, count:0, cities:{} });
+        const d = byDateArea.get(dk);
+        d.count++;
+        d.cities[t.city] = (d.cities[t.city] || 0) + 1;
+      }
+    });
 
-  areaRows(){
-    const ag = this.aggregate();
-    if (!ag) return [];
-    const capAreas = Object.keys(STATE.capacity?.areas || {});
-    const all = [...new Set([...capAreas, ...ag.byArea.keys()])];
-    return all.map(area=>{
-      const hit = ag.byArea.get(area) || {area,count:0,shippers:{},cities:new Map()};
-      const cap = this.capForMonth(ag.record.ym, area);
-      const j = this.judge(hit.count, cap);
-      return { area, count:hit.count, cap, rate:j.rate, judge:j.label, cls:j.cls, oneDay:STATE.capacity?.areas?.[area]?.weekday || 0, shippers:hit.shippers||{}, cities:[...hit.cities.entries()].map(([city,count])=>({city,count})).sort((a,b)=>b.count-a.count) };
-    }).sort((a,b)=>b.rate-a.rate || b.count-a.count);
-  },
-
-  dailyRows(){
-    const ag = this.aggregate();
-    if (!ag) return [];
-    const out = [];
-    if (ag.byDateArea.size > 1) {
-      ag.byDateArea.forEach(v=>{
-        const cap = this.capForDay(v.date, v.area);
-        const j = this.judge(v.count, cap);
-        out.push({date:v.date,area:v.area,count:v.count,cap,rate:j.rate,judge:j.label,cls:j.cls,cities:[...v.cities.entries()].map(([city,count])=>({city,count})).sort((a,b)=>b.count-a.count)});
-      });
-    } else {
-      // 月間CSVのみの場合は日平均で軽量判定
-      this.areaRows().forEach(r=>{
-        const avg = r.count / Math.max(1, ag.days);
-        for(let d=1; d<=this.daysInYM(ag.record.ym); d++) {
-          const date = this.dateFromYM(ag.record.ym,d);
-          const cap = this.capForDay(date, r.area);
-          const j = this.judge(avg, cap);
-          out.push({date,area:r.area,count:avg,cap,rate:j.rate,judge:j.label,cls:j.cls,cities:r.cities});
+    // 日付がない月次CSVの場合は、月件数÷稼働日数を日別推定として展開する。
+    if (!hasDate) {
+      const days = this.getDays();
+      byArea.forEach(a=>{
+        const avg = a.count / days;
+        for (let d=1; d<=days; d++) {
+          const date = this.ymDate(ym,d);
+          byDateArea.set(`${date}__${a.area}`, { date, area:a.area, count:avg, cities:a.cities, estimated:true });
         }
       });
     }
-    const risk={danger:4,warn:3,ok:2,good:1};
-    return out.sort((a,b)=>(risk[b.cls]||0)-(risk[a.cls]||0) || b.rate-a.rate || a.date.localeCompare(b.date));
+
+    return { ym, source:rec.files?.join(', ') || rec.source || 'productAddressData', rawCount:rec.rawRows || rec.detailRows || rec.tickets.length, tickets, byArea, byDateArea, unmatched, hasDate };
   },
 
-  render(){
+  dayType(dateStr) {
+    return STATE.capacity?.calendar?.[dateStr]?.type || 'normal';
+  },
+
+  dayAdj(dateStr) {
+    return this.n(STATE.capacity?.calendar?.[dateStr]?.adjust || 0);
+  },
+
+  baseDailyCap(dateStr, area) {
+    const row = STATE.capacity?.areas?.[area];
+    if (!row) return 0;
+    const mode = this.getBaseMode();
+    const wd = this.n(row.weekday ?? row.max);
+    const we = this.n(row.weekend ?? row.max ?? row.weekday);
+    if (mode === 'weekday') return wd;
+    if (mode === 'weekend') return we;
+    if (mode === 'max') return Math.max(wd,we);
+    const holidayLike = this.isWeekend(dateStr) || this.dayType(dateStr) === 'holiday';
+    return holidayLike ? we : wd;
+  },
+
+  dailyCap(dateStr, area) {
+    return Math.max(0, this.baseDailyCap(dateStr, area) + this.dayAdj(dateStr));
+  },
+
+  monthlyCap(ym, area) {
+    const mode = this.getBaseMode();
+    const days = this.getDays();
+    if (mode === 'weekday' || mode === 'weekend' || mode === 'max') {
+      return this.baseDailyCap(this.ymDate(ym,1), area) * days;
+    }
+    let total = 0;
+    const last = this.daysInYM(ym);
+    for (let d=1; d<=last; d++) total += this.dailyCap(this.ymDate(ym,d), area);
+    return total;
+  },
+
+  judge(used, cap) {
+    const rate = cap > 0 ? used / cap * 100 : (used > 0 ? 999 : 0);
+    if (cap <= 0 && used > 0) return { rate, status:'要確認', cls:'over' };
+    if (rate >= 120) return { rate, status:'要調整', cls:'over' };
+    if (rate >= 100) return { rate, status:'超過', cls:'over' };
+    if (rate >= 80) return { rate, status:'余裕少', cls:'full' };
+    return { rate, status:'余裕あり', cls:'ok' };
+  },
+
+  areaRows() {
+    const actual = this.buildActual();
+    const capAreas = Object.keys(STATE.capacity?.areas || {});
+    const all = [...new Set([...capAreas, ...actual.byArea.keys()])].filter(Boolean);
+    return all.map(area=>{
+      const a = actual.byArea.get(area) || { area, count:0, shippers:{}, cities:{} };
+      const cap = this.monthlyCap(actual.ym, area);
+      const one = this.baseDailyCap(this.ymDate(actual.ym,1), area);
+      const j = this.judge(a.count, cap);
+      return { ...a, cap, oneDay:one, rate:j.rate, status:j.status, cls:j.cls };
+    }).sort((a,b)=>b.rate-a.rate || b.count-a.count);
+  },
+
+  dailyRows() {
+    const actual = this.buildActual();
+    const risk = { over:4, full:3, ok:1 };
+    return [...actual.byDateArea.values()].map(r=>{
+      const cap = this.dailyCap(r.date, r.area);
+      const j = this.judge(r.count, cap);
+      return { ...r, cap, rate:j.rate, status:j.status, cls:j.cls };
+    }).sort((a,b)=>(risk[b.cls]||0)-(risk[a.cls]||0) || b.rate-a.rate || String(a.date).localeCompare(String(b.date)));
+  },
+
+  render() {
     const view = document.getElementById('view-capacity');
     if (!view || !view.classList.contains('active')) return;
-    this.populateYMSel();
-    const root = document.getElementById('capacity-root');
-    if (!root) return;
-    const s = this.state();
-    const ag = this.aggregate();
+    this.ensureState();
+    this.ensureStyle();
+
+    const actual = this.buildActual();
     const rows = this.areaRows();
-    const dRows = this.dailyRows();
+    const daily = this.dailyRows();
     this._lastRows = rows;
-    const used = rows.reduce((x,r)=>x+r.count,0);
-    const cap = rows.reduce((x,r)=>x+r.cap,0);
-    const j = this.judge(used,cap);
-    const over = dRows.filter(r=>r.rate>100).length;
-    const kpi = document.getElementById('capacity-kpi');
-    if (kpi) kpi.innerHTML = `
-      <div class="kpi-card accent-blue"><div class="kpi-label">実績件数</div><div class="kpi-value navy">${this.fmt(used)}</div></div>
-      <div class="kpi-card accent-green"><div class="kpi-label">月キャパ</div><div class="kpi-value green">${this.fmt(cap)}</div></div>
-      <div class="kpi-card ${j.cls==='danger'?'accent-red':j.cls==='warn'?'accent-amber':'accent-green'}"><div class="kpi-label">月使用率</div><div class="kpi-value ${j.cls==='danger'?'red':'navy'}">${this.pct(j.rate)}%</div></div>
-      <div class="kpi-card accent-amber"><div class="kpi-label">日別超過</div><div class="kpi-value">${this.fmt(over)}</div></div>`;
-    const msg = document.getElementById('capacity-msg');
-    if (msg) msg.textContent = STATE.capacity?.updatedAt ? `キャパ: ${Object.keys(STATE.capacity.areas||{}).length}地区 / 実績: ${ag?this.fmt(ag.record.rawCount)+'行':''}` : 'キャパExcelが未登録です';
-    root.innerHTML = `${this.tabsHtml(s)}${s.tab==='summary'?this.summaryHtml(rows):s.tab==='daily'?this.dailyHtml(dRows):s.tab==='calendar'?this.calendarHtml(dRows):s.tab==='mapping'?this.mappingHtml():this.masterHtml()}`;
-    this.renderUnmatched();
+    this._lastDailyRows = daily;
+
+    view.innerHTML = this.layout(actual, rows, daily);
     this.bind();
   },
 
-  tabsHtml(s){
-    const tabs=[['summary','月別使用状況'],['daily','日別超過'],['calendar','カレンダー'],['mapping','地区マッピング'],['master','通常キャパ']];
-    return `<div class="cap-tabs">${tabs.map(([k,l])=>`<button type="button" class="btn ${s.tab===k?'btn-primary':''}" data-cap-tab="${k}">${l}</button>`).join('')}</div>`;
-  },
-  summaryHtml(rows){
-    if (!STATE.capacity?.areas) return '<div class="card"><div class="card-body" style="text-align:center;color:var(--text3)">キャパExcelを取り込んでください</div></div>';
-    return `<div class="grid2" style="align-items:start"><div class="card"><div class="card-header"><span class="card-title">地区別 月キャパ使用状況</span></div><div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">実績</th><th class="r">1日基準</th><th class="r">月キャパ</th><th class="r">使用率</th><th>判定</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td><button class="linklike" data-cap-detail="${i}">${this.esc(r.area)}</button></td><td class="r"><b>${this.fmt(r.count)}</b></td><td class="r">${this.fmt(r.oneDay)}</td><td class="r">${this.fmt(r.cap)}</td><td class="r">${this.pct(r.rate)}%</td><td><span class="capacity-status ${r.cls==='danger'?'over':r.cls==='warn'?'full':'ok'}">${this.esc(r.judge)}</span></td></tr>`).join('')}</tbody></table></div></div><div class="card"><div class="card-header"><span class="card-title">市区町村・荷主内訳</span></div><div id="capacity-detail-box" class="card-body" style="color:var(--text3);text-align:center">地区をクリックしてください</div></div></div>`;
-  },
-  dailyHtml(rows){
-    return `<div class="card"><div class="card-header"><span class="card-title">日別キャパ超過チェック</span></div><div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績/日</th><th class="r">日キャパ</th><th class="r">使用率</th><th>判定</th><th>主な市区町村</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${this.esc(r.date)}（${this.esc(this.dowLabel(r.date))}）</td><td>${this.esc(r.area)}</td><td class="r">${Number(r.count).toFixed(1)}</td><td class="r">${this.fmt(r.cap)}</td><td class="r">${this.pct(r.rate)}%</td><td><span class="capacity-status ${r.cls==='danger'?'over':r.cls==='warn'?'full':'ok'}">${this.esc(r.judge)}</span></td><td>${this.esc((r.cities||[]).slice(0,3).map(c=>`${c.city} ${c.count}件`).join(' / ') || '—')}</td></tr>`).join('')}</tbody></table></div></div>`;
-  },
-  calendarHtml(dRows){
-    const ag=this.aggregate(); const ym=ag?.record?.ym || this.state().ym || this.latestYM();
-    const riskByDate=new Map();
-    dRows.forEach(r=>{ const p=riskByDate.get(r.date); if(!p||r.rate>p.rate) riskByDate.set(r.date,r); });
-    const cells=[]; for(let i=0;i<this.dow(this.dateFromYM(ym,1));i++) cells.push(null); for(let d=1;d<=this.daysInYM(ym);d++) cells.push(this.dateFromYM(ym,d)); while(cells.length%7) cells.push(null);
-    return `<div class="card"><div class="card-header"><span class="card-title">カレンダー（日別超過＋補正）</span></div><div class="cap-calendar">${['日','月','火','水','木','金','土'].map((d,i)=>`<div class="cap-week ${i===0?'sun':i===6?'sat':''}">${d}</div>`).join('')}${cells.map(date=>{ if(!date)return '<div></div>'; const r=riskByDate.get(date); const c=this.calendar()[date]||{}; return `<div class="cap-day ${r?.cls||''} ${this.isWeekend(date)?'weekend':''}"><div class="cap-daytop"><b>${Number(date.slice(8,10))}</b><span>${r?`${Number(r.count).toFixed(1)}件 ${this.pct(r.rate)}%`:'0件'}</span></div><select data-cal-date="${date}" data-cal-field="type">${DAY_TYPES.map(t=>`<option value="${t.key}" ${(c.type||'normal')===t.key?'selected':''}>${t.label}</option>`).join('')}</select><input type="number" data-cal-date="${date}" data-cal-field="adjust" value="${this.esc(c.adjust||0)}" placeholder="補正"><input data-cal-date="${date}" data-cal-field="memo" value="${this.esc(c.memo||'')}" placeholder="メモ"></div>`;}).join('')}</div></div>`;
-  },
-  mappingHtml(){ const rows=this.maps().slice().sort((a,b)=>this.num(b.priority)-this.num(a.priority)); return `<div class="card"><div class="card-header"><span class="card-title">地区マッピング</span><button class="btn" id="cap-add-map">＋追加</button></div><div class="scroll-x"><table class="tbl"><thead><tr><th>優先</th><th>含む文字</th><th>キャパ地区</th><th></th></tr></thead><tbody>${rows.map((r,i)=>`<tr data-map-index="${i}"><td><input data-map-field="priority" type="number" value="${this.esc(r.priority)}"></td><td><input data-map-field="pattern" value="${this.esc(r.pattern)}"></td><td><input data-map-field="area" value="${this.esc(r.area)}"></td><td><button class="btn btn-danger" data-map-delete="${i}">削除</button></td></tr>`).join('')}</tbody></table></div></div>`; },
-  masterHtml(){ const rows=Object.entries(STATE.capacity?.areas||{}); return `<div class="card"><div class="card-header"><span class="card-title">通常キャパ（Excel取込結果）</span></div><div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">平日</th><th class="r">土日祝</th><th>時間帯内訳</th></tr></thead><tbody>${rows.map(([a,v])=>`<tr><td>${this.esc(a)}</td><td class="r">${this.fmt(v.weekday)}</td><td class="r">${this.fmt(v.weekend)}</td><td>${this.esc((v.rows||[]).map(r=>`${r.time}:${r.weekday}/${r.weekend}`).join('、'))}</td></tr>`).join('')}</tbody></table></div></div>`; },
+  layout(actual, rows, daily) {
+    const totalActual = rows.reduce((s,r)=>s+this.n(r.count),0);
+    const totalCap = rows.reduce((s,r)=>s+this.n(r.cap),0);
+    const j = this.judge(totalActual,totalCap);
+    const overDays = daily.filter(r=>r.rate >= 100).length;
+    const hasCap = !!(STATE.capacity?.areas && Object.keys(STATE.capacity.areas).length);
+    const yms = [...new Set((STATE.productAddressData || []).map(r=>r.ym).filter(Boolean))].sort().reverse();
+    const curYM = actual.ym || this.getYM();
 
-  bind(){
-    document.querySelectorAll('[data-cap-tab]').forEach(b=>b.onclick=()=>{this.setState({tab:b.dataset.capTab});this.render();});
-    document.querySelectorAll('[data-cap-detail]').forEach(b=>b.onclick=()=>this.showDetail(Number(b.dataset.capDetail)));
-    document.querySelectorAll('[data-cal-date]').forEach(input=>input.onchange=()=>{const cc=this.calendar(); const d=input.dataset.calDate; cc[d]=cc[d]||{}; cc[d][input.dataset.calField]=input.type==='number'?this.num(input.value):input.value; this.saveCalendar(cc); this.render();});
-    const add=document.getElementById('cap-add-map'); if(add)add.onclick=()=>{const r=this.maps(); r.push({pattern:'',area:'未分類',priority:1}); this.saveMaps(r); this.render();};
-    document.querySelectorAll('[data-map-field]').forEach(input=>input.onchange=()=>{const rows=this.maps().slice().sort((a,b)=>this.num(b.priority)-this.num(a.priority)); const idx=Number(input.closest('[data-map-index]').dataset.mapIndex); rows[idx][input.dataset.mapField]=input.type==='number'?this.num(input.value):input.value; this.saveMaps(rows); this.render();});
-    document.querySelectorAll('[data-map-delete]').forEach(btn=>btn.onclick=()=>{const rows=this.maps().slice().sort((a,b)=>this.num(b.priority)-this.num(a.priority)); rows.splice(Number(btn.dataset.mapDelete),1); this.saveMaps(rows); this.render();});
+    return `
+      <div class="capx">
+        <div class="capx-card capx-control">
+          <div class="capx-headline">
+            <div>
+              <h2>キャパ分析</h2>
+              <p>キャパExcelと商品・住所CSVを突合し、月別使用率・日別超過・カレンダー補正を確認します。</p>
+            </div>
+            <div class="capx-cond">
+              <label>対象月
+                <select id="capacity-ym">
+                  ${(yms.length?yms:[curYM]).map(ym=>`<option value="${esc(ym)}" ${ym===curYM?'selected':''}>${esc(ymLabel(ym))}</option>`).join('')}
+                </select>
+              </label>
+              <label>稼働日数
+                <input id="capacity-days" type="number" min="1" max="31" value="${esc(document.getElementById('capacity-days')?.value || '26')}">
+              </label>
+              <label>表示基準
+                <select id="capacity-base">
+                  ${[
+                    ['calendar','カレンダー日別積上げ'],['weekday','平日キャパ×稼働日数'],['weekend','土日キャパ×稼働日数'],['max','大きい方×稼働日数']
+                  ].map(([v,l])=>`<option value="${v}" ${this.getBaseMode()===v?'selected':''}>${l}</option>`).join('')}
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="capx-actions">
+            <button class="btn btn-primary" onclick="document.getElementById('capacity-master-input').click()">キャパExcel取込</button>
+            <input type="file" id="capacity-master-input" accept=".xlsx,.xls" style="display:none" onchange="CAPACITY_UI.importCapacityExcel(this.files[0])">
+            <button class="btn" onclick="document.getElementById('capacity-csv-input').click()">商品・住所CSV取込</button>
+            <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none" onchange="CAPACITY_UI.importAreaCsv(this.files)">
+            <button class="btn" onclick="CAPACITY_UI.render()">再集計</button>
+            <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()">キャパマスタ削除</button>
+            <span id="capacity-msg">${hasCap ? `キャパ登録済：${Object.keys(STATE.capacity.areas).length}地区 / ${esc(STATE.capacity.sourceFile || '')}` : 'キャパExcelが未登録です'}</span>
+          </div>
+          <div class="capx-note">商品・住所CSVは原票番号でユニーク化済みデータを使用します。日付がない月間CSVの場合、日別超過は「月間件数÷稼働日数」の推定表示です。</div>
+        </div>
+
+        <div class="capx-kpis">
+          <div class="capx-kpi blue"><span>実績件数</span><b>${fmt(totalActual)}</b><em>原票</em></div>
+          <div class="capx-kpi green"><span>月キャパ</span><b>${fmt(totalCap)}</b><em>${hasCap?'登録済':'未登録'}</em></div>
+          <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${pct(j.rate)}%</b><em>${esc(j.status)}</em></div>
+          <div class="capx-kpi amber"><span>日別超過</span><b>${fmt(overDays)}</b><em>日・地区</em></div>
+        </div>
+
+        <div class="capx-tabs">
+          ${[
+            ['monthly','月別使用状況'],['daily','日別超過'],['calendar','カレンダー'],['mapping','地区マッピング'],['master','通常キャパ'],['unmatched','未分類']
+          ].map(([k,l])=>`<button type="button" class="${this._tab===k?'active':''}" data-capx-tab="${k}">${l}</button>`).join('')}
+        </div>
+
+        ${this._tab==='monthly'?this.monthlyHtml(rows):''}
+        ${this._tab==='daily'?this.dailyHtml(daily, actual):''}
+        ${this._tab==='calendar'?this.calendarHtml(daily, actual):''}
+        ${this._tab==='mapping'?this.mappingHtml(actual):''}
+        ${this._tab==='master'?this.masterHtml():''}
+        ${this._tab==='unmatched'?this.unmatchedHtml(actual):''}
+      </div>`;
   },
-  showDetail(idx){ const r=this._lastRows[idx]; const box=document.getElementById('capacity-detail-box'); if(!box||!r)return; const shippers=Object.entries(r.shippers||{}).sort((a,b)=>b[1]-a[1]); box.innerHTML=`<div style="display:grid;gap:10px"><div><b>市区町村</b>${(r.cities||[]).slice(0,10).map((c,i)=>`<div class="cap-minirow"><span>${i+1}. ${this.esc(c.city)}</span><b>${this.fmt(c.count)}件</b></div>`).join('')||'<div style="color:var(--text3)">なし</div>'}</div><div><b>荷主</b>${shippers.slice(0,10).map(([n,c],i)=>`<div class="cap-minirow"><span>${i+1}. ${this.esc(n)}</span><b>${this.fmt(c)}件</b></div>`).join('')||'<div style="color:var(--text3)">なし</div>'}</div></div>`; },
-  renderUnmatched(){ const tbody=document.getElementById('capacity-unmatched-tbody'); if(!tbody)return; const ag=this.aggregate(); if(!ag||!ag.unmatched||!ag.unmatched.size){tbody.innerHTML='<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--text3)">未分類なし</td></tr>';return;} tbody.innerHTML=[...ag.unmatched.entries()].sort((a,b)=>b[1]-a[1]).map(([addr,c])=>`<tr><td>${this.esc(addr)}</td><td>—</td><td class="r">${this.fmt(c)}</td></tr>`).join(''); },
-  saveSettings(){ this._cacheKey=''; this.render(); }
+
+  monthlyHtml(rows) {
+    if (!STATE.capacity?.areas || !Object.keys(STATE.capacity.areas).length) {
+      return `<div class="capx-card capx-empty">キャパExcelを取り込んでください。</div>`;
+    }
+    return `<div class="capx-grid">
+      <div class="capx-card">
+        <h3>地区別 月キャパ使用状況</h3>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">実績</th><th class="r">1日基準</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
+          ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${pct(r.rate)}%</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td></tr>`).join('')}
+        </tbody></table></div>
+      </div>
+      <div class="capx-card"><h3>市区町村内訳</h3><div id="capacity-detail-box" class="capx-empty">地区をクリックしてください</div></div>
+    </div>`;
+  },
+
+  dailyHtml(rows, actual) {
+    if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
+    return `<div class="capx-card"><h3>日別キャパ超過チェック</h3><div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr class="capx-risk-${esc(r.cls)}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r">${pct(r.rate)}%</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+  },
+
+  calendarHtml(rows, actual) {
+    const ym = actual.ym || this.getYM();
+    const riskByDate = new Map();
+    rows.forEach(r=>{
+      const prev = riskByDate.get(r.date);
+      if (!prev || r.rate > prev.rate) riskByDate.set(r.date,r);
+    });
+    const firstDow = this.dow(this.ymDate(ym,1));
+    const cells = [];
+    for (let i=0;i<firstDow;i++) cells.push(null);
+    for (let d=1; d<=this.daysInYM(ym); d++) cells.push(this.ymDate(ym,d));
+    while (cells.length % 7) cells.push(null);
+    return `<div class="capx-card"><h3>カレンダー（日別超過＋補正）</h3><div class="capx-calendar">
+      ${['日','月','火','水','木','金','土'].map((d,i)=>`<div class="capx-week ${i===0?'sun':i===6?'sat':''}">${d}</div>`).join('')}
+      ${cells.map(date=>{
+        if(!date) return `<div class="capx-day blank"></div>`;
+        const c = STATE.capacity.calendar?.[date] || {};
+        const risk = riskByDate.get(date);
+        const cls = risk ? risk.cls : (this.isWeekend(date) ? 'weekend' : '');
+        return `<div class="capx-day ${esc(cls)}"><div class="capx-daytop"><b>${Number(date.slice(8,10))}</b><span>${risk?`${fmt(risk.count)}件 / ${pct(risk.rate)}%`:'0件'}</span></div><select data-capx-cal-date="${date}" data-capx-cal-field="type"><option value="normal" ${(c.type||'normal')==='normal'?'selected':''}>通常</option><option value="holiday" ${c.type==='holiday'?'selected':''}>祝日</option><option value="busy" ${c.type==='busy'?'selected':''}>繁忙日</option><option value="limit" ${c.type==='limit'?'selected':''}>制限日</option><option value="special" ${c.type==='special'?'selected':''}>特殊日</option></select><input type="number" data-capx-cal-date="${date}" data-capx-cal-field="adjust" value="${esc(c.adjust||0)}" placeholder="補正"><input data-capx-cal-date="${date}" data-capx-cal-field="memo" value="${esc(c.memo||'')}" placeholder="メモ"></div>`;
+      }).join('')}
+    </div></div>`;
+  },
+
+  mappingHtml(actual) {
+    const rows = (STATE.capacity.mapping || this.defaultMapping()).slice().sort((a,b)=>this.n(b.priority)-this.n(a.priority));
+    return `<div class="capx-card"><h3>地区マッピング</h3><button class="btn" id="capacity-add-map">＋ ルール追加</button><div class="scroll-x"><table class="tbl"><thead><tr><th>優先</th><th>含む文字</th><th>キャパ地区</th><th></th></tr></thead><tbody>${rows.map((r,i)=>`<tr data-capx-map-index="${i}"><td><input type="number" data-capx-map-field="priority" value="${esc(r.priority)}"></td><td><input data-capx-map-field="pattern" value="${esc(r.pattern)}"></td><td><input data-capx-map-field="area" value="${esc(r.area)}"></td><td><button class="btn btn-danger" data-capx-map-delete="${i}">削除</button></td></tr>`).join('')}</tbody></table></div></div>`;
+  },
+
+  masterHtml() {
+    const rows = Object.entries(STATE.capacity.areas || {});
+    return `<div class="capx-card"><h3>通常キャパ</h3><p class="capx-note2">Excel取込結果です。地区名・平日・土日祝をここで直接補正できます。</p><button class="btn" id="capacity-add-master">＋ 行追加</button><div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">平日</th><th class="r">土日祝</th><th>時間内訳</th><th></th></tr></thead><tbody>${rows.map(([name,r],i)=>`<tr data-capx-master-index="${i}" data-area="${esc(name)}"><td><input data-capx-master-field="area" value="${esc(name)}"></td><td><input type="number" data-capx-master-field="weekday" value="${esc(r.weekday||r.max||0)}"></td><td><input type="number" data-capx-master-field="weekend" value="${esc(r.weekend||r.max||0)}"></td><td>${esc((r.rows||[]).map(x=>`${x.time}:${x.weekday}/${x.weekend}`).join('、') || '—')}</td><td><button class="btn btn-danger" data-capx-master-delete="${esc(name)}">削除</button></td></tr>`).join('')}</tbody></table></div></div>`;
+  },
+
+  unmatchedHtml(actual) {
+    const rows = [...(actual.unmatched || new Map()).entries()].sort((a,b)=>b[1]-a[1]);
+    return `<div class="capx-card"><h3>未分類住所・市区町村</h3><div class="scroll-x"><table class="tbl"><thead><tr><th>住所・市区町村</th><th class="r">件数</th></tr></thead><tbody>${rows.length?rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="r">${fmt(v)}</td></tr>`).join(''):'<tr><td colspan="2" class="capx-empty">未分類はありません</td></tr>'}</tbody></table></div></div>`;
+  },
+
+  bind() {
+    const ym = document.getElementById('capacity-ym');
+    if (ym) ym.addEventListener('change', ()=>this.render());
+    const days = document.getElementById('capacity-days');
+    if (days) days.addEventListener('change', ()=>this.render());
+    const base = document.getElementById('capacity-base');
+    if (base) base.addEventListener('change', ()=>this.render());
+
+    document.querySelectorAll('[data-capx-tab]').forEach(btn=>btn.addEventListener('click',()=>{ this._tab=btn.dataset.capxTab; this.render(); }));
+    document.querySelectorAll('[data-capx-detail]').forEach(btn=>btn.addEventListener('click',()=>this.showCities(Number(btn.dataset.capxDetail))));
+    document.querySelectorAll('[data-capx-cal-date]').forEach(inp=>inp.addEventListener('change',()=>{
+      const date = inp.dataset.capxCalDate, field = inp.dataset.capxCalField;
+      STATE.capacity.calendar = STATE.capacity.calendar || {};
+      STATE.capacity.calendar[date] = STATE.capacity.calendar[date] || {};
+      STATE.capacity.calendar[date][field] = inp.type === 'number' ? this.n(inp.value) : inp.value;
+      STORE.save();
+      this.render();
+    }));
+    const addMap = document.getElementById('capacity-add-map');
+    if (addMap) addMap.addEventListener('click',()=>{ STATE.capacity.mapping.push({pattern:'',area:'未分類',priority:1}); STORE.save(); this.render(); });
+    document.querySelectorAll('[data-capx-map-field]').forEach(inp=>inp.addEventListener('change',()=>{
+      const rows = STATE.capacity.mapping.slice().sort((a,b)=>this.n(b.priority)-this.n(a.priority));
+      const idx = Number(inp.closest('[data-capx-map-index]').dataset.capxMapIndex);
+      rows[idx][inp.dataset.capxMapField] = inp.type === 'number' ? this.n(inp.value) : inp.value;
+      STATE.capacity.mapping = rows;
+      STORE.save();
+      this.render();
+    }));
+    document.querySelectorAll('[data-capx-map-delete]').forEach(btn=>btn.addEventListener('click',()=>{
+      const rows = STATE.capacity.mapping.slice().sort((a,b)=>this.n(b.priority)-this.n(a.priority));
+      rows.splice(Number(btn.dataset.capxMapDelete),1);
+      STATE.capacity.mapping = rows;
+      STORE.save();
+      this.render();
+    }));
+    const addMaster = document.getElementById('capacity-add-master');
+    if (addMaster) addMaster.addEventListener('click',()=>{ STATE.capacity.areas['新規地区']={weekday:0,weekend:0,rows:[]}; STORE.save(); this.render(); });
+    document.querySelectorAll('[data-capx-master-field]').forEach(inp=>inp.addEventListener('change',()=>this.updateMaster(inp)));
+    document.querySelectorAll('[data-capx-master-delete]').forEach(btn=>btn.addEventListener('click',()=>{ delete STATE.capacity.areas[btn.dataset.capxMasterDelete]; STORE.save(); this.render(); }));
+  },
+
+  updateMaster(inp) {
+    const tr = inp.closest('[data-area]');
+    const old = tr.dataset.area;
+    const field = inp.dataset.capxMasterField;
+    const row = STATE.capacity.areas[old] || {weekday:0,weekend:0,rows:[]};
+    if (field === 'area') {
+      const name = this.normArea(inp.value);
+      if (name && name !== old) {
+        delete STATE.capacity.areas[old];
+        STATE.capacity.areas[name] = row;
+      }
+    } else {
+      row[field] = this.n(inp.value);
+      STATE.capacity.areas[old] = row;
+    }
+    STORE.save();
+    this.render();
+  },
+
+  showCities(idx) {
+    const row = this._lastRows[idx];
+    const box = document.getElementById('capacity-detail-box');
+    if (!box || !row) return;
+    const cities = Object.entries(row.cities || {}).sort((a,b)=>b[1]-a[1]);
+    box.innerHTML = cities.length ? cities.map(([c,n],i)=>`<div class="capx-city"><b>${i+1}</b><span>${esc(c)}</span><em>${fmt(n)}件</em></div>`).join('') : '<div class="capx-empty">該当なし</div>';
+  },
+
+  saveSettings() {},
+
+  async importCapacityExcel(file) {
+    if (!file) return;
+    await IMPORT.importCapacityExcel(file);
+    this.render();
+  },
+
+  importAreaCsv(files) {
+    if (!files || !files.length) return;
+    if (window.FIELD_PRODUCT_IMPORT2?.handleFiles) FIELD_PRODUCT_IMPORT2.handleFiles(files);
+    else if (window.FIELD_WORKER_IMPORT2?.handleFiles) FIELD_WORKER_IMPORT2.handleFiles(files);
+    UI.toast('CSVを取り込みました。完了後に再集計してください。','info');
+  },
+
+  clearMaster() {
+    if (!confirm('キャパマスタを削除しますか？')) return;
+    STATE.capacity = { areas:{}, mapping:this.defaultMapping(), calendar:{} };
+    STORE.save();
+    this.render();
+  },
+
+  populateYMSel() {},
+
+  ensureStyle() {
+    if (document.getElementById('capacity-ui-fixed-style')) return;
+    const st = document.createElement('style');
+    st.id = 'capacity-ui-fixed-style';
+    st.textContent = `
+      .capx{display:grid;gap:14px}.capx-card{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:18px}.capx-control{border-top:3px solid var(--navy)}.capx-headline{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.capx h2{margin:0;font-size:22px;font-weight:900}.capx h3{margin:0 0 12px;font-size:16px;font-weight:900}.capx p{margin:4px 0 0;color:var(--text2);font-size:12px;font-weight:700}.capx-cond{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.capx-cond label{font-size:11px;color:var(--text2);font-weight:800}.capx-cond select,.capx-cond input{display:block;margin-top:4px;min-width:160px}.capx-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.capx-note,.capx-note2{font-size:11px;color:var(--text3);line-height:1.7;margin-top:8px}.capx-kpis{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.capx-kpi{position:relative;background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px 18px;box-shadow:0 10px 22px rgba(15,23,42,.05);overflow:hidden}.capx-kpi:before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:#2563eb}.capx-kpi.green:before{background:#059669}.capx-kpi.over:before{background:#dc2626}.capx-kpi.amber:before{background:#f97316}.capx-kpi span{display:block;color:var(--text2);font-size:12px;font-weight:900;margin-bottom:6px}.capx-kpi b{font-size:28px;font-weight:900;color:var(--text)}.capx-kpi em{display:block;font-style:normal;color:var(--text2);font-size:12px;font-weight:800;margin-top:4px}.capx-tabs{display:flex;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:16px;padding:12px}.capx-tabs button{border:1px solid var(--border2);background:#fff;border-radius:999px;padding:10px 16px;font-weight:900;cursor:pointer}.capx-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}.capx-grid{display:grid;grid-template-columns:minmax(620px,1.4fr) minmax(320px,.8fr);gap:14px}.capx-link{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer}.capx-risk-over td{background:#fff7f7}.capx-risk-full td{background:#fffaf0}.capx-empty{text-align:center;color:var(--text3);font-weight:800;padding:22px}.capx-calendar{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:8px;background:#f8fafc;padding:10px;border-radius:14px}.capx-week{text-align:center;font-size:12px;font-weight:900;background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px}.capx-week.sun{color:#b91c1c}.capx-week.sat{color:#1d4ed8}.capx-day{min-height:140px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:9px;display:grid;gap:7px}.capx-day.weekend{background:#eff6ff}.capx-day.ok{background:#ecfdf5}.capx-day.full{background:#fff7ed}.capx-day.over{background:#fef2f2}.capx-day.blank{background:transparent;border:0}.capx-daytop{display:flex;justify-content:space-between;gap:8px}.capx-daytop b{font-size:18px}.capx-daytop span{font-size:11px;font-weight:800;color:var(--text2)}.capx-city{display:grid;grid-template-columns:32px 1fr 80px;gap:8px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-bottom:7px}.capx-city b{color:#1d4ed8}.capx-city span{font-weight:900}.capx-city em{font-style:normal;text-align:right;font-weight:900}@media(max-width:900px){.capx-headline{flex-direction:column}.capx-kpis{grid-template-columns:repeat(2,1fr)}.capx-grid{grid-template-columns:1fr}.capx-calendar{grid-template-columns:repeat(2,1fr)}.capx-week{display:none}}
+    `;
+    document.head.appendChild(st);
+  }
 };
 
 
