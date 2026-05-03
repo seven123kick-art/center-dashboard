@@ -570,7 +570,7 @@
           const share = metric === 'amount' ? fmtPct(p.amount,total.amount) : fmtPct(p.count,total.count);
 
           return `
-            <details class="fa3-pref-card" ${idx < 3 ? 'open' : ''}>
+            <details class="fa3-pref-card">
               <summary>
                 <div class="fa3-pref-main">
                   <span>${esc(p.label)}</span>
