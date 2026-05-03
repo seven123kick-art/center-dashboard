@@ -1,4 +1,4 @@
-/* field_area.js : エリア分析ビュー 全国郵便番号マスタ分割読込対応・実務UI版
+/* field_area.js : エリア分析ビュー 都道府県・市区町村・町域対応・実務UI版
    2026-05-03
    目的：
    - エリア別の件数構成・売上構成を見やすく表示
@@ -10,7 +10,7 @@
 'use strict';
 
 (function(){
-  const FLAG = '__FIELD_AREA_PRO_UI_20260503__';
+  const FLAG = '__FIELD_AREA_PREF_CITY_TOWN_20260503__';
   if (window[FLAG]) return;
   window[FLAG] = true;
 
@@ -71,11 +71,12 @@
     const pref = prefMatch ? prefMatch[1] : '';
     const rest = prefMatch ? t.slice(pref.length) : t;
     let city = '';
-    const wardCity = rest.match(/^(.+?市.+?区)/);
-    const muni = rest.match(/^(.+?[市区町村])/);
-    if (wardCity) city = wardCity[1];
-    else if (muni) city = muni[1];
-    return { pref, city };
+    let town = '';
+    const wardCity = rest.match(/^(.+?市.+?区)(.*)$/);
+    const muni = rest.match(/^(.+?[市区町村])(.*)$/);
+    if (wardCity) { city = wardCity[1]; town = wardCity[2] || ''; }
+    else if (muni) { city = muni[1]; town = muni[2] || ''; }
+    return { pref, city, town };
   }
 
   function areaFromZip(zipRaw){
@@ -88,31 +89,27 @@
 
     if (!hit) return null;
 
-    if (Array.isArray(hit)) return { zip, pref: clean(hit[0]) || '未設定', city: clean(hit[1]) || '未設定', zipStatus:'OK' };
+    if (Array.isArray(hit)) return { zip, pref: clean(hit[0]) || '未設定', city: clean(hit[1]) || '未設定', town: clean(hit[2]) || '', zipStatus:'OK' };
 
     if (obj(hit)) {
       const pref = clean(hit.pref || hit.prefecture || hit[0]);
       const city = clean(hit.city || hit.municipality || hit.addr1 || hit[1]);
-      return { zip, pref: pref || '未設定', city: city || '未設定', zipStatus:'OK' };
+      const town = clean(hit.town || hit.area || hit.addr2 || hit[2]);
+      return { zip, pref: pref || '未設定', city: city || '未設定', town: town || '', zipStatus:'OK' };
     }
 
     const p = splitPrefCity(hit);
-    return { zip, pref: p.pref || '未設定', city: p.city || '未設定', zipStatus:'OK' };
+    return { zip, pref: p.pref || '未設定', city: p.city || '未設定', town: p.town || '', zipStatus:'OK' };
   }
 
   function areaFromAddress(address){
-    const t = clean(address).replace(/\s+/g,'');
-    if (!t) return { pref:'未設定', city:'未設定', zipStatus:'NO_ADDRESS' };
-    const prefMatch = t.match(/^(北海道|東京都|(?:京都|大阪)府|.{2,3}県)/);
-    const pref = prefMatch ? prefMatch[1] : '未設定';
-    const rest = prefMatch ? t.slice(pref.length) : t;
-    let city = rest;
-    const wardCity = rest.match(/^(.+?市.+?区)/);
-    const muni = rest.match(/^(.+?[市区町村])/);
-    if (wardCity) city = wardCity[1];
-    else if (muni) city = muni[1];
-    else city = rest.slice(0,12) || '未設定';
-    return { pref, city, zipStatus:'FALLBACK' };
+    const p = splitPrefCity(address);
+    return {
+      pref: p.pref || '未設定',
+      city: p.city || '未設定',
+      town: p.town || '',
+      zipStatus: address ? 'FALLBACK' : 'NO_ADDRESS'
+    };
   }
 
   function resolveArea(t){
@@ -139,8 +136,10 @@
     const resolved = resolveArea(base);
     const pref = clean(t.pref || t.prefecture || t['都道府県']) || resolved.pref;
     const city = clean(t.city || t.municipality || t['市区町村']) || resolved.city;
-    const area = pref === '未設定' ? city : pref + city;
-    return { ...base, pref: pref || '未設定', city: city || '未設定', area: area || '未設定', zipStatus: resolved.zipStatus || 'UNKNOWN' };
+    const town = clean(t.town || t['町域'] || t['町名']) || resolved.town || '';
+    const cityLabel = pref === '未設定' ? city : pref + city;
+    const townLabel = town ? cityLabel + town : cityLabel;
+    return { ...base, pref: pref || '未設定', city: city || '未設定', town, area: cityLabel || '未設定', townLabel: townLabel || cityLabel || '未設定', zipStatus: resolved.zipStatus || 'UNKNOWN' };
   }
 
   function normalizeProductRecord(x, source){
@@ -167,7 +166,7 @@
         if (!base.zip && t.zip) base.zip = t.zip;
         if (!base.address && t.address) base.address = t.address;
         if (base.zipStatus !== 'OK' && t.zipStatus === 'OK') {
-          base.pref = t.pref; base.city = t.city; base.area = t.area; base.zipStatus = 'OK';
+          base.pref = t.pref; base.city = t.city; base.town = t.town; base.area = t.area; base.townLabel = t.townLabel; base.zipStatus = 'OK';
         }
       }
     });
@@ -275,13 +274,16 @@
       if (level === 'pref') {
         key = nt.pref || '未設定';
         label = key;
+      } else if (level === 'town') {
+        key = nt.townLabel || nt.area || '未設定';
+        label = key;
       } else if (level === 'city') {
-        key = nt.city || '未設定';
-        label = nt.pref && nt.pref !== '未設定' ? nt.pref + nt.city : nt.city;
+        key = nt.area || '未設定';
+        label = key;
       }
 
       if (!map.has(key)) {
-        map.set(key, { label, pref:nt.pref || '未設定', city:nt.city || '未設定', count:0, amount:0, zipNg:0 });
+        map.set(key, { label, pref:nt.pref || '未設定', city:nt.city || '未設定', town:nt.town || '', count:0, amount:0, zipNg:0 });
       }
       const row = map.get(key);
       row.count += 1;
@@ -323,8 +325,9 @@
   function controlsHtml(mode, sortMode, metric){
     return `
       <div class="fa-tabs">
-        <button class="fa-tab ${mode === 'ranking' ? 'active' : ''}" data-fa-mode="ranking">ランキング</button>
+        <button class="fa-tab ${mode === 'ranking' ? 'active' : ''}" data-fa-mode="ranking">市区町村</button>
         <button class="fa-tab ${mode === 'pref' ? 'active' : ''}" data-fa-mode="pref">都道府県</button>
+        <button class="fa-tab ${mode === 'town' ? 'active' : ''}" data-fa-mode="town">町域</button>
         <button class="fa-tab ${mode === 'history' ? 'active' : ''}" data-fa-mode="history">月別推移</button>
       </div>
       <div class="fa-control-right">
@@ -501,7 +504,7 @@
       const mode = getMode();
       const sortMode = getSortMode();
       const metric = getMetric();
-      const level = mode === 'pref' ? 'pref' : 'area';
+      const level = mode === 'pref' ? 'pref' : (mode === 'town' ? 'town' : 'city');
 
       let rows = buildRows(rec, level);
       rows = sortRows(rows, sortMode);
@@ -526,8 +529,10 @@
         box.insertAdjacentHTML('beforeend', historyHtml(records, ym));
       } else if (mode === 'pref') {
         box.insertAdjacentHTML('beforeend', prefHtml(rows, metric, sortMode));
+      } else if (mode === 'town') {
+        box.insertAdjacentHTML('beforeend', rankingHtml(rows, metric).replace('エリア別ランキング', '町域別ランキング'));
       } else {
-        box.insertAdjacentHTML('beforeend', rankingHtml(rows, metric));
+        box.insertAdjacentHTML('beforeend', rankingHtml(rows, metric).replace('エリア別ランキング', '市区町村別ランキング'));
       }
 
       bindInlineControls();
