@@ -168,44 +168,18 @@ IMPORT.deleteFieldData = function(ym) {
   }
 
   function fieldAccessReadStorageArray(name){
-    const out = [];
-    try {
-      if (typeof STORE !== 'undefined' && STORE._g) {
-        const direct = STORE._g(name);
-        if (Array.isArray(direct)) out.push(...direct);
-      }
-    } catch(e) {}
-    try {
-      const prefix = (typeof STORE !== 'undefined' && STORE._p) ? STORE._p : `mgmt5_${CENTER.id}_`;
-      for (let i=0; i<localStorage.length; i++) {
-        const key = localStorage.key(i) || '';
-        if (!key.startsWith(prefix)) continue;
-        if (key.endsWith(name)) {
-          const v = JSON.parse(localStorage.getItem(key) || '[]');
-          if (Array.isArray(v)) out.push(...v);
-        }
-        if (key.endsWith('full_state')) {
-          const v = JSON.parse(localStorage.getItem(key) || '{}');
-          if (v && Array.isArray(v[name])) out.push(...v[name]);
-        }
-      }
-    } catch(e) {}
-    return out;
+    // v29: 重量化・別センター混入防止のため、画面描画時のlocalStorage全探索は行わない。
+    // app.js / STORE.load がセンター別の workerCsvData / productAddressData をSTATEへ復元する。
+    return [];
   }
 
   window.FIELD_DATA_ACCESS = {
     getWorkerRecords(){
-      const list = [
-        ...safeArray(STATE.workerCsvData),
-        ...fieldAccessReadStorageArray('workerCsvData')
-      ];
+      const list = safeArray(STATE.workerCsvData);
       return fieldAccessUnique(fieldAccessClone(list), 'worker');
     },
     getProductRecords(){
-      const list = [
-        ...safeArray(STATE.productAddressData),
-        ...fieldAccessReadStorageArray('productAddressData')
-      ];
+      const list = safeArray(STATE.productAddressData);
       return fieldAccessUnique(fieldAccessClone(list), 'product');
     },
     getAllYms(){
@@ -228,10 +202,11 @@ IMPORT.deleteFieldData = function(ym) {
   const originalStoreSave = STORE.save.bind(STORE);
   STORE.load = function(){
     originalStoreLoad();
-    STATE.workerCsvData = this._g('workerCsvData') || [];
-    STATE.productAddressData = this._g('productAddressData') || [];
+    STATE.workerCsvData = Array.isArray(STATE.workerCsvData) && STATE.workerCsvData.length ? STATE.workerCsvData : (this._g('workerCsvData') || []);
+    STATE.productAddressData = Array.isArray(STATE.productAddressData) && STATE.productAddressData.length ? STATE.productAddressData : (this._g('productAddressData') || []);
     ensureState();
     if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
+    if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
   };
   STORE.save = function(){
     ensureState();
