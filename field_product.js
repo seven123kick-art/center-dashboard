@@ -130,6 +130,14 @@
       out.worker.push({ ...x, ym, __source:source });
     }
 
+    // field_core.js の統一アクセサを最優先する。
+    // これにより、年度プルダウンが出ない・別センターのデータを拾う・削除済みが復活する問題を防ぐ。
+    if (window.FIELD_DATA_ACCESS) {
+      FIELD_DATA_ACCESS.getProductRecords().forEach((x,i)=>pushProduct(x, `FIELD_DATA_ACCESS.product.${i}`));
+      FIELD_DATA_ACCESS.getWorkerRecords().forEach((x,i)=>pushWorker(x, `FIELD_DATA_ACCESS.worker.${i}`));
+      if (out.product.length || out.worker.length) return out;
+    }
+
     const st = window.STATE || {};
     arr(st.productAddressData).forEach((x,i)=>pushProduct(x, `STATE.productAddressData.${i}`));
     arr(st.workerCsvData).forEach((x,i)=>pushWorker(x, `STATE.workerCsvData.${i}`));
