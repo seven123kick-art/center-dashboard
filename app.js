@@ -2882,9 +2882,7 @@ const CAPACITY_UI = {
             <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none" onchange="CAPACITY_UI.importAreaCsv(this.files)">
             <button class="btn" onclick="CAPACITY_UI.render()">再集計</button>
             <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()">キャパ区分を初期化</button>
-            <span id="capacity-msg">${hasCap ? `キャパ区分登録済：${STATE.capacity.capacityGroups.length}区分` : '荷主キャパ区分が未作成です'}</span>
           </div>
-          <div class="capx-note">旧Excelキャパ・旧地区マスタは使用しません。先に「荷主キャパ」で区／市を選択して区分を作成すると、月別・日別・曜日・カレンダーへ自動反映します。</div>
         </div>
 
         <div class="capx-kpis">
@@ -2912,8 +2910,7 @@ const CAPACITY_UI = {
   monthlyHtml(rows) {
     if (!this.hasValidCapacityGroups()) {
       return `<div class="capx-card capx-empty">
-        <h3>荷主キャパ区分を作成してください</h3>
-        <p class="capx-note2">現在は旧Excelキャパ・旧地区マスタを使わない設計です。先に「荷主キャパ」タブで、区／市を選択して区分を作成し、コジマ＋ビック・でんきち・エディオンのキャパを入力してください。</p>
+        <h3>まだ区分が作成されていません</h3>
         <button class="btn btn-primary" type="button" data-capx-tab="shipperCap">荷主キャパを作成する</button>
       </div>`;
     }
@@ -2930,8 +2927,7 @@ const CAPACITY_UI = {
 
   needCapacityGroupHtml() {
     return `<div class="capx-card capx-empty">
-      <h3>荷主キャパ区分が未作成です</h3>
-      <p class="capx-note2">旧地区キャパは参照しません。「荷主キャパ」タブで区／市を選び、区分名と荷主別キャパを入力してください。</p>
+      <h3>まだ区分が作成されていません</h3>
       <button class="btn btn-primary" type="button" data-capx-tab="shipperCap">荷主キャパを作成する</button>
     </div>`;
   },
@@ -3803,7 +3799,8 @@ const CAPACITY_UI = {
   },
 
   clearMaster() {
-    if (!confirm('作成済みの荷主キャパ区分を初期化しますか？\n※商品・住所CSV、荷主判定ルール、カレンダー補正は残します。')) return;
+    if (!confirm('作成済みのキャパ区分をすべて削除します。よろしいですか？')) return;
+    if (!confirm('本当に削除しますか？この操作は元に戻せません。')) return;
     this.ensureState();
     STATE.capacity.capacityGroups = [];
     STATE.capacity.areas = {};
@@ -3811,6 +3808,7 @@ const CAPACITY_UI = {
     STATE.capacity.rowCount = 0;
     STORE.save();
     this.render();
+    UI.toast('キャパ区分を初期化しました', 'warn');
   },
 
   populateYMSel() {},
