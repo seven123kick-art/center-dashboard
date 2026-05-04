@@ -360,6 +360,7 @@ const STATE = {
   memos:     {},    // {ym: {text,savedAt}}
   library:   [],    // 過去資料
   reportKnowledge: { policies:{}, references:[] }, // 会議報告書用：年度半期方針・参考資料メモ
+  deleted: { datasets:{}, planFiscalYears:{}, historyFiscalYears:{}, historyMonths:{}, workerMonths:{}, productMonths:{}, fieldMonths:{} }, // 削除済み復活防止用
   view:      'dashboard',
   selYM:     null,  // 現在選択中のYM
   shipperMode: 'group',
@@ -443,6 +444,101 @@ function sanitizedCloneForExport(obj) {
   }
 }
 
+
+/* ════════ 削除済み復活防止（クラウド再取得対策） ════════════════
+   ローカルで削除した後に Supabase の古い full_state / plan / field / skdl から戻らないよう、
+   「削除済みマーカー」を保持して、同期・マージ時に必ず削除を優先する。
+*/
+function normalizeDeletedState(raw) {
+  const base = { datasets:{}, planFiscalYears:{}, historyFiscalYears:{}, historyMonths:{}, workerMonths:{}, productMonths:{}, fieldMonths:{} };
+  if (!raw || typeof raw !== 'object') return base;
+  Object.keys(base).forEach(k => {
+    if (raw[k] && typeof raw[k] === 'object' && !Array.isArray(raw[k])) base[k] = { ...raw[k] };
+  });
+  return base;
+}
+function ensureDeletedState() {
+  STATE.deleted = normalizeDeletedState(STATE.deleted);
+  return STATE.deleted;
+}
+function dataDeleteKey(ym, type='confirmed') {
+  return `${String(ym || '')}_${String(type || 'confirmed')}`;
+}
+function markDataDeleted(kind, key) {
+  const d = ensureDeletedState();
+  if (!d[kind]) d[kind] = {};
+  d[kind][String(key)] = new Date().toISOString();
+  return d[kind][String(key)];
+}
+function clearDataDeleted(kind, key) {
+  const d = ensureDeletedState();
+  if (d[kind]) delete d[kind][String(key)];
+}
+function mergeDeletedStates(a, b) {
+  const out = normalizeDeletedState(a);
+  const bb = normalizeDeletedState(b);
+  Object.keys(out).forEach(kind => {
+    out[kind] = { ...(out[kind] || {}) };
+    Object.entries(bb[kind] || {}).forEach(([key, ts]) => {
+      if (!out[kind][key] || String(ts || '') > String(out[kind][key] || '')) out[kind][key] = ts;
+    });
+  });
+  return out;
+}
+function deletedAt(kind, key) {
+  const d = ensureDeletedState();
+  return d[kind] ? d[kind][String(key)] : null;
+}
+function isDeletedSince(kind, key, itemTime) {
+  const del = deletedAt(kind, key);
+  if (!del) return false;
+  if (!itemTime) return true;
+  return String(del) >= String(itemTime);
+}
+function applyDeletionTombstonesToState(target = STATE) {
+  const d = normalizeDeletedState(target.deleted || STATE.deleted);
+
+  if (Array.isArray(target.datasets)) {
+    target.datasets = target.datasets.filter(ds => {
+      if (!ds || !ds.ym) return false;
+      const source = ds.source || 'csv';
+      const time = ds.importedAt || ds.updatedAt || ds.savedAt || '';
+      if (source === 'history') {
+        const fy = String(ds.fiscalYear || fiscalYearFromYM(ds.ym));
+        if (d.historyFiscalYears[fy]) return false;
+        if (d.historyMonths[ds.ym]) return false;
+      } else {
+        const key = dataDeleteKey(ds.ym, ds.type || 'confirmed');
+        if (isDeletedSince('datasets', key, time)) return false;
+      }
+      return true;
+    });
+  }
+
+  if (target.planData && typeof target.planData === 'object') {
+    Object.keys(d.planFiscalYears || {}).forEach(fy => { if (target.planData) delete target.planData[fy]; });
+  }
+
+  if (Array.isArray(target.workerCsvData)) {
+    target.workerCsvData = target.workerCsvData.filter(r => r && r.ym && !d.workerMonths[r.ym] && !d.fieldMonths[r.ym]);
+  }
+  if (Array.isArray(target.productAddressData)) {
+    target.productAddressData = target.productAddressData.filter(r => r && r.ym && !d.productMonths[r.ym] && !d.fieldMonths[r.ym]);
+  }
+  if (Array.isArray(target.fieldData)) {
+    target.fieldData = target.fieldData.filter(r => r && r.ym && !d.fieldMonths[r.ym] && !d.workerMonths[r.ym] && !d.productMonths[r.ym]);
+  }
+  if (Array.isArray(target.areaData)) {
+    target.areaData = target.areaData.filter(r => r && r.ym && !d.fieldMonths[r.ym] && !d.workerMonths[r.ym] && !d.productMonths[r.ym]);
+  }
+
+  target.deleted = d;
+  return target;
+}
+window.markDataDeleted = markDataDeleted;
+window.clearDataDeleted = clearDataDeleted;
+window.applyDeletionTombstonesToState = applyDeletionTombstonesToState;
+
 /* ════════ §4 STORE（localStorage、センター別） ════════════════ */
 const STORE = {
   _p: `mgmt5_${CENTER.id}_`,
@@ -459,7 +555,9 @@ const STORE = {
     STATE.memos     = this._g('memos')     || {};
     STATE.library   = this._g('library')   || [];
     STATE.reportKnowledge = normalizeReportKnowledge(this._g('reportKnowledge') || STATE.reportKnowledge);
+    STATE.deleted = normalizeDeletedState(this._g('deleted') || STATE.deleted);
     sanitizePersonalDataState(STATE);
+    applyDeletionTombstonesToState(STATE);
   },
 
   save() {
@@ -472,6 +570,7 @@ const STORE = {
     this._s('memos',     STATE.memos);
     this._s('library',   STATE.library);
     this._s('reportKnowledge', STATE.reportKnowledge);
+    this._s('deleted', STATE.deleted);
   },
 
   exportJSON() {
@@ -479,7 +578,7 @@ const STORE = {
     const blob = new Blob([JSON.stringify({
       center:CENTER.id, exportedAt:new Date().toISOString(),
       datasets:STATE.datasets, fieldData:STATE.fieldData, areaData:STATE.areaData,
-      capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos, library:STATE.library, reportKnowledge:STATE.reportKnowledge,
+      capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos, library:STATE.library, reportKnowledge:STATE.reportKnowledge, deleted:STATE.deleted,
     },null,2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -500,7 +599,9 @@ const STORE = {
       if (d.memos)     STATE.memos     = d.memos;
       if (d.library)   STATE.library   = d.library;
       if (d.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(d.reportKnowledge);
+      if (d.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, d.deleted);
       sanitizePersonalDataState(STATE);
+      applyDeletionTombstonesToState(STATE);
       this.save();
       NAV.refresh();
       UI.toast('バックアップを復元しました');
@@ -916,7 +1017,9 @@ ${ds.fileName || 'ファイル名なし'}
     if (!confirm(`${ymLabel(ym)}の${typeLabel}CSVを削除しますか？${detail}
 
 ※収支補完・計画データは削除しません。`)) return;
+    markDataDeleted('datasets', dataDeleteKey(ym, type));
     STATE.datasets = STATE.datasets.filter(d=>!(d.ym===ym && (d.type || 'confirmed') === type && d.source !== 'history'));
+    applyDeletionTombstonesToState(STATE);
     STORE.save();
     try {
       if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD._datasetKey(ym, type));
@@ -1085,6 +1188,7 @@ const CLOUD = {
       hasMemos: !!(STATE.memos && Object.keys(STATE.memos).length),
       hasLibrary: !!(STATE.library && STATE.library.length),
       hasReportKnowledge: !!(STATE.reportKnowledge && ((STATE.reportKnowledge.references||[]).length || Object.keys(STATE.reportKnowledge.policies||{}).length)),
+      deleted: STATE.deleted || {},
     };
   },
   _makeFullState() {
@@ -1102,6 +1206,7 @@ const CLOUD = {
       memos: STATE.memos || {},
       library: STATE.library || [],
       reportKnowledge: STATE.reportKnowledge || { policies:{}, references:[] },
+      deleted: STATE.deleted || {},
     };
   },
   _applyFullState(full) {
@@ -1116,7 +1221,9 @@ const CLOUD = {
     if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
     if (Array.isArray(full.library)) STATE.library = full.library;
     if (full.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(full.reportKnowledge);
+    STATE.deleted = mergeDeletedStates(STATE.deleted, full.deleted || {});
     sanitizePersonalDataState(STATE);
+    applyDeletionTombstonesToState(STATE);
     if (typeof AUTO_SYNC !== 'undefined') {
       AUTO_SYNC.withoutSync(() => STORE.save());
     } else {
@@ -1198,8 +1305,8 @@ const CLOUD = {
     try {
       for (const ds of STATE.datasets.filter(d => d.source !== 'history')) await this._uploadJSON(this._datasetKey(ds.ym, ds.type || 'confirmed'), ds);
       if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
-      if (STATE.fieldData && STATE.fieldData.length) await this._uploadJSON(this._fieldKey(), STATE.fieldData);
-      if (STATE.planData && Object.keys(STATE.planData).length) await this._uploadJSON(this._planKey(), STATE.planData);
+      await this._uploadJSON(this._fieldKey(), STATE.fieldData || []);
+      await this._uploadJSON(this._planKey(), STATE.planData || {});
       if (STATE.memos && Object.keys(STATE.memos).length) await this._uploadJSON(this._memosKey(), STATE.memos);
       if (STATE.library && STATE.library.length) await this._uploadJSON(this._libraryKey(), STATE.library);
       // 旧形式data_v5.jsonに個人情報を含む古い現場データが残る可能性があるため削除する。
@@ -1215,10 +1322,12 @@ const CLOUD = {
   async pullManifestAndMissing() {
     const manifest = await this._downloadJSON(this._manifestKey());
     if (!manifest || !Array.isArray(manifest.datasets)) return { ok:false, error:'manifestなし' };
+    if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
     let changed = 0;
     for (const meta of manifest.datasets) {
       if (!meta.ym) continue;
       const metaType = meta.type || 'confirmed';
+      if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
       const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
       if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
         const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
@@ -1239,6 +1348,7 @@ const CLOUD = {
       const cloudPlan = await this._downloadJSON(this._planKey());
       if (cloudPlan && typeof cloudPlan === 'object') {
         STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
+        applyDeletionTombstonesToState(STATE);
         changed++;
       }
     }
@@ -1253,6 +1363,7 @@ const CLOUD = {
       if (Array.isArray(library)) { STATE.library = library; changed++; }
     }
 
+    applyDeletionTombstonesToState(STATE);
     if (changed) STORE.save();
     UI.updateCloudBadge('ok');
     return { ok:true, changed };
@@ -1266,6 +1377,8 @@ const CLOUD = {
     if (j.planData)  STATE.planData  = normalizePlanData(j.planData);
     if (j.memos)     STATE.memos     = j.memos;
     if (j.library)   STATE.library   = j.library;
+    if (j.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, j.deleted);
+    applyDeletionTombstonesToState(STATE);
     STORE.save();
     UI.updateCloudBadge('ok');
     return { ok:true };
@@ -1323,7 +1436,9 @@ const CLOUD = {
         ? mergeFullState(localFull, cloudFull)
         : localFull;
 
-      // 一度適用してから、manifest/skdlの月別データも必ず取得
+      // 削除済みマーカーを先に統合し、削除を優先してから適用する
+      mergedBase.deleted = mergeDeletedStates(localFull.deleted || {}, cloudFull?.deleted || {});
+      applyDeletionTombstonesToState(mergedBase);
       this._applyFullState(mergedBase);
       this._busy = false;
       const manifestResult = await this.pullManifestAndMissing();
@@ -1333,9 +1448,9 @@ const CLOUD = {
       const finalFull = this._makeFullState();
       await this._uploadJSON(this._fullStateKey(), finalFull);
 
-      if (STATE.planData && Object.keys(STATE.planData).length) await this._uploadJSON(this._planKey(), STATE.planData);
+      await this._uploadJSON(this._planKey(), STATE.planData || {});
       if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
-      if (STATE.fieldData && STATE.fieldData.length) await this._uploadJSON(this._fieldKey(), STATE.fieldData);
+      await this._uploadJSON(this._fieldKey(), STATE.fieldData || []);
       try { const sb = await this._client(); if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey()]); } catch(e) {}
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
 
@@ -1820,20 +1935,25 @@ function mergeDatasetsByImportedAt(localList, cloudList) {
 function mergeFullState(localFull, cloudFull) {
   const local = localFull || {};
   const cloud = cloudFull || {};
-  return {
-    version: 15,
+  const deleted = mergeDeletedStates(local.deleted || {}, cloud.deleted || {});
+  const merged = {
+    version: 31,
     center: CENTER.id,
     savedAt: new Date().toISOString(),
     datasets: mergeDatasetsByImportedAt(local.datasets || [], cloud.datasets || []),
-    fieldData: (cloud.fieldData && cloud.fieldData.length) ? cloud.fieldData : (local.fieldData || []),
-    areaData: (cloud.areaData && cloud.areaData.length) ? cloud.areaData : (local.areaData || []),
+    fieldData: (local.fieldData && local.fieldData.length) ? local.fieldData : (cloud.fieldData || []),
+    areaData: (local.areaData && local.areaData.length) ? local.areaData : (cloud.areaData || []),
+    workerCsvData: (local.workerCsvData && local.workerCsvData.length) ? local.workerCsvData : (cloud.workerCsvData || []),
+    productAddressData: (local.productAddressData && local.productAddressData.length) ? local.productAddressData : (cloud.productAddressData || []),
     capacity: cloud.capacity || local.capacity || null,
     planData: mergePlanDataByUpdatedAt(local.planData || {}, cloud.planData || {}),
     fiscalYear: local.fiscalYear || cloud.fiscalYear || null,
     memos: { ...(local.memos || {}), ...(cloud.memos || {}) },
     library: (cloud.library && cloud.library.length) ? cloud.library : (local.library || []),
     reportKnowledge: mergeReportKnowledge(local.reportKnowledge || {}, cloud.reportKnowledge || {}),
+    deleted,
   };
+  return applyDeletionTombstonesToState(merged);
 }
 
 
@@ -3398,7 +3518,10 @@ window.DATA_STORAGE_TABLE = {
     if (!STATE.planData || !STATE.planData[fy]) { UI.toast(`${fy}年度の計画データは未登録です`,'warn'); return; }
     if (!confirm(`${fy}年度の計画データを削除しますか？
 他年度は削除しません。`)) return;
+    markDataDeleted('planFiscalYears', fy);
     delete STATE.planData[fy];
+    applyDeletionTombstonesToState(STATE);
+    try { if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD._planKey()); } catch(e) {}
     await this._syncAfterDelete(`${fy}年度の計画データ`);
     UI.toast(`${fy}年度の計画データを削除しました`);
   },
@@ -3408,8 +3531,9 @@ window.DATA_STORAGE_TABLE = {
     if (!rows.length) { UI.toast(`${fy}年度の収支補完データは未登録です`,'warn'); return; }
     if (!confirm(`${fy}年度の収支補完データ ${rows.length}件を削除しますか？
 通常CSV・計画データは削除しません。`)) return;
+    markDataDeleted('historyFiscalYears', fy);
     STATE.datasets = (STATE.datasets || []).filter(d => !(storageIsHistory(d) && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy)));
-    // 収支補完は full_state 側に保持するため、個別datasetキーは削除しない（通常CSVとのキー衝突を防止）。
+    applyDeletionTombstonesToState(STATE);
     await this._syncAfterDelete(`${fy}年度の収支補完データ`);
     UI.toast(`${fy}年度の収支補完データを削除しました`);
   },
@@ -3419,8 +3543,9 @@ window.DATA_STORAGE_TABLE = {
     if (!rows.length) { UI.toast(`${ymLabel(ym)}の収支補完は未登録です`,'warn'); return; }
     if (!confirm(`${ymLabel(ym)}の収支補完データを削除しますか？
 通常CSV・計画データは削除しません。`)) return;
+    markDataDeleted('historyMonths', ym);
     STATE.datasets = (STATE.datasets || []).filter(d => !(storageIsHistory(d) && d.ym === ym));
-    // 収支補完は full_state 側に保持するため、個別datasetキーは削除しない（通常CSVとのキー衝突を防止）。
+    applyDeletionTombstonesToState(STATE);
     await this._syncAfterDelete(`${ymLabel(ym)}の収支補完データ`);
     UI.toast(`${ymLabel(ym)}の収支補完データを削除しました`);
   },
@@ -3431,7 +3556,9 @@ window.DATA_STORAGE_TABLE = {
     const label = type === 'daily' ? '速報CSV' : type === 'confirmed' ? '確定CSV' : '収支CSV';
     if (!confirm(`${ymLabel(ym)}の${label} ${rows.length}件を削除しますか？
 収支補完・計画データは削除しません。`)) return;
+    rows.forEach(d => markDataDeleted('datasets', dataDeleteKey(d.ym, d.type || 'confirmed')));
     STATE.datasets = (STATE.datasets || []).filter(d => !(d.ym === ym && d.source !== 'history' && (!type || (d.type || 'confirmed') === type)));
+    applyDeletionTombstonesToState(STATE);
     try {
       for (const d of rows) {
         if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD._datasetKey(d.ym, d.type || 'confirmed'));
@@ -4265,6 +4392,7 @@ const PLAN = {
       if (!ok) return;
       delete STATE.planData[fy];
     }
+    clearDataDeleted('planFiscalYears', fy);
     STATE.planData[fy] = {
       rows: plan,
       fiscalYear: fy,
@@ -4289,7 +4417,9 @@ const PLAN = {
     const fy = getSelectedFiscalYear('plan-year-sel');
     if (!STATE.planData[fy]) { UI.toast(`${fy}年度の計画データは未登録です`, 'warn'); return; }
     if (!confirm(`${fy}年度の計画データを削除しますか？\n他年度は削除しません。`)) return;
+    markDataDeleted('planFiscalYears', fy);
     delete STATE.planData[fy];
+    applyDeletionTombstonesToState(STATE);
     STORE.save();
     const msg = document.getElementById('plan-import-msg');
     if (msg) msg.textContent = `${fy}年度の計画データを削除しました`;
@@ -4319,6 +4449,8 @@ const TSV_IMPORT = {
     if (!rows.length) { UI.toast('データが空です','warn'); return; }
 
     // 年度の収支補完のみ全削除。通常CSVは残す。
+    clearDataDeleted('historyFiscalYears', fy);
+    monthsOfFiscalYear(fy).forEach(ym => clearDataDeleted('historyMonths', ym));
     STATE.datasets = STATE.datasets.filter(d => !(d.source === 'history' && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy)));
 
     const months = ['04','05','06','07','08','09','10','11','12','01','02','03'];
@@ -4360,7 +4492,9 @@ const TSV_IMPORT = {
     if (!rows.length) { UI.toast(`${fy}年度の収支補完データは未登録です`, 'warn'); return; }
     if (!confirm(`${fy}年度の収支補完データ ${rows.length}件を削除しますか？\n※通常CSVで取り込んだデータは削除しません。`)) return;
     const before = STATE.datasets.length;
+    markDataDeleted('historyFiscalYears', fy);
     STATE.datasets = STATE.datasets.filter(d => !(d.source === 'history' && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy)));
+    applyDeletionTombstonesToState(STATE);
     STORE.save();
     const deleted = before - STATE.datasets.length;
     renderImport();
