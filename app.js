@@ -2329,6 +2329,27 @@ const CAPACITY_UI = {
     STATE.capacity.areas = STATE.capacity.areas || {};
     STATE.capacity.mapping = Array.isArray(STATE.capacity.mapping) && STATE.capacity.mapping.length ? STATE.capacity.mapping : this.defaultMapping();
     STATE.capacity.calendar = STATE.capacity.calendar || {};
+    STATE.capacity.shipperGroups = Array.isArray(STATE.capacity.shipperGroups) && STATE.capacity.shipperGroups.length ? STATE.capacity.shipperGroups : this.defaultShipperGroups();
+    STATE.capacity.shipperAreaCaps = STATE.capacity.shipperAreaCaps || {};
+    this.migrateShipperCaps();
+  },
+
+  defaultShipperGroups() {
+    return [
+      { key:'kojima_bic', label:'コジマ＋ビック', patterns:'コジマ|ビック|ビックカメラ|BIC|KOJIMA', codePrefixes:'', active:true, sort:10 },
+      { key:'denkichi', label:'でんきち', patterns:'でんきち|デンキチ', codePrefixes:'', active:true, sort:20 },
+      { key:'edion', label:'エディオン', patterns:'エディオン|EDION', codePrefixes:'', active:true, sort:30 },
+      { key:'other', label:'その他', patterns:'', codePrefixes:'', active:false, sort:99 }
+    ];
+  },
+
+  migrateShipperCaps() {
+    const cap = STATE.capacity || {};
+    cap.shipperAreaCaps = cap.shipperAreaCaps || {};
+    // 旧「荷主別1本キャパ」は、地区別キャパへは自動展開しない。二重計上防止のため参照だけ残す。
+    (cap.shipperGroups || this.defaultShipperGroups()).forEach(g=>{
+      cap.shipperAreaCaps[g.key] = cap.shipperAreaCaps[g.key] || {};
+    });
   },
 
   normArea(v) {
@@ -2474,36 +2495,89 @@ const CAPACITY_UI = {
     return String(t.slip || t.slipNo || t.ticketNo || t.invoiceNo || t['原票番号'] || t['エスライン原票番号'] || '').trim() || `no_${idx}`;
   },
 
-  confirmedShipperBySlip(slip, ym) {
+  confirmedShipperInfoBySlip(slip, ym) {
     const key = String(slip || '').trim();
-    if (!key) return '';
+    if (!key) return null;
     const list = (STATE.datasets || []).filter(d=>!ym || d.ym === ym);
     for (const ds of list) {
       const map = ds && ds.confirmedSlipSales;
       if (!map || typeof map !== 'object') continue;
       const hit = map[key] || map[key.replace(/^0+/, '')];
-      const name = hit && (hit.shipperName || hit.clientName || hit.name);
-      if (String(name || '').trim()) return String(name).trim();
+      if (!hit) continue;
+      const name = String(hit.shipperName || hit.clientName || hit.name || '').trim();
+      const code = String(hit.shipperCode || hit.clientCode || hit.code || '').trim();
+      if (name || code) return { name, code };
     }
-    return '';
+    return null;
   },
 
-  ticketShipper(t, slip='', ym='') {
+  confirmedShipperBySlip(slip, ym) {
+    const info = this.confirmedShipperInfoBySlip(slip, ym);
+    return info?.name || '';
+  },
+
+  ticketShipperCode(t, slip='', ym='') {
+    const direct = String(t.shipperCode || t.clientCode || t.customerCode || t['荷主コード'] || t['荷主基本コード'] || t['荷主ＣＤ'] || t['荷主CD'] || '').trim();
+    if (direct) return direct;
+    const row = t.representativeRow || t.firstRow || t.row || t.raw;
+    if (Array.isArray(row)) {
+      // 確定CSV標準：Y列=荷主基本コード。商品・住所CSV側に同等列がある場合も拾う。
+      const candidates = [row[24], row[25], row[23]];
+      for (const v of candidates) {
+        const code = String(v || '').normalize('NFKC').replace(/[^0-9A-Za-z]/g,'').trim();
+        if (code && /^\d{2,}/.test(code)) return code;
+      }
+    }
+    return this.confirmedShipperInfoBySlip(slip || this.ticketSlip(t,0), ym)?.code || '';
+  },
+
+  ticketShipperName(t, slip='', ym='') {
     const direct = String(t.shipperName || t.shipper || t.clientName || t.customerName || t['荷主名'] || t['荷主名称'] || t['契約名'] || t['契約名称'] || '').trim();
     if (direct) return direct;
 
     const row = t.representativeRow || t.firstRow || t.row || t.raw;
     if (Array.isArray(row)) {
       // 確定CSVの標準位置：AA列=荷主名、AB列=契約名。商品・住所CSV側に同等列がある場合も拾う。
-      const candidates = [row[26], row[27], row[25], row[24]];
+      const candidates = [row[26], row[27], row[25]];
       for (const v of candidates) {
         const name = String(v || '').normalize('NFKC').trim();
         if (name && !/^0+$/.test(name) && !/^\d{4,}$/.test(name)) return name;
       }
     }
 
-    const fromConfirmed = this.confirmedShipperBySlip(slip || this.ticketSlip(t, 0), ym);
-    return fromConfirmed || '未設定';
+    return this.confirmedShipperInfoBySlip(slip || this.ticketSlip(t, 0), ym)?.name || '未設定';
+  },
+
+  normalizeShipperGroup(name='', code='') {
+    this.ensureState();
+    const n = String(name || '').normalize('NFKC').toUpperCase();
+    const c = String(code || '').normalize('NFKC').replace(/[^0-9A-Z]/g,'').toUpperCase();
+    const groups = (STATE.capacity.shipperGroups || this.defaultShipperGroups()).slice().sort((a,b)=>this.n(a.sort)-this.n(b.sort));
+    for (const g of groups) {
+      if (g.key === 'other') continue;
+      const codes = String(g.codePrefixes || '').split('|').map(x=>x.trim().toUpperCase()).filter(Boolean);
+      if (c && codes.some(prefix=>c.startsWith(prefix))) return g.label || g.key;
+      const pats = String(g.patterns || '').normalize('NFKC').toUpperCase().split('|').map(x=>x.trim()).filter(Boolean);
+      if (pats.some(p=>n.includes(p))) return g.label || g.key;
+    }
+    return 'その他';
+  },
+
+  shipperGroupKeyByLabel(label) {
+    this.ensureState();
+    const g = (STATE.capacity.shipperGroups || []).find(x=>String(x.label) === String(label) || String(x.key) === String(label));
+    return g?.key || 'other';
+  },
+
+  shipperGroupByKey(key) {
+    this.ensureState();
+    return (STATE.capacity.shipperGroups || []).find(x=>x.key === key) || { key:'other', label:'その他', active:false };
+  },
+
+  ticketShipper(t, slip='', ym='') {
+    const name = this.ticketShipperName(t, slip, ym);
+    const code = this.ticketShipperCode(t, slip, ym);
+    return this.normalizeShipperGroup(name, code);
   },
 
   mappedArea(city) {
@@ -2538,9 +2612,11 @@ const CAPACITY_UI = {
       const date = dt || '';
       const city = this.ticketCity(t);
       const area = this.mappedArea(city);
-      const shipper = this.ticketShipper(t, slip, ym);
+      const shipperName = this.ticketShipperName(t, slip, ym);
+      const shipperCode = this.ticketShipperCode(t, slip, ym);
+      const shipper = this.normalizeShipperGroup(shipperName, shipperCode);
       const key = `${date || 'monthly'}__${slip}`;
-      if (!uniq.has(key)) uniq.set(key, { slip, date, city, area, shipper });
+      if (!uniq.has(key)) uniq.set(key, { slip, date, city, area, shipper, shipperName, shipperCode });
     });
 
     const tickets = [...uniq.values()];
@@ -2593,21 +2669,54 @@ const CAPACITY_UI = {
     return this.n(STATE.capacity?.calendar?.[dateStr]?.adjust || 0);
   },
 
+  activeShipperGroups() {
+    this.ensureState();
+    return (STATE.capacity.shipperGroups || this.defaultShipperGroups())
+      .filter(g=>g.active !== false && g.key !== 'other')
+      .sort((a,b)=>this.n(a.sort)-this.n(b.sort));
+  },
+
+  getShipperAreaCap(groupKey, area, field) {
+    const row = STATE.capacity?.shipperAreaCaps?.[groupKey]?.[area] || {};
+    return this.n(row[field] ?? 0);
+  },
+
+  hasAnyShipperAreaCap(area='') {
+    const groups = this.activeShipperGroups();
+    return groups.some(g=>{
+      const areas = STATE.capacity?.shipperAreaCaps?.[g.key] || {};
+      if (area) {
+        const r = areas[area] || {};
+        return this.n(r.weekday) > 0 || this.n(r.weekend) > 0;
+      }
+      return Object.values(areas).some(r=>this.n(r?.weekday)>0 || this.n(r?.weekend)>0);
+    });
+  },
+
   baseDailyCap(dateStr, area) {
+    const holidayLike = this.isWeekend(dateStr) || this.dayType(dateStr) === 'holiday';
+    const field = holidayLike ? 'weekend' : 'weekday';
+    const groups = this.activeShipperGroups();
+    const shipperCap = groups.reduce((s,g)=>s+this.getShipperAreaCap(g.key, area, field),0);
+    if (shipperCap > 0 || this.hasAnyShipperAreaCap(area)) return shipperCap;
+
+    // 互換用：荷主キャパ未設定の地区だけ、旧通常キャパを参照する。
     const row = STATE.capacity?.areas?.[area];
     if (!row) return 0;
-    const mode = this.getBaseMode();
     const wd = this.n(row.weekday ?? row.max);
     const we = this.n(row.weekend ?? row.max ?? row.weekday);
-    if (mode === 'weekday') return wd;
-    if (mode === 'weekend') return we;
-    if (mode === 'max') return Math.max(wd,we);
-    const holidayLike = this.isWeekend(dateStr) || this.dayType(dateStr) === 'holiday';
     return holidayLike ? we : wd;
   },
 
   dailyCap(dateStr, area) {
     return Math.max(0, this.baseDailyCap(dateStr, area) + this.dayAdj(dateStr));
+  },
+
+  shipperDailyCap(dateStr, area, groupLabelOrKey) {
+    const key = this.shipperGroupKeyByLabel(groupLabelOrKey);
+    const holidayLike = this.isWeekend(dateStr) || this.dayType(dateStr) === 'holiday';
+    const field = holidayLike ? 'weekend' : 'weekday';
+    return this.getShipperAreaCap(key, area, field);
   },
 
   monthlyCap(ym, area) {
@@ -2617,6 +2726,19 @@ const CAPACITY_UI = {
       total += this.dailyCap(this.ymDate(ym,d), area);
     }
     return total;
+  },
+
+  shipperMonthlyCap(ym, area, groupLabelOrKey) {
+    let total = 0;
+    const last = this.daysInYM(ym);
+    for (let d=1; d<=last; d++) total += this.shipperDailyCap(this.ymDate(ym,d), area, groupLabelOrKey);
+    return total;
+  },
+
+  capTargetCount(shippers) {
+    if (!shippers || !this.hasAnyShipperAreaCap()) return null;
+    const activeLabels = new Set(this.activeShipperGroups().map(g=>g.label));
+    return Object.entries(shippers).reduce((s,[name,n])=>activeLabels.has(name) ? s+this.n(n) : s,0);
   },
 
   judge(used, cap) {
@@ -2637,8 +2759,10 @@ const CAPACITY_UI = {
       const a = actual.byArea.get(area) || { area, count:0, shippers:{}, cities:{} };
       const cap = this.monthlyCap(actual.ym, area);
       const one = this.baseDailyCap(this.ymDate(actual.ym,1), area);
-      const j = this.judge(a.count, cap);
-      return { ...a, cap, oneDay:one, rate:j.rate, status:j.status, cls:j.cls };
+      const targetCount = this.capTargetCount(a.shippers);
+      const used = targetCount === null ? a.count : targetCount;
+      const j = this.judge(used, cap);
+      return { ...a, used, cap, oneDay:one, rate:j.rate, status:j.status, cls:j.cls };
     }).sort((a,b)=>{
       const aw = /その他|未分類|未設定/.test(a.area) ? 1 : 0;
       const bw = /その他|未分類|未設定/.test(b.area) ? 1 : 0;
@@ -2651,9 +2775,11 @@ const CAPACITY_UI = {
     const risk = { collapse:5, over:4, full:3, good:2, ok:1, unset:0 };
     return [...actual.byDateArea.values()].map(r=>{
       const cap = this.dailyCap(r.date, r.area);
-      const j = this.judge(r.count, cap);
-      const diff = this.n(r.count) - this.n(cap);
-      return { ...r, cap, diff, rate:j.rate, status:j.status, cls:j.cls };
+      const targetCount = this.capTargetCount(r.shippers);
+      const used = targetCount === null ? r.count : targetCount;
+      const j = this.judge(used, cap);
+      const diff = this.n(used) - this.n(cap);
+      return { ...r, used, cap, diff, rate:j.rate, status:j.status, cls:j.cls };
     }).sort((a,b)=>(risk[b.cls]||0)-(risk[a.cls]||0) || this.n(b.diff)-this.n(a.diff) || b.rate-a.rate || String(a.date).localeCompare(String(b.date)));
   },
 
@@ -2675,8 +2801,9 @@ const CAPACITY_UI = {
 
   layout(actual, rows, daily) {
     const totalActual = rows.reduce((s,r)=>s+this.n(r.count),0);
+    const totalUsed = rows.reduce((s,r)=>s+this.n(r.used ?? r.count),0);
     const totalCap = rows.reduce((s,r)=>s+this.n(r.cap),0);
-    const j = this.judge(totalActual,totalCap);
+    const j = this.judge(totalUsed,totalCap);
 
     // 日別超過サマリー
     // ここで必ず定義してからKPIカードで使う。未定義変数で画面全体が止まらないようにする。
@@ -2757,8 +2884,8 @@ const CAPACITY_UI = {
     return `<div class="capx-grid">
       <div class="capx-card">
         <h3>地区別 月キャパ使用状況</h3>
-        <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">実績</th><th class="r">基準キャパ</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
-          ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td></tr>`).join('')}
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">実績</th><th class="r">判定対象</th><th class="r">基準キャパ</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
+          ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.used ?? r.count)}</td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td></tr>`).join('')}
         </tbody></table></div>
       </div>
       <div class="capx-card"><h3>市区町村内訳</h3><div id="capacity-detail-box" class="capx-empty">地区をクリックしてください</div></div>
@@ -2948,59 +3075,91 @@ const CAPACITY_UI = {
 
 
   shipperCapacityHtml(actual) {
+    this.ensureState();
     const tickets = actual.tickets || [];
-    const map = new Map();
-    tickets.forEach(t=>{
-      const name = t.shipper || '未設定';
-      const x = map.get(name) || { name, count:0, cities:{}, areas:{} };
-      x.count += 1;
-      x.cities[t.city || '未設定'] = (x.cities[t.city || '未設定'] || 0) + 1;
-      x.areas[t.area || '未分類'] = (x.areas[t.area || '未分類'] || 0) + 1;
-      map.set(name, x);
-    });
-    const rows = [...map.values()].sort((a,b)=>b.count-a.count || String(a.name).localeCompare(String(b.name)));
-    const caps = STATE.capacity.shipperCaps || {};
-    const days = this.daysInYM(actual.ym || this.getYM()) || 1;
-    const total = rows.reduce((s,r)=>s+r.count,0);
+    const groups = (STATE.capacity.shipperGroups || this.defaultShipperGroups()).slice().sort((a,b)=>this.n(a.sort)-this.n(b.sort));
+    const activeGroups = groups.filter(g=>g.active !== false && g.key !== 'other');
+    const capAreas = Object.keys(STATE.capacity?.areas || {});
+    const actualAreas = [...new Set(tickets.map(t=>t.area).filter(Boolean))];
+    const areas = [...new Set([...capAreas, ...actualAreas])].filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b),'ja'));
+    const ym = actual.ym || this.getYM();
+    const days = this.daysInYM(ym) || 1;
 
-    if (!tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
+    const areaGroupCounts = {};
+    tickets.forEach(t=>{
+      const area = t.area || '未分類';
+      const label = t.shipper || 'その他';
+      areaGroupCounts[area] = areaGroupCounts[area] || {};
+      areaGroupCounts[area][label] = (areaGroupCounts[area][label] || 0) + 1;
+    });
+
+    if (!areas.length) return `<div class="capx-card capx-empty">地区マッピングまたは商品・住所CSVを読み込んでください。</div>`;
+
+    const areaRows = areas.map(area=>{
+      const weekday = activeGroups.reduce((s,g)=>s+this.getShipperAreaCap(g.key, area, 'weekday'),0);
+      const weekend = activeGroups.reduce((s,g)=>s+this.getShipperAreaCap(g.key, area, 'weekend'),0);
+      const count = Object.values(areaGroupCounts[area] || {}).reduce((s,n)=>s+this.n(n),0);
+      return { area, weekday, weekend, count };
+    });
+
+    const groupSummary = activeGroups.map(g=>{
+      const weekday = areas.reduce((s,a)=>s+this.getShipperAreaCap(g.key,a,'weekday'),0);
+      const weekend = areas.reduce((s,a)=>s+this.getShipperAreaCap(g.key,a,'weekend'),0);
+      const count = tickets.filter(t=>t.shipper === g.label).length;
+      return { ...g, weekday, weekend, count };
+    });
 
     return `<div class="capx-card">
       <div class="capx-section-head">
         <div>
           <h3>荷主キャパ設定</h3>
-          <p class="capx-note2">荷主別の日キャパを画面上で設定します。ここで設定した値は、荷主別の負荷確認に使用します。</p>
+          <p class="capx-note2">地区ごとに「コジマ＋ビック」「でんきち」「エディオン」の平日・土日キャパを設定します。通常キャパはこの合算で自動計算します。</p>
         </div>
         <div class="capx-cal-summary">
-          <span>荷主 ${fmt(rows.length)}件</span>
-          <span>実績 ${fmt(total)}件</span>
-          <span>対象 ${esc(ymLabel(actual.ym || this.getYM()))}</span>
+          <span>地区 ${fmt(areas.length)}</span>
+          <span>荷主区分 ${fmt(activeGroups.length)}</span>
+          <span>対象 ${esc(ymLabel(ym))}</span>
         </div>
       </div>
-      <div class="capx-note">未設定の荷主は分析には表示しますが、キャパ判定は行いません。まず主要荷主だけ日キャパを入力してください。</div>
-      <div class="scroll-x"><table class="tbl capx-shipper-cap-table"><thead><tr>
-        <th>荷主</th><th class="r">実績件数</th><th class="r">構成比</th><th class="r">日キャパ</th><th class="r">月キャパ目安</th><th class="r">使用率</th><th>主な地区</th><th>主な市区町村</th>
+      <div class="capx-note">その他は件数表示のみで、キャパ判定には含めません。地区によって荷主別キャパが違う前提で入力できます。</div>
+
+      <div class="capx-shipper-summary">
+        ${groupSummary.map(g=>`<div class="capx-mini-card"><span>${esc(g.label)}</span><b>${fmt(g.count)}件</b><em>平日合計 ${fmt(g.weekday)} / 土日合計 ${fmt(g.weekend)}</em></div>`).join('')}
+      </div>
+
+      <div class="scroll-x"><table class="tbl capx-shipper-cap-matrix"><thead><tr>
+        <th rowspan="2">地区</th>
+        ${activeGroups.map(g=>`<th colspan="2" class="r">${esc(g.label)}</th>`).join('')}
+        <th colspan="2" class="r">通常キャパ自動計算</th>
+        <th rowspan="2" class="r">当月実績</th>
+      </tr><tr>
+        ${activeGroups.map(()=>`<th class="r">平日</th><th class="r">土日</th>`).join('')}
+        <th class="r">平日</th><th class="r">土日</th>
       </tr></thead><tbody>
-        ${rows.map(r=>{
-          const cap = this.n(caps[r.name]?.daily || 0);
-          const monthCap = cap * days;
-          const rate = monthCap > 0 ? r.count / monthCap * 100 : 0;
-          const topArea = Object.entries(r.areas).sort((a,b)=>b[1]-a[1])[0];
-          const topCity = Object.entries(r.cities).sort((a,b)=>b[1]-a[1])[0];
-          const cls = monthCap <= 0 ? 'unset' : (rate >= 120 ? 'over' : rate >= 100 ? 'full' : rate >= 80 ? 'good' : 'ok');
-          const status = monthCap <= 0 ? '未設定' : (rate >= 120 ? '超過注意' : rate >= 100 ? '満杯' : rate >= 80 ? '適正' : '余裕');
-          return `<tr data-capx-shipper="${esc(r.name)}">
-            <td><b>${esc(r.name)}</b></td>
-            <td class="r"><b>${fmt(r.count)}</b></td>
-            <td class="r">${pct(r.count / (total || 1) * 100)}</td>
-            <td class="r"><input type="number" min="0" step="1" value="${cap || ''}" placeholder="例 30" data-capx-shipper-cap="${esc(r.name)}" style="width:90px;text-align:right"></td>
-            <td class="r">${monthCap ? fmt(monthCap) : '—'}</td>
-            <td class="r">${monthCap ? pct(rate) : '—'} <span class="capacity-status ${cls}">${status}</span></td>
-            <td>${topArea ? `${esc(topArea[0])} ${fmt(topArea[1])}件` : '—'}</td>
-            <td>${topCity ? `${esc(topCity[0])} ${fmt(topCity[1])}件` : '—'}</td>
-          </tr>`;
-        }).join('')}
+        ${areaRows.map(r=>`<tr data-capx-area-cap-row="${esc(r.area)}">
+          <td><b>${esc(r.area)}</b></td>
+          ${activeGroups.map(g=>{
+            const wd = this.getShipperAreaCap(g.key, r.area, 'weekday');
+            const we = this.getShipperAreaCap(g.key, r.area, 'weekend');
+            return `<td class="r"><input type="number" min="0" step="1" value="${wd || ''}" placeholder="0" data-capx-shipper-area-cap="${esc(g.key)}" data-capx-area="${esc(r.area)}" data-capx-cap-field="weekday"></td><td class="r"><input type="number" min="0" step="1" value="${we || ''}" placeholder="0" data-capx-shipper-area-cap="${esc(g.key)}" data-capx-area="${esc(r.area)}" data-capx-cap-field="weekend"></td>`;
+          }).join('')}
+          <td class="r"><b>${fmt(r.weekday)}</b></td>
+          <td class="r"><b>${fmt(r.weekend)}</b></td>
+          <td class="r">${fmt(r.count)}</td>
+        </tr>`).join('')}
       </tbody></table></div>
+
+      <details class="capx-details"><summary>荷主判定ルールを確認・修正する</summary>
+        <p class="capx-note2">荷主名または荷主コードの前方一致で区分します。コードが分かる場合は「コード接頭辞」に入力すると名称ブレより強く判定できます。</p>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>区分名</th><th>名称キーワード（|区切り）</th><th>コード接頭辞（|区切り）</th><th class="r">判定</th></tr></thead><tbody>
+          ${groups.map(g=>`<tr data-capx-group-key="${esc(g.key)}">
+            <td><input value="${esc(g.label)}" data-capx-group-field="label" style="width:150px"></td>
+            <td><input value="${esc(g.patterns || '')}" data-capx-group-field="patterns" style="width:320px"></td>
+            <td><input value="${esc(g.codePrefixes || '')}" data-capx-group-field="codePrefixes" style="width:220px"></td>
+            <td class="r"><label class="capx-check"><input type="checkbox" ${g.active !== false ? 'checked' : ''} data-capx-group-field="active">対象</label></td>
+          </tr>`).join('')}
+        </tbody></table></div>
+      </details>
     </div>`;
   },
 
@@ -3058,9 +3217,18 @@ const CAPACITY_UI = {
   },
 
   masterHtml() {
-    const rows = Object.entries(STATE.capacity.areas || {}).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
-    return `<div class="capx-card"><div class="capx-section-head"><div><h3>通常キャパ</h3><p class="capx-note2">地区ごとの平日・土日の日キャパを設定します。</p></div><button class="btn" id="capacity-add-master">地区追加</button></div>
-      <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">平日キャパ</th><th class="r">土日キャパ</th><th></th></tr></thead><tbody>${rows.map(([area,r])=>`<tr data-area="${esc(area)}"><td><input value="${esc(area)}" data-capx-master-field="area" style="width:220px"></td><td class="r"><input type="number" value="${esc(r.weekday ?? r.max ?? 0)}" data-capx-master-field="weekday" style="width:90px;text-align:right"></td><td class="r"><input type="number" value="${esc(r.weekend ?? r.max ?? r.weekday ?? 0)}" data-capx-master-field="weekend" style="width:90px;text-align:right"></td><td><button class="btn btn-danger" data-capx-master-delete="${esc(area)}">削除</button></td></tr>`).join('')}</tbody></table></div>
+    this.ensureState();
+    const capAreas = Object.keys(STATE.capacity?.areas || {});
+    const shipperAreas = new Set();
+    Object.values(STATE.capacity?.shipperAreaCaps || {}).forEach(obj=>Object.keys(obj || {}).forEach(a=>shipperAreas.add(a)));
+    const areas = [...new Set([...capAreas, ...shipperAreas])].filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b),'ja'));
+    const groups = this.activeShipperGroups();
+    return `<div class="capx-card"><div class="capx-section-head"><div><h3>通常キャパ</h3><p class="capx-note2">通常キャパは荷主キャパの合算です。この画面は確認用です。修正は「荷主キャパ」タブで行ってください。</p></div><button class="btn" data-capx-tab="shipperCap">荷主キャパを修正</button></div>
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th>${groups.map(g=>`<th class="r">${esc(g.label)}</th>`).join('')}<th class="r">平日合計</th><th class="r">土日合計</th></tr></thead><tbody>${areas.map(area=>{
+        const wd = groups.reduce((s,g)=>s+this.getShipperAreaCap(g.key, area, 'weekday'),0);
+        const we = groups.reduce((s,g)=>s+this.getShipperAreaCap(g.key, area, 'weekend'),0);
+        return `<tr><td><b>${esc(area)}</b></td>${groups.map(g=>`<td class="r">${fmt(this.getShipperAreaCap(g.key, area, 'weekday'))} / ${fmt(this.getShipperAreaCap(g.key, area, 'weekend'))}</td>`).join('')}<td class="r"><b>${fmt(wd)}</b></td><td class="r"><b>${fmt(we)}</b></td></tr>`;
+      }).join('')}</tbody></table></div>
     </div>`;
   },
 
@@ -3080,6 +3248,12 @@ const CAPACITY_UI = {
     const topShipper = shippers[0];
     const cityShare = topCity ? topCity[1] / (this.n(row.count) || 1) * 100 : 0;
     const shipperShare = topShipper ? topShipper[1] / (this.n(row.count) || 1) * 100 : 0;
+    const shipperCapRows = shippers.map(([name,n])=>{
+      const cap = this.shipperDailyCap(row.date, row.area, name);
+      const diff = this.n(n) - cap;
+      const j = this.judge(this.n(n), cap);
+      return { name, count:this.n(n), cap, diff, ...j };
+    });
     const insight = diff > 0
       ? `${esc(row.area)}で日キャパを${diff > 0 ? '+' : ''}${fmt(diff)}件超過しています。${topCity ? `市区町村は${esc(topCity[0])}が最多（${pct(cityShare)}）です。` : ''}${topShipper ? ` 荷主は${esc(topShipper[0])}が最多（${pct(shipperShare)}）です。` : ''}`
       : `日キャパ内に収まっています。内訳確認用の表示です。`;
@@ -3108,11 +3282,11 @@ const CAPACITY_UI = {
       </div>
       <h5>荷主別 原因内訳</h5>
       <div class="capx-cause-list">
-        ${shippers.length ? shippers.map(([c,n],i)=>`
+        ${shipperCapRows.length ? shipperCapRows.map((x,i)=>`
           <div class="capx-cause-row">
             <b>${i+1}</b>
-            <span>${esc(c)}</span>
-            <em>${fmt(n)}件</em>
+            <span>${esc(x.name)}</span>
+            <em>${fmt(x.count)}件${x.cap>0 ? ` / 枠${fmt(x.cap)}件 / ${x.diff>0?'+':''}${fmt(x.diff)}件` : ' / 判定なし'}</em>
           </div>
         `).join('') : '<div class="capx-empty">荷主内訳なし</div>'}
       </div>
@@ -3186,11 +3360,24 @@ const CAPACITY_UI = {
     if (addMaster) addMaster.addEventListener('click',()=>{ STATE.capacity.areas['新規地区']={weekday:0,weekend:0,rows:[]}; STORE.save(); this.render(); });
     document.querySelectorAll('[data-capx-master-field]').forEach(inp=>inp.addEventListener('change',()=>this.updateMaster(inp)));
     document.querySelectorAll('[data-capx-master-delete]').forEach(btn=>btn.addEventListener('click',()=>{ delete STATE.capacity.areas[btn.dataset.capxMasterDelete]; STORE.save(); this.render(); }));
-    document.querySelectorAll('[data-capx-shipper-cap]').forEach(inp=>inp.addEventListener('change',()=>{
-      const name = inp.dataset.capxShipperCap || '';
-      STATE.capacity.shipperCaps = STATE.capacity.shipperCaps || {};
-      STATE.capacity.shipperCaps[name] = STATE.capacity.shipperCaps[name] || {};
-      STATE.capacity.shipperCaps[name].daily = this.n(inp.value);
+    document.querySelectorAll('[data-capx-shipper-area-cap]').forEach(inp=>inp.addEventListener('change',()=>{
+      const groupKey = inp.dataset.capxShipperAreaCap;
+      const area = inp.dataset.capxArea;
+      const field = inp.dataset.capxCapField;
+      STATE.capacity.shipperAreaCaps = STATE.capacity.shipperAreaCaps || {};
+      STATE.capacity.shipperAreaCaps[groupKey] = STATE.capacity.shipperAreaCaps[groupKey] || {};
+      STATE.capacity.shipperAreaCaps[groupKey][area] = STATE.capacity.shipperAreaCaps[groupKey][area] || {};
+      STATE.capacity.shipperAreaCaps[groupKey][area][field] = this.n(inp.value);
+      STORE.save();
+      this.render();
+    }));
+    document.querySelectorAll('[data-capx-group-field]').forEach(inp=>inp.addEventListener('change',()=>{
+      const tr = inp.closest('[data-capx-group-key]');
+      const key = tr?.dataset.capxGroupKey;
+      const g = (STATE.capacity.shipperGroups || []).find(x=>x.key === key);
+      if (!g) return;
+      const field = inp.dataset.capxGroupField;
+      g[field] = inp.type === 'checkbox' ? inp.checked : inp.value;
       STORE.save();
       this.render();
     }));
@@ -4855,7 +5042,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     .capx-click-row.selected td:last-child{border-right:1px solid #bfdbfe!important;border-top-right-radius:10px;border-bottom-right-radius:10px;}
     .capx-tabs{position:relative;z-index:5;}
     .capx-tabs button{position:relative;z-index:6;}
-    .capx-shipper-cap-table input{border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font-weight:800;}
+    .capx-shipper-cap-table input,.capx-shipper-cap-matrix input{border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font-weight:800;width:70px;text-align:right;}
+    .capx-shipper-cap-matrix th,.capx-shipper-cap-matrix td{white-space:nowrap;}
+    .capx-shipper-cap-matrix thead tr:first-child th{text-align:center;background:#eef4fb;}
+    .capx-shipper-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0;}
+    .capx-mini-card{border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px 14px;}
+    .capx-mini-card span{display:block;color:#475569;font-size:12px;font-weight:900;margin-bottom:4px;}
+    .capx-mini-card b{font-size:20px;font-weight:950;color:#0f172a;}
+    .capx-mini-card em{display:block;margin-top:4px;font-style:normal;color:#64748b;font-size:11px;font-weight:800;}
+    .capx-details{margin-top:16px;border:1px solid #e2e8f0;border-radius:14px;background:#fbfdff;padding:12px;}
+    .capx-details summary{cursor:pointer;font-weight:950;color:#174f7f;}
+    .capx-check{display:inline-flex;gap:6px;align-items:center;font-weight:900;}
+    @media(max-width:1000px){.capx-shipper-summary{grid-template-columns:1fr;}}
   `;
   document.head.appendChild(st);
 })();
