@@ -222,22 +222,8 @@
   }
 
   function localStorageRecords(){
-    const out = [];
-    try {
-      for (let i=0; i<localStorage.length; i++) {
-        const key = localStorage.key(i) || '';
-        // センター別データ混入防止：現在のセンター用 localStorage キーだけ参照する
-        // 例：mgmt5_kitasaitama_productAddressData は北埼玉だけ、mgmt5_toda_productAddressData は戸田だけ
-        if (typeof STORE !== 'undefined' && STORE._p && !key.startsWith(STORE._p)) continue;
-        if (!/(^|_)productAddressData$|(^|_)full_state$/.test(key)) continue;
-        const raw = localStorage.getItem(key);
-        if (!raw || !/^[\[{]/.test(String(raw).trim())) continue;
-        const val = JSON.parse(raw);
-        if (Array.isArray(val)) out.push({ key, value: val });
-        else if (val && typeof val === 'object' && Array.isArray(val.productAddressData)) out.push({ key:key + '.productAddressData', value: val.productAddressData });
-      }
-    } catch(e) {}
-    return out;
+    // v29: 表示時のlocalStorage全探索は重く、別センター混入・削除済み復活の原因になるため廃止。
+    return [];
   }
 
   function rawRecords(){
@@ -264,8 +250,6 @@
       arr(STATE.productAddressData).forEach((x,i)=>pushRecord(x, `STATE.productAddressData.${i}`));
       arr(STATE.fieldData).forEach((x,i)=>pushRecord(x, `STATE.fieldData.${i}`));
     }
-    localStorageRecords().forEach(pack=>arr(pack.value).forEach((x,i)=>pushRecord(x, `${pack.key}.${i}`)));
-
     const seen = new Set();
     return out.filter(r=>{
       const sig = `${r.ym}:${r.tickets.length}:${r.amount || ''}:${r.uniqueCount || ''}:${r.__source}`;
