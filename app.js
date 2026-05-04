@@ -3104,50 +3104,123 @@ const CAPACITY_UI = {
   regionFilterOptions() {
     return [
       { key:'saitama_all', label:'埼玉県 全域' },
-      { key:'saitama_south', label:'埼玉県 南部' },
-      { key:'saitama_north', label:'埼玉県 北部・秩父方面' },
-      { key:'tokyo_23', label:'東京都 23区' },
-      { key:'tokyo_other', label:'東京都 その他' },
+      { key:'saitama_saitama', label:'埼玉県 さいたま地域' },
+      { key:'saitama_south', label:'埼玉県 南部地域' },
+      { key:'saitama_southwest', label:'埼玉県 南西部地域' },
+      { key:'saitama_east', label:'埼玉県 東部地域' },
+      { key:'saitama_keno', label:'埼玉県 県央地域' },
+      { key:'saitama_kawagoe_hiki', label:'埼玉県 川越比企地域' },
+      { key:'saitama_west', label:'埼玉県 西部地域' },
+      { key:'saitama_tone', label:'埼玉県 利根地域' },
+      { key:'saitama_north', label:'埼玉県 北部地域' },
+      { key:'saitama_chichibu', label:'埼玉県 秩父地域' },
+      { key:'tokyo_all', label:'東京都 全域' },
+      { key:'tokyo_23', label:'東京都 23区 全域' },
+      { key:'tokyo_core', label:'東京都 都心部' },
+      { key:'tokyo_joto', label:'東京都 城東地域' },
+      { key:'tokyo_josei', label:'東京都 城西地域' },
+      { key:'tokyo_jonan', label:'東京都 城南地域' },
+      { key:'tokyo_johoku', label:'東京都 城北地域' },
+      { key:'tokyo_tama', label:'東京都 多摩地域' },
       { key:'all_tokyo_saitama', label:'東京・埼玉 すべて' }
     ];
   },
 
+  regionDefinitions() {
+    return {
+      saitama_saitama: ['さいたま市西区','さいたま市北区','さいたま市大宮区','さいたま市見沼区','さいたま市中央区','さいたま市桜区','さいたま市浦和区','さいたま市南区','さいたま市緑区','さいたま市岩槻区'],
+      saitama_south: ['川口市','蕨市','戸田市'],
+      saitama_southwest: ['朝霞市','志木市','和光市','新座市','富士見市','ふじみ野市','三芳町'],
+      saitama_east: ['春日部市','草加市','越谷市','八潮市','三郷市','吉川市','松伏町'],
+      saitama_keno: ['鴻巣市','上尾市','桶川市','北本市','伊奈町'],
+      saitama_kawagoe_hiki: ['川越市','東松山市','坂戸市','鶴ヶ島市','日高市','毛呂山町','越生町','滑川町','嵐山町','小川町','川島町','吉見町','鳩山町','ときがわ町','東秩父村'],
+      saitama_west: ['所沢市','飯能市','狭山市','入間市'],
+      saitama_tone: ['行田市','加須市','羽生市','久喜市','蓮田市','幸手市','白岡市','宮代町','杉戸町'],
+      saitama_north: ['熊谷市','本庄市','深谷市','美里町','神川町','上里町','寄居町'],
+      saitama_chichibu: ['秩父市','横瀬町','皆野町','長瀞町','小鹿野町'],
+      tokyo_core: ['千代田区','中央区','港区'],
+      tokyo_joto: ['台東区','墨田区','江東区','荒川区','足立区','葛飾区','江戸川区'],
+      tokyo_josei: ['新宿区','中野区','杉並区'],
+      tokyo_jonan: ['品川区','目黒区','大田区','世田谷区','渋谷区'],
+      tokyo_johoku: ['文京区','豊島区','北区','板橋区','練馬区'],
+      tokyo_tama: ['八王子市','立川市','武蔵野市','三鷹市','青梅市','府中市','昭島市','調布市','町田市','小金井市','小平市','日野市','東村山市','国分寺市','国立市','福生市','狛江市','東大和市','清瀬市','東久留米市','武蔵村山市','多摩市','稲城市','羽村市','あきる野市','西東京市','瑞穂町','日の出町','檜原村','奥多摩町']
+    };
+  },
+
+  normalizeCapacityUnit(unit) {
+    let u = String(unit || '').normalize('NFKC').replace(/\s+/g,'').trim();
+    if (!u || u === '未設定') return '';
+    u = u.replace(/^埼玉県さいたま市さいたま市/, '埼玉県さいたま市');
+    if (/^(北海道|東京都|(?:京都|大阪)府|.{2,3}県)/.test(u)) return u;
+
+    const defs = this.regionDefinitions();
+    const saitamaUnits = Object.keys(defs)
+      .filter(k=>k.startsWith('saitama_'))
+      .flatMap(k=>defs[k]);
+    const tokyoUnits = Object.keys(defs)
+      .filter(k=>k.startsWith('tokyo_'))
+      .flatMap(k=>defs[k]);
+
+    if (/^さいたま市.+区$/.test(u)) return '埼玉県' + u;
+    if (/^[^市]+区$/.test(u) && tokyoUnits.includes(u)) return '東京都' + u;
+    if (/^[^市]+区$/.test(u) && saitamaUnits.includes('さいたま市' + u)) return '埼玉県さいたま市' + u;
+    if (saitamaUnits.includes(u)) return '埼玉県' + u;
+    if (tokyoUnits.includes(u)) return '東京都' + u;
+
+    if (/市|町|村|区/.test(u)) {
+      if (/足立区|荒川区|板橋区|江戸川区|大田区|葛飾区|北区|江東区|品川区|渋谷区|新宿区|杉並区|墨田区|世田谷区|台東区|中央区|千代田区|豊島区|中野区|練馬区|文京区|港区|目黒区/.test(u)) return '東京都' + u;
+      return '埼玉県' + u;
+    }
+    return u;
+  },
+
   unitShortName(unit) {
-    return String(unit || '')
+    const u = this.normalizeCapacityUnit(unit) || String(unit || '');
+    return u
       .replace(/^東京都/, '')
       .replace(/^埼玉県/, '')
-      .replace(/^(.+?市)(.+?区)$/, '$1$2')
       .trim() || '未設定';
   },
 
   isTokyo23Unit(unit) {
-    return /^東京都.+区$/.test(String(unit || ''));
+    const u = this.normalizeCapacityUnit(unit);
+    return /^東京都.+区$/.test(u) && !u.includes('市');
   },
 
-  isSaitamaNorthUnit(unit) {
-    const u = String(unit || '');
-    if (!u.includes('埼玉県')) return false;
-    return /(熊谷市|深谷市|本庄市|行田市|羽生市|加須市|鴻巣市|北本市|桶川市|上尾市|伊奈町|久喜市|蓮田市|白岡市|幸手市|宮代町|杉戸町|東松山市|吉見町|滑川町|嵐山町|小川町|川島町|ときがわ町|鳩山町|東秩父村|秩父市|横瀬町|皆野町|長瀞町|小鹿野町|寄居町|美里町|神川町|上里町)/.test(u);
+  isSaitamaUnit(unit) {
+    return this.normalizeCapacityUnit(unit).startsWith('埼玉県');
+  },
+
+  isTokyoUnit(unit) {
+    return this.normalizeCapacityUnit(unit).startsWith('東京都');
+  },
+
+  unitMatchesAnyShortName(unit, names) {
+    const short = this.unitShortName(unit);
+    return (names || []).some(name => short === name || short.startsWith(name) || short.includes(name));
   },
 
   unitMatchesRegion(unit, regionKey) {
-    const u = String(unit || '');
+    const u = this.normalizeCapacityUnit(unit);
     if (!u || u === '未設定') return false;
-    if (regionKey === 'all_tokyo_saitama') return u.includes('埼玉県') || u.includes('東京都');
-    if (regionKey === 'saitama_all') return u.includes('埼玉県');
-    if (regionKey === 'saitama_north') return this.isSaitamaNorthUnit(u);
-    if (regionKey === 'saitama_south') return u.includes('埼玉県') && !this.isSaitamaNorthUnit(u);
+    const defs = this.regionDefinitions();
+
+    if (regionKey === 'all_tokyo_saitama') return this.isSaitamaUnit(u) || this.isTokyoUnit(u);
+    if (regionKey === 'saitama_all') return this.isSaitamaUnit(u);
+    if (regionKey === 'tokyo_all') return this.isTokyoUnit(u);
     if (regionKey === 'tokyo_23') return this.isTokyo23Unit(u);
-    if (regionKey === 'tokyo_other') return u.includes('東京都') && !this.isTokyo23Unit(u);
+    if (regionKey === 'tokyo_tama') return this.unitMatchesAnyShortName(u, defs.tokyo_tama);
+    if (regionKey && defs[regionKey]) return this.unitMatchesAnyShortName(u, defs[regionKey]);
     return true;
   },
 
   availableCapacityUnits(actual) {
     const map = new Map();
     (actual?.tickets || []).forEach(t => {
-      const unit = this.ticketCity(t);
+      const rawUnit = this.ticketCity(t);
+      const unit = this.normalizeCapacityUnit(rawUnit);
       if (!unit || unit === '未設定') return;
-      if (!(String(unit).includes('埼玉県') || String(unit).includes('東京都'))) return;
+      if (!(this.isSaitamaUnit(unit) || this.isTokyoUnit(unit))) return;
       const area = this.mappedArea(unit);
       const old = map.get(unit) || { unit, label:this.unitShortName(unit), area, count:0, shippers:{} };
       old.count += 1;
@@ -3157,8 +3230,20 @@ const CAPACITY_UI = {
     return [...map.values()].sort((a,b)=>{
       const pa = a.unit.includes('埼玉県') ? 0 : 1;
       const pb = b.unit.includes('埼玉県') ? 0 : 1;
-      return pa - pb || String(a.unit).localeCompare(String(b.unit), 'ja');
+      const ra = this.regionSortKey(a.unit);
+      const rb = this.regionSortKey(b.unit);
+      return pa - pb || ra - rb || String(a.unit).localeCompare(String(b.unit), 'ja');
     });
+  },
+
+  regionSortKey(unit) {
+    const opts = this.regionFilterOptions().map(o=>o.key);
+    for (let i=0;i<opts.length;i++) {
+      const key = opts[i];
+      if (['saitama_all','tokyo_all','tokyo_23','all_tokyo_saitama'].includes(key)) continue;
+      if (this.unitMatchesRegion(unit, key)) return i;
+    }
+    return 999;
   },
 
   capacityGroupDailyCap(group, dateStr, shipperKey='') {
@@ -3173,7 +3258,7 @@ const CAPACITY_UI = {
     this.ensureState();
     return (STATE.capacity.capacityGroups || []).filter(g => {
       const units = Array.isArray(g.units) ? g.units : [];
-      return units.some(unit => this.mappedArea(unit) === area);
+      return units.some(unit => this.mappedArea(this.normalizeCapacityUnit(unit)) === area);
     });
   },
 
@@ -3189,7 +3274,7 @@ const CAPACITY_UI = {
     (this.buildActual().tickets || []).forEach(t => {
       if (t.area !== area) return;
       if (row?.date && t.date && t.date !== row.date) return;
-      const unit = this.ticketCity(t);
+      const unit = this.normalizeCapacityUnit(this.ticketCity(t));
       const key = unit || '未設定';
       const x = result.get(key) || { unit:key, label:this.unitShortName(key), count:0, shippers:{} };
       x.count += 1;
@@ -3278,8 +3363,8 @@ const CAPACITY_UI = {
         <div class="capx-capgroup-list">
           <h4>作成済み区分</h4>
           ${savedGroups.length ? savedGroups.map((cg,idx)=>{
-            const unitText = (cg.units || []).map(u=>this.unitShortName(u)).join('・') || '対象なし';
-            const areaText = [...new Set((cg.units || []).map(u=>this.mappedArea(u)))].join(' / ') || '未分類';
+            const unitText = (cg.units || []).map(u=>this.unitShortName(this.normalizeCapacityUnit(u))).join('・') || '対象なし';
+            const areaText = [...new Set((cg.units || []).map(u=>this.mappedArea(this.normalizeCapacityUnit(u))))].join(' / ') || '未分類';
             return `<div class="capx-capgroup-card" data-capx-capgroup-id="${esc(cg.id)}">
               <div class="capx-capgroup-title">
                 <div>
@@ -3561,7 +3646,7 @@ const CAPACITY_UI = {
     const addCapGroup = document.getElementById('capx-add-cap-group');
     if (addCapGroup) addCapGroup.addEventListener('click',()=>{
       const name = String(document.getElementById('capx-new-group-name')?.value || '').trim();
-      const units = [...document.querySelectorAll('[data-capx-new-group-unit]:checked')].map(x=>x.value).filter(Boolean);
+      const units = [...document.querySelectorAll('[data-capx-new-group-unit]:checked')].map(x=>this.normalizeCapacityUnit(x.value)).filter(Boolean);
       if (!name) { UI.toast('区分名を入力してください','warn'); return; }
       if (!units.length) { UI.toast('対象の区・市を選択してください','warn'); return; }
 
