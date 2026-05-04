@@ -214,6 +214,29 @@
     };
   }
 
+  function normalizeRecordTickets(x){
+    if (!x || typeof x !== 'object') return [];
+    if (Array.isArray(x.tickets)) return x.tickets.filter(Boolean);
+    if (x.tickets && typeof x.tickets === 'object') return Object.values(x.tickets).filter(Boolean);
+    return [];
+  }
+
+  function localStorageRecords(){
+    const out = [];
+    try {
+      for (let i=0; i<localStorage.length; i++) {
+        const key = localStorage.key(i) || '';
+        if (!/(^|_)productAddressData$|(^|_)full_state$/.test(key)) continue;
+        const raw = localStorage.getItem(key);
+        if (!raw || !/^[\[{]/.test(String(raw).trim())) continue;
+        const val = JSON.parse(raw);
+        if (Array.isArray(val)) out.push({ key, value: val });
+        else if (val && typeof val === 'object' && Array.isArray(val.productAddressData)) out.push({ key:key + '.productAddressData', value: val.productAddressData });
+      }
+    } catch(e) {}
+    return out;
+  }
+
   function rawRecords(){
     const out = [];
 
@@ -221,8 +244,9 @@
       if (!obj(x)) return;
       const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name || source);
       // 個人情報保護：保存済みの安全化済み tickets だけを使う。rows/data/rawRows は参照しない。
-      const tickets = arr(x.tickets).length ? x.tickets : [];
-      if (!ym || !tickets.length) return;
+      const tickets = normalizeRecordTickets(x);
+      const has = tickets.length || Number(x.uniqueCount || 0) > 0 || Number(x.detailRows || 0) > 0;
+      if (!ym || !has) return;
       out.push({ ...x, ym, tickets, __source:source });
     }
 
@@ -230,10 +254,11 @@
       arr(STATE.productAddressData).forEach((x,i)=>pushRecord(x, `STATE.productAddressData.${i}`));
       arr(STATE.fieldData).forEach((x,i)=>pushRecord(x, `STATE.fieldData.${i}`));
     }
+    localStorageRecords().forEach(pack=>arr(pack.value).forEach((x,i)=>pushRecord(x, `${pack.key}.${i}`)));
 
     const seen = new Set();
     return out.filter(r=>{
-      const sig = `${r.ym}:${r.tickets.length}:${r.amount || ''}:${r.__source}`;
+      const sig = `${r.ym}:${r.tickets.length}:${r.amount || ''}:${r.uniqueCount || ''}:${r.__source}`;
       if (seen.has(sig)) return false;
       seen.add(sig);
       return true;
