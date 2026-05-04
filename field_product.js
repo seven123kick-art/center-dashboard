@@ -74,6 +74,32 @@
     } catch(e) { return null; }
   }
 
+  function normalizeRecordTickets(x){
+    if (!x || typeof x !== 'object') return [];
+    if (Array.isArray(x.tickets)) return x.tickets.filter(Boolean);
+    if (x.tickets && typeof x.tickets === 'object') return Object.values(x.tickets).filter(Boolean);
+    return [];
+  }
+
+  function localStorageRecords(){
+    const out = [];
+    try {
+      for (let i=0; i<localStorage.length; i++) {
+        const key = localStorage.key(i) || '';
+        if (!/(^|_)productAddressData$|(^|_)workerCsvData$|(^|_)full_state$/.test(key)) continue;
+        const raw = localStorage.getItem(key);
+        if (!raw || !/^[\[{]/.test(String(raw).trim())) continue;
+        const val = JSON.parse(raw);
+        if (Array.isArray(val)) out.push({ key, value: val });
+        else if (val && typeof val === 'object') {
+          if (Array.isArray(val.productAddressData)) out.push({ key:key + '.productAddressData', value: val.productAddressData });
+          if (Array.isArray(val.workerCsvData)) out.push({ key:key + '.workerCsvData', value: val.workerCsvData });
+        }
+      }
+    } catch(e) {}
+    return out;
+  }
+
   function collectRecords(){
     const out = { product:[], worker:[] };
     const seen = new Set();
@@ -81,20 +107,21 @@
     function pushProduct(x, source){
       if (!obj(x)) return;
       const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name);
-      const has = arr(x.tickets).length || obj(x.products);
+      const tickets = normalizeRecordTickets(x);
+      const has = tickets.length || obj(x.products) || num(x.uniqueCount) > 0 || num(x.detailRows) > 0;
       if (!ym || !has) return;
-      const key = `p:${source}:${ym}:${arr(x.tickets).length}:${arr(x.rows).length}:${arr(x.data).length}`;
+      const key = `p:${ym}:${tickets.length}:${num(x.uniqueCount)}:${num(x.detailRows)}:${source}`;
       if (seen.has(key)) return;
       seen.add(key);
-      out.product.push({ ...x, ym, __source:source });
+      out.product.push({ ...x, ym, tickets, __source:source });
     }
 
     function pushWorker(x, source){
       if (!obj(x)) return;
       const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name);
-      const has = obj(x.workers);
+      const has = obj(x.workers) || num(x.rowCount) > 0;
       if (!ym || !has) return;
-      const key = `w:${source}:${ym}:${Object.keys(x.workers||{}).length}:${arr(x.rows).length}:${arr(x.data).length}`;
+      const key = `w:${ym}:${Object.keys(x.workers||{}).length}:${num(x.rowCount)}:${source}`;
       if (seen.has(key)) return;
       seen.add(key);
       out.worker.push({ ...x, ym, __source:source });
@@ -104,6 +131,12 @@
     arr(st.productAddressData).forEach((x,i)=>pushProduct(x, `STATE.productAddressData.${i}`));
     arr(st.workerCsvData).forEach((x,i)=>pushWorker(x, `STATE.workerCsvData.${i}`));
     arr(st.fieldData).forEach((x,i)=>{ pushProduct(x, `STATE.fieldData.${i}`); pushWorker(x, `STATE.fieldData.${i}`); });
+
+    // STATEが未初期化・別描画で空に見える場合の保険。保存済みの安全化済みデータだけ拾う。
+    localStorageRecords().forEach(pack=>{
+      if (/workerCsvData/.test(pack.key)) arr(pack.value).forEach((x,i)=>pushWorker(x, `${pack.key}.${i}`));
+      else arr(pack.value).forEach((x,i)=>pushProduct(x, `${pack.key}.${i}`));
+    });
 
     return out;
   }
@@ -325,7 +358,8 @@
   function rowsFromProductRecord(rec){
     const rows = [];
 
-    arr(rec?.tickets).forEach(t=>{
+    const tickets = normalizeRecordTickets(rec);
+    tickets.forEach(t=>{
       const product = t.product || t.productName || t.product_name || '';
       const slip = t.slip || t.slipNo || '';
       const details = arr(t.workDetails).length
@@ -349,6 +383,13 @@
       }
     });
 
+    // 旧互換：安全化済みの products 集計が残っている場合だけ保険利用
+    if (!rows.length && obj(rec?.products)) {
+      Object.entries(rec.products).forEach(([product, v])=>{
+        if (obj(v)) rows.push({ slip:'', product, work:v.work || '', amount:amountFrom(v) });
+        else rows.push({ slip:'', product, work:'', amount:num(v) });
+      });
+    }
 
     return rows.filter(r=>r.product || r.work || r.amount);
   }
