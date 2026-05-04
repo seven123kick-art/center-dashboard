@@ -226,6 +226,9 @@
     try {
       for (let i=0; i<localStorage.length; i++) {
         const key = localStorage.key(i) || '';
+        // センター別データ混入防止：現在のセンター用 localStorage キーだけ参照する
+        // 例：mgmt5_kitasaitama_productAddressData は北埼玉だけ、mgmt5_toda_productAddressData は戸田だけ
+        if (typeof STORE !== 'undefined' && STORE._p && !key.startsWith(STORE._p)) continue;
         if (!/(^|_)productAddressData$|(^|_)full_state$/.test(key)) continue;
         const raw = localStorage.getItem(key);
         if (!raw || !/^[\[{]/.test(String(raw).trim())) continue;
