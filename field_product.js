@@ -103,39 +103,9 @@
     const st = window.STATE || {};
     arr(st.productAddressData).forEach((x,i)=>pushProduct(x, `STATE.productAddressData.${i}`));
     arr(st.workerCsvData).forEach((x,i)=>pushWorker(x, `STATE.workerCsvData.${i}`));
-    arr(st.fieldData).forEach((x,i)=>{ pushProduct(x, `STATE.fieldData.${i}`); pushWorker(x, `STATE.fieldData.${i}`); });
 
-    // localStorage全体を探索。キー名に依存しない。
-    try {
-      for (let i=0; i<localStorage.length; i++){
-        const key = localStorage.key(i);
-        const parsed = localJSON(key);
-        if (!parsed) continue;
+    // 保存済みの旧raw行を拾わないため、localStorage全体探索は行わない。
 
-        if (Array.isArray(parsed)) {
-          parsed.forEach((x,idx)=>{
-            pushProduct(x, `${key}.${idx}`);
-            pushWorker(x, `${key}.${idx}`);
-          });
-        } else if (obj(parsed)) {
-          pushProduct(parsed, key);
-          pushWorker(parsed, key);
-
-          Object.keys(parsed).forEach(k=>{
-            const v = parsed[k];
-            if (Array.isArray(v)) {
-              v.forEach((x,idx)=>{
-                pushProduct(x, `${key}.${k}.${idx}`);
-                pushWorker(x, `${key}.${k}.${idx}`);
-              });
-            }
-          });
-        }
-      }
-    } catch(e) {}
-
-    out.product.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
-    out.worker.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
     return out;
   }
 
@@ -380,18 +350,7 @@
       }
     });
 
-    const rawRows = [
-      ...arr(rec?.rows),
-      ...arr(rec?.data),
-      ...arr(rec?.rawRows),
-      ...arr(rec?.items)
-    ];
-    rawRows.forEach(r=>rows.push({
-      slip: slipFrom(r),
-      product: productFrom(r),
-      work: workFrom(r),
-      amount: amountFrom(r)
-    }));
+
 
     return rows.filter(r=>r.product || r.work || r.amount);
   }
@@ -410,18 +369,7 @@
       });
     });
 
-    const rawRows = [
-      ...arr(rec?.rows),
-      ...arr(rec?.data),
-      ...arr(rec?.rawRows),
-      ...arr(rec?.items)
-    ];
-    rawRows.forEach(r=>rows.push({
-      slip: slipFrom(r),
-      product: productFrom(r),
-      work: workFrom(r),
-      amount: amountFrom(r)
-    }));
+
 
     return rows.filter(r=>r.product || r.work || r.amount);
   }
