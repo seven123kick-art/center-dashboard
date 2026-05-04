@@ -130,22 +130,86 @@ IMPORT.deleteFieldData = function(ym) {
     if (!Array.isArray(STATE.areaData)) STATE.areaData = [];
   }
 
+  function safeRowAt(row, idx){
+    return Array.isArray(row) ? clean(row[idx]) : '';
+  }
+
+  function dateFromProductRow(row){
+    return normalizeWorkDate(safeRowAt(row, 0));
+  }
+
+  function sanitizeProductTicket(ticket){
+    if (!ticket || typeof ticket !== 'object') return ticket;
+
+    const row = ticket.representativeRow || ticket.firstRow || ticket.row || ticket.raw;
+    const address = clean(ticket.address || ticket.addr || ticket.destinationAddress || safeRowAt(row, 13));
+    const zip = clean(ticket.zip || ticket.zipcode || ticket.postCode || ticket.postalCode || safeRowAt(row, 11)).replace(/[〒\s　\-]/g, '').replace(/[^0-9]/g, '');
+    const area = areaFromAddress(address);
+    const product = clean(ticket.product || safeRowAt(row, 15));
+    const date = clean(ticket.date || ticket.deliveryDate || ticket.workDate || dateFromProductRow(row));
+
+    const sanitized = {
+      slip: normalizeSlipNo(ticket.slip || ticket.slipNo || ticket.ticketNo || ticket.invoiceNo || safeRowAt(row, 8)),
+      date,
+      zip,
+      product,
+      category: ticket.category || productCategory(product),
+      sizeBucket: ticket.sizeBucket || sizeBucketFromProduct(product),
+      pref: ticket.pref || area.pref,
+      city: ticket.city || area.city,
+      area: ticket.area || area.area,
+      amount: yen(ticket.amount),
+      works: ticket.works && typeof ticket.works === 'object' ? ticket.works : {},
+      workDetails: Array.isArray(ticket.workDetails) ? ticket.workDetails.map(x => ({ work: clean(x.work) || '未設定', amount: yen(x.amount) })) : [],
+      rowCount: Number(ticket.rowCount || 0),
+      hasMultipleZip: !!ticket.hasMultipleZip,
+      hasMultipleAddress: !!ticket.hasMultipleAddress
+    };
+
+    // 顧客情報・住所詳細・CSV生行は保存しない。
+    // 保存対象は、分析に必要な原票番号・日付・郵便番号・市区町村/区・商品/作業/金額のみ。
+    return sanitized;
+  }
+
+  function sanitizeProductRecord(record){
+    if (!record || typeof record !== 'object') return record;
+    const tickets = safeArray(record.tickets).map(sanitizeProductTicket).filter(t => t && t.slip);
+    return {
+      ym: record.ym,
+      source: record.source || 'product_address_csv',
+      importedAt: record.importedAt || new Date().toISOString(),
+      files: safeArray(record.files),
+      rawRows: Number(record.rawRows || 0),
+      detailRows: Number(record.detailRows || 0),
+      uniqueCount: tickets.length || Number(record.uniqueCount || 0),
+      duplicateExcluded: Math.max(0, Number(record.detailRows || 0) - tickets.length),
+      addressCount: tickets.filter(t => t.pref && t.city && t.city !== '未設定').length,
+      zipCount: tickets.filter(t => t.zip).length,
+      productCategoryCount: new Set(tickets.map(t => t.category).filter(Boolean)).size,
+      workTypeCount: new Set(tickets.flatMap(t => Object.keys(t.works || {}))).size,
+      amount: tickets.reduce((s,t)=>s+yen(t.amount),0),
+      tickets
+    };
+  }
+
+  function sanitizeProductRecords(records){
+    return safeArray(records).map(sanitizeProductRecord).filter(r => r && r.ym);
+  }
+
   // STOREへ新しい現場CSV専用データを保存対象として追加
   const originalStoreLoad = STORE.load.bind(STORE);
   const originalStoreSave = STORE.save.bind(STORE);
   STORE.load = function(){
     originalStoreLoad();
     STATE.workerCsvData = this._g('workerCsvData') || [];
-    STATE.productAddressData = sanitizeProductRecordList(this._g('productAddressData') || []);
+    STATE.productAddressData = sanitizeProductRecords(this._g('productAddressData') || []);
     ensureState();
-    this._s('productAddressData', STATE.productAddressData);
   };
   STORE.save = function(){
     ensureState();
-    STATE.productAddressData = sanitizeProductRecordList(STATE.productAddressData);
     originalStoreSave();
     this._s('workerCsvData', STATE.workerCsvData);
-    this._s('productAddressData', STATE.productAddressData);
+    this._s('productAddressData', sanitizeProductRecords(STATE.productAddressData));
   };
 
   // クラウド full_state へ現場CSV専用データを追加
@@ -155,7 +219,7 @@ IMPORT.deleteFieldData = function(ym) {
       const base = oldMakeFull ? oldMakeFull() : { version: 1, center: CENTER.id, savedAt: new Date().toISOString() };
       ensureState();
       base.workerCsvData = STATE.workerCsvData;
-      base.productAddressData = sanitizeProductRecordList(STATE.productAddressData);
+      base.productAddressData = sanitizeProductRecords(STATE.productAddressData);
       base.version = Math.max(Number(base.version || 1), 30);
       return base;
     };
@@ -163,7 +227,7 @@ IMPORT.deleteFieldData = function(ym) {
     CLOUD._applyFullState = function(full){
       const ok = oldApplyFull ? oldApplyFull(full) : true;
       if (full && Array.isArray(full.workerCsvData)) STATE.workerCsvData = full.workerCsvData;
-      if (full && Array.isArray(full.productAddressData)) STATE.productAddressData = sanitizeProductRecordList(full.productAddressData);
+      if (full && Array.isArray(full.productAddressData)) STATE.productAddressData = sanitizeProductRecords(full.productAddressData);
       ensureState();
       return ok;
     };
@@ -443,76 +507,6 @@ IMPORT.deleteFieldData = function(ym) {
     return { pref, city, area: pref === '未設定' ? city : pref + city };
   }
 
-  function rowAt(row, idx){
-    return Array.isArray(row) ? clean(row[idx]) : '';
-  }
-
-  function sanitizeProductTicket(t){
-    if (!t || typeof t !== 'object') return null;
-    const row = t.representativeRow || t.firstRow || t.row || t.raw || null;
-    const slip = clean(t.slip || t.slipNo || t.ticketNo || t.invoiceNo || t['原票番号'] || t['エスライン原票番号'] || rowAt(row, 8));
-    if (!slip) return null;
-    const zip = clean(t.zip || t.zipcode || t.postCode || t.postalCode || t['郵便番号'] || t['お届け先郵便番号'] || rowAt(row, 11)).replace(/[〒\s　\-]/g, '').replace(/[^0-9]/g, '');
-    const address = clean(t.address || t.addr || t.destinationAddress || t['住所'] || t['届け先住所'] || t['配送先住所'] || t['お届け先住所'] || rowAt(row, 13));
-    const area = t.pref && t.city
-      ? { pref: clean(t.pref), city: clean(t.city), area: clean(t.areaUnit || t.area || (String(t.pref) + String(t.city))) }
-      : areaFromAddress(address || clean(t.areaUnit || t.area || t.city));
-    const product = clean(t.product || t.productName || t.product_name || rowAt(row, 15));
-    const shipperCode = clean(t.shipperCode || t.clientCode || t.customerCode || t['荷主コード'] || t['荷主基本コード'] || rowAt(row, 24));
-    const shipperName = clean(t.shipperName || t.shipper || t.clientName || t.customerName || t['荷主名'] || t['荷主名称'] || rowAt(row, 26) || rowAt(row, 27));
-    const workDetails = safeArray(t.workDetails).map(d => ({ work: clean(d.work || d.label || d.name || d[0]) || '未設定', amount: yen(d.amount || d.value || d[1]) }));
-    const works = {};
-    if (t.works && typeof t.works === 'object') Object.entries(t.works).forEach(([k,v]) => { works[clean(k) || '未設定'] = yen(v); });
-    workDetails.forEach(d => { works[d.work] = (works[d.work] || 0) + yen(d.amount); });
-    return {
-      slip,
-      date: clean(t.date || t.deliveryDate || t.workDate || t['日付'] || rowAt(row, 0)),
-      zip,
-      pref: area.pref || '未設定',
-      city: area.city || '未設定',
-      area: area.area || (area.pref === '未設定' ? area.city : area.pref + area.city),
-      areaUnit: area.area || (area.pref === '未設定' ? area.city : area.pref + area.city),
-      product,
-      category: clean(t.category) || productCategory(product),
-      sizeBucket: clean(t.sizeBucket) || sizeBucketFromProduct(product),
-      shipperCode,
-      shipperName,
-      amount: yen(t.amount),
-      works,
-      workDetails,
-      rowCount: Number(t.rowCount || 1),
-      hasMultipleZip: !!t.hasMultipleZip,
-      hasMultipleAddress: !!t.hasMultipleAddress
-    };
-  }
-
-  function sanitizeProductRecord(record){
-    if (!record || typeof record !== 'object') return record;
-    const tickets = safeArray(record.tickets).map(sanitizeProductTicket).filter(Boolean);
-    return {
-      ym: record.ym,
-      source: record.source || 'product_address_csv',
-      importedAt: record.importedAt || new Date().toISOString(),
-      files: safeArray(record.files),
-      rawRows: Number(record.rawRows || 0),
-      detailRows: Number(record.detailRows || 0),
-      uniqueCount: tickets.length,
-      duplicateExcluded: Math.max(0, Number(record.detailRows || 0) - tickets.length),
-      addressCount: tickets.filter(t => t.areaUnit && t.areaUnit !== '未設定').length,
-      zipCount: tickets.filter(t => t.zip).length,
-      productCategoryCount: new Set(tickets.map(t => t.category).filter(Boolean)).size,
-      workTypeCount: new Set(tickets.flatMap(t => Object.keys(t.works || {}))).size,
-      amount: tickets.reduce((sum,t) => sum + yen(t.amount), 0),
-      tickets,
-      privacyMode: 'customer_pii_removed',
-      privacyUpdatedAt: new Date().toISOString()
-    };
-  }
-
-  function sanitizeProductRecordList(list){
-    return safeArray(list).map(sanitizeProductRecord).filter(r => r && r.ym);
-  }
-
   function parseProductAddressRows(rows, fileName){
     if (!rows.length) return { rawRows:0, detailRows:0, uniqueCount:0, tickets:[], multiAddressSlipCount:0, multiZipSlipCount:0 };
 
@@ -520,18 +514,16 @@ IMPORT.deleteFieldData = function(ym) {
 
     // 商品・住所CSVは列位置を固定する。
     // I列：エスライン原票番号、L列：郵便番号、N列：住所、P列：商品、R列：作業内容、U列：金額
-    // Y列：荷主基本コード、AA列：荷主名、AB列：契約名を荷主判定用に使用する。
-    // 重要：住所全文・氏名・電話番号・raw行は保存しない。住所は取込時に市区町村/区へ丸めて破棄する。
-    const idxDate    = 0;
-    const idxSlip    = 8;
-    const idxZip     = 11;
-    const idxAddress = 13;
-    const idxProduct = 15;
-    const idxWork    = 17;
-    const idxAmount  = 20;
-    const idxShipperCode = 24;
-    const idxShipperName = 26;
-    const idxContractName = 27;
+    // 重要：I列原票番号が重複する前提。
+    // 件数・商品・サイズ・エリアは、I列原票番号ごとに1件だけ採用する。
+    // R列作業内容とU列金額だけは、重複行を原票番号へ紐づけて集計する。
+    const idxSlip    = 8;   // I列 エスライン原票番号
+    const idxZip     = 11;  // L列 郵便番号
+    const idxAddress = 13;  // N列 住所
+    const idxDate    = 0;   // A列 日付（ある場合のみ）
+    const idxProduct = 15;  // P列 商品
+    const idxWork    = 17;  // R列 作業内容
+    const idxAmount  = 20;  // U列 金額
 
     const slipMap = new Map();
     let detailRows = 0;
@@ -546,78 +538,70 @@ IMPORT.deleteFieldData = function(ym) {
       if (!slip) continue;
       detailRows++;
 
-      const date = clean(row[idxDate]);
       const zip = normalizeZip(row[idxZip]);
       const address = clean(row[idxAddress]);
-      const area = areaFromAddress(address);
-      const areaLabel = area.area || (area.pref === '未設定' ? area.city : area.pref + area.city);
+      const date = normalizeWorkDate(row[idxDate]);
       const product = clean(row[idxProduct]);
       const work = clean(row[idxWork]) || '未設定';
       const amount = yen(row[idxAmount]);
-      const shipperCode = clean(row[idxShipperCode]);
-      const shipperName = clean(row[idxShipperName]) || clean(row[idxContractName]);
 
       if (!slipMap.has(slip)) {
+        // 原票番号の初回出現行を代表行にする。
+        // 以降の同一原票行は、件数・商品・サイズ・住所判定には使わない。
         slipMap.set(slip, {
           slip,
           firstRowOrder: rowIndex,
           date,
           zip,
-          pref: area.pref,
-          city: area.city,
-          area: areaLabel,
-          areaUnit: areaLabel,
+          address,
           product,
-          shipperCode,
-          shipperName,
           amount: 0,
           works: {},
           workDetails: [],
           rowCount: 0,
           seenZips: new Set(zip ? [zip] : []),
-          seenAreaUnits: new Set(areaLabel && areaLabel !== '未設定' ? [areaLabel] : [])
+          seenAddresses: new Set(address ? [address] : [])
         });
       }
 
       const g = slipMap.get(slip);
       g.rowCount++;
-      if (!g.date && date) g.date = date;
-      if (!g.zip && zip) g.zip = zip;
-      if ((!g.areaUnit || g.areaUnit === '未設定') && areaLabel && areaLabel !== '未設定') {
-        g.pref = area.pref;
-        g.city = area.city;
-        g.area = areaLabel;
-        g.areaUnit = areaLabel;
-      }
-      if (!g.product && product) g.product = product;
-      if (!g.shipperCode && shipperCode) g.shipperCode = shipperCode;
-      if (!g.shipperName && shipperName) g.shipperName = shipperName;
-      if (zip) g.seenZips.add(zip);
-      if (areaLabel && areaLabel !== '未設定') g.seenAreaUnits.add(areaLabel);
 
+      // 代表行のL/N/Pが空だった場合だけ、後続行の値で補完する。
+      // 値が入った後は上書きしない。
+      if (!g.zip && zip) g.zip = zip;
+      if (!g.date && date) g.date = date;
+      if (!g.address && address) g.address = address;
+      if (!g.product && product) g.product = product;
+      if (zip) g.seenZips.add(zip);
+      if (address) g.seenAddresses.add(address);
+
+      // R列作業内容・U列金額だけは原票に紐づけて集計する。
       g.amount += amount;
       g.works[work] = (g.works[work] || 0) + amount;
       g.workDetails.push({ work, amount });
     }
 
-    const tickets = [...slipMap.values()].map(g => sanitizeProductTicket({
-      slip: g.slip,
-      date: g.date,
-      zip: g.zip,
-      pref: g.pref,
-      city: g.city,
-      area: g.area,
-      areaUnit: g.areaUnit,
-      product: g.product,
-      shipperCode: g.shipperCode,
-      shipperName: g.shipperName,
-      amount: yen(g.amount),
-      works: g.works,
-      workDetails: g.workDetails,
-      rowCount: g.rowCount,
-      hasMultipleZip: g.seenZips.size > 1,
-      hasMultipleAddress: g.seenAreaUnits.size > 1
-    })).filter(Boolean);
+    const tickets = [...slipMap.values()].map(g => {
+      const area = areaFromAddress(g.address);
+      return {
+        slip: g.slip,
+        date: g.date || '',
+        zip: g.zip,
+        product: g.product,
+        category: productCategory(g.product),
+        sizeBucket: sizeBucketFromProduct(g.product),
+        pref: area.pref,
+        city: area.city,
+        area: area.area,
+        amount: yen(g.amount),
+        works: g.works,
+        workDetails: g.workDetails,
+        rowCount: g.rowCount,
+        hasMultipleZip: g.seenZips.size > 1,
+        hasMultipleAddress: g.seenAddresses.size > 1
+      };
+    });
 
     return {
       sourceFileName: fileName,
@@ -625,11 +609,11 @@ IMPORT.deleteFieldData = function(ym) {
       detailRows,
       uniqueCount: tickets.length,
       duplicateExcluded: Math.max(0, detailRows - tickets.length),
-      addressCount: tickets.filter(t => t.areaUnit && t.areaUnit !== '未設定').length,
+      addressCount: tickets.filter(t => t.pref && t.city && t.city !== '未設定').length,
       zipCount: tickets.filter(t => t.zip).length,
       productCategoryCount: new Set(tickets.map(t => t.category).filter(Boolean)).size,
       workTypeCount: new Set(tickets.flatMap(t => Object.keys(t.works || {}))).size,
-      amount: tickets.reduce((sum,t)=>sum+yen(t.amount),0),
+      amount: tickets.reduce((s,t)=>s+yen(t.amount),0),
       multiAddressSlipCount: tickets.filter(t => t.hasMultipleAddress).length,
       multiZipSlipCount: tickets.filter(t => t.hasMultipleZip).length,
       tickets
@@ -784,7 +768,7 @@ IMPORT.deleteFieldData = function(ym) {
         base.workDetails.push(...(t.workDetails || []));
       }
     });
-    const tickets = [...ticketMap.values()].map(sanitizeProductTicket).filter(Boolean);
+    const tickets = [...ticketMap.values()].map(sanitizeProductTicket);
     const record = {
       ym,
       source:'product_address_csv',
@@ -794,14 +778,14 @@ IMPORT.deleteFieldData = function(ym) {
       detailRows,
       uniqueCount: tickets.length,
       duplicateExcluded: Math.max(0, detailRows - tickets.length),
-      addressCount: tickets.filter(t=>t.areaUnit && t.areaUnit !== '未設定').length,
+      addressCount: tickets.filter(t=>t.pref && t.city && t.city !== '未設定').length,
       zipCount: tickets.filter(t=>t.zip).length,
       productCategoryCount: new Set(tickets.map(t=>t.category).filter(Boolean)).size,
       workTypeCount: new Set(tickets.flatMap(t=>Object.keys(t.works||{}))).size,
       amount: tickets.reduce((s,t)=>s+yen(t.amount),0),
       tickets
     };
-    upsertByYm('productAddressData', sanitizeProductRecord(record));
+    upsertByYm('productAddressData', record);
     STORE.save();
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
     refreshFieldAll();
