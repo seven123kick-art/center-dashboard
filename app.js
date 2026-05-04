@@ -731,92 +731,8 @@ const IMPORT = {
     }
   },
 
-  async importCapacityExcel(file) {
-    try {
-      await ASSETS.xlsx();
-      if (!window.XLSX) { UI.toast('SheetJSが読み込まれていません','error'); return; }
-
-      const buf = await file.arrayBuffer();
-      const wb = window.XLSX.read(buf,{type:'array'});
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = window.XLSX.utils.sheet_to_json(ws,{header:1, defval:''});
-
-      function normAreaName(v){
-        return String(v || '')
-          .normalize('NFKC')
-          .replace(/\s+/g,'')
-          .replace(/_n/g,'_')
-          .replace(/＿n/g,'_')
-          .replace(/北\/板橋/g,'北/板')
-          .trim();
-      }
-      function n(v){
-        const x = Number(String(v ?? '').normalize('NFKC').replace(/,/g,'').replace(/[^\d.-]/g,''));
-        return Number.isFinite(x) ? x : 0;
-      }
-      function isHeader(row){
-        const s = row.map(x=>String(x||'')).join('|');
-        return /地区.*名称|時間.*区分|平日|土日/.test(s);
-      }
-
-      const areas = {};
-      let rowCount = 0;
-
-      for (const row of data) {
-        if (!row || !row.some(c=>String(c||'').trim())) continue;
-        if (isHeader(row)) continue;
-
-        // 標準フォーマット：B列=地区名称1、F列=時間区分、G列=平日、H列=土日
-        let area = normAreaName(row[1]);
-        let time = String(row[5] || '').normalize('NFKC').trim() || 'ALL';
-        let weekday = n(row[6]);
-        let weekend = n(row[7]);
-
-        // 旧簡易フォーマット：A列=地区、B列=平日/最大、C列=土日
-        if ((!area || (!weekday && !weekend)) && row[0]) {
-          const a0 = normAreaName(row[0]);
-          const w0 = n(row[1]);
-          const e0 = n(row[2]);
-          if (a0 && (w0 || e0)) {
-            area = a0;
-            time = String(row[3] || 'ALL').normalize('NFKC').trim() || 'ALL';
-            weekday = w0;
-            weekend = e0 || w0;
-          }
-        }
-
-        if (!area || (!weekday && !weekend)) continue;
-        if (!areas[area]) areas[area] = { weekday:0, weekend:0, rows:[], max:0 };
-        areas[area].weekday += weekday;
-        areas[area].weekend += (weekend || weekday);
-        areas[area].max += Math.max(weekday, weekend || weekday);
-        areas[area].rows.push({ time, weekday, weekend:weekend || weekday });
-        rowCount++;
-      }
-
-      if (!Object.keys(areas).length) {
-        UI.toast('地区データが見つかりません（想定：B列=地区、F列=時間、G列=平日、H列=土日）','warn');
-        return;
-      }
-
-      STATE.capacity = STATE.capacity || {};
-      STATE.capacity.areas = areas;
-      STATE.capacity.updatedAt = new Date().toISOString();
-      STATE.capacity.sourceFile = file.name;
-      STATE.capacity.rowCount = rowCount;
-      STATE.capacity.mapping = STATE.capacity.mapping || CAPACITY_UI.defaultMapping();
-      STATE.capacity.calendar = STATE.capacity.calendar || {};
-    STATE.capacity.shipperCaps = STATE.capacity.shipperCaps || {};
-
-      STORE.save();
-      CLOUD.pushCapacity().catch(()=>{});
-      NAV.refresh();
-      UI.toast(`キャパ取込完了: ${Object.keys(areas).length}地区 / ${rowCount}行`);
-      if (window.CAPACITY_UI?.render) CAPACITY_UI.render();
-    } catch(e) {
-      console.error(e);
-      UI.toast('Excel読込エラー: '+e.message,'error');
-    }
+  importCapacityExcel() {
+    UI.toast('現在のキャパ設定は「荷主キャパ」タブで手入力する方式です。Excel取込は使用しません。', 'warn');
   },
 
   deleteDataset(ym, type) {
@@ -2326,14 +2242,13 @@ const CAPACITY_UI = {
 
   ensureState() {
     STATE.capacity = STATE.capacity || {};
-    STATE.capacity.areas = STATE.capacity.areas || {};
-    STATE.capacity.mapping = Array.isArray(STATE.capacity.mapping) && STATE.capacity.mapping.length ? STATE.capacity.mapping : this.defaultMapping();
+    STATE.capacity.areas = {}; // 旧Excelキャパは使用しない
+    STATE.capacity.mapping = []; // 旧地区マッピングは使用しない
     STATE.capacity.calendar = STATE.capacity.calendar || {};
     STATE.capacity.shipperGroups = Array.isArray(STATE.capacity.shipperGroups) && STATE.capacity.shipperGroups.length ? STATE.capacity.shipperGroups : this.defaultShipperGroups();
-    STATE.capacity.shipperAreaCaps = STATE.capacity.shipperAreaCaps || {};
+    STATE.capacity.shipperAreaCaps = {}; // 旧地区別荷主キャパは使用しない
     STATE.capacity.capacityGroups = Array.isArray(STATE.capacity.capacityGroups) ? STATE.capacity.capacityGroups : [];
     this._capRegionFilter = this._capRegionFilter || 'saitama_all';
-    this.migrateShipperCaps();
   },
 
   defaultShipperGroups() {
@@ -2683,7 +2598,8 @@ const CAPACITY_UI = {
       if (dt) hasDate = true;
       const date = dt || '';
       const city = this.ticketCity(t);
-      const area = this.mappedArea(city);
+      const capGroup = this.capacityGroupForUnit(city);
+      const area = capGroup ? (capGroup.name || '未設定区分') : '未区分';
       const shipperName = this.ticketShipperName(t, slip, ym);
       const shipperCode = this.ticketShipperCode(t, slip, ym);
       const shipper = this.normalizeShipperGroup(shipperName, shipperCode);
@@ -2748,6 +2664,25 @@ const CAPACITY_UI = {
       .sort((a,b)=>this.n(a.sort)-this.n(b.sort));
   },
 
+  hasValidCapacityGroups() {
+    this.ensureState();
+    return (STATE.capacity?.capacityGroups || []).some(g => {
+      if (!Array.isArray(g.units) || !g.units.length) return false;
+      return this.activeShipperGroups().some(sg =>
+        this.n(g.capacity?.[sg.key]?.weekday) > 0 || this.n(g.capacity?.[sg.key]?.weekend) > 0
+      );
+    });
+  },
+
+  capacityGroupForUnit(unit) {
+    this.ensureState();
+    const normalized = this.normalizeCapacityUnit(unit);
+    if (!normalized) return null;
+    return (STATE.capacity.capacityGroups || []).find(g =>
+      Array.isArray(g.units) && g.units.some(u => this.normalizeCapacityUnit(u) === normalized)
+    ) || null;
+  },
+
   getShipperAreaCap(groupKey, area, field) {
     const row = STATE.capacity?.shipperAreaCaps?.[groupKey]?.[area] || {};
     return this.n(row[field] ?? 0);
@@ -2755,40 +2690,19 @@ const CAPACITY_UI = {
 
   hasAnyShipperAreaCap(area='') {
     this.ensureState();
-
-    const groupHasCap = (STATE.capacity.capacityGroups || []).some(g => {
-      if (area && !this.capacityGroupsForArea(area).some(x => x.id === g.id)) return false;
+    const groups = STATE.capacity?.capacityGroups || [];
+    if (!groups.length) return false;
+    return groups.some(g => {
+      if (!Array.isArray(g.units) || !g.units.length) return false;
+      if (area && String(g.name || '') !== String(area)) return false;
       return this.capacityGroupDailyCap(g, this.ymDate(this.getYM() || '202601', 1)) > 0;
-    });
-    if (groupHasCap) return true;
-
-    const groups = this.activeShipperGroups();
-    return groups.some(g=>{
-      const areas = STATE.capacity?.shipperAreaCaps?.[g.key] || {};
-      if (area) {
-        const r = areas[area] || {};
-        return this.n(r.weekday) > 0 || this.n(r.weekend) > 0;
-      }
-      return Object.values(areas).some(r=>this.n(r?.weekday)>0 || this.n(r?.weekend)>0);
     });
   },
 
   baseDailyCap(dateStr, area) {
-    const groupCap = this.areaGroupCapSum(dateStr, area);
-    if (groupCap > 0 || (STATE.capacity?.capacityGroups || []).length) return groupCap;
-
-    const holidayLike = this.isWeekend(dateStr) || this.dayType(dateStr) === 'holiday';
-    const field = holidayLike ? 'weekend' : 'weekday';
-    const groups = this.activeShipperGroups();
-    const shipperCap = groups.reduce((s,g)=>s+this.getShipperAreaCap(g.key, area, field),0);
-    if (shipperCap > 0 || this.hasAnyShipperAreaCap(area)) return shipperCap;
-
-    // 互換用：荷主キャパ未設定の地区だけ、旧通常キャパを参照する。
-    const row = STATE.capacity?.areas?.[area];
-    if (!row) return 0;
-    const wd = this.n(row.weekday ?? row.max);
-    const we = this.n(row.weekend ?? row.max ?? row.weekday);
-    return holidayLike ? we : wd;
+    // 新方式：通常キャパは、荷主キャパ区分の合算のみ。
+    // 旧Excelキャパ・旧地区キャパ・旧shipperAreaCapsは参照しない。
+    return this.areaGroupCapSum(dateStr, area);
   },
 
   dailyCap(dateStr, area) {
@@ -2797,12 +2711,7 @@ const CAPACITY_UI = {
 
   shipperDailyCap(dateStr, area, groupLabelOrKey) {
     const key = this.shipperGroupKeyByLabel(groupLabelOrKey);
-    const groupCap = this.areaGroupCapSum(dateStr, area, key);
-    if (groupCap > 0 || (STATE.capacity?.capacityGroups || []).length) return groupCap;
-
-    const holidayLike = this.isWeekend(dateStr) || this.dayType(dateStr) === 'holiday';
-    const field = holidayLike ? 'weekend' : 'weekday';
-    return this.getShipperAreaCap(key, area, field);
+    return this.areaGroupCapSum(dateStr, area, key);
   },
 
   monthlyCap(ym, area) {
@@ -2822,9 +2731,9 @@ const CAPACITY_UI = {
   },
 
   capTargetCount(shippers) {
-    if (!shippers || !this.hasAnyShipperAreaCap()) return null;
+    if (!shippers || !this.hasValidCapacityGroups()) return null;
     const activeLabels = new Set(this.activeShipperGroups().map(g=>g.label));
-    return Object.entries(shippers).reduce((s,[name,n])=>activeLabels.has(name) ? s+this.n(n) : s,0);
+    return Object.entries(shippers).reduce((sum,[name,count])=>activeLabels.has(name) ? sum + this.n(count) : sum, 0);
   },
 
   judge(used, cap) {
@@ -2839,8 +2748,12 @@ const CAPACITY_UI = {
 
   areaRows() {
     const actual = this.buildActual();
-    const capAreas = Object.keys(STATE.capacity?.areas || {});
-    const all = [...new Set([...capAreas, ...actual.byArea.keys()])].filter(Boolean);
+    if (!this.hasValidCapacityGroups()) return [];
+    const groupNames = (STATE.capacity?.capacityGroups || [])
+      .filter(g => Array.isArray(g.units) && g.units.length)
+      .map(g => g.name)
+      .filter(Boolean);
+    const all = [...new Set(groupNames)];
     return all.map(area=>{
       const a = actual.byArea.get(area) || { area, count:0, shippers:{}, cities:{} };
       const cap = this.monthlyCap(actual.ym, area);
@@ -2849,11 +2762,7 @@ const CAPACITY_UI = {
       const used = targetCount === null ? a.count : targetCount;
       const j = this.judge(used, cap);
       return { ...a, used, cap, oneDay:one, rate:j.rate, status:j.status, cls:j.cls };
-    }).sort((a,b)=>{
-      const aw = /その他|未分類|未設定/.test(a.area) ? 1 : 0;
-      const bw = /その他|未分類|未設定/.test(b.area) ? 1 : 0;
-      return aw-bw || b.rate-a.rate || b.count-a.count;
-    });
+    }).sort((a,b)=> b.rate-a.rate || b.count-a.count || String(a.area).localeCompare(String(b.area),'ja'));
   },
 
   dailyRows() {
@@ -2924,27 +2833,26 @@ const CAPACITY_UI = {
     this._lastRows = rows;
     this._lastDailyRows = daily;
 
+    if (!['monthly','daily','integrated','shipperCap','weekday','calendar'].includes(this._tab)) this._tab = 'monthly';
     view.innerHTML = this.layout(actual, rows, daily);
     this.bind();
   },
 
   layout(actual, rows, daily) {
-    const totalActual = rows.reduce((s,r)=>s+this.n(r.count),0);
-    const totalUsed = rows.reduce((s,r)=>s+this.n(r.used ?? r.count),0);
-    const totalCap = rows.reduce((s,r)=>s+this.n(r.cap),0);
-    const j = this.judge(totalUsed,totalCap);
+    const hasCap = this.hasValidCapacityGroups();
+    const totalActual = actual.tickets?.length || 0;
+    const totalUsed = hasCap ? rows.reduce((s,r)=>s+this.n(r.used ?? r.count),0) : 0;
+    const totalCap = hasCap ? rows.reduce((s,r)=>s+this.n(r.cap),0) : 0;
+    const j = hasCap ? this.judge(totalUsed,totalCap) : { rate:0, status:'未設定', cls:'unset' };
 
-    // 日別超過サマリー
-    // ここで必ず定義してからKPIカードで使う。未定義変数で画面全体が止まらないようにする。
     const dailyRows = Array.isArray(daily) ? daily : [];
-    const overList = dailyRows.filter(r => r && this.n(r.cap) > 0 && this.n(r.rate) >= 100);
+    const overList = hasCap ? dailyRows.filter(r => r && this.n(r.cap) > 0 && this.n(r.rate) >= 100) : [];
     const overDays = overList.length;
     const weekendOver = overList.filter(r => [0,6].includes(this.dow(r.date))).length;
     const weekendShare = overDays ? Math.round(weekendOver / overDays * 100) : 0;
     const weekdayShare = overDays ? 100 - weekendShare : 0;
-    const worstOver = overList.slice().sort((a,b)=>this.n(b.rate)-this.n(a.rate))[0] || null;
+    const worstOver = overList.slice().sort((a,b)=>this.n(b.diff)-this.n(a.diff) || this.n(b.rate)-this.n(a.rate))[0] || null;
 
-    const hasCap = !!(STATE.capacity?.areas && Object.keys(STATE.capacity.areas).length);
     const yms = [...new Set((STATE.productAddressData || []).map(r=>r.ym).filter(Boolean))].sort().reverse();
     const curYM = actual.ym || this.getYM();
 
@@ -2954,7 +2862,7 @@ const CAPACITY_UI = {
           <div class="capx-headline">
             <div>
               <h2>キャパ分析</h2>
-              <p>キャパExcelと商品・住所CSVを突合し、月別使用率・日別超過・カレンダー補正を確認します。</p>
+              <p>商品・住所CSVをもとに、区分作成と荷主別キャパ手入力で使用率・日別超過を確認します。</p>
             </div>
             <div class="capx-cond">
               <label>対象月
@@ -2964,33 +2872,31 @@ const CAPACITY_UI = {
               </label>
               <label>表示基準
                 <select id="capacity-base" disabled>
-                  <option value="calendar" selected>カレンダー日別積み上げ</option>
+                  <option value="calendar" selected>区分キャパ日別積み上げ</option>
                 </select>
               </label>
             </div>
           </div>
           <div class="capx-actions">
-            <button class="btn btn-primary" onclick="document.getElementById('capacity-master-input').click()">キャパExcel取込</button>
-            <input type="file" id="capacity-master-input" accept=".xlsx,.xls" style="display:none" onchange="CAPACITY_UI.importCapacityExcel(this.files[0])">
-            <button class="btn" onclick="document.getElementById('capacity-csv-input').click()">商品・住所CSV取込</button>
+            <button class="btn btn-primary" onclick="document.getElementById('capacity-csv-input').click()">商品・住所CSV取込</button>
             <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none" onchange="CAPACITY_UI.importAreaCsv(this.files)">
             <button class="btn" onclick="CAPACITY_UI.render()">再集計</button>
-            <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()">キャパマスタ削除</button>
-            <span id="capacity-msg">${hasCap ? `キャパ登録済：${Object.keys(STATE.capacity.areas).length}地区 / ${esc(STATE.capacity.sourceFile || '')}` : 'キャパExcelが未登録です'}</span>
+            <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()">キャパ区分を初期化</button>
+            <span id="capacity-msg">${hasCap ? `キャパ区分登録済：${STATE.capacity.capacityGroups.length}区分` : '荷主キャパ区分が未作成です'}</span>
           </div>
-          <div class="capx-note">商品・住所CSVは原票番号でユニーク化済みデータを使用します。日付がない月間CSVの場合、日別超過は「月間件数÷カレンダー日数」の推定表示です。</div>
+          <div class="capx-note">旧Excelキャパ・旧地区マスタは使用しません。先に「荷主キャパ」で区／市を選択して区分を作成すると、月別・日別・曜日・カレンダーへ自動反映します。</div>
         </div>
 
         <div class="capx-kpis">
           <div class="capx-kpi blue"><span>実績件数</span><b>${fmt(totalActual)}</b><em>原票</em></div>
-          <div class="capx-kpi green"><span>月キャパ</span><b>${fmt(totalCap)}</b><em>${hasCap?'登録済':'未登録'}</em></div>
-          <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${pct(j.rate)}</b><em>${esc(j.status)}</em></div>
-          <div class="capx-kpi amber"><span>日別超過（地区×日）</span><b>${fmt(overDays)}</b><em>土日 ${fmt(weekendShare)}% / 平日 ${fmt(weekdayShare)}% / 最大 ${worstOver ? esc(worstOver.area) + ' +' + fmt(this.n(worstOver.count)-this.n(worstOver.cap)) + '件（' + pct(worstOver.rate) + '）' : '—'}</em></div>
+          <div class="capx-kpi green"><span>月キャパ</span><b>${hasCap ? fmt(totalCap) : '—'}</b><em>${hasCap?'区分合算':'未設定'}</em></div>
+          <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${hasCap ? pct(j.rate) : '—'}</b><em>${esc(j.status)}</em></div>
+          <div class="capx-kpi amber"><span>日別超過（区分×日）</span><b>${hasCap ? fmt(overDays) : '—'}</b><em>${hasCap ? `土日 ${fmt(weekendShare)}% / 平日 ${fmt(weekdayShare)}% / 最大 ${worstOver ? esc(worstOver.area) + ' +' + fmt(this.n(worstOver.diff)) + '件（' + pct(worstOver.rate) + '）' : '—'}` : '区分作成後に表示'}</em></div>
         </div>
 
         <div class="capx-tabs">
           ${[
-            ['monthly','月別使用状況'],['daily','日別超過'],['integrated','連動分析'],['shipperCap','荷主キャパ'],['weekday','曜日分析'],['calendar','カレンダー'],['mapping','地区マッピング'],['master','通常キャパ'],['unmatched','未分類']
+            ['monthly','月別使用状況'],['daily','日別超過'],['integrated','連動分析'],['shipperCap','荷主キャパ'],['weekday','曜日分析'],['calendar','カレンダー']
           ].map(([k,l])=>`<button type="button" class="${this._tab===k?'active':''}" data-capx-tab="${k}">${l}</button>`).join('')}
         </div>
 
@@ -3000,28 +2906,38 @@ const CAPACITY_UI = {
         ${this._tab==='shipperCap'?this.shipperCapacityHtml(actual):''}
         ${this._tab==='weekday'?this.weekdayHtml(daily, actual):''}
         ${this._tab==='calendar'?this.calendarHtml(daily, actual):''}
-        ${this._tab==='mapping'?this.mappingHtml(actual):''}
-        ${this._tab==='master'?this.masterHtml():''}
-        ${this._tab==='unmatched'?this.unmatchedHtml(actual):''}
       </div>`;
   },
 
   monthlyHtml(rows) {
-    if (!STATE.capacity?.areas || !Object.keys(STATE.capacity.areas).length) {
-      return `<div class="capx-card capx-empty">キャパExcelを取り込んでください。</div>`;
+    if (!this.hasValidCapacityGroups()) {
+      return `<div class="capx-card capx-empty">
+        <h3>荷主キャパ区分を作成してください</h3>
+        <p class="capx-note2">現在は旧Excelキャパ・旧地区マスタを使わない設計です。先に「荷主キャパ」タブで、区／市を選択して区分を作成し、コジマ＋ビック・でんきち・エディオンのキャパを入力してください。</p>
+        <button class="btn btn-primary" type="button" data-capx-tab="shipperCap">荷主キャパを作成する</button>
+      </div>`;
     }
     return `<div class="capx-grid">
       <div class="capx-card">
-        <h3>地区別 月キャパ使用状況</h3>
-        <div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th class="r">実績</th><th class="r">判定対象</th><th class="r">基準キャパ</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
+        <h3>区分別 月キャパ使用状況</h3>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>区分</th><th class="r">実績</th><th class="r">判定対象</th><th class="r">日キャパ</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
           ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.used ?? r.count)}</td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td></tr>`).join('')}
         </tbody></table></div>
       </div>
-      <div class="capx-card"><h3>市区町村内訳</h3><div id="capacity-detail-box" class="capx-empty">地区をクリックしてください</div></div>
+      <div class="capx-card"><h3>区分内訳</h3><div id="capacity-detail-box" class="capx-empty">区分をクリックしてください</div></div>
+    </div>`;
+  },
+
+  needCapacityGroupHtml() {
+    return `<div class="capx-card capx-empty">
+      <h3>荷主キャパ区分が未作成です</h3>
+      <p class="capx-note2">旧地区キャパは参照しません。「荷主キャパ」タブで区／市を選び、区分名と荷主別キャパを入力してください。</p>
+      <button class="btn btn-primary" type="button" data-capx-tab="shipperCap">荷主キャパを作成する</button>
     </div>`;
   },
 
   dailyHtml(rows, actual) {
+    if (!this.hasValidCapacityGroups()) return this.needCapacityGroupHtml();
     if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
 
     this._lastDailyRows = rows;
@@ -3068,6 +2984,7 @@ const CAPACITY_UI = {
   },
 
   integratedHtml(rows, actual) {
+    if (!this.hasValidCapacityGroups()) return this.needCapacityGroupHtml();
     if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
 
     const over = rows.filter(r=>r.cap > 0 && this.n(r.diff) > 0);
@@ -3152,6 +3069,7 @@ const CAPACITY_UI = {
   },
 
   weekdayHtml(rows, actual) {
+    if (!this.hasValidCapacityGroups()) return this.needCapacityGroupHtml();
     if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
 
     const names = ['日','月','火','水','木','金','土'];
@@ -3417,10 +3335,7 @@ const CAPACITY_UI = {
 
   capacityGroupsForArea(area) {
     this.ensureState();
-    return (STATE.capacity.capacityGroups || []).filter(g => {
-      const units = Array.isArray(g.units) ? g.units : [];
-      return units.some(unit => this.mappedArea(this.normalizeCapacityUnit(unit)) === area);
-    });
+    return (STATE.capacity.capacityGroups || []).filter(g => String(g.name || '') === String(area || ''));
   },
 
   areaGroupCapSum(dateStr, area, shipperKey='') {
@@ -3564,6 +3479,7 @@ const CAPACITY_UI = {
   },
 
   calendarHtml(rows, actual) {
+    if (!this.hasValidCapacityGroups()) return this.needCapacityGroupHtml();
     const ym = actual.ym || this.getYM();
     const days = this.daysInYM(ym);
     if (!ym || !days) return `<div class="capx-card capx-empty">対象月を選択してください。</div>`;
@@ -3756,38 +3672,6 @@ const CAPACITY_UI = {
       STORE.save();
       this.render();
     }));
-    const addMap = document.getElementById('capacity-add-map');
-    if (addMap) addMap.addEventListener('click',()=>{ STATE.capacity.mapping.push({pattern:'',area:'未分類',priority:1}); STORE.save(); this.render(); });
-    document.querySelectorAll('[data-capx-map-field]').forEach(inp=>inp.addEventListener('change',()=>{
-      const rows = STATE.capacity.mapping.slice().sort((a,b)=>this.n(b.priority)-this.n(a.priority));
-      const idx = Number(inp.closest('[data-capx-map-index]').dataset.capxMapIndex);
-      rows[idx][inp.dataset.capxMapField] = inp.type === 'number' ? this.n(inp.value) : inp.value;
-      STATE.capacity.mapping = rows;
-      STORE.save();
-      this.render();
-    }));
-    document.querySelectorAll('[data-capx-map-delete]').forEach(btn=>btn.addEventListener('click',()=>{
-      const rows = STATE.capacity.mapping.slice().sort((a,b)=>this.n(b.priority)-this.n(a.priority));
-      rows.splice(Number(btn.dataset.capxMapDelete),1);
-      STATE.capacity.mapping = rows;
-      STORE.save();
-      this.render();
-    }));
-    const addMaster = document.getElementById('capacity-add-master');
-    if (addMaster) addMaster.addEventListener('click',()=>{ STATE.capacity.areas['新規地区']={weekday:0,weekend:0,rows:[]}; STORE.save(); this.render(); });
-    document.querySelectorAll('[data-capx-master-field]').forEach(inp=>inp.addEventListener('change',()=>this.updateMaster(inp)));
-    document.querySelectorAll('[data-capx-master-delete]').forEach(btn=>btn.addEventListener('click',()=>{ delete STATE.capacity.areas[btn.dataset.capxMasterDelete]; STORE.save(); this.render(); }));
-    document.querySelectorAll('[data-capx-shipper-area-cap]').forEach(inp=>inp.addEventListener('change',()=>{
-      const groupKey = inp.dataset.capxShipperAreaCap;
-      const area = inp.dataset.capxArea;
-      const field = inp.dataset.capxCapField;
-      STATE.capacity.shipperAreaCaps = STATE.capacity.shipperAreaCaps || {};
-      STATE.capacity.shipperAreaCaps[groupKey] = STATE.capacity.shipperAreaCaps[groupKey] || {};
-      STATE.capacity.shipperAreaCaps[groupKey][area] = STATE.capacity.shipperAreaCaps[groupKey][area] || {};
-      STATE.capacity.shipperAreaCaps[groupKey][area][field] = this.n(inp.value);
-      STORE.save();
-      this.render();
-    }));
     document.querySelectorAll('[data-capx-group-field]').forEach(inp=>inp.addEventListener('change',()=>{
       const tr = inp.closest('[data-capx-group-key]');
       const key = tr?.dataset.capxGroupKey;
@@ -3919,8 +3803,12 @@ const CAPACITY_UI = {
   },
 
   clearMaster() {
-    if (!confirm('キャパマスタを削除しますか？')) return;
-    STATE.capacity = { areas:{}, mapping:this.defaultMapping(), calendar:{} };
+    if (!confirm('作成済みの荷主キャパ区分を初期化しますか？\n※商品・住所CSV、荷主判定ルール、カレンダー補正は残します。')) return;
+    this.ensureState();
+    STATE.capacity.capacityGroups = [];
+    STATE.capacity.areas = {};
+    STATE.capacity.sourceFile = '';
+    STATE.capacity.rowCount = 0;
     STORE.save();
     this.render();
   },
