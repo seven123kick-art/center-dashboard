@@ -1008,7 +1008,6 @@ IMPORT.deleteFieldData = function(ym) {
   }
 
   function renderMonthlyCheck(){
-    const oldFn = window.renderMonthlyCheckTable;
     window.renderMonthlyCheckTable = function(){
       const fy = typeof storageFiscalYear === 'function' ? storageFiscalYear() : (STATE.fiscalYear || getDefaultFiscalYear());
       const months = typeof storageFiscalMonths === 'function' ? storageFiscalMonths(fy) : MONTHS.map(mm=>ymFromFiscalMonth(fy,mm));
@@ -1019,17 +1018,31 @@ IMPORT.deleteFieldData = function(ym) {
         let judge = base.judge, kind = base.kind, note = base.note || '';
         if (base.csvLabel === '未登録' && base.histLabel === 'なし') { judge = '漏れ'; kind = 'danger'; }
         if (p || w) {
-          note = [note, w ? `作業者 ${w.rowCount.toLocaleString()}行 / ${w.workerCount.toLocaleString()}名` : '', p ? `商品住所 原票${p.uniqueCount.toLocaleString()}件 / 明細${p.detailRows.toLocaleString()}行 / 重複除外${p.duplicateExcluded.toLocaleString()}行` : ''].filter(Boolean).join(' / ');
+          note = [
+            note,
+            w ? `作業者 ${Number(w.rowCount||0).toLocaleString()}行 / ${Number(w.workerCount||0).toLocaleString()}名` : '',
+            p ? `商品住所 原票${Number(p.uniqueCount||0).toLocaleString()}件 / 明細${Number(p.detailRows||0).toLocaleString()}行 / 重複除外${Number(p.duplicateExcluded||0).toLocaleString()}行` : ''
+          ].filter(Boolean).join(' / ');
         }
-        return { ...base, workerLabel:w?'登録済':'未登録', workerKind:w?'ok':'danger', productLabel:p?'登録済':'未登録', productKind:p?'ok':'danger', judge, kind, note };
+        const hasConfirmed = safeArray(STATE.datasets).some(d => d && d.ym === ym && d.source !== 'history' && (d.type || 'confirmed') === 'confirmed');
+        const hasDaily = safeArray(STATE.datasets).some(d => d && d.ym === ym && d.source !== 'history' && d.type === 'daily');
+        const hasHistory = safeArray(STATE.datasets).some(d => d && d.ym === ym && d.source === 'history');
+        const ops = [];
+        if (hasConfirmed) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="DATA_STORAGE_TABLE.deleteCsvMonth('${ym}','confirmed')">確定CSV削除</button>`);
+        if (hasDaily) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="DATA_STORAGE_TABLE.deleteCsvMonth('${ym}','daily')">速報CSV削除</button>`);
+        if (hasHistory) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="DATA_STORAGE_TABLE.deleteHistoryMonth('${ym}')">補完削除</button>`);
+        if (w) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="FIELD_CSV_REBUILD.deleteMonthType('${ym}','worker')">作業者削除</button>`);
+        if (p) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="FIELD_CSV_REBUILD.deleteMonthType('${ym}','product')">商品住所削除</button>`);
+        if (w || p) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="FIELD_CSV_REBUILD.deleteMonthType('${ym}','all')">現場CSV月削除</button>`);
+        return { ...base, workerLabel:w?'登録済':'未登録', workerKind:w?'ok':'danger', productLabel:p?'登録済':'未登録', productKind:p?'ok':'danger', judge, kind, note, ops: ops.join(' ') || '<span style="color:var(--text3);font-size:11px">削除対象なし</span>' };
       });
       const need = rows.filter(r => r.kind !== 'ok').length;
       const summary = typeof storageBadge === 'function' ? storageBadge(`確認 ${need}ヶ月`, need ? 'warn' : 'ok') : '';
       const badge = (label,kind) => typeof storageBadge === 'function' ? storageBadge(label,kind) : label;
       return `<div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px"><div><div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div><div style="font-size:11px;color:var(--text3);margin-top:3px">${fy}年度：${fy}年4月 ～ ${Number(fy)+1}年3月（年度順）</div></div><div>${summary}</div></div>
-        <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>作業者CSV</th><th>商品住所CSV</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
-        ${rows.map(s=>`<tr><td><strong>${ymText(s.ym)}</strong></td><td>${badge(s.csvLabel,s.csvKind)}</td><td>${badge(s.histLabel,s.histKind)}</td><td>${badge(s.planLabel,s.planKind)}</td><td>${badge(s.workerLabel,s.workerKind)}</td><td>${badge(s.productLabel,s.productKind)}</td><td>${badge(s.judge,s.kind)}</td><td style="min-width:260px;color:var(--text2)">${esc2(s.note)}</td></tr>`).join('')}
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px"><div><div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div><div style="font-size:11px;color:var(--text3);margin-top:3px">${fy}年度：${fy}年4月 ～ ${Number(fy)+1}年3月（年度順）/ CSVは月単位で個別削除できます</div></div><div>${summary}</div></div>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>作業者CSV</th><th>商品住所CSV</th><th>判定</th><th>確認内容</th><th>月別操作</th></tr></thead><tbody>
+        ${rows.map(s=>`<tr><td><strong>${ymText(s.ym)}</strong></td><td>${badge(s.csvLabel,s.csvKind)}</td><td>${badge(s.histLabel,s.histKind)}</td><td>${badge(s.planLabel,s.planKind)}</td><td>${badge(s.workerLabel,s.workerKind)}</td><td>${badge(s.productLabel,s.productKind)}</td><td>${badge(s.judge,s.kind)}</td><td style="min-width:260px;color:var(--text2)">${esc2(s.note)}</td><td style="min-width:280px"><div style="display:flex;gap:6px;flex-wrap:wrap">${s.ops}</div></td></tr>`).join('')}
         </tbody></table></div></div>`;
     };
   }
@@ -1076,17 +1089,29 @@ IMPORT.deleteFieldData = function(ym) {
     }
   }
 
-  function deleteMonthType(ym, type){
+  async function deleteMonthType(ym, type){
     ensureState();
+    const w = workerRecord(ym);
+    const p = productRecord(ym);
+    if (type === 'worker' && !w) { msg(`${ymText(ym)} の作業者CSVは未登録です`, 'warn'); return; }
+    if (type === 'product' && !p) { msg(`${ymText(ym)} の商品住所CSVは未登録です`, 'warn'); return; }
+    if (type === 'all' && !w && !p) { msg(`${ymText(ym)} の現場CSVは未登録です`, 'warn'); return; }
+    const label = type==='all' ? '現場CSV（作業者・商品住所）' : type==='worker' ? '作業者CSV' : '商品住所CSV';
+    if (!confirm(`${ymText(ym)} の${label}を削除しますか？\n収支CSV・収支補完・計画データは削除しません。`)) return;
+
     if (type === 'worker' || type === 'all') STATE.workerCsvData = safeArray(STATE.workerCsvData).filter(d => d.ym !== ym);
     if (type === 'product' || type === 'all') STATE.productAddressData = safeArray(STATE.productAddressData).filter(d => d.ym !== ym);
     // 旧混在データも同じ年月は消して復活を防止
     STATE.fieldData = safeArray(STATE.fieldData).filter(d => d.ym !== ym);
     STATE.areaData = safeArray(STATE.areaData).filter(d => d.ym !== ym);
     STORE.save();
-    if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
+    try {
+      if (CLOUD?.pushAll) await CLOUD.pushAll();
+    } catch(e) {
+      msg(`${ymText(ym)} の${label}はローカル削除済みですが、クラウド同期に失敗しました`, 'warn');
+    }
     refreshFieldAll();
-    msg(`${ymText(ym)} の${type==='all'?'現場明細':type==='worker'?'作業者CSV':'商品住所CSV'}を削除しました`, 'warn');
+    msg(`${ymText(ym)} の${label}を削除しました`, 'warn');
   }
 
   /* 確定CSV 原票番号別売上マップ作成
