@@ -496,82 +496,157 @@
     <div class="view" id="view-report">
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
-          <span class="card-title">会議報告書作成</span>
-          <span style="font-size:11px;color:var(--text3)">月次版／年度版を選択し、A4 1枚用のAIプロンプトを作成します</span>
+          <span class="card-title">会議報告書</span>
+          <span style="font-size:11px;color:var(--text3)">年度・半期方針、参考資料ストック、月次実績から報告書本文を作成します</span>
         </div>
         <div class="card-body">
           <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px">
             <div>
               <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">作成タイプ</label>
-              <select id="report-type" onchange="REPORT_UI.refresh()" style="width:100%;font-size:12px;padding:6px 8px">
-                <option value="monthly">月次版</option>
-                <option value="annual">年度版</option>
+              <select id="report-type" onchange="REPORT_UI.refresh()" style="width:100%;font-size:12px;padding:8px 10px">
+                <option value="monthly">月次会議報告書</option>
+                <option value="halfReview">半期振り返り</option>
+                <option value="policy">半期方針</option>
               </select>
             </div>
             <div>
               <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">対象年度</label>
-              <select id="report-fy" onchange="REPORT_UI.refresh()" style="width:100%;font-size:12px;padding:6px 8px"></select>
+              <select id="report-fy" onchange="REPORT_UI.refresh()" style="width:100%;font-size:12px;padding:8px 10px"></select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">対象区分</label>
+              <select id="report-half" onchange="REPORT_UI.refresh()" style="width:100%;font-size:12px;padding:8px 10px">
+                <option value="上期">上期</option>
+                <option value="下期">下期</option>
+              </select>
             </div>
             <div id="report-month-wrap">
               <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">対象月</label>
-              <select id="report-ym" style="width:100%;font-size:12px;padding:6px 8px"></select>
-            </div>
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">出力形式</label>
-              <select id="report-style" style="width:100%;font-size:12px;padding:6px 8px">
-                <option value="a4">A4 1枚・管理者会議向け</option>
-                <option value="dense">A4 1枚・数字多め</option>
-                <option value="executive">A4 1枚・役員向け簡潔</option>
-              </select>
+              <select id="report-ym" onchange="REPORT_UI.refreshReferenceList()" style="width:100%;font-size:12px;padding:8px 10px"></select>
             </div>
           </div>
 
-          <div class="grid2" style="margin-bottom:12px">
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">当月・当期の状況（手入力）</label>
-              <textarea id="report-current-note" placeholder="例：大型案件の増減、荷主対応、傭車使用、現場の人員状況、特記事項など" style="width:100%;height:120px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
+          <div class="report-tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 14px">
+            <button type="button" class="btn report-tab active" data-report-tab="policy" onclick="REPORT_UI.switchTab('policy')" style="font-size:12px">年度・半期方針</button>
+            <button type="button" class="btn report-tab" data-report-tab="references" onclick="REPORT_UI.switchTab('references')" style="font-size:12px">参考資料ストック</button>
+            <button type="button" class="btn report-tab" data-report-tab="generate" onclick="REPORT_UI.switchTab('generate')" style="font-size:12px">報告書生成</button>
+          </div>
+
+          <div class="report-pane active" id="report-pane-policy">
+            <div class="grid2" style="margin-bottom:12px">
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">運営方針</label>
+                <textarea id="report-policy-direction" placeholder="例：売上を取りにいきながら利益を確実に残す運営へ転換する" style="width:100%;height:110px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">重点施策</label>
+                <textarea id="report-policy-actions" placeholder="例：クレーン強化、エディオン継続受注、ワンマン案件、不採算エリア整理" style="width:100%;height:110px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
+              </div>
             </div>
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">方針・強調したいこと（手入力）</label>
-              <textarea id="report-policy-note" placeholder="例：クレーン、エディオン、ワンマン、不採算エリア整理、配車・傭車方針など" style="width:100%;height:120px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
+            <div class="grid2" style="margin-bottom:12px">
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">数値目標・管理指標</label>
+                <textarea id="report-policy-targets" placeholder="例：クレーン月40件、付帯売上1,500千円、みなし人件費率80%以内" style="width:100%;height:90px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">前期からの課題・振り返り</label>
+                <textarea id="report-policy-issues" placeholder="例：改善が後手対応、再現性の課題、受注条件の整理不足" style="width:100%;height:90px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="REPORT_UI.savePolicy()" style="font-size:12px">年度・半期方針を保存</button>
+              <button class="btn" onclick="REPORT_UI.loadPolicy()" style="font-size:12px">保存内容を読込</button>
+              <button class="btn" onclick="NAV.go('library')" style="font-size:12px">方針スクショを過去資料へ登録</button>
+              <span id="report-policy-msg" style="font-size:11px;color:var(--text2)"></span>
             </div>
           </div>
 
-          <div style="margin-bottom:12px">
-            <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:6px">参照データ</label>
-            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;font-size:12px;color:var(--text2)">
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="monthly" checked>月次収支</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="plan" checked>計画差異</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="compare" checked>前月比・前年比</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="alerts" checked>アラート</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="field" checked>現場明細</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="annualField" checked>年度別現場分析</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="pastLibrary" checked>過去資料ライブラリ</label>
+          <div class="report-pane" id="report-pane-references" style="display:none">
+            <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">資料名</label>
+                <input id="report-ref-title" placeholder="例：4月 管理者会議メモ / 方針スクショ補足" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">資料区分</label>
+                <select id="report-ref-category" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+                  <option value="現場メモ">現場メモ</option>
+                  <option value="会議資料">会議資料</option>
+                  <option value="半期方針">半期方針</option>
+                  <option value="施策メモ">施策メモ</option>
+                  <option value="荷主対応">荷主対応</option>
+                  <option value="キャパ分析">キャパ分析</option>
+                  <option value="売上分析">売上分析</option>
+                  <option value="トラブル記録">トラブル記録</option>
+                  <option value="その他">その他</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">重要度</label>
+                <select id="report-ref-priority" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+                  <option value="高">高</option>
+                  <option value="中" selected>中</option>
+                  <option value="低">低</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">紐付け</label>
+                <select id="report-ref-scope" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+                  <option value="month">対象月</option>
+                  <option value="half">半期全体</option>
+                  <option value="year">年度全体</option>
+                </select>
+              </div>
             </div>
-          </div>
-
-          <div style="margin-bottom:12px">
-            <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:6px">参照する過去資料区分</label>
-            <div id="report-library-category-wrap" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;font-size:12px;color:var(--text2);margin-bottom:8px">
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-library-category" value="管理者会議資料" checked>管理者会議資料</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-library-category" value="月次報告書" checked>月次報告書</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-library-category" value="収支着地予測" checked>収支着地予測</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-library-category" value="年度方針" checked>年度方針</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-library-category" value="収支実績" checked>収支実績</label>
-              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-library-category" value="その他" checked>その他</label>
+            <div style="margin-bottom:12px">
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">内容・メモ</label>
+              <textarea id="report-ref-content" placeholder="資料から読み取った要点、会議で使った数字、現場判断、AIに必ず使わせたい表現を入れてください。スクショの場合は見出しや重要数字を短く補足してください。" style="width:100%;height:110px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
             </div>
-            <div id="report-library-selected-list" style="font-size:11px;color:var(--text3);background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:8px;line-height:1.7">過去資料ライブラリに登録した資料がここに反映されます</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+              <button class="btn btn-primary" onclick="REPORT_UI.saveReference()" style="font-size:12px">参考資料メモを保存</button>
+              <button class="btn" onclick="REPORT_UI.clearReferenceForm()" style="font-size:12px">入力クリア</button>
+              <button class="btn" onclick="NAV.go('library')" style="font-size:12px">PDF・画像・Excelを過去資料へ登録</button>
+              <span id="report-ref-msg" style="font-size:11px;color:var(--text2)"></span>
+            </div>
+            <div id="report-reference-list" style="font-size:12px;color:var(--text2);background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:10px;line-height:1.7">参考資料はまだありません</div>
           </div>
 
-          <div>
-            <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">過去PDF・Wordの文体／参考文（任意）</label>
-            <textarea id="report-reference-note" placeholder="過去の会議資料・PDF・Wordから、文体や使いたい表現を貼り付けてください。例：振り返り→方針→重点施策→まとめ、の流れなど" style="width:100%;height:100px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
-          </div>
-
-          <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
-            <button class="btn btn-primary" onclick="REPORT_UI.generatePrompt()" style="font-size:12px">AI用プロンプト作成</button>
-            <button class="btn" onclick="REPORT_UI.copyPrompt()" style="font-size:12px">コピー</button>
-            <span id="report-msg" style="font-size:11px;color:var(--text2)"></span>
+          <div class="report-pane" id="report-pane-generate" style="display:none">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">出力形式</label>
+                <select id="report-style" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+                  <option value="a4">A4 1枚・管理者会議向け</option>
+                  <option value="dense">A4 1枚・数字多め</option>
+                  <option value="executive">A4 1枚・役員向け簡潔</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">文章トーン</label>
+                <select id="report-tone" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+                  <option value="結論先出し・実務的・数字重視">結論先出し・実務的・数字重視</option>
+                  <option value="役員向け・簡潔・断定調">役員向け・簡潔・断定調</option>
+                  <option value="管理者会議向け・改善提案型">管理者会議向け・改善提案型</option>
+                </select>
+              </div>
+            </div>
+            <div style="margin-bottom:12px">
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:6px">参照データ</label>
+              <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;font-size:12px;color:var(--text2)">
+                <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="monthly" checked>月次収支</label>
+                <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="plan" checked>計画差異</label>
+                <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="compare" checked>前月比・前年比</label>
+                <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="field" checked>現場明細</label>
+                <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="capacity" checked>キャパ分析</label>
+                <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="report-source" value="references" checked>参考資料ストック</label>
+              </div>
+            </div>
+            <div id="report-generate-summary" style="font-size:11px;color:var(--text3);background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:10px;line-height:1.7;margin-bottom:12px">対象月・方針・参考資料を選択してください</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="REPORT_UI.generatePrompt()" style="font-size:12px">AI用プロンプト作成</button>
+              <button class="btn" onclick="REPORT_UI.copyPrompt()" style="font-size:12px">コピー</button>
+              <span id="report-msg" style="font-size:11px;color:var(--text2)"></span>
+            </div>
           </div>
         </div>
       </div>
@@ -579,7 +654,7 @@
       <div class="card">
         <div class="card-header">
           <span class="card-title">AIへ貼り付けるプロンプト</span>
-          <span style="font-size:11px;color:var(--text3)">ChatGPT / Claude に貼り付けて、A4 1枚の本文を生成します</span>
+          <span style="font-size:11px;color:var(--text3)">数字・方針・参考資料を結合し、会議報告書本文作成用に整えます</span>
         </div>
         <div class="card-body">
           <textarea id="report-prompt-output" placeholder="ここにAI用プロンプトが生成されます" style="width:100%;height:360px;font-size:12px;line-height:1.65;padding:10px;border:1px solid var(--border2);border-radius:6px;font-family:'Consolas','Meiryo',monospace;resize:vertical;color:var(--text)"></textarea>
@@ -603,6 +678,10 @@
                 <option value="月次報告書">月次報告書</option>
                 <option value="収支着地予測">収支着地予測</option>
                 <option value="年度方針">年度方針</option>
+                <option value="半期方針（スクショ）">半期方針（スクショ）</option>
+                <option value="参考資料（スクショ）">参考資料（スクショ）</option>
+                <option value="現場メモ">現場メモ</option>
+                <option value="施策メモ">施策メモ</option>
                 <option value="収支実績">収支実績</option>
                 <option value="その他">その他</option>
               </select>
@@ -631,7 +710,7 @@
           </div>
 
           <div class="upload-zone no-print" id="library-bulk-upload-zone" style="padding:18px;margin-bottom:12px;border-radius:8px;border:2px dashed var(--border2);background:#f8fafc;text-align:center;cursor:pointer" onclick="document.getElementById('library-bulk-file-input').click()">
-            <input type="file" id="library-bulk-file-input" accept=".pdf,.xlsx,.xls,.doc,.docx,.txt,.csv" multiple style="display:none" onchange="PAST_LIBRARY.handleBulkFiles(this.files)">
+            <input type="file" id="library-bulk-file-input" accept=".pdf,.xlsx,.xls,.doc,.docx,.txt,.csv,.png,.jpg,.jpeg,.webp" multiple style="display:none" onchange="PAST_LIBRARY.handleBulkFiles(this.files)">
             <div style="font-size:22px;color:#94a3b8;margin-bottom:4px">⬆</div>
             <div style="font-size:13px;font-weight:700;margin-bottom:4px">PDF・Excel・Wordをまとめて選択</div>
             <div style="font-size:11px;color:var(--text3)">同じ区分・年度・月をまとめて付けます。あとから個別削除できます。</div>
@@ -664,6 +743,10 @@
                 <option value="月次報告書">月次報告書</option>
                 <option value="収支着地予測">収支着地予測</option>
                 <option value="年度方針">年度方針</option>
+                <option value="半期方針（スクショ）">半期方針（スクショ）</option>
+                <option value="参考資料（スクショ）">参考資料（スクショ）</option>
+                <option value="現場メモ">現場メモ</option>
+                <option value="施策メモ">施策メモ</option>
                 <option value="収支実績">収支実績</option>
                 <option value="その他">その他</option>
               </select>
@@ -683,7 +766,7 @@
           </div>
 
           <div class="upload-zone no-print" id="library-upload-zone" style="padding:18px;margin-bottom:12px;border-radius:8px;border:2px dashed var(--border2);background:#f8fafc;text-align:center;cursor:pointer" onclick="document.getElementById('library-file-input').click()">
-            <input type="file" id="library-file-input" accept=".pdf,.xlsx,.xls,.doc,.docx,.txt,.csv" style="display:none" onchange="PAST_LIBRARY.handleFile(this.files[0])">
+            <input type="file" id="library-file-input" accept=".pdf,.xlsx,.xls,.doc,.docx,.txt,.csv,.png,.jpg,.jpeg,.webp" style="display:none" onchange="PAST_LIBRARY.handleFile(this.files[0])">
             <div style="font-size:22px;color:#94a3b8;margin-bottom:4px">⬆</div>
             <div style="font-size:13px;font-weight:700;margin-bottom:4px">PDF・Excel・Wordを選択</div>
             <div style="font-size:11px;color:var(--text3)">PDFとExcelは可能な範囲で文字抽出します。Wordは資料名・メモ中心で保存します。</div>
@@ -719,6 +802,10 @@
               <option value="月次報告書">月次報告書</option>
               <option value="収支着地予測">収支着地予測</option>
               <option value="年度方針">年度方針</option>
+                <option value="半期方針（スクショ）">半期方針（スクショ）</option>
+                <option value="参考資料（スクショ）">参考資料（スクショ）</option>
+                <option value="現場メモ">現場メモ</option>
+                <option value="施策メモ">施策メモ</option>
               <option value="収支実績">収支実績</option>
               <option value="その他">その他</option>
             </select>
