@@ -1040,14 +1040,33 @@ IMPORT.deleteFieldData = function(ym) {
     setupYmSelects();
     FIELD_UI.updatePeriodBadge();
     const isWorkerViewActive = (document.getElementById('view-field-worker')?.classList.contains('active')) || STATE.view === 'field-worker';
+    const isProductViewActive = (document.getElementById('view-field-product')?.classList.contains('active')) || STATE.view === 'field-product';
+    const isAreaViewActive = (document.getElementById('view-field-area')?.classList.contains('active')) || STATE.view === 'field-area';
+
     if (isWorkerViewActive && window.FIELD_WORKER_UI && typeof window.FIELD_WORKER_UI.render === 'function') {
       window.FIELD_WORKER_UI.render();
     } else {
       renderWorker();
     }
+
     renderContent();
-    renderProduct();
-    renderMap();
+
+    // 商品カテゴリ分析・エリア分析は専用モジュールが画面全体を描画する。
+    // ここで旧コア描画を常に走らせると、専用UIが「データなし」に戻るため、
+    // 対象画面が開いている時は専用モジュールを優先する。
+    if (isProductViewActive && window.FIELD_PRODUCT_UI) {
+      if (typeof window.FIELD_PRODUCT_UI.refresh === 'function') window.FIELD_PRODUCT_UI.refresh();
+      else if (typeof window.FIELD_PRODUCT_UI.render === 'function') window.FIELD_PRODUCT_UI.render();
+    } else {
+      renderProduct();
+    }
+
+    if (isAreaViewActive && window.FIELD_AREA_UI && typeof window.FIELD_AREA_UI.render === 'function') {
+      window.FIELD_AREA_UI.render();
+    } else {
+      renderMap();
+    }
+
     renderDataList();
     const topBadge = document.getElementById('field-period-badge');
     if (topBadge) {
