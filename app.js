@@ -2353,11 +2353,6 @@ const CAPACITY_UI = {
   ticketDate(t, ym) {
     const d = this.parseDate(t.date || t.deliveryDate || t.workDate || t['日付'] || t['作業日'] || t['配達完了日'], ym);
     if (d) return d;
-    const row = t.representativeRow || t.firstRow || t.row || t.raw;
-    if (Array.isArray(row)) {
-      const d2 = this.parseDate(row[0], ym);
-      if (d2) return d2;
-    }
     return '';
   },
 
@@ -2437,43 +2432,13 @@ const CAPACITY_UI = {
   },
 
   ticketCity(t) {
-    // エリア分析と同じく、過去に生成された t.area / t.city は粗い値が残ることがあるため最優先しない。
-    // ただし、さいたま市は郵便番号マスタが未ロード／粗い値の場合に「さいたま市」止まりになるため、
-    // 住所に区が入っている場合は住所側を優先し、区単位を維持する。
-    const row = t.representativeRow || t.firstRow || t.row || t.raw;
-    const isCoarseSaitama = (v) => /^埼玉県さいたま市?$/.test(String(v || '').normalize('NFKC').replace(/\s+/g,''));
+    // 顧客住所全文・raw行は保存しない方針。
+    // 取込時点で作成済みの areaUnit / pref + city を使用する。
+    const direct = this.normalizeCapacityUnit(t.areaUnit || t.area || (t.pref && t.city ? String(t.pref) + String(t.city) : '') || t.city || '');
+    if (direct && direct !== '未設定') return direct;
 
-    const addr = t.address || t.addr || t.destinationAddress ||
-      t['住所'] || t['届け先住所'] || t['配送先住所'] || t['お届け先住所'] ||
-      (Array.isArray(row) ? row[13] : '');
-    const addrCity = this.normalizeCapacityUnit(this.cityFromAddress(addr));
-    if (addrCity && addrCity !== '未設定' && !isCoarseSaitama(addrCity)) return addrCity;
-
-    const zip = this.normalizeZip(
-      t.zip || t.zipcode || t.postCode || t.postalCode ||
-      t['お届け先郵便番号'] || t['届け先郵便番号'] || t['郵便番号'] ||
-      (Array.isArray(row) ? row[11] : '')
-    );
-    const zipCity = this.normalizeCapacityUnit(this.cityFromZip(zip));
-    if (zipCity && zipCity !== '未設定' && !isCoarseSaitama(zipCity)) return zipCity;
-
-    if (t.pref && t.city && t.ward) {
-      const prefCityWard = this.normalizeCapacityUnit(String(t.pref) + String(t.city) + String(t.ward));
-      if (prefCityWard && prefCityWard !== '未設定' && !isCoarseSaitama(prefCityWard)) return prefCityWard;
-    }
-    if (t.pref && t.city) {
-      const prefCity = this.normalizeCapacityUnit(String(t.pref) + String(t.city));
-      if (prefCity && prefCity !== '未設定' && !isCoarseSaitama(prefCity)) return prefCity;
-    }
-
-    const oldCity = this.normalizeCapacityUnit(t.city || t.area || '');
-    if (oldCity && oldCity !== '未設定' && !isCoarseSaitama(oldCity)) return oldCity;
-
-    // どうしても区が取れない場合だけ粗いさいたま市を返す。
-    // 荷主キャパ設定側では区単位を優先するため、通常は郵便番号マスタ読込後に区へ分解される。
-    if (addrCity && addrCity !== '未設定') return addrCity;
+    const zipCity = this.normalizeCapacityUnit(this.cityFromZip(t.zip || t.zipcode || t.postCode || t.postalCode || ''));
     if (zipCity && zipCity !== '未設定') return zipCity;
-    if (oldCity && oldCity !== '未設定') return oldCity;
 
     return '未設定';
   },
@@ -2504,36 +2469,14 @@ const CAPACITY_UI = {
   },
 
   ticketShipperCode(t, slip='', ym='') {
-    const direct = String(t.shipperCode || t.clientCode || t.customerCode || t['荷主コード'] || t['荷主基本コード'] || t['荷主ＣＤ'] || t['荷主CD'] || '').trim();
-    if (direct) return direct;
-    const row = t.representativeRow || t.firstRow || t.row || t.raw;
-    if (Array.isArray(row)) {
-      // 確定CSV標準：Y列=荷主基本コード。商品・住所CSV側に同等列がある場合も拾う。
-      const candidates = [row[24], row[25], row[23]];
-      for (const v of candidates) {
-        const code = String(v || '').normalize('NFKC').replace(/[^0-9A-Za-z]/g,'').trim();
-        if (code && /^\d{2,}/.test(code)) return code;
-      }
-    }
-    return this.confirmedShipperInfoBySlip(slip || this.ticketSlip(t,0), ym)?.code || '';
+    return String(t.shipperCode || t.clientCode || t.customerCode || t['荷主コード'] || t['荷主基本コード'] || t['荷主ＣＤ'] || t['荷主CD'] || '').trim();
   },
+
 
   ticketShipperName(t, slip='', ym='') {
-    const direct = String(t.shipperName || t.shipper || t.clientName || t.customerName || t['荷主名'] || t['荷主名称'] || t['契約名'] || t['契約名称'] || '').trim();
-    if (direct) return direct;
-
-    const row = t.representativeRow || t.firstRow || t.row || t.raw;
-    if (Array.isArray(row)) {
-      // 確定CSVの標準位置：AA列=荷主名、AB列=契約名。商品・住所CSV側に同等列がある場合も拾う。
-      const candidates = [row[26], row[27], row[25]];
-      for (const v of candidates) {
-        const name = String(v || '').normalize('NFKC').trim();
-        if (name && !/^0+$/.test(name) && !/^\d{4,}$/.test(name)) return name;
-      }
-    }
-
-    return this.confirmedShipperInfoBySlip(slip || this.ticketSlip(t, 0), ym)?.name || '未設定';
+    return String(t.shipperName || t.shipper || t.clientName || t.customerName || t['荷主名'] || t['荷主名称'] || t['契約名'] || t['契約名称'] || '').trim() || '未設定';
   },
+
 
   normalizeShipperGroup(name='', code='') {
     this.ensureState();
@@ -2783,14 +2726,7 @@ const CAPACITY_UI = {
     if (!rec || !Array.isArray(rec.tickets) || !rec.tickets.length) return true;
     if (!window.JP_ZIP_LOADER || typeof JP_ZIP_LOADER.loadForZips !== 'function') return true;
 
-    const zips = rec.tickets.map((t) => {
-      const row = t.representativeRow || t.firstRow || t.row || t.raw;
-      return this.normalizeZip(
-        t.zip || t.zipcode || t.postCode || t.postalCode ||
-        t['お届け先郵便番号'] || t['届け先郵便番号'] || t['郵便番号'] ||
-        (Array.isArray(row) ? row[11] : '')
-      );
-    }).filter(Boolean);
+    const zips = rec.tickets.map((t) => this.normalizeZip(t.zip || t.zipcode || t.postCode || t.postalCode || t['お届け先郵便番号'] || t['届け先郵便番号'] || t['郵便番号'] || '')).filter(Boolean);
 
     if (!zips.length) return true;
     const prefixes = [...new Set(zips.map(z => String(z).slice(0, 2)))];
