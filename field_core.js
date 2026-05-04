@@ -130,6 +130,99 @@ IMPORT.deleteFieldData = function(ym) {
     if (!Array.isArray(STATE.areaData)) STATE.areaData = [];
   }
 
+
+  /* 現場CSVデータ取得を一元化
+     目的：画面ごとの独自 localStorage 探索で、年度が出ない・別センター混入・削除済み復活が起きないようにする。
+     優先順位：STATE → STORE直読 → localStorage full_state。削除済みマーカーは必ず反映する。
+  */
+  function fieldAccessDeleted(kind, ym){
+    try {
+      const d = (typeof ensureDeletedState === 'function') ? ensureDeletedState() : (STATE.deleted || {});
+      if (!ym) return false;
+      if (kind === 'worker') return !!(d.workerMonths && d.workerMonths[ym]) || !!(d.fieldMonths && d.fieldMonths[ym]);
+      if (kind === 'product') return !!(d.productMonths && d.productMonths[ym]) || !!(d.fieldMonths && d.fieldMonths[ym]);
+      return false;
+    } catch(e) { return false; }
+  }
+
+  function fieldAccessClone(v){
+    try { return JSON.parse(JSON.stringify(v || [])); } catch(e) { return Array.isArray(v) ? v.slice() : []; }
+  }
+
+  function fieldAccessYm(x){
+    return String((x && (x.ym || x.YM || x.month || x.targetYM)) || '').replace(/[^0-9]/g,'').slice(0,6);
+  }
+
+  function fieldAccessUnique(list, kind){
+    const map = new Map();
+    safeArray(list).forEach((r, idx) => {
+      if (!r || typeof r !== 'object') return;
+      const ym = fieldAccessYm(r);
+      if (!ym || fieldAccessDeleted(kind, ym)) return;
+      const importedAt = String(r.importedAt || r.updatedAt || r.savedAt || '');
+      const sig = `${ym}_${r.source || ''}_${r.uniqueCount || r.rowCount || ''}`;
+      const old = map.get(sig);
+      if (!old || importedAt >= String(old.importedAt || old.updatedAt || old.savedAt || '')) map.set(sig, { ...r, ym });
+    });
+    return [...map.values()].sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+  }
+
+  function fieldAccessReadStorageArray(name){
+    const out = [];
+    try {
+      if (typeof STORE !== 'undefined' && STORE._g) {
+        const direct = STORE._g(name);
+        if (Array.isArray(direct)) out.push(...direct);
+      }
+    } catch(e) {}
+    try {
+      const prefix = (typeof STORE !== 'undefined' && STORE._p) ? STORE._p : `mgmt5_${CENTER.id}_`;
+      for (let i=0; i<localStorage.length; i++) {
+        const key = localStorage.key(i) || '';
+        if (!key.startsWith(prefix)) continue;
+        if (key.endsWith(name)) {
+          const v = JSON.parse(localStorage.getItem(key) || '[]');
+          if (Array.isArray(v)) out.push(...v);
+        }
+        if (key.endsWith('full_state')) {
+          const v = JSON.parse(localStorage.getItem(key) || '{}');
+          if (v && Array.isArray(v[name])) out.push(...v[name]);
+        }
+      }
+    } catch(e) {}
+    return out;
+  }
+
+  window.FIELD_DATA_ACCESS = {
+    getWorkerRecords(){
+      const list = [
+        ...safeArray(STATE.workerCsvData),
+        ...fieldAccessReadStorageArray('workerCsvData')
+      ];
+      return fieldAccessUnique(fieldAccessClone(list), 'worker');
+    },
+    getProductRecords(){
+      const list = [
+        ...safeArray(STATE.productAddressData),
+        ...fieldAccessReadStorageArray('productAddressData')
+      ];
+      return fieldAccessUnique(fieldAccessClone(list), 'product');
+    },
+    getAllYms(){
+      return [...new Set([
+        ...this.getWorkerRecords().map(d=>d.ym),
+        ...this.getProductRecords().map(d=>d.ym)
+      ].filter(Boolean))].sort();
+    },
+    syncStateFromStorage(){
+      const w = this.getWorkerRecords();
+      const p = this.getProductRecords();
+      if (w.length) STATE.workerCsvData = w;
+      if (p.length) STATE.productAddressData = p;
+      return { worker:w, product:p };
+    }
+  };
+
   // STOREへ新しい現場CSV専用データを保存対象として追加
   const originalStoreLoad = STORE.load.bind(STORE);
   const originalStoreSave = STORE.save.bind(STORE);
@@ -179,8 +272,8 @@ IMPORT.deleteFieldData = function(ym) {
     const now = new Date();
     for (let y = now.getFullYear() - 2; y <= now.getFullYear() + 1; y++) years.add(String(y));
     safeArray(STATE.datasets).forEach(d => d?.ym && years.add(fiscalFromYM2(d.ym)));
-    safeArray(STATE.workerCsvData).forEach(d => d?.ym && years.add(fiscalFromYM2(d.ym)));
-    safeArray(STATE.productAddressData).forEach(d => d?.ym && years.add(fiscalFromYM2(d.ym)));
+    (window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData)).forEach(d => d?.ym && years.add(fiscalFromYM2(d.ym)));
+    (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).forEach(d => d?.ym && years.add(fiscalFromYM2(d.ym)));
     const sortedYears = [...years].sort((a,b)=>Number(b)-Number(a));
 
     function fillPair(fyId, mId, noteId){
@@ -778,7 +871,9 @@ IMPORT.deleteFieldData = function(ym) {
   function getSelectedFieldYM(){
     const sel = document.getElementById('field-common-month-select');
     if (sel?.value) return sel.value;
-    return STATE.selYM || safeArray(STATE.productAddressData).at(-1)?.ym || safeArray(STATE.workerCsvData).at(-1)?.ym || latestDS()?.ym || '';
+    const accessProducts = window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData);
+    const accessWorkers = window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData);
+    return STATE.selYM || accessProducts.at(-1)?.ym || accessWorkers.at(-1)?.ym || latestDS()?.ym || '';
   }
   function setupFieldCommonSelectors(){
     ensureState();
@@ -812,10 +907,12 @@ IMPORT.deleteFieldData = function(ym) {
     if (!fySel || !mSel) return;
     const yset = new Set([getDefaultFiscalYear()]);
     safeArray(STATE.datasets).forEach(d=>d?.ym && yset.add(fiscalFromYM2(d.ym)));
-    safeArray(STATE.workerCsvData).forEach(d=>d?.ym && yset.add(fiscalFromYM2(d.ym)));
-    safeArray(STATE.productAddressData).forEach(d=>d?.ym && yset.add(fiscalFromYM2(d.ym)));
+    (window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData)).forEach(d=>d?.ym && yset.add(fiscalFromYM2(d.ym)));
+    (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).forEach(d=>d?.ym && yset.add(fiscalFromYM2(d.ym)));
     const years = [...yset].sort((a,b)=>Number(b)-Number(a));
-    const keepFY = fySel.value || fiscalFromYM2(STATE.selYM || safeArray(STATE.productAddressData).at(-1)?.ym || safeArray(STATE.workerCsvData).at(-1)?.ym || latestDS()?.ym || `${new Date().getFullYear()}04`);
+    const accessProducts = window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData);
+    const accessWorkers = window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData);
+    const keepFY = fySel.value || fiscalFromYM2(STATE.selYM || accessProducts.at(-1)?.ym || accessWorkers.at(-1)?.ym || latestDS()?.ym || `${new Date().getFullYear()}04`);
     fySel.innerHTML = years.map(y=>`<option value="${y}">${y}年度</option>`).join('');
     fySel.value = years.includes(keepFY) ? keepFY : years[0];
     function fillMonths(){
@@ -823,14 +920,14 @@ IMPORT.deleteFieldData = function(ym) {
       const current = mSel.value || STATE.selYM;
       mSel.innerHTML = MONTHS.map(mm => {
         const ym = ymFromFiscalMonth(fy, mm);
-        const hasW = safeArray(STATE.workerCsvData).some(d=>d.ym===ym);
-        const hasP = safeArray(STATE.productAddressData).some(d=>d.ym===ym);
+        const hasW = (window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData)).some(d=>d.ym===ym);
+        const hasP = (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).some(d=>d.ym===ym);
         const label = ymText(ym);
         return `<option value="${ym}">${label}</option>`;
       }).join('');
       if ([...mSel.options].some(o=>o.value===current)) mSel.value = current;
       else {
-        const latest = [...mSel.options].reverse().find(o => safeArray(STATE.workerCsvData).some(d=>d.ym===o.value) || safeArray(STATE.productAddressData).some(d=>d.ym===o.value));
+        const latest = [...mSel.options].reverse().find(o => (window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData)).some(d=>d.ym===o.value) || (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).some(d=>d.ym===o.value));
         mSel.value = latest ? latest.value : ymFromFiscalMonth(fy, '04');
       }
       STATE.fiscalYear = fy;
@@ -841,8 +938,8 @@ IMPORT.deleteFieldData = function(ym) {
     fillMonths();
   }
 
-  function productRecord(ym){ return safeArray(STATE.productAddressData).find(d=>d.ym===ym); }
-  function workerRecord(ym){ return safeArray(STATE.workerCsvData).find(d=>d.ym===ym); }
+  function productRecord(ym){ return (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).find(d=>d.ym===ym); }
+  function workerRecord(ym){ return (window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData)).find(d=>d.ym===ym); }
 
   function renderBars(container, rows, valueKey='count'){
     if (!container) return;
@@ -1024,7 +1121,7 @@ IMPORT.deleteFieldData = function(ym) {
     ensureState();
     const list = document.getElementById('field-data-list2') || document.getElementById('field-data-list');
     const badge = document.getElementById('field-import-badge');
-    const yms = [...new Set([...safeArray(STATE.workerCsvData).map(d=>d.ym), ...safeArray(STATE.productAddressData).map(d=>d.ym)])].filter(Boolean).sort();
+    const yms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : [...new Set([...safeArray(STATE.workerCsvData).map(d=>d.ym), ...safeArray(STATE.productAddressData).map(d=>d.ym)])].filter(Boolean).sort();
     if (badge) { badge.textContent = yms.length ? '読込済' : '未読込'; badge.className = yms.length ? 'badge badge-ok' : 'badge badge-warn'; }
     const delAll = document.getElementById('field-delete-all-row'); if (delAll) delAll.style.display = yms.length ? 'flex' : 'none';
     if (!list) return;
