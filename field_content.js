@@ -34,6 +34,20 @@
   function clean(v){ return String(v ?? '').replace(/[\u0000-\u001f]/g,'').trim(); }
   function compact(v){ return clean(v).replace(/[\s　]/g,''); }
   function amountOf(v){ return num(v); }
+  function normalizeText(v){ return String(v ?? '').normalize('NFKC').replace(/[\s　]/g,'').toLowerCase(); }
+  function isKansen(t){ const s = normalizeText(t); return s.includes('幹線') || s.includes('中継'); }
+  function isCrane(t){
+    const raw = String(t || '');
+    const s = normalizeText(raw);
+    if (!raw.trim()) return false;
+    if (s.includes('ユニック含まず') || s.includes('unic含まず')) return false;
+    return /クレーン|ｸﾚｰﾝ|クレ－ン|クレ-ン|クーレン|ユニック|ﾕﾆｯｸ|UNIC|手吊り|手吊|吊り/i.test(raw)
+      || /クレ-ン|クーレン|ユニック|unic|手吊|吊/i.test(s);
+  }
+  function isRecycle(t){ const raw=String(t||''); const s=normalizeText(raw); return /リサイクル|ﾘｻｲｸﾙ|家電リサイクル|リサイクル料/i.test(raw) || s.includes('リサイクル'); }
+  function isWaste(t){ const raw=String(t||''); const s=normalizeText(raw); return /廃材|廃材処理|廃材引取|廃材引取り/i.test(raw) || s.includes('廃材'); }
+  function isEstimate(t){ const s=normalizeText(t); return s.includes('見積') || s.includes('下見') || s.includes('現調'); }
+  function isInstall(t){ const s=normalizeText(t); return s.includes('設置') || s.includes('取付') || s.includes('搬入') || s.includes('搬出') || s.includes('入替') || s.includes('入れ替え'); }
 
   function sizeName(text){
     const s = compact(text);
@@ -43,28 +57,40 @@
     return `サイズ${map[m[1]] || m[1]}`;
   }
 
-  function classifyWork(raw){
-    const label = clean(raw) || '未設定';
-    const s = compact(label);
-    const sz = sizeName(label);
-    if (sz) return { major:'配送', middle:sz, minor:label, order:10 + SIZE_ORDER.indexOf(sz) };
-    if (/即日配送/.test(s)) return { major:'配送', middle:'即日配送', minor:label, order:18 };
-    if (/幹線|中継/.test(s)) return { major:'幹線料', middle:'幹線料', minor:label, order:90 };
-    if (/リサイクル/.test(s)) {
+  function classifyWork(raw, product){
+    const label = clean(raw) || clean(product) || '未設定';
+    const workText = clean(raw);
+    const productText = clean(product);
+    const combined = `${workText} ${productText}`.trim();
+    const s = compact(combined);
+    const sz = sizeName(workText) || sizeName(productText);
+
+    // 商品カテゴリ分析と粒度を合わせるため、作業名だけでなく商品名も判定材料にする。
+    // クレーンは商品名側にしか出ないケースがあるため、最優先で拾う。
+    if (isCrane(combined)) {
+      let middle = 'クレーン作業';
+      if (isEstimate(combined)) middle = 'クレーン見積';
+      else if (normalizeText(combined).includes('差額')) middle = 'クレーン差額';
+      else if (isInstall(combined)) middle = 'クレーン搬入';
+      return { major:'クレーン', middle, minor:label, order:50 };
+    }
+
+    if (isRecycle(combined)) {
       if (/洗濯/.test(s)) return { major:'リサイクル', middle:'洗濯機リサイクル', minor:label, order:30 };
       if (/冷蔵|冷凍/.test(s)) return { major:'リサイクル', middle:'冷蔵庫リサイクル', minor:label, order:31 };
-      if (/テレビ|TV|ＴＶ/.test(s)) return { major:'リサイクル', middle:'テレビリサイクル', minor:label, order:32 };
+      if (/テレビ|TV|ＴＶ/i.test(combined) || /テレビ|tv/.test(s)) return { major:'リサイクル', middle:'テレビリサイクル', minor:label, order:32 };
       return { major:'リサイクル', middle:'その他リサイクル', minor:label, order:33 };
     }
-    if (/廃材|廃材処理|廃材引取/.test(s)) return { major:'廃材', middle:'廃材', minor:label, order:40 };
-    if (/クレーン/.test(s)) {
-      if (/見積/.test(s)) return { major:'クレーン', middle:'クレーン見積', minor:label, order:50 };
-      if (/搬入/.test(s)) return { major:'クレーン', middle:'クレーン搬入', minor:label, order:51 };
-      return { major:'クレーン', middle:'クレーン作業', minor:label, order:52 };
-    }
-    if (/設置|取付|取り付け|取付け|取替|入替|入れ替え/.test(s)) return { major:'付帯作業', middle:'取付・設置', minor:label, order:60 };
+
+    if (isWaste(combined)) return { major:'廃材', middle:'廃材', minor:label, order:40 };
+    if (sz) return { major:'配送', middle:sz, minor:label, order:10 + SIZE_ORDER.indexOf(sz) };
+    if (/即日配送/.test(s)) return { major:'配送', middle:'即日配送', minor:label, order:18 };
+    if (isKansen(combined)) return { major:'幹線料', middle:'幹線料', minor:label, order:90 };
+    if (/設置|取付|取り付け|取付け|取替|入替|入れ替え/.test(s) || isInstall(combined)) return { major:'付帯作業', middle:'取付・設置', minor:label, order:60 };
     if (/ニップル|ホース|ジョイント|部材|マット|防止|架台|金具/.test(s)) return { major:'付帯作業', middle:'部材・付属品', minor:label, order:61 };
-    if (/冷蔵|冷凍|洗濯|ドラム|テレビ|TV|ＴＶ|レンジ|照明|エアコン|炊飯/.test(s)) return { major:'家電作業', middle:normalizeAppliance(s), minor:label, order:70 };
+    if (/冷蔵|冷凍|洗濯|ドラム|テレビ|TV|ＴＶ|レンジ|照明|エアコン|炊飯/i.test(combined) || /冷蔵|冷凍|洗濯|ドラム|テレビ|tv|レンジ|照明|エアコン|炊飯/.test(s)) {
+      return { major:'家電作業', middle:normalizeAppliance(s), minor:label, order:70 };
+    }
     if (/大型|重量物|特殊/.test(s)) return { major:'特殊', middle:'特殊作業', minor:label, order:80 };
     return { major:'その他', middle:'その他', minor:label, order:999 };
   }
@@ -101,7 +127,9 @@
       details.forEach(d => {
         const raw = d.work || d.label || d.name || '未設定';
         const amount = amountOf(d.amount);
-        const c = classifyWork(raw);
+        const product = t.product || t.productName || t.product_name || '';
+        if (isKansen(raw)) return;
+        const c = classifyWork(raw, product);
         const major = addMap(majorMap, c.major, amount, c.order);
         const middle = addMap(major.children, c.middle, amount, c.order);
         addMap(middle.children, c.minor, amount, c.order);
@@ -131,7 +159,7 @@
     const max = Math.max(...list.map(r=>r.amount), 1);
     return list.map((r,i)=>{
       const width = Math.max(2, r.amount / max * 100);
-      return `<div class="fc-bar-row"><div class="fc-rank">${i+1}</div><div class="fc-name" title="${esc(r.label)}">${esc(r.label)}</div><div class="fc-track"><div class="fc-fill" style="width:${width.toFixed(1)}%"></div></div><div class="fc-val">${fmtK(r.amount)}千円<span>${fmt(r.count)}件 / ${fmt1(pct(r.amount,total))}%</span></div></div>`;
+      return `<div class="fc-bar-row"><div class="fc-rank">${i+1}</div><div class="fc-name" title="${esc(r.label)}">${esc(r.label)}</div><div class="fc-track"><div class="fc-fill" style="width:${width.toFixed(1)}%"></div></div><div class="fc-val">${fmtK(r.amount)}千円<span>${fmt(r.count)}点 / ${fmt1(pct(r.amount,total))}%</span></div></div>`;
     }).join('');
   }
 
@@ -156,7 +184,7 @@
       <div class="fc-kpi-grid">
         <div class="fc-kpi"><div class="fc-kpi-label">対象月</div><div class="fc-kpi-value">${esc(ymText(ym))}</div><div class="fc-kpi-sub">作業内容分析</div></div>
         <div class="fc-kpi green"><div class="fc-kpi-label">作業内容売上</div><div class="fc-kpi-value">${fmtK(totalAmount)}千円</div><div class="fc-kpi-sub">商品・住所CSV 作業明細ベース</div></div>
-        <div class="fc-kpi"><div class="fc-kpi-label">作業明細</div><div class="fc-kpi-value">${fmt(totalCount)}</div><div class="fc-kpi-sub">作業内容行数</div></div>
+        <div class="fc-kpi"><div class="fc-kpi-label">作業明細</div><div class="fc-kpi-value">${fmt(totalCount)}</div><div class="fc-kpi-sub">明細点数</div></div>
         <div class="fc-kpi amber"><div class="fc-kpi-label">平均単価</div><div class="fc-kpi-value">${fmt(avg)}円</div><div class="fc-kpi-sub">売上 ÷ 作業明細</div></div>
         <div class="fc-kpi"><div class="fc-kpi-label">最大カテゴリ</div><div class="fc-kpi-value">${esc(top.label)}</div><div class="fc-kpi-sub">${fmtK(top.amount)}千円 / ${fmt1(pct(top.amount,totalAmount))}%</div></div>
       </div>
@@ -167,10 +195,10 @@
       <div class="fc-card fc-detail"><div class="fc-head"><div><div class="fc-title">大分類別 詳細</div><div class="fc-sub">クリックで中分類・小分類を確認</div></div><span class="fc-pill">上位：${esc(top.label)} ${fmtK(top.amount)}千円</span></div><div class="fc-body">
       ${majors.map((m,idx)=>{
         const children = [...m.children.values()].sort(sortRows);
-        return `<details ${idx < 3 ? 'open' : ''}><summary><span>＋ ${esc(m.label)} <span class="fc-pill">${fmtK(m.amount)}千円</span> <span class="fc-pill">${fmt(m.count)}件</span></span><span>${fmt1(pct(m.amount,totalAmount))}%</span></summary><div class="fc-detail-body">
+        return `<details ${idx < 3 ? 'open' : ''}><summary><span>＋ ${esc(m.label)} <span class="fc-pill">${fmtK(m.amount)}千円</span> <span class="fc-pill">${fmt(m.count)}点</span></span><span>${fmt1(pct(m.amount,totalAmount))}%</span></summary><div class="fc-detail-body">
           ${children.map(mid=>{
             const minors = [...mid.children.values()].sort(sortRows).slice(0,20);
-            return `<details style="margin-bottom:8px" ${children.length <= 4 ? 'open' : ''}><summary><span>${esc(mid.label)} <span class="fc-pill">${fmtK(mid.amount)}千円</span> <span class="fc-pill">${fmt(mid.count)}件</span></span><span>${fmt1(pct(mid.amount,totalAmount))}%</span></summary><div class="fc-detail-body"><table class="fc-table"><thead><tr><th>小分類・元表記</th><th class="r">件数</th><th class="r">売上</th><th class="r">構成比</th></tr></thead><tbody>${minors.map(mi=>`<tr><td>${esc(mi.label)}</td><td class="r">${fmt(mi.count)}</td><td class="r">${fmtK(mi.amount)}千円</td><td class="r">${fmt1(pct(mi.amount,totalAmount))}%</td></tr>`).join('')}</tbody></table></div></details>`;
+            return `<details style="margin-bottom:8px" ${children.length <= 4 ? 'open' : ''}><summary><span>${esc(mid.label)} <span class="fc-pill">${fmtK(mid.amount)}千円</span> <span class="fc-pill">${fmt(mid.count)}点</span></span><span>${fmt1(pct(mid.amount,totalAmount))}%</span></summary><div class="fc-detail-body"><table class="fc-table"><thead><tr><th>小分類・元表記</th><th class="r">点数</th><th class="r">売上</th><th class="r">構成比</th></tr></thead><tbody>${minors.map(mi=>`<tr><td>${esc(mi.label)}</td><td class="r">${fmt(mi.count)}</td><td class="r">${fmtK(mi.amount)}千円</td><td class="r">${fmt1(pct(mi.amount,totalAmount))}%</td></tr>`).join('')}</tbody></table></div></details>`;
           }).join('')}</div></details>`;
       }).join('')}</div></div>`;
   }
