@@ -2533,10 +2533,11 @@ const CAPACITY_UI = {
 
       if (hasDate && t.date) {
         const dk = `${t.date}__${t.area}`;
-        if (!byDateArea.has(dk)) byDateArea.set(dk,{ date:t.date, area:t.area, count:0, cities:{} });
+        if (!byDateArea.has(dk)) byDateArea.set(dk,{ date:t.date, area:t.area, count:0, cities:{}, shippers:{} });
         const d = byDateArea.get(dk);
         d.count++;
         d.cities[t.city] = (d.cities[t.city] || 0) + 1;
+        d.shippers[t.shipper] = (d.shippers[t.shipper] || 0) + 1;
       }
     });
 
@@ -2547,7 +2548,7 @@ const CAPACITY_UI = {
         const avg = a.count / days;
         for (let d=1; d<=days; d++) {
           const date = this.ymDate(ym,d);
-          byDateArea.set(`${date}__${a.area}`, { date, area:a.area, count:avg, cities:a.cities, estimated:true });
+          byDateArea.set(`${date}__${a.area}`, { date, area:a.area, count:avg, cities:a.cities, shippers:a.shippers || {}, estimated:true });
         }
       });
     }
@@ -2618,12 +2619,13 @@ const CAPACITY_UI = {
 
   dailyRows() {
     const actual = this.buildActual();
-    const risk = { over:4, full:3, ok:1 };
+    const risk = { collapse:5, over:4, full:3, good:2, ok:1, unset:0 };
     return [...actual.byDateArea.values()].map(r=>{
       const cap = this.dailyCap(r.date, r.area);
       const j = this.judge(r.count, cap);
-      return { ...r, cap, rate:j.rate, status:j.status, cls:j.cls };
-    }).sort((a,b)=>(risk[b.cls]||0)-(risk[a.cls]||0) || b.rate-a.rate || String(a.date).localeCompare(String(b.date)));
+      const diff = this.n(r.count) - this.n(cap);
+      return { ...r, cap, diff, rate:j.rate, status:j.status, cls:j.cls };
+    }).sort((a,b)=>(risk[b.cls]||0)-(risk[a.cls]||0) || this.n(b.diff)-this.n(a.diff) || b.rate-a.rate || String(a.date).localeCompare(String(b.date)));
   },
 
   render() {
@@ -2703,12 +2705,13 @@ const CAPACITY_UI = {
 
         <div class="capx-tabs">
           ${[
-            ['monthly','月別使用状況'],['daily','日別超過'],['weekday','曜日分析'],['calendar','カレンダー'],['mapping','地区マッピング'],['master','通常キャパ'],['unmatched','未分類']
+            ['monthly','月別使用状況'],['daily','日別超過'],['integrated','連動分析'],['weekday','曜日分析'],['calendar','カレンダー'],['mapping','地区マッピング'],['master','通常キャパ'],['unmatched','未分類']
           ].map(([k,l])=>`<button type="button" class="${this._tab===k?'active':''}" data-capx-tab="${k}">${l}</button>`).join('')}
         </div>
 
         ${this._tab==='monthly'?this.monthlyHtml(rows):''}
         ${this._tab==='daily'?this.dailyHtml(daily, actual):''}
+        ${this._tab==='integrated'?this.integratedHtml(daily, actual):''}
         ${this._tab==='weekday'?this.weekdayHtml(daily, actual):''}
         ${this._tab==='calendar'?this.calendarHtml(daily, actual):''}
         ${this._tab==='mapping'?this.mappingHtml(actual):''}
@@ -2740,7 +2743,7 @@ const CAPACITY_UI = {
     const weekendOver = over.filter(r=>[0,6].includes(this.dow(r.date))).length;
     const weekendShare = over.length ? Math.round(weekendOver / over.length * 100) : 0;
     const weekdayShare = over.length ? 100 - weekendShare : 0;
-    const worst = over.slice().sort((a,b)=>b.rate-a.rate)[0] || null;
+    const worst = over.slice().sort((a,b)=>this.n(b.diff)-this.n(a.diff) || b.rate-a.rate)[0] || null;
 
     setTimeout(()=>this.showDailyCause(0), 0);
 
@@ -2755,7 +2758,7 @@ const CAPACITY_UI = {
             <span class="danger">超過 ${fmt(over.length)}件</span>
             <span class="full">土日 ${fmt(weekendShare)}%</span>
             <span class="good">平日 ${fmt(weekdayShare)}%</span>
-            <span>${worst ? `最大 ${esc(worst.area)} ${pct(worst.rate)}` : '最大 —'}</span>
+            <span>${worst ? `最大 ${esc(worst.area)} ${worst.diff > 0 ? '+' : ''}${fmt(worst.diff)}件 / ${pct(worst.rate)}` : '最大 —'}</span>
           </div>
         </div>
         <div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">差分</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th></tr></thead><tbody>
@@ -2765,6 +2768,99 @@ const CAPACITY_UI = {
       <div class="capx-card">
         <h3>原因ドリルダウン</h3>
         <div id="capacity-daily-cause-box" class="capx-empty">左の行をクリックしてください</div>
+      </div>
+    </div>`;
+  },
+
+
+  concentrationLabel(name, count, total) {
+    if (!name || !total) return '';
+    const share = count / total * 100;
+    if (share >= 50) return `${name}に${pct(share)}集中`;
+    if (share >= 30) return `${name}が${pct(share)}を占める`;
+    return `${name}が最多（${pct(share)}）`;
+  },
+
+  integratedHtml(rows, actual) {
+    if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
+
+    const over = rows.filter(r=>r.cap > 0 && this.n(r.diff) > 0);
+    const overCount = over.reduce((s,r)=>s+this.n(r.count),0);
+    const overDiff = over.reduce((s,r)=>s+Math.max(0,this.n(r.diff)),0);
+    const overCap = over.reduce((s,r)=>s+this.n(r.cap),0);
+
+    const areaMap = new Map();
+    const shipperMap = new Map();
+    const cityMap = new Map();
+    over.forEach(r=>{
+      const area = r.area || '未設定';
+      const areaObj = areaMap.get(area) || { name:area, count:0, diff:0, days:0, maxRate:0 };
+      areaObj.count += this.n(r.count);
+      areaObj.diff += Math.max(0,this.n(r.diff));
+      areaObj.days += 1;
+      areaObj.maxRate = Math.max(areaObj.maxRate, this.n(r.rate));
+      areaMap.set(area, areaObj);
+
+      Object.entries(r.shippers || {}).forEach(([name,n])=>{
+        const x = shipperMap.get(name) || { name, count:0 };
+        x.count += this.n(n);
+        shipperMap.set(name, x);
+      });
+      Object.entries(r.cities || {}).forEach(([name,n])=>{
+        const x = cityMap.get(name) || { name, count:0 };
+        x.count += this.n(n);
+        cityMap.set(name, x);
+      });
+    });
+
+    const topAreas = [...areaMap.values()].sort((a,b)=>b.diff-a.diff || b.count-a.count).slice(0,8);
+    const topShippers = [...shipperMap.values()].sort((a,b)=>b.count-a.count).slice(0,8);
+    const topCities = [...cityMap.values()].sort((a,b)=>b.count-a.count).slice(0,8);
+    const worst = over.slice().sort((a,b)=>this.n(b.diff)-this.n(a.diff) || b.rate-a.rate)[0] || null;
+    const topArea = topAreas[0];
+    const topShipper = topShippers[0];
+    const topCity = topCities[0];
+
+    const comments = [];
+    if (worst) comments.push(`${this.dateLabel(worst.date)}の${worst.area}が最大超過（${worst.diff>0?'+':''}${fmt(worst.diff)}件 / ${pct(worst.rate)}）です。`);
+    if (topArea) comments.push(`超過差分は${topArea.name}が最も大きく、合計${fmt(topArea.diff)}件分を押し上げています。`);
+    if (topCity) comments.push(`市区町村では${this.concentrationLabel(topCity.name, topCity.count, overCount)}しています。`);
+    if (topShipper) comments.push(`荷主では${this.concentrationLabel(topShipper.name, topShipper.count, overCount)}しています。`);
+    if (!comments.length) comments.push('対象月に日別キャパ超過はありません。現状は大きな偏りを確認する段階です。');
+
+    const bar = (value, total)=>{
+      const w = total > 0 ? Math.max(4, Math.min(100, value/total*100)) : 0;
+      return `<div class="capx-mini-bar"><span style="width:${w}%"></span></div>`;
+    };
+
+    return `<div class="capx-grid">
+      <div class="capx-card">
+        <div class="capx-section-head">
+          <div>
+            <h3>連動分析（キャパ × エリア × 荷主）</h3>
+            <p class="capx-note2">超過している日だけを対象に、場所と荷主の偏りをまとめて確認します。</p>
+          </div>
+          <div class="capx-cal-summary">
+            <span class="danger">超過差分 ${fmt(overDiff)}件</span>
+            <span>超過件数 ${fmt(overCount)}件</span>
+            <span>超過対象 ${fmt(over.length)}行</span>
+          </div>
+        </div>
+        <div class="capx-kpis" style="grid-template-columns:repeat(3,minmax(160px,1fr));margin-bottom:14px">
+          <div class="capx-kpi over"><span>最大超過</span><b>${worst ? `${worst.diff>0?'+':''}${fmt(worst.diff)}件` : '—'}</b><em>${worst ? `${this.dateLabel(worst.date)} / ${esc(worst.area)}` : '超過なし'}</em></div>
+          <div class="capx-kpi amber"><span>エリア最大要因</span><b>${topCity ? esc(topCity.name) : '—'}</b><em>${topCity ? `${fmt(topCity.count)}件 / ${pct(topCity.count / (overCount||1) * 100)}` : '内訳なし'}</em></div>
+          <div class="capx-kpi good"><span>荷主最大要因</span><b>${topShipper ? esc(topShipper.name) : '—'}</b><em>${topShipper ? `${fmt(topShipper.count)}件 / ${pct(topShipper.count / (overCount||1) * 100)}` : '内訳なし'}</em></div>
+        </div>
+        <div class="capx-action-box">
+          <h5>読み取りコメント</h5>
+          ${comments.map(c=>`<div class="capx-action-item">・${esc(c)}</div>`).join('')}
+        </div>
+      </div>
+      <div class="capx-card">
+        <h3>超過日の上位要因</h3>
+        ${topAreas.length ? `<h5 class="capx-mini-title">地区別 超過差分</h5>${topAreas.map((x,i)=>`<div class="capx-rank-row"><b>${i+1}</b><span>${esc(x.name)}</span><em>+${fmt(x.diff)}件</em>${bar(x.diff, topAreas[0].diff)}</div>`).join('')}` : `<div class="capx-empty">超過地区なし</div>`}
+        ${topCities.length ? `<h5 class="capx-mini-title">市区町村別 件数</h5>${topCities.map((x,i)=>`<div class="capx-rank-row"><b>${i+1}</b><span>${esc(x.name)}</span><em>${fmt(x.count)}件</em>${bar(x.count, topCities[0].count)}</div>`).join('')}` : ''}
+        ${topShippers.length ? `<h5 class="capx-mini-title">荷主別 件数</h5>${topShippers.map((x,i)=>`<div class="capx-rank-row"><b>${i+1}</b><span>${esc(x.name)}</span><em>${fmt(x.count)}件</em>${bar(x.count, topShippers[0].count)}</div>`).join('')}` : ''}
       </div>
     </div>`;
   },
@@ -2824,12 +2920,21 @@ const CAPACITY_UI = {
     if (!row) return `<div class="capx-empty">対象データがありません</div>`;
     const diff = this.n(row.count) - this.n(row.cap);
     const cities = Object.entries(row.cities || {}).sort((a,b)=>b[1]-a[1]);
+    const shippers = Object.entries(row.shippers || {}).sort((a,b)=>b[1]-a[1]);
+    const topCity = cities[0];
+    const topShipper = shippers[0];
+    const cityShare = topCity ? topCity[1] / (this.n(row.count) || 1) * 100 : 0;
+    const shipperShare = topShipper ? topShipper[1] / (this.n(row.count) || 1) * 100 : 0;
+    const insight = diff > 0
+      ? `${esc(row.area)}で日キャパを${diff > 0 ? '+' : ''}${fmt(diff)}件超過しています。${topCity ? `市区町村は${esc(topCity[0])}が最多（${pct(cityShare)}）です。` : ''}${topShipper ? ` 荷主は${esc(topShipper[0])}が最多（${pct(shipperShare)}）です。` : ''}`
+      : `日キャパ内に収まっています。内訳確認用の表示です。`;
 
     return `<div class="capx-cause-inner">
       <div class="capx-cause-title">
         <h4>${esc(this.dateLabel(row.date))} / ${esc(row.area)}</h4>
         <p>${row.estimated ? '※月間件数をカレンダー日数で割った推定値です。' : '実日付データをもとにした集計です。'}</p>
       </div>
+      <div class="capx-city-hint">${insight}</div>
       <div class="capx-cause-kpis">
         <div><span>実績</span><b>${fmt(row.count)}件</b></div>
         <div><span>日キャパ</span><b>${fmt(row.cap)}件</b></div>
@@ -2845,6 +2950,16 @@ const CAPACITY_UI = {
             <em>${fmt(n)}件</em>
           </div>
         `).join('') : '<div class="capx-empty">市区町村内訳なし</div>'}
+      </div>
+      <h5>荷主別 原因内訳</h5>
+      <div class="capx-cause-list">
+        ${shippers.length ? shippers.map(([c,n],i)=>`
+          <div class="capx-cause-row">
+            <b>${i+1}</b>
+            <span>${esc(c)}</span>
+            <em>${fmt(n)}件</em>
+          </div>
+        `).join('') : '<div class="capx-empty">荷主内訳なし</div>'}
       </div>
     </div>`;
   },
@@ -4539,6 +4654,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     .capx-kpi.amber em{
       line-height:1.35;
     }
+  `;
+  document.head.appendChild(st);
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-integrated-analysis-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-integrated-analysis-style';
+  st.textContent = `
+    .capx-mini-title{margin:14px 0 8px!important;font-size:13px!important;font-weight:950!important;color:#334155!important;}
+    .capx-rank-row{display:grid;grid-template-columns:30px minmax(0,1fr) 86px;gap:8px;align-items:center;border:1px solid #eef2f7;border-radius:12px;padding:9px 10px;margin-bottom:7px;background:#fff;}
+    .capx-rank-row>b{width:22px;height:22px;border-radius:999px;background:#eaf3ff;color:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:950;}
+    .capx-rank-row>span{font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .capx-rank-row>em{font-style:normal;text-align:right;font-weight:950;color:#0f172a;}
+    .capx-mini-bar{grid-column:2 / 4;height:7px;background:#e5e7eb;border-radius:999px;overflow:hidden;}
+    .capx-mini-bar>span{display:block;height:100%;background:#2563eb;border-radius:999px;}
   `;
   document.head.appendChild(st);
 })();
