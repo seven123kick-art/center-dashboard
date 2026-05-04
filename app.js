@@ -3157,7 +3157,7 @@ function storagePlanAllTotal(plan) {
 function storageBadge(text, kind) {
   const bg = kind === 'ok' ? '#d1fae5' : kind === 'warn' ? '#fef3c7' : '#fee2e2';
   const fg = kind === 'ok' ? '#065f46' : kind === 'warn' ? '#92400e' : '#991b1b';
-  return `<span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${bg};color:${fg};font-weight:900;font-size:11px">${text}</span>`;
+  return `<span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${bg};color:${fg};font-weight:900;font-size:11px;white-space:nowrap">${text}</span>`;
 }
 function storageWarnings(fy) {
   const warnings = [];
