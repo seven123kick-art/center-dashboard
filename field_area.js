@@ -100,11 +100,31 @@
     return Array.isArray(row) ? clean(row[idx]) : '';
   }
   function ticketZip(t){
-    return normalizeZip(t?.zip || t?.zipcode || t?.postCode || t?.postalCode || t?.['お届け先郵便番号'] || t?.['届け先郵便番号'] || t?.['郵便番号'] || t?.['L列'] || '');
+    return normalizeZip(
+      t?.zip || t?.zipcode || t?.postCode || t?.postalCode ||
+      t?.['お届け先郵便番号'] || t?.['届け先郵便番号'] || t?.['郵便番号'] || t?.['L列'] ||
+      rawAt(t?.firstRow, 11) || rawAt(t?.representativeRow, 11) || rawAt(t?.row, 11) || rawAt(t?.raw, 11)
+    );
   }
   function ticketAddress(t){
-    // 顧客の住所全文は保存しない方針。過去データ互換用にもraw行は参照しない。
-    return clean(t?.address || t?.addr || t?.destinationAddress || t?.['住所'] || t?.['届け先住所'] || t?.['配送先住所'] || t?.['お届け先住所'] || '');
+    // 顧客住所全文は保存しない方針。旧データ互換のため存在する場合だけ読む。
+    return clean(
+      t?.address || t?.addr || t?.destinationAddress ||
+      t?.['住所'] || t?.['届け先住所'] || t?.['配送先住所'] || t?.['お届け先住所'] ||
+      rawAt(t?.firstRow, 13) || rawAt(t?.representativeRow, 13) || rawAt(t?.row, 13) || rawAt(t?.raw, 13)
+    );
+  }
+  function ticketSavedArea(t){
+    const pref = clean(t?.pref || t?.prefecture);
+    const city = clean(t?.city || t?.ward || t?.areaUnit);
+    if (pref && city && city !== '未設定') return { pref, city, status:'SAVED' };
+    if (city && city !== '未設定') return { pref:'未設定', city, status:'SAVED' };
+    const area = clean(t?.area || t?.label);
+    if (area) {
+      const p = splitAddressToCity(area);
+      return { pref:p.pref, city:p.city, status:'SAVED' };
+    }
+    return null;
   }
   function ticketSlip(t, idx){
     return clean(t?.slip || t?.slipNo || t?.ticketNo || t?.invoiceNo || t?.['エスライン原票番号'] || t?.['原票番号']) || `__no_slip_${idx}`;
@@ -188,14 +208,11 @@
     const zip = ticketZip(t);
     const address = ticketAddress(t);
 
-    // 最重要：既存の t.pref / t.city / t.area は使わない。
-    // 過去の住所パース結果が残っているため、郵便番号マスタを必ず優先する。
-    let area = areaFromZip(zip);
+    // 郵便番号マスタを最優先。住所全文は保存しないため、次に保存済みの pref/city を使う。
+    let area = areaFromZip(zip) || ticketSavedArea(t);
 
     if (!area) {
-      if (t?.pref && t?.city) area = { pref: clean(t.pref), city: clean(t.city), status:'SAVED_UNIT' };
-      else if (t?.areaUnit || t?.area || t?.city) area = splitAddressToCity(t.areaUnit || t.area || t.city);
-      else area = splitAddressToCity(address);
+      area = splitAddressToCity(address);
       area.status = zip ? 'ZIP_NOT_FOUND' : area.status;
     }
 
@@ -220,14 +237,37 @@
     function pushRecord(x, source){
       if (!obj(x)) return;
       const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name || source);
-      const tickets = arr(x.tickets).length ? x.tickets : [];
+      const tickets = arr(x.tickets).length ? x.tickets
+        : arr(x.rows).length ? x.rows
+        : arr(x.data).length ? x.data
+        : arr(x.rawRows).length ? x.rawRows
+        : [];
       if (!ym || !tickets.length) return;
       out.push({ ...x, ym, tickets, __source:source });
     }
 
     if (window.STATE) {
       arr(STATE.productAddressData).forEach((x,i)=>pushRecord(x, `STATE.productAddressData.${i}`));
+      arr(STATE.fieldData).forEach((x,i)=>pushRecord(x, `STATE.fieldData.${i}`));
     }
+
+    // 念のためローカル保存済みも見る
+    try {
+      for (let i=0; i<localStorage.length; i++) {
+        const key = localStorage.key(i);
+        const raw = localStorage.getItem(key);
+        if (!raw || !/^[\[{]/.test(raw.trim())) continue;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) parsed.forEach((x,idx)=>pushRecord(x, `${key}.${idx}`));
+        else if (obj(parsed)) {
+          pushRecord(parsed, key);
+          Object.keys(parsed).forEach(k=>{
+            const v = parsed[k];
+            if (Array.isArray(v)) v.forEach((x,idx)=>pushRecord(x, `${key}.${k}.${idx}`));
+          });
+        }
+      }
+    } catch(e) {}
 
     const seen = new Set();
     return out.filter(r=>{
