@@ -982,22 +982,38 @@ IMPORT.deleteFieldData = function(ym) {
     const usable = (actions || []).filter(a => a && a.value && a.label);
     if (!usable.length) return '<span style="color:var(--text3);font-size:11px;white-space:nowrap">削除対象なし</span>';
     const compact = mode === 'compact';
-    return `<select class="field-month-op-select" data-month-op-ym="${esc2(ym)}" onchange="FIELD_MONTH_OPS.run('${esc2(ym)}', this.value); this.value='';" style="${compact ? 'width:124px' : 'width:150px'};max-width:100%;padding:5px 28px 5px 9px;border:1px solid var(--border2);border-radius:999px;background:#fff;font-size:11px;font-weight:900;color:var(--text);white-space:nowrap;box-shadow:0 1px 3px rgba(15,23,42,.06)">
-      <option value="">削除操作</option>
-      ${usable.map(a=>`<option value="${esc2(a.value)}">${esc2(a.label)}</option>`).join('')}
-    </select>`;
+    const selectWidth = compact ? '132px' : '158px';
+    return `<div class="field-month-op-wrap" style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;max-width:100%">
+      <select class="field-month-op-select" data-month-op-ym="${esc2(ym)}" style="width:${selectWidth};max-width:100%;padding:5px 28px 5px 9px;border:1px solid var(--border2);border-radius:999px;background:#fff;font-size:11px;font-weight:900;color:var(--text);white-space:nowrap;box-shadow:0 1px 3px rgba(15,23,42,.06)">
+        <option value="">削除対象を選択</option>
+        ${usable.map(a=>`<option value="${esc2(a.value)}">${esc2(a.label)}</option>`).join('')}
+      </select>
+      <button type="button" class="btn btn-danger" onclick="FIELD_MONTH_OPS.runFromSelect(this)" style="font-size:11px;padding:5px 10px;border-radius:999px;white-space:nowrap;line-height:1.2">削除</button>
+    </div>`;
   }
 
-  window.FIELD_MONTH_OPS = window.FIELD_MONTH_OPS || {
-    run(ym, action){
-      if (!ym || !action) return;
-      if (action === 'csv_confirmed') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'confirmed') : null;
-      if (action === 'csv_daily') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'daily') : null;
-      if (action === 'history') return DATA_STORAGE_TABLE?.deleteHistoryMonth ? DATA_STORAGE_TABLE.deleteHistoryMonth(ym) : null;
-      if (action === 'worker') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'worker') : null;
-      if (action === 'product') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'product') : null;
-      if (action === 'field_all') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'all') : null;
+  window.FIELD_MONTH_OPS = window.FIELD_MONTH_OPS || {};
+  window.FIELD_MONTH_OPS.run = function(ym, action){
+    if (!ym || !action) return;
+    if (action === 'csv_confirmed') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'confirmed') : null;
+    if (action === 'csv_daily') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'daily') : null;
+    if (action === 'history') return DATA_STORAGE_TABLE?.deleteHistoryMonth ? DATA_STORAGE_TABLE.deleteHistoryMonth(ym) : null;
+    if (action === 'worker') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'worker') : null;
+    if (action === 'product') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'product') : null;
+    if (action === 'field_all') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'all') : null;
+  };
+  window.FIELD_MONTH_OPS.runFromSelect = function(btn){
+    const wrap = btn && btn.closest ? btn.closest('.field-month-op-wrap') : null;
+    const sel = wrap ? wrap.querySelector('.field-month-op-select') : null;
+    const ym = sel ? sel.dataset.monthOpYm : '';
+    const action = sel ? sel.value : '';
+    if (!action) {
+      if (window.UI?.toast) UI.toast('削除対象を選択してください', 'warn');
+      return;
     }
+    const result = window.FIELD_MONTH_OPS.run(ym, action);
+    if (sel) sel.value = '';
+    return result;
   };
 
   function renderDataList(){
