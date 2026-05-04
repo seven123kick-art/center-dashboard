@@ -3191,47 +3191,64 @@ const CAPACITY_UI = {
   },
 
   normalizeCapacityUnit(value) {
-    const raw = String(value || '').normalize('NFKC').replace(/\s+/g,'').trim();
+    const raw = String(value ?? '').normalize('NFKC').replace(/\s+/g,'').trim();
     if (!raw || raw === '未設定') return '';
 
-    // 郵便番号だけが入った場合は郵便番号マスタから行政区へ戻す。
+    const stripPref = (x) => String(x || '').replace(/^埼玉県/, '').replace(/^東京都/, '');
+    const withPref = (pref, name) => pref + String(name || '').replace(new RegExp('^' + pref), '');
+
+    // 郵便番号だけの場合は、郵便番号マスタから取得した行政単位を1回だけ正規化する。
+    // ※自分自身を無条件に呼ばない。Maximum call stack size exceeded 防止。
     const zip = this.normalizeZip(raw);
     if (/^\d{7}$/.test(zip) && raw.replace(/[^0-9]/g,'').length === 7) {
       const byZip = this.cityFromZip(zip);
-      if (byZip && byZip !== raw) return this.normalizeCapacityUnit(byZip);
+      if (byZip && byZip !== raw) {
+        const z = String(byZip).normalize('NFKC').replace(/\s+/g,'').trim();
+        if (z.includes('埼玉県') || z.includes('東京都')) {
+          const c = this.cityFromAddress(z);
+          return c && c !== '未設定' ? c : z;
+        }
+        value = z;
+      }
     }
 
-    // 県名つきはそのまま行政単位まで切る。
-    if (raw.includes('東京都') || raw.includes('埼玉県')) {
-      const c = this.cityFromAddress(raw);
-      return c && c !== '未設定' ? c : raw;
+    let v = String(value ?? raw).normalize('NFKC').replace(/\s+/g,'').trim();
+    if (!v || v === '未設定') return '';
+
+    // 県名つきは行政単位まで切る。cityFromAddress が同じ値を返しても再帰しない。
+    if (v.includes('東京都') || v.includes('埼玉県')) {
+      const c = this.cityFromAddress(v);
+      return c && c !== '未設定' ? c : v;
     }
 
     // さいたま市の区は、東京都の「北区」などと衝突しやすいため最優先で補完する。
-    if (raw.includes('さいたま市')) {
-      const ward = this.saitamaWardNames().find(w => raw.includes(w));
+    if (v.includes('さいたま市')) {
+      const ward = this.saitamaWardNames().find(w => v.includes(w));
       return '埼玉県さいたま市' + (ward || '');
     }
-    const saitamaWard = this.saitamaWardNames().find(w => raw === w || raw.endsWith(w));
-    if (saitamaWard && !raw.includes('東京都')) return '埼玉県さいたま市' + saitamaWard;
+    const saitamaWard = this.saitamaWardNames().find(w => v === w || v.endsWith(w));
+    if (saitamaWard && !v.includes('東京都')) return '埼玉県さいたま市' + saitamaWard;
 
     // 東京都23区。
-    const tokyoWard = this.tokyoWardNames().find(w => raw === w || raw.includes(w));
+    const tokyoWard = this.tokyoWardNames().find(w => v === w || v.includes(w));
     if (tokyoWard) return '東京都' + tokyoWard;
 
     // 埼玉県内市町村。
-    const saitamaMuni = this.saitamaMunicipalityNames().find(m => raw === m || raw.includes(m));
-    if (saitamaMuni) return '埼玉県' + saitamaMuni;
+    const saitamaMuni = this.saitamaMunicipalityNames().find(m => v === m || v.includes(m));
+    if (saitamaMuni) return withPref('埼玉県', saitamaMuni);
 
     // 東京都多摩等。
-    const tokyoMuni = this.tokyoMunicipalityNames().find(m => raw === m || raw.includes(m));
-    if (tokyoMuni) return '東京都' + tokyoMuni;
+    const tokyoMuni = this.tokyoMunicipalityNames().find(m => v === m || v.includes(m));
+    if (tokyoMuni) return withPref('東京都', tokyoMuni);
 
     // エリア分析で対応済みだった住所崩れへの補正。
     // 例：蕨中央5-、戸田美女木、さいたま大宮区 などを町域ではなく市・区へ丸める。
-    const cleaned = raw.replace(/^[0-9〒-]+/, '');
+    const cleaned = v.replace(/^[0-9〒-]+/, '');
     const repaired = this.cityFromAddress(cleaned);
-    if (repaired && repaired !== '未設定') return this.normalizeCapacityUnit(repaired);
+    if (repaired && repaired !== '未設定' && repaired !== cleaned && repaired !== v) {
+      // ここも再帰しない。戻り値を行政単位としてそのまま返す。
+      return repaired;
+    }
 
     if (/^さいたま/.test(cleaned)) return '埼玉県さいたま市';
     if (/^蕨/.test(cleaned)) return '埼玉県蕨市';
@@ -3242,7 +3259,7 @@ const CAPACITY_UI = {
     if (/^志木/.test(cleaned)) return '埼玉県志木市';
     if (/^新座/.test(cleaned)) return '埼玉県新座市';
 
-    return raw;
+    return v;
   },
 
   regionFilterOptions() {
