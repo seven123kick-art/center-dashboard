@@ -3,7 +3,7 @@
    原因対策：
    1) field_core側の旧描画に戻されても商品カテゴリ画面表示中は再描画
    2) 年度/月は「YYYYMM」を基準にし、登録済みデータ月だけ表示
-   3) STATEだけでなく localStorage 全体から workerCsvData / productAddressData 相当を探索
+   3) 個人情報保護のため localStorage 全体探索・rawRows参照はしない
    4) 商品・住所CSVが見つかれば R列作業内容＋U列金額を優先
    5) 商品・住所CSVがなくても作業者CSVの works から暫定表示
    6) クレーン／ユニック／手吊り／吊り系は最優先でクレーン分類
@@ -81,7 +81,7 @@
     function pushProduct(x, source){
       if (!obj(x)) return;
       const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name);
-      const has = arr(x.tickets).length || arr(x.rows).length || arr(x.data).length || arr(x.rawRows).length || obj(x.products);
+      const has = arr(x.tickets).length || obj(x.products);
       if (!ym || !has) return;
       const key = `p:${source}:${ym}:${arr(x.tickets).length}:${arr(x.rows).length}:${arr(x.data).length}`;
       if (seen.has(key)) return;
@@ -92,7 +92,7 @@
     function pushWorker(x, source){
       if (!obj(x)) return;
       const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name);
-      const has = obj(x.workers) || arr(x.rows).length || arr(x.data).length || arr(x.rawRows).length;
+      const has = obj(x.workers);
       if (!ym || !has) return;
       const key = `w:${source}:${ym}:${Object.keys(x.workers||{}).length}:${arr(x.rows).length}:${arr(x.data).length}`;
       if (seen.has(key)) return;
@@ -105,37 +105,6 @@
     arr(st.workerCsvData).forEach((x,i)=>pushWorker(x, `STATE.workerCsvData.${i}`));
     arr(st.fieldData).forEach((x,i)=>{ pushProduct(x, `STATE.fieldData.${i}`); pushWorker(x, `STATE.fieldData.${i}`); });
 
-    // localStorage全体を探索。キー名に依存しない。
-    try {
-      for (let i=0; i<localStorage.length; i++){
-        const key = localStorage.key(i);
-        const parsed = localJSON(key);
-        if (!parsed) continue;
-
-        if (Array.isArray(parsed)) {
-          parsed.forEach((x,idx)=>{
-            pushProduct(x, `${key}.${idx}`);
-            pushWorker(x, `${key}.${idx}`);
-          });
-        } else if (obj(parsed)) {
-          pushProduct(parsed, key);
-          pushWorker(parsed, key);
-
-          Object.keys(parsed).forEach(k=>{
-            const v = parsed[k];
-            if (Array.isArray(v)) {
-              v.forEach((x,idx)=>{
-                pushProduct(x, `${key}.${k}.${idx}`);
-                pushWorker(x, `${key}.${k}.${idx}`);
-              });
-            }
-          });
-        }
-      }
-    } catch(e) {}
-
-    out.product.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
-    out.worker.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
     return out;
   }
 
@@ -380,18 +349,6 @@
       }
     });
 
-    const rawRows = [
-      ...arr(rec?.rows),
-      ...arr(rec?.data),
-      ...arr(rec?.rawRows),
-      ...arr(rec?.items)
-    ];
-    rawRows.forEach(r=>rows.push({
-      slip: slipFrom(r),
-      product: productFrom(r),
-      work: workFrom(r),
-      amount: amountFrom(r)
-    }));
 
     return rows.filter(r=>r.product || r.work || r.amount);
   }
@@ -410,18 +367,6 @@
       });
     });
 
-    const rawRows = [
-      ...arr(rec?.rows),
-      ...arr(rec?.data),
-      ...arr(rec?.rawRows),
-      ...arr(rec?.items)
-    ];
-    rawRows.forEach(r=>rows.push({
-      slip: slipFrom(r),
-      product: productFrom(r),
-      work: workFrom(r),
-      amount: amountFrom(r)
-    }));
 
     return rows.filter(r=>r.product || r.work || r.amount);
   }
