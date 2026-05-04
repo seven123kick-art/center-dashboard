@@ -447,6 +447,10 @@ IMPORT.deleteFieldData = function(ym) {
 
 
 
+  function normalizeZip(v){
+    return clean(v).replace(/[〒\s　\-]/g, '').replace(/[^0-9]/g, '');
+  }
+
   function sanitizeAreaFromZipOrAddress(zip, address){
     const z = normalizeZip(zip);
     let a = null;
@@ -509,11 +513,6 @@ IMPORT.deleteFieldData = function(ym) {
 
     const slipMap = new Map();
     let detailRows = 0;
-
-    function normalizeZip(v){
-      return clean(v).replace(/[〒\s　\-]/g, '').replace(/[^0-9]/g, '');
-    }
-
     for (let rowIndex = 0; rowIndex < body.length; rowIndex++) {
       const row = body[rowIndex];
       const slip = clean(row[idxSlip]);
