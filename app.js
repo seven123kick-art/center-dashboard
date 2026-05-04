@@ -359,6 +359,7 @@ const STATE = {
   fiscalYear: null, // 現在操作中の年度
   memos:     {},    // {ym: {text,savedAt}}
   library:   [],    // 過去資料
+  reportKnowledge: { policies:{}, references:[] }, // 会議報告書用：年度半期方針・参考資料メモ
   view:      'dashboard',
   selYM:     null,  // 現在選択中のYM
   shipperMode: 'group',
@@ -457,6 +458,7 @@ const STORE = {
     STATE.planData  = normalizePlanData(this._g('planData'));
     STATE.memos     = this._g('memos')     || {};
     STATE.library   = this._g('library')   || [];
+    STATE.reportKnowledge = normalizeReportKnowledge(this._g('reportKnowledge') || STATE.reportKnowledge);
     sanitizePersonalDataState(STATE);
   },
 
@@ -469,6 +471,7 @@ const STORE = {
     this._s('planData',  STATE.planData);
     this._s('memos',     STATE.memos);
     this._s('library',   STATE.library);
+    this._s('reportKnowledge', STATE.reportKnowledge);
   },
 
   exportJSON() {
@@ -476,7 +479,7 @@ const STORE = {
     const blob = new Blob([JSON.stringify({
       center:CENTER.id, exportedAt:new Date().toISOString(),
       datasets:STATE.datasets, fieldData:STATE.fieldData, areaData:STATE.areaData,
-      capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos, library:STATE.library,
+      capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos, library:STATE.library, reportKnowledge:STATE.reportKnowledge,
     },null,2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -496,6 +499,7 @@ const STORE = {
       if (d.planData) STATE.planData = normalizePlanData(d.planData);
       if (d.memos)     STATE.memos     = d.memos;
       if (d.library)   STATE.library   = d.library;
+      if (d.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(d.reportKnowledge);
       sanitizePersonalDataState(STATE);
       this.save();
       NAV.refresh();
@@ -1062,6 +1066,7 @@ const CLOUD = {
       planDataUpdatedAt: latestPlanUpdatedAt(),
       hasMemos: !!(STATE.memos && Object.keys(STATE.memos).length),
       hasLibrary: !!(STATE.library && STATE.library.length),
+      hasReportKnowledge: !!(STATE.reportKnowledge && ((STATE.reportKnowledge.references||[]).length || Object.keys(STATE.reportKnowledge.policies||{}).length)),
     };
   },
   _makeFullState() {
@@ -1078,6 +1083,7 @@ const CLOUD = {
       fiscalYear: STATE.fiscalYear || null,
       memos: STATE.memos || {},
       library: STATE.library || [],
+      reportKnowledge: STATE.reportKnowledge || { policies:{}, references:[] },
     };
   },
   _applyFullState(full) {
@@ -1091,6 +1097,7 @@ const CLOUD = {
     if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
     if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
     if (Array.isArray(full.library)) STATE.library = full.library;
+    if (full.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(full.reportKnowledge);
     sanitizePersonalDataState(STATE);
     if (typeof AUTO_SYNC !== 'undefined') {
       AUTO_SYNC.withoutSync(() => STORE.save());
@@ -1807,6 +1814,7 @@ function mergeFullState(localFull, cloudFull) {
     fiscalYear: local.fiscalYear || cloud.fiscalYear || null,
     memos: { ...(local.memos || {}), ...(cloud.memos || {}) },
     library: (cloud.library && cloud.library.length) ? cloud.library : (local.library || []),
+    reportKnowledge: mergeReportKnowledge(local.reportKnowledge || {}, cloud.reportKnowledge || {}),
   };
 }
 
@@ -3516,39 +3524,305 @@ var FIELD_UI = window.FIELD_UI || {
   },
 };
 
+
+function normalizeReportKnowledge(raw) {
+  const base = { policies:{}, references:[] };
+  if (!raw || typeof raw !== 'object') return base;
+  const policies = raw.policies && typeof raw.policies === 'object' ? raw.policies : {};
+  const references = Array.isArray(raw.references) ? raw.references : [];
+  return {
+    policies,
+    references: references.map(r => ({
+      id: r.id || Date.now() + Math.random(),
+      fiscalYear: String(r.fiscalYear || getDefaultFiscalYear()),
+      half: r.half || '上期',
+      ym: r.ym || '',
+      scope: r.scope || (r.ym ? 'month' : 'half'),
+      title: r.title || '無題',
+      category: r.category || 'その他',
+      priority: r.priority || '中',
+      content: r.content || '',
+      savedAt: r.savedAt || new Date().toISOString()
+    }))
+  };
+}
+
+function mergeReportKnowledge(localRaw, cloudRaw) {
+  const local = normalizeReportKnowledge(localRaw);
+  const cloud = normalizeReportKnowledge(cloudRaw);
+  const policies = { ...local.policies };
+  Object.entries(cloud.policies || {}).forEach(([key, val]) => {
+    const old = policies[key];
+    const nt = val && (val.savedAt || val.updatedAt || '');
+    const ot = old && (old.savedAt || old.updatedAt || '');
+    if (!old || String(nt) >= String(ot)) policies[key] = val;
+  });
+  const refMap = new Map();
+  [...(local.references || []), ...(cloud.references || [])].forEach(r => {
+    if (!r) return;
+    const id = String(r.id || `${r.fiscalYear}_${r.half}_${r.ym}_${r.title}`);
+    const old = refMap.get(id);
+    if (!old || String(r.savedAt || '') >= String(old.savedAt || '')) refMap.set(id, r);
+  });
+  return { policies, references:[...refMap.values()].sort((a,b)=>String(b.savedAt||'').localeCompare(String(a.savedAt||''))) };
+}
+
+function reportPolicyKey(fy, half) {
+  return `${String(fy || getDefaultFiscalYear())}_${half || '上期'}`;
+}
+
+function reportHalfFromYM(ym) {
+  const mm = Number(String(ym || '').slice(4,6));
+  return (mm >= 4 && mm <= 9) ? '上期' : '下期';
+}
+
+function reportFYFromYM(ym) {
+  return ym ? fiscalYearFromYM(ym) : getDefaultFiscalYear();
+}
+
 /* ════════ §23 REPORT_UI（スタブ） ═════════════════════════════ */
 const REPORT_UI = {
-  refresh() {},
+  _tab:'policy',
+
+  getFY() {
+    return document.getElementById('report-fy')?.value || dashboardSelectedFiscalYear() || getDefaultFiscalYear();
+  },
+  getHalf() {
+    return document.getElementById('report-half')?.value || '上期';
+  },
+  getYM() {
+    return document.getElementById('report-ym')?.value || dashboardSelectedYM() || latestDS()?.ym || '';
+  },
+  getPolicy() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    return STATE.reportKnowledge.policies[reportPolicyKey(this.getFY(), this.getHalf())] || null;
+  },
+
+  switchTab(tab) {
+    this._tab = tab || 'policy';
+    document.querySelectorAll('.report-tab').forEach(b=>b.classList.toggle('active', b.dataset.reportTab === this._tab));
+    document.querySelectorAll('.report-pane').forEach(p=>p.style.display='none');
+    const pane = document.getElementById('report-pane-' + this._tab);
+    if (pane) pane.style.display = '';
+    this.refreshReferenceList();
+  },
+
+  refresh() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    this.populateSelectors();
+    this.loadPolicy();
+    this.refreshReferenceList();
+    this.refreshGenerateSummary();
+    this.switchTab(this._tab || 'policy');
+  },
+
+  populateSelectors() {
+    const fySel = document.getElementById('report-fy');
+    const ymSel = document.getElementById('report-ym');
+    const halfSel = document.getElementById('report-half');
+    if (!fySel) return;
+
+    const years = [...new Set([...dashboardAvailableFiscalYears(), getDefaultFiscalYear(), ...Object.keys(STATE.reportKnowledge.policies || {}).map(k=>k.slice(0,4))])]
+      .filter(Boolean).sort((a,b)=>Number(b)-Number(a));
+    const oldFY = fySel.value || dashboardSelectedFiscalYear() || getDefaultFiscalYear();
+    fySel.innerHTML = years.map(y=>`<option value="${esc(y)}" ${String(y)===String(oldFY)?'selected':''}>${esc(y)}年度</option>`).join('');
+    if (!fySel.value && years.length) fySel.value = years[0];
+
+    const fym = monthsOfFiscalYear(fySel.value);
+    const validYms = fym.filter(ym => activeDatasetByYM(ym) || (STATE.fieldData || []).some(d=>d.ym===ym) || (STATE.productAddressData || []).some(d=>d.ym===ym));
+    const currentYM = ymSel?.value || dashboardSelectedYM() || validYms.at(-1) || fym[0] || '';
+    if (ymSel) {
+      ymSel.innerHTML = fym.map(ym=>{
+        const has = validYms.includes(ym);
+        return `<option value="${esc(ym)}" ${ym===currentYM?'selected':''}>${esc(ymLabel(ym))}${has?'':'（データなし）'}</option>`;
+      }).join('');
+      if (currentYM) ymSel.value = currentYM;
+    }
+    if (halfSel && ymSel?.value && !halfSel.dataset.manualChanged) halfSel.value = reportHalfFromYM(ymSel.value);
+    if (halfSel) halfSel.onchange = () => { halfSel.dataset.manualChanged = '1'; this.refresh(); };
+  },
+
+  savePolicy() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    const fy = this.getFY();
+    const half = this.getHalf();
+    const key = reportPolicyKey(fy, half);
+    STATE.reportKnowledge.policies[key] = {
+      fiscalYear: fy,
+      half,
+      direction: document.getElementById('report-policy-direction')?.value || '',
+      actions: document.getElementById('report-policy-actions')?.value || '',
+      targets: document.getElementById('report-policy-targets')?.value || '',
+      issues: document.getElementById('report-policy-issues')?.value || '',
+      savedAt: new Date().toISOString()
+    };
+    STORE.save();
+    const msg = document.getElementById('report-policy-msg');
+    if (msg) msg.textContent = `${fy}年度 ${half} 方針を保存しました`;
+    UI.toast('年度・半期方針を保存しました');
+    this.refreshGenerateSummary();
+  },
+
+  loadPolicy() {
+    const p = this.getPolicy();
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    set('report-policy-direction', p?.direction);
+    set('report-policy-actions', p?.actions);
+    set('report-policy-targets', p?.targets);
+    set('report-policy-issues', p?.issues);
+  },
+
+  saveReference() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    const title = document.getElementById('report-ref-title')?.value?.trim();
+    const content = document.getElementById('report-ref-content')?.value?.trim();
+    if (!title && !content) { UI.toast('資料名または内容を入力してください','warn'); return; }
+    const fy = this.getFY();
+    const half = this.getHalf();
+    const scope = document.getElementById('report-ref-scope')?.value || 'month';
+    const ym = scope === 'month' ? this.getYM() : '';
+    STATE.reportKnowledge.references.push({
+      id: Date.now(), fiscalYear: fy, half, ym, scope,
+      title: title || '参考メモ',
+      category: document.getElementById('report-ref-category')?.value || 'その他',
+      priority: document.getElementById('report-ref-priority')?.value || '中',
+      content: content || '',
+      savedAt: new Date().toISOString()
+    });
+    STORE.save();
+    this.clearReferenceForm();
+    this.refreshReferenceList();
+    UI.toast('参考資料メモを保存しました');
+  },
+
+  clearReferenceForm() {
+    ['report-ref-title','report-ref-content'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+    const msg=document.getElementById('report-ref-msg'); if(msg) msg.textContent='';
+  },
+
+  referenceMatches(ref) {
+    const fy = this.getFY();
+    const half = this.getHalf();
+    const ym = this.getYM();
+    if (String(ref.fiscalYear) !== String(fy)) return false;
+    if (ref.scope === 'year') return true;
+    if ((ref.half || half) !== half) return false;
+    if (ref.scope === 'month') return !ref.ym || ref.ym === ym;
+    return true;
+  },
+
+  selectedReferences() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    const direct = (STATE.reportKnowledge.references || []).filter(r=>this.referenceMatches(r));
+    const fy = this.getFY(), half = this.getHalf(), ym = this.getYM();
+    const lib = (STATE.library || []).filter(item => {
+      if (item.fiscalYear && String(item.fiscalYear) !== String(fy)) return false;
+      const cat = String(item.category || '');
+      const monthMatch = !item.month || (ym && item.month === ym.slice(4,6));
+      const isPolicy = cat.includes('方針');
+      const isMeeting = cat.includes('会議') || cat.includes('報告') || cat.includes('資料') || cat.includes('メモ') || cat.includes('スクショ');
+      return monthMatch || isPolicy || isMeeting || !item.month;
+    }).map(item => ({
+      id:'lib_' + item.id,
+      fiscalYear: item.fiscalYear || fy,
+      half,
+      ym: item.month ? `${fy}${item.month}` : '',
+      scope: item.month ? 'month' : 'half',
+      title: item.title || item.fileName || '過去資料',
+      category: item.category || '過去資料',
+      priority: item.category && String(item.category).includes('方針') ? '高' : '中',
+      content: [item.memo, item.content, item.fileName ? `添付ファイル：${item.fileName}` : ''].filter(Boolean).join('\n'),
+      savedAt: item.savedAt || ''
+    }));
+    return [...direct, ...lib].sort((a,b)=>{
+      const rank = {高:3,中:2,低:1};
+      return (rank[b.priority]||0)-(rank[a.priority]||0) || String(b.savedAt||'').localeCompare(String(a.savedAt||''));
+    }).slice(0,20);
+  },
+
+  refreshReferenceList() {
+    const box = document.getElementById('report-reference-list');
+    const sum = document.getElementById('report-generate-summary');
+    const refs = this.selectedReferences();
+    if (box) {
+      box.innerHTML = refs.length ? refs.map(r=>`
+        <div style="border-bottom:1px solid var(--border);padding:8px 0">
+          <div style="font-weight:800;color:var(--text)">${esc(r.title)} <span style="font-size:11px;color:var(--text3)">[${esc(r.category)} / ${esc(r.priority)}]</span></div>
+          <div style="white-space:pre-wrap;color:var(--text2);font-size:12px">${esc((r.content || '').slice(0,500)) || '添付資料のみ。必要に応じて資料内容を確認してください。'}</div>
+        </div>`).join('') : '対象期間に紐づく参考資料はまだありません';
+    }
+    if (sum) this.refreshGenerateSummary();
+  },
+
+  refreshGenerateSummary() {
+    const sum = document.getElementById('report-generate-summary');
+    if (!sum) return;
+    const fy=this.getFY(), half=this.getHalf(), ym=this.getYM();
+    const p=this.getPolicy();
+    const refs=this.selectedReferences();
+    const ds=ym ? activeDatasetByYM(ym) : null;
+    sum.innerHTML = `対象：${esc(fy)}年度 ${esc(half)} / ${esc(ymLabel(ym))}<br>` +
+      `方針：${p ? '登録済' : '未登録'} / 月次収支：${ds ? datasetKindLabel(ds) + 'あり' : 'なし'} / 参考資料：${refs.length}件`;
+  },
+
+  buildDataSummary(ym) {
+    const ds = ym ? activeDatasetByYM(ym) : latestDS();
+    const prev = ds ? prevDS(ds.ym) : null;
+    const lastYear = ds ? sameMonthLastYear(ds.ym) : null;
+    const lines = [];
+    if (ds) {
+      lines.push(`- 営業収益: ${fmtK(ds.totalIncome)}千円`);
+      lines.push(`- 費用合計: ${fmtK(ds.totalExpense)}千円`);
+      lines.push(`- センター利益: ${fmtK(ds.profit)}千円`);
+      lines.push(`- 利益率: ${pct(ds.profitRate)}`);
+      lines.push(`- みなし人件費率: ${pct(ds.pseudoLaborRate)}（目標: ${CONFIG.TARGETS.pseudoLaborRate}%以内）`);
+      if (prev) lines.push(`- 前月比 営業収益: ${ratio(ds.totalIncome, prev.totalIncome)}`);
+      if (lastYear) lines.push(`- 前年同月比 営業収益: ${ratio(ds.totalIncome, lastYear.totalIncome)}`);
+    } else {
+      lines.push('- 月次収支データなし');
+    }
+    const field = (STATE.productAddressData || []).find(r=>r.ym===ym);
+    if (field) {
+      lines.push(`- 商品・住所CSV: 原票${fmt(field.slipCount || field.uniqueSlips || field.tickets?.length || 0)}件 / 明細${fmt(field.detailRows || field.rows || 0)}行`);
+    }
+    return lines.join('\n');
+  },
+
   generatePrompt() {
-    const ds = latestDS();
     const out = document.getElementById('report-prompt-output');
     if (!out) return;
-    if (!ds) { out.value='データがありません。先にCSVを取込んでください。'; return; }
-    const note = document.getElementById('report-current-note')?.value||'';
-    out.value = `## ${CENTER.name} ${ymLabel(ds.ym)} 月次報告書 作成依頼
+    const fy = this.getFY();
+    const half = this.getHalf();
+    const ym = this.getYM();
+    const type = document.getElementById('report-type')?.value || 'monthly';
+    const style = document.getElementById('report-style')?.value || 'a4';
+    const tone = document.getElementById('report-tone')?.value || '結論先出し・実務的・数字重視';
+    const policy = this.getPolicy();
+    const refs = this.selectedReferences();
+    const refText = refs.length ? refs.map((r,i)=>`【参考資料${i+1}｜${r.category}｜重要度:${r.priority}】\n${r.title}\n${r.content || '添付資料あり。資料名・メモを参考にしてください。'}`).join('\n\n') : '参考資料なし';
 
-### 基本データ（${ymLabel(ds.ym)}）
-- 営業収益: ${fmtK(ds.totalIncome)}千円
-- 費用合計: ${fmtK(ds.totalExpense)}千円
-- センター利益: ${fmtK(ds.profit)}千円
-- 利益率: ${pct(ds.profitRate)}
-- みなし人件費率: ${pct(ds.pseudoLaborRate)}（目標: ${CONFIG.TARGETS.pseudoLaborRate}%以内）
-- 変動費率: ${pct(ds.variableRate)}
-
-### 当月の状況（担当者入力）
-${note||'（入力なし）'}
-
----
-上記のデータを元に、A4 1枚の月次報告書を作成してください。
-構成: 1.月次実績概要 / 2.前月比・計画比分析 / 3.重点課題と対策 / 4.来月の方針
-`;
-    UI.toast('プロンプトを生成しました。コピーしてAIに貼り付けてください。');
+    out.value = `# ${CENTER.name} 会議報告書 作成依頼\n\n` +
+`## 作成条件\n` +
+`- 作成タイプ: ${type}\n- 対象: ${fy}年度 ${half} / ${ymLabel(ym)}\n- 出力形式: ${style}\n- 文章トーン: ${tone}\n\n` +
+`## 年度・半期方針\n` +
+`- 運営方針: ${policy?.direction || '未登録'}\n- 重点施策: ${policy?.actions || '未登録'}\n- 数値目標・管理指標: ${policy?.targets || '未登録'}\n- 前期からの課題・振り返り: ${policy?.issues || '未登録'}\n\n` +
+`## 月次実績データ\n${this.buildDataSummary(ym)}\n\n` +
+`## 参考資料ストック\n${refText}\n\n` +
+`## 作成ルール\n` +
+`- 構成は「結論 → 数字結果 → 進捗評価 → 原因・課題 → 今月実施したこと → 来月以降の打ち手 → まとめ」。\n` +
+`- 推測で書かず、数字・方針・参考資料に基づいて書く。確認できない内容は書かない。\n` +
+`- 文章は管理者会議でそのまま読める社内向けの丁寧な文体にする。\n` +
+`- 重点施策と月次実績のつながりを必ず書く。\n` +
+`- 過剰な経営提案ではなく、現場判断に直結する打ち手に絞る。\n` +
+`- A4 1枚想定で、見出し付きの本文として作成する。`;
+    UI.toast('会議報告書用プロンプトを生成しました');
   },
+
   copyPrompt() {
     const out = document.getElementById('report-prompt-output');
     if (!out?.value) { UI.toast('先に「AI用プロンプト作成」ボタンを押してください','warn'); return; }
     navigator.clipboard.writeText(out.value).then(()=>UI.toast('クリップボードにコピーしました'));
-  },
+  }
 };
 
 /* ════════ §24 PAST_LIBRARY（ファイル本体はStorage、台帳はfull_state） ══════════════════════════ */
@@ -3807,7 +4081,7 @@ const NAV = {
       case 'field-content': if (window.FIELD_TASK_UI?.render) FIELD_TASK_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'field-product': if (window.FIELD_PRODUCT_UI?.render) FIELD_PRODUCT_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'field-area':    if (window.FIELD_AREA_UI?.render) FIELD_AREA_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
-      // report: フォームそのままで描画不要
+      case 'report':     REPORT_UI.refresh(); break;
     }
   },
 };
