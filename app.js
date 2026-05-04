@@ -2455,14 +2455,53 @@ const CAPACITY_UI = {
   cityFromAddress(address) {
     const t = String(address || '').normalize('NFKC').replace(/\s+/g,'').trim();
     if (!t) return '未設定';
+
     const prefMatch = t.match(/^(北海道|東京都|(?:京都|大阪)府|.{2,3}県)/);
     const pref = prefMatch ? prefMatch[1] : '';
     const rest = pref ? t.slice(pref.length) : t;
+
+    // エリア分析側と同じ考え方：郵便番号が取れない場合でも、町域・番地ではなく行政区・市で止める。
+    const known = [
+      'さいたま市西区','さいたま市北区','さいたま市大宮区','さいたま市見沼区','さいたま市中央区',
+      'さいたま市桜区','さいたま市浦和区','さいたま市南区','さいたま市緑区','さいたま市岩槻区',
+      '蕨市','戸田市','川口市','朝霞市','和光市','志木市','新座市','富士見市','ふじみ野市',
+      '川越市','所沢市','狭山市','上尾市','桶川市','北本市','鴻巣市','入間市','草加市','越谷市',
+      '熊谷市','本庄市','深谷市','秩父市','行田市','加須市','羽生市','久喜市','蓮田市','幸手市','白岡市',
+      '板橋区','北区','豊島区','練馬区','文京区','足立区','荒川区','台東区','江東区','大田区',
+      '世田谷区','新宿区','港区','墨田区','品川区','目黒区','中野区','杉並区','渋谷区','中央区','千代田区'
+    ];
+    for (const name of known) {
+      if (rest.startsWith(name)) return pref + name;
+    }
+
+    // 「蕨中央5-」「戸田美女木」など、市名の「市」が落ちた住所を補正する。
+    const saitamaFallbacks = [
+      ['蕨','蕨市'],['戸田','戸田市'],['川口','川口市'],['朝霞','朝霞市'],['和光','和光市'],['志木','志木市'],['新座','新座市'],
+      ['富士見','富士見市'],['ふじみ野','ふじみ野市'],['上尾','上尾市'],['桶川','桶川市'],['北本','北本市'],['鴻巣','鴻巣市'],
+      ['熊谷','熊谷市'],['深谷','深谷市'],['本庄','本庄市'],['秩父','秩父市']
+    ];
+    if (!pref || pref === '埼玉県') {
+      for (const [head, city] of saitamaFallbacks) {
+        if (rest.startsWith(head)) return '埼玉県' + city;
+      }
+    }
+
+    const tokyoFallbacks = [
+      ['板橋','板橋区'],['北','北区'],['豊島','豊島区'],['練馬','練馬区'],['文京','文京区'],['足立','足立区'],['荒川','荒川区'],
+      ['台東','台東区'],['江東','江東区'],['大田','大田区'],['世田谷','世田谷区'],['新宿','新宿区'],['港','港区'],['墨田','墨田区'],
+      ['品川','品川区'],['目黒','目黒区'],['中野','中野区'],['杉並','杉並区'],['渋谷','渋谷区'],['中央','中央区'],['千代田','千代田区']
+    ];
+    if (pref === '東京都') {
+      for (const [head, ward] of tokyoFallbacks) {
+        if (rest.startsWith(head)) return '東京都' + ward;
+      }
+    }
+
     const wardCity = rest.match(/^(.+?市.+?区)/);
     if (wardCity) return pref + wardCity[1];
     const muni = rest.match(/^(.+?[市区町村])/);
     if (muni) return pref + muni[1];
-    return pref ? pref + rest.slice(0,8) : rest.slice(0,8);
+    return '未設定';
   },
 
   cityFromZip(zip) {
@@ -2478,29 +2517,29 @@ const CAPACITY_UI = {
   },
 
   ticketCity(t) {
-    // キャパ設定は区単位で使うため、住所・郵便番号から取れる行政区を最優先する。
-    // 県名がCSV側に無い場合でも、埼玉県・東京都は画面側で補完して扱う。
-    const addr = t.address || t.addr || t.destinationAddress || t['住所'] || t['お届け先住所'];
-    if (addr) {
-      const c = this.normalizeCapacityUnit(this.cityFromAddress(addr));
-      if (c && c !== '未設定') return c;
-    }
-
+    // エリア分析と同じく、過去に生成された t.area / t.city は粗い値が残ることがあるため最優先しない。
+    // 優先順位：郵便番号マスタ → 住所文字列 → pref/city/ward → 既存値の順。
     const row = t.representativeRow || t.firstRow || t.row || t.raw;
-    if (Array.isArray(row)) {
-      const zc2 = this.normalizeCapacityUnit(this.cityFromZip(row[11]));
-      if (zc2 && zc2 !== '未設定') return zc2;
-      const c2 = this.normalizeCapacityUnit(this.cityFromAddress(row[13]));
-      if (c2 && c2 !== '未設定') return c2;
-    }
 
-    const zc = this.normalizeCapacityUnit(t.zip || t.zipcode || t.postalCode || t['郵便番号'] || t['お届け先郵便番号']);
-    const zcCity = this.normalizeCapacityUnit(this.cityFromZip(zc));
-    if (zcCity && zcCity !== '未設定') return zcCity;
+    const zip = this.normalizeZip(
+      t.zip || t.zipcode || t.postCode || t.postalCode ||
+      t['お届け先郵便番号'] || t['届け先郵便番号'] || t['郵便番号'] ||
+      (Array.isArray(row) ? row[11] : '')
+    );
+    const zipCity = this.normalizeCapacityUnit(this.cityFromZip(zip));
+    if (zipCity && zipCity !== '未設定') return zipCity;
+
+    const addr = t.address || t.addr || t.destinationAddress ||
+      t['住所'] || t['届け先住所'] || t['配送先住所'] || t['お届け先住所'] ||
+      (Array.isArray(row) ? row[13] : '');
+    const addrCity = this.normalizeCapacityUnit(this.cityFromAddress(addr));
+    if (addrCity && addrCity !== '未設定') return addrCity;
 
     if (t.pref && t.city && t.ward) return this.normalizeCapacityUnit(String(t.pref) + String(t.city) + String(t.ward));
     if (t.pref && t.city) return this.normalizeCapacityUnit(String(t.pref) + String(t.city));
-    if (t.area) return this.normalizeCapacityUnit(String(t.area));
+
+    const oldCity = this.normalizeCapacityUnit(t.city || t.area || '');
+    if (oldCity && oldCity !== '未設定') return oldCity;
 
     return '未設定';
   },
@@ -3188,6 +3227,21 @@ const CAPACITY_UI = {
     const tokyoMuni = this.tokyoMunicipalityNames().find(m => raw === m || raw.includes(m));
     if (tokyoMuni) return '東京都' + tokyoMuni;
 
+    // エリア分析で対応済みだった住所崩れへの補正。
+    // 例：蕨中央5-、戸田美女木、さいたま大宮区 などを町域ではなく市・区へ丸める。
+    const cleaned = raw.replace(/^[0-9〒-]+/, '');
+    const repaired = this.cityFromAddress(cleaned);
+    if (repaired && repaired !== '未設定') return this.normalizeCapacityUnit(repaired);
+
+    if (/^さいたま/.test(cleaned)) return '埼玉県さいたま市';
+    if (/^蕨/.test(cleaned)) return '埼玉県蕨市';
+    if (/^戸田/.test(cleaned)) return '埼玉県戸田市';
+    if (/^川口/.test(cleaned)) return '埼玉県川口市';
+    if (/^朝霞/.test(cleaned)) return '埼玉県朝霞市';
+    if (/^和光/.test(cleaned)) return '埼玉県和光市';
+    if (/^志木/.test(cleaned)) return '埼玉県志木市';
+    if (/^新座/.test(cleaned)) return '埼玉県新座市';
+
     return raw;
   },
 
@@ -3251,7 +3305,7 @@ const CAPACITY_UI = {
   availableCapacityUnits(actual) {
     const map = new Map();
     (actual?.tickets || []).forEach(t => {
-      const unit = this.normalizeCapacityUnit(t.city || this.ticketCity(t));
+      const unit = this.normalizeCapacityUnit(this.ticketCity(t));
       if (!unit || unit === '未設定') return;
       if (!(unit.includes('埼玉県') || unit.includes('東京都'))) return;
       const area = this.mappedArea(unit);
@@ -3295,7 +3349,7 @@ const CAPACITY_UI = {
     (this.buildActual().tickets || []).forEach(t => {
       if (t.area !== area) return;
       if (row?.date && t.date && t.date !== row.date) return;
-      const unit = this.normalizeCapacityUnit(t.city || this.ticketCity(t));
+      const unit = this.normalizeCapacityUnit(this.ticketCity(t));
       const key = unit || '未設定';
       const x = result.get(key) || { unit:key, label:this.unitShortName(key), count:0, shippers:{} };
       x.count += 1;
