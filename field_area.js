@@ -253,6 +253,13 @@
       out.push({ ...x, ym, tickets, __source:source });
     }
 
+    // field_core.js の統一アクセサを最優先する。
+    // これにより、年度プルダウンが出ない・別センターのデータを拾う・削除済みが復活する問題を防ぐ。
+    if (window.FIELD_DATA_ACCESS) {
+      FIELD_DATA_ACCESS.getProductRecords().forEach((x,i)=>pushRecord(x, `FIELD_DATA_ACCESS.product.${i}`));
+      if (out.length) return out;
+    }
+
     if (window.STATE) {
       arr(STATE.productAddressData).forEach((x,i)=>pushRecord(x, `STATE.productAddressData.${i}`));
       arr(STATE.fieldData).forEach((x,i)=>pushRecord(x, `STATE.fieldData.${i}`));
