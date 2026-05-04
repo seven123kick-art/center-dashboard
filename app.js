@@ -2460,6 +2460,11 @@ const CAPACITY_UI = {
     const pref = prefMatch ? prefMatch[1] : '';
     const rest = pref ? t.slice(pref.length) : t;
 
+    // さいたま市は同じ市内でも区ごとにキャパが違うため、区が住所に含まれる場合は最優先で区まで保持する。
+    // 例：埼玉県さいたま市大宮区、さいたま大宮区、さいたま市桜区 など。
+    const saitamaWardMatch = rest.match(/さいたま(?:市)?(西区|北区|大宮区|見沼区|中央区|桜区|浦和区|南区|緑区|岩槻区)/);
+    if (saitamaWardMatch) return '埼玉県さいたま市' + saitamaWardMatch[1];
+
     // エリア分析側と同じ考え方：郵便番号が取れない場合でも、町域・番地ではなく行政区・市で止める。
     const known = [
       'さいたま市西区','さいたま市北区','さいたま市大宮区','さいたま市見沼区','さいたま市中央区',
@@ -2518,8 +2523,16 @@ const CAPACITY_UI = {
 
   ticketCity(t) {
     // エリア分析と同じく、過去に生成された t.area / t.city は粗い値が残ることがあるため最優先しない。
-    // 優先順位：郵便番号マスタ → 住所文字列 → pref/city/ward → 既存値の順。
+    // ただし、さいたま市は郵便番号マスタが未ロード／粗い値の場合に「さいたま市」止まりになるため、
+    // 住所に区が入っている場合は住所側を優先し、区単位を維持する。
     const row = t.representativeRow || t.firstRow || t.row || t.raw;
+    const isCoarseSaitama = (v) => /^埼玉県さいたま市?$/.test(String(v || '').normalize('NFKC').replace(/\s+/g,''));
+
+    const addr = t.address || t.addr || t.destinationAddress ||
+      t['住所'] || t['届け先住所'] || t['配送先住所'] || t['お届け先住所'] ||
+      (Array.isArray(row) ? row[13] : '');
+    const addrCity = this.normalizeCapacityUnit(this.cityFromAddress(addr));
+    if (addrCity && addrCity !== '未設定' && !isCoarseSaitama(addrCity)) return addrCity;
 
     const zip = this.normalizeZip(
       t.zip || t.zipcode || t.postCode || t.postalCode ||
@@ -2527,18 +2540,24 @@ const CAPACITY_UI = {
       (Array.isArray(row) ? row[11] : '')
     );
     const zipCity = this.normalizeCapacityUnit(this.cityFromZip(zip));
-    if (zipCity && zipCity !== '未設定') return zipCity;
+    if (zipCity && zipCity !== '未設定' && !isCoarseSaitama(zipCity)) return zipCity;
 
-    const addr = t.address || t.addr || t.destinationAddress ||
-      t['住所'] || t['届け先住所'] || t['配送先住所'] || t['お届け先住所'] ||
-      (Array.isArray(row) ? row[13] : '');
-    const addrCity = this.normalizeCapacityUnit(this.cityFromAddress(addr));
-    if (addrCity && addrCity !== '未設定') return addrCity;
-
-    if (t.pref && t.city && t.ward) return this.normalizeCapacityUnit(String(t.pref) + String(t.city) + String(t.ward));
-    if (t.pref && t.city) return this.normalizeCapacityUnit(String(t.pref) + String(t.city));
+    if (t.pref && t.city && t.ward) {
+      const prefCityWard = this.normalizeCapacityUnit(String(t.pref) + String(t.city) + String(t.ward));
+      if (prefCityWard && prefCityWard !== '未設定' && !isCoarseSaitama(prefCityWard)) return prefCityWard;
+    }
+    if (t.pref && t.city) {
+      const prefCity = this.normalizeCapacityUnit(String(t.pref) + String(t.city));
+      if (prefCity && prefCity !== '未設定' && !isCoarseSaitama(prefCity)) return prefCity;
+    }
 
     const oldCity = this.normalizeCapacityUnit(t.city || t.area || '');
+    if (oldCity && oldCity !== '未設定' && !isCoarseSaitama(oldCity)) return oldCity;
+
+    // どうしても区が取れない場合だけ粗いさいたま市を返す。
+    // 荷主キャパ設定側では区単位を優先するため、通常は郵便番号マスタ読込後に区へ分解される。
+    if (addrCity && addrCity !== '未設定') return addrCity;
+    if (zipCity && zipCity !== '未設定') return zipCity;
     if (oldCity && oldCity !== '未設定') return oldCity;
 
     return '未設定';
@@ -2850,11 +2869,54 @@ const CAPACITY_UI = {
     }).sort((a,b)=>(risk[b.cls]||0)-(risk[a.cls]||0) || this.n(b.diff)-this.n(a.diff) || b.rate-a.rate || String(a.date).localeCompare(String(b.date)));
   },
 
+  ensureZipMasterForCapacity() {
+    const rec = this.selectedProductRecord();
+    if (!rec || !Array.isArray(rec.tickets) || !rec.tickets.length) return true;
+    if (!window.JP_ZIP_LOADER || typeof JP_ZIP_LOADER.loadForZips !== 'function') return true;
+
+    const zips = rec.tickets.map((t) => {
+      const row = t.representativeRow || t.firstRow || t.row || t.raw;
+      return this.normalizeZip(
+        t.zip || t.zipcode || t.postCode || t.postalCode ||
+        t['お届け先郵便番号'] || t['届け先郵便番号'] || t['郵便番号'] ||
+        (Array.isArray(row) ? row[11] : '')
+      );
+    }).filter(Boolean);
+
+    if (!zips.length) return true;
+    const prefixes = [...new Set(zips.map(z => String(z).slice(0, 2)))];
+    const loaded = new Set(typeof JP_ZIP_LOADER.loadedPrefixes === 'function' ? JP_ZIP_LOADER.loadedPrefixes() : []);
+    const missing = prefixes.filter(p => !(window.JP_ZIP_PARTS && window.JP_ZIP_PARTS[p]) && !loaded.has(p));
+    if (!missing.length) return true;
+
+    const key = missing.sort().join('|');
+    if (this._zipLoadingKey === key) return false;
+    this._zipLoadingKey = key;
+
+    JP_ZIP_LOADER.loadForZips(zips).then(() => {
+      this._zipLoadingKey = '';
+      this.render();
+    }).catch((e) => {
+      console.warn('郵便番号マスタ読込失敗', e);
+      this._zipLoadingKey = '';
+      // 読み込めない場合でも、住所文字列の補正で表示できる範囲を描画する。
+      this._zipLoadFailedKey = key;
+      this.render();
+    });
+
+    return false;
+  },
+
   render() {
     const view = document.getElementById('view-capacity');
     if (!view || !view.classList.contains('active')) return;
     this.ensureState();
     this.ensureStyle();
+
+    if (!this.ensureZipMasterForCapacity()) {
+      view.innerHTML = `<div class="capx"><div class="capx-card capx-empty">郵便番号マスタを読み込み中です。完了後に自動で再表示します。</div></div>`;
+      return;
+    }
 
     const actual = this.buildActual();
     const rows = this.areaRows();
@@ -3250,7 +3312,10 @@ const CAPACITY_UI = {
       return repaired;
     }
 
-    if (/^さいたま/.test(cleaned)) return '埼玉県さいたま市';
+    if (/^さいたま/.test(cleaned)) {
+      const ward = this.saitamaWardNames().find(w => cleaned.includes(w));
+      return '埼玉県さいたま市' + (ward || '');
+    }
     if (/^蕨/.test(cleaned)) return '埼玉県蕨市';
     if (/^戸田/.test(cleaned)) return '埼玉県戸田市';
     if (/^川口/.test(cleaned)) return '埼玉県川口市';
@@ -3331,11 +3396,15 @@ const CAPACITY_UI = {
       old.shippers[t.shipper || 'その他'] = (old.shippers[t.shipper || 'その他'] || 0) + 1;
       map.set(unit, old);
     });
-    return [...map.values()].sort((a,b)=>{
-      const pa = a.unit.includes('埼玉県') ? 0 : 1;
-      const pb = b.unit.includes('埼玉県') ? 0 : 1;
-      return pa - pb || String(a.unit).localeCompare(String(b.unit), 'ja');
-    });
+    const values = [...map.values()];
+    const hasSaitamaWard = values.some(x => /^埼玉県さいたま市(西区|北区|大宮区|見沼区|中央区|桜区|浦和区|南区|緑区|岩槻区)$/.test(x.unit));
+    return values
+      .filter(x => !(hasSaitamaWard && /^埼玉県さいたま市?$/.test(x.unit)))
+      .sort((a,b)=>{
+        const pa = a.unit.includes('埼玉県') ? 0 : 1;
+        const pb = b.unit.includes('埼玉県') ? 0 : 1;
+        return pa - pb || String(a.unit).localeCompare(String(b.unit), 'ja');
+      });
   },
 
   capacityGroupDailyCap(group, dateStr, shipperKey='') {
