@@ -978,6 +978,28 @@ IMPORT.deleteFieldData = function(ym) {
     tbody.innerHTML = rows.map(r=>`<tr><td>${esc2(r.label)}</td><td class="r">${r.count.toLocaleString()}</td><td class="r">${Math.round(r.amount/1000).toLocaleString()}</td><td class="r">${(r.count/total*100).toFixed(1)}%</td></tr>`).join('');
   }
 
+  function monthDeleteOptionsHtml(ym, actions, mode){
+    const usable = (actions || []).filter(a => a && a.value && a.label);
+    if (!usable.length) return '<span style="color:var(--text3);font-size:11px;white-space:nowrap">削除対象なし</span>';
+    const compact = mode === 'compact';
+    return `<select class="field-month-op-select" data-month-op-ym="${esc2(ym)}" onchange="FIELD_MONTH_OPS.run('${esc2(ym)}', this.value); this.value='';" style="${compact ? 'width:124px' : 'width:150px'};max-width:100%;padding:5px 28px 5px 9px;border:1px solid var(--border2);border-radius:999px;background:#fff;font-size:11px;font-weight:900;color:var(--text);white-space:nowrap;box-shadow:0 1px 3px rgba(15,23,42,.06)">
+      <option value="">削除操作</option>
+      ${usable.map(a=>`<option value="${esc2(a.value)}">${esc2(a.label)}</option>`).join('')}
+    </select>`;
+  }
+
+  window.FIELD_MONTH_OPS = window.FIELD_MONTH_OPS || {
+    run(ym, action){
+      if (!ym || !action) return;
+      if (action === 'csv_confirmed') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'confirmed') : null;
+      if (action === 'csv_daily') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'daily') : null;
+      if (action === 'history') return DATA_STORAGE_TABLE?.deleteHistoryMonth ? DATA_STORAGE_TABLE.deleteHistoryMonth(ym) : null;
+      if (action === 'worker') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'worker') : null;
+      if (action === 'product') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'product') : null;
+      if (action === 'field_all') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'all') : null;
+    }
+  };
+
   function renderDataList(){
     ensureState();
     const list = document.getElementById('field-data-list2') || document.getElementById('field-data-list');
@@ -998,10 +1020,12 @@ IMPORT.deleteFieldData = function(ym) {
             ${w ? `✅ 作業者別CSV ${w.rowCount.toLocaleString()}行 / 作業者${w.workerCount.toLocaleString()}名` : '⬜ 作業者別CSV 未登録'}
           </div>
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-          ${w ? `<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="FIELD_CSV_REBUILD.deleteMonthType('${ym}','worker')">作業者削除</button>` : ''}
-          ${p ? `<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="FIELD_CSV_REBUILD.deleteMonthType('${ym}','product')">商品住所削除</button>` : ''}
-          <button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="FIELD_CSV_REBUILD.deleteMonthType('${ym}','all')">月削除</button>
+        <div style="display:flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end;align-items:center;white-space:nowrap">
+          ${monthDeleteOptionsHtml(ym, [
+            w ? { value:'worker', label:'作業者CSV削除' } : null,
+            p ? { value:'product', label:'商品住所CSV削除' } : null,
+            (w || p) ? { value:'field_all', label:'現場CSV月削除' } : null
+          ], 'compact')}
         </div>
       </div>`;
     }).join('');
@@ -1027,22 +1051,23 @@ IMPORT.deleteFieldData = function(ym) {
         const hasConfirmed = safeArray(STATE.datasets).some(d => d && d.ym === ym && d.source !== 'history' && (d.type || 'confirmed') === 'confirmed');
         const hasDaily = safeArray(STATE.datasets).some(d => d && d.ym === ym && d.source !== 'history' && d.type === 'daily');
         const hasHistory = safeArray(STATE.datasets).some(d => d && d.ym === ym && d.source === 'history');
-        const ops = [];
-        if (hasConfirmed) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="DATA_STORAGE_TABLE.deleteCsvMonth('${ym}','confirmed')">確定CSV削除</button>`);
-        if (hasDaily) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="DATA_STORAGE_TABLE.deleteCsvMonth('${ym}','daily')">速報CSV削除</button>`);
-        if (hasHistory) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="DATA_STORAGE_TABLE.deleteHistoryMonth('${ym}')">補完削除</button>`);
-        if (w) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="FIELD_CSV_REBUILD.deleteMonthType('${ym}','worker')">作業者削除</button>`);
-        if (p) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="FIELD_CSV_REBUILD.deleteMonthType('${ym}','product')">商品住所削除</button>`);
-        if (w || p) ops.push(`<button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="FIELD_CSV_REBUILD.deleteMonthType('${ym}','all')">現場CSV月削除</button>`);
-        return { ...base, workerLabel:w?'登録済':'未登録', workerKind:w?'ok':'danger', productLabel:p?'登録済':'未登録', productKind:p?'ok':'danger', judge, kind, note, ops: ops.join(' ') || '<span style="color:var(--text3);font-size:11px">削除対象なし</span>' };
+        const ops = monthDeleteOptionsHtml(ym, [
+          hasConfirmed ? { value:'csv_confirmed', label:'確定CSV削除' } : null,
+          hasDaily ? { value:'csv_daily', label:'速報CSV削除' } : null,
+          hasHistory ? { value:'history', label:'補完削除' } : null,
+          w ? { value:'worker', label:'作業者CSV削除' } : null,
+          p ? { value:'product', label:'商品住所CSV削除' } : null,
+          (w || p) ? { value:'field_all', label:'現場CSV月削除' } : null
+        ]);
+        return { ...base, workerLabel:w?'登録済':'未登録', workerKind:w?'ok':'danger', productLabel:p?'登録済':'未登録', productKind:p?'ok':'danger', judge, kind, note, ops };
       });
       const need = rows.filter(r => r.kind !== 'ok').length;
       const summary = typeof storageBadge === 'function' ? storageBadge(`確認 ${need}ヶ月`, need ? 'warn' : 'ok') : '';
       const badge = (label,kind) => typeof storageBadge === 'function' ? storageBadge(label,kind) : label;
       return `<div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px"><div><div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div><div style="font-size:11px;color:var(--text3);margin-top:3px">${fy}年度：${fy}年4月 ～ ${Number(fy)+1}年3月（年度順）/ CSVは月単位で個別削除できます</div></div><div>${summary}</div></div>
-        <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>作業者CSV</th><th>商品住所CSV</th><th>判定</th><th>確認内容</th><th>月別操作</th></tr></thead><tbody>
-        ${rows.map(s=>`<tr><td><strong>${ymText(s.ym)}</strong></td><td>${badge(s.csvLabel,s.csvKind)}</td><td>${badge(s.histLabel,s.histKind)}</td><td>${badge(s.planLabel,s.planKind)}</td><td>${badge(s.workerLabel,s.workerKind)}</td><td>${badge(s.productLabel,s.productKind)}</td><td>${badge(s.judge,s.kind)}</td><td style="min-width:260px;color:var(--text2)">${esc2(s.note)}</td><td style="min-width:280px"><div style="display:flex;gap:6px;flex-wrap:wrap">${s.ops}</div></td></tr>`).join('')}
+        <div class="scroll-x"><table class="tbl"><thead><tr><th style="white-space:nowrap">月</th><th style="white-space:nowrap">収支CSV</th><th style="white-space:nowrap">収支補完</th><th style="white-space:nowrap">計画</th><th style="white-space:nowrap">作業者CSV</th><th style="white-space:nowrap">商品住所CSV</th><th style="white-space:nowrap">判定</th><th>確認内容</th><th style="white-space:nowrap">月別操作</th></tr></thead><tbody>
+        ${rows.map(s=>`<tr><td><strong>${ymText(s.ym)}</strong></td><td>${badge(s.csvLabel,s.csvKind)}</td><td>${badge(s.histLabel,s.histKind)}</td><td>${badge(s.planLabel,s.planKind)}</td><td>${badge(s.workerLabel,s.workerKind)}</td><td>${badge(s.productLabel,s.productKind)}</td><td>${badge(s.judge,s.kind)}</td><td style="min-width:260px;color:var(--text2)">${esc2(s.note)}</td><td style="min-width:150px;white-space:nowrap;text-align:left"><div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;white-space:nowrap">${s.ops}</div></td></tr>`).join('')}
         </tbody></table></div></div>`;
     };
   }
