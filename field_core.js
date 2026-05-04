@@ -155,6 +155,7 @@ IMPORT.deleteFieldData = function(ym) {
       const base = oldMakeFull ? oldMakeFull() : { version: 1, center: CENTER.id, savedAt: new Date().toISOString() };
       ensureState();
       if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
+      if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
       base.workerCsvData = STATE.workerCsvData;
       base.productAddressData = STATE.productAddressData;
       base.version = Math.max(Number(base.version || 1), 30);
@@ -167,6 +168,7 @@ IMPORT.deleteFieldData = function(ym) {
       if (full && Array.isArray(full.productAddressData)) STATE.productAddressData = full.productAddressData;
       ensureState();
       if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
+      if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
       return ok;
     };
   }
@@ -706,6 +708,7 @@ IMPORT.deleteFieldData = function(ym) {
     combined.avgPerWorkDay = combined.workDayCount > 0 ? combined.rowCount / combined.workDayCount : 0;
     combined.amountMode = '単一CSV：幹線料系除外後';
 
+    if (typeof clearDataDeleted === 'function') { clearDataDeleted('workerMonths', ym); clearDataDeleted('fieldMonths', ym); }
     upsertByYm('workerCsvData', { ym, source:'worker_csv', importedAt:new Date().toISOString(), ...combined });
     STORE.save();
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
@@ -755,6 +758,7 @@ IMPORT.deleteFieldData = function(ym) {
       amount: tickets.reduce((s,t)=>s+yen(t.amount),0),
       tickets
     };
+    if (typeof clearDataDeleted === 'function') { clearDataDeleted('productMonths', ym); clearDataDeleted('fieldMonths', ym); }
     upsertByYm('productAddressData', record);
     STORE.save();
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
@@ -1140,11 +1144,19 @@ IMPORT.deleteFieldData = function(ym) {
     const label = type==='all' ? '現場CSV（作業者・商品住所）' : type==='worker' ? '作業者CSV' : '商品住所CSV';
     if (!confirm(`${ymText(ym)} の${label}を削除しますか？\n収支CSV・収支補完・計画データは削除しません。`)) return;
 
-    if (type === 'worker' || type === 'all') STATE.workerCsvData = safeArray(STATE.workerCsvData).filter(d => d.ym !== ym);
-    if (type === 'product' || type === 'all') STATE.productAddressData = safeArray(STATE.productAddressData).filter(d => d.ym !== ym);
+    if (type === 'worker' || type === 'all') {
+      if (typeof markDataDeleted === 'function') markDataDeleted('workerMonths', ym);
+      STATE.workerCsvData = safeArray(STATE.workerCsvData).filter(d => d.ym !== ym);
+    }
+    if (type === 'product' || type === 'all') {
+      if (typeof markDataDeleted === 'function') markDataDeleted('productMonths', ym);
+      STATE.productAddressData = safeArray(STATE.productAddressData).filter(d => d.ym !== ym);
+    }
+    if (type === 'all' && typeof markDataDeleted === 'function') markDataDeleted('fieldMonths', ym);
     // 旧混在データも同じ年月は消して復活を防止
     STATE.fieldData = safeArray(STATE.fieldData).filter(d => d.ym !== ym);
     STATE.areaData = safeArray(STATE.areaData).filter(d => d.ym !== ym);
+    if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
     STORE.save();
     try {
       if (CLOUD?.pushAll) await CLOUD.pushAll();
@@ -1243,10 +1255,13 @@ IMPORT.deleteFieldData = function(ym) {
   if (typeof DATA_RESET !== 'undefined') DATA_RESET.clearFieldAll = function(){
     if (!confirm('現場明細データ（作業者CSV・商品住所CSV）を全月削除しますか？')) return;
     ensureState();
+    const months = new Set([...(STATE.workerCsvData||[]).map(d=>d.ym), ...(STATE.productAddressData||[]).map(d=>d.ym), ...(STATE.fieldData||[]).map(d=>d.ym), ...(STATE.areaData||[]).map(d=>d.ym)].filter(Boolean));
+    if (typeof markDataDeleted === 'function') months.forEach(ym => markDataDeleted('fieldMonths', ym));
     STATE.workerCsvData = [];
     STATE.productAddressData = [];
     STATE.fieldData = [];
     STATE.areaData = [];
+    if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
     STORE.save();
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
     refreshFieldAll();
