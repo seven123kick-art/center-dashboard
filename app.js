@@ -1602,40 +1602,59 @@ function activeDatasetByYM(ym) {
   return activeDatasets().find(d => d.ym === ym) || null;
 }
 
+function dashboardActualDatasets() {
+  // ダッシュボードの初期表示は、収支補完ではなく実CSV（確定/速報）を優先する。
+  // 収支補完はCSVがない月の参考値として使うが、未来月・年度末月を勝手に初期表示にしない。
+  return activeDatasets().filter(d => d && datasetSourceKind(d) !== 'history');
+}
+function latestActualDS() {
+  const list = dashboardActualDatasets();
+  return list.length ? list[list.length - 1] : null;
+}
+function activeDatasetByYMActual(ym) {
+  return dashboardActualDatasets().find(d => d.ym === ym) || null;
+}
 function dashboardAvailableFiscalYears() {
   const set = new Set();
   for (const d of activeDatasets()) {
     if (d && d.ym) set.add(fiscalYearFromYM(d.ym));
   }
-  const latest = latestDS();
-  if (latest && latest.ym) set.add(fiscalYearFromYM(latest.ym));
+  const latestActual = latestActualDS();
+  if (latestActual && latestActual.ym) set.add(fiscalYearFromYM(latestActual.ym));
   set.add(getDefaultFiscalYear());
   return [...set].sort((a,b)=>parseInt(b,10)-parseInt(a,10));
 }
 function dashboardSelectedFiscalYear() {
   if (STATE.fiscalYear) return String(STATE.fiscalYear);
+  const latestActual = latestActualDS();
+  if (latestActual && latestActual.ym) return fiscalYearFromYM(latestActual.ym);
   const latest = latestDS();
   return latest && latest.ym ? fiscalYearFromYM(latest.ym) : getDefaultFiscalYear();
 }
 function dashboardSelectedYM() {
   const fy = dashboardSelectedFiscalYear();
   const months = monthsOfFiscalYear(fy);
+  const validActualMonths = months.filter(ym => activeDatasetByYMActual(ym));
   const validMonths = months.filter(ym => activeDatasetByYM(ym));
-  if (STATE.selYM && months.includes(STATE.selYM) && activeDatasetByYM(STATE.selYM)) return STATE.selYM;
-  const latestInFY = validMonths.length ? validMonths[validMonths.length - 1] : null;
+
+  if (STATE.selYM && months.includes(STATE.selYM) && activeDatasetByYM(STATE.selYM)) {
+    return STATE.selYM;
+  }
+
+  // 初期値は実CSVの最新月。実CSVがない年度だけ収支補完を使う。
+  const latestInFY = validActualMonths.length ? validActualMonths[validActualMonths.length - 1] : (validMonths.length ? validMonths[validMonths.length - 1] : null);
   if (latestInFY) {
     STATE.selYM = latestInFY;
     return latestInFY;
   }
 
-  // 年度を明示選択している場合、データが無い年度で勝手に最新年度へ戻さない。
-  // 年次サマリー等で「2026年度」を選んだのに2025年度データが出る誤表示を防ぐ。
   if (STATE.fiscalYear) {
     STATE.selYM = null;
     return null;
   }
 
-  const latest = latestDS();
+  const latestActual = latestActualDS();
+  const latest = latestActual || latestDS();
   if (latest && latest.ym) {
     STATE.fiscalYear = fiscalYearFromYM(latest.ym);
     STATE.selYM = latest.ym;
@@ -1664,7 +1683,10 @@ function selectedFiscalYearForImport() {
 function dashboardDatasetsForSelectedFiscalYear() {
   const fy = dashboardSelectedFiscalYear();
   const months = monthsOfFiscalYear(fy);
-  return months.map(ym => activeDatasetByYM(ym)).filter(Boolean);
+  const selectedYM = dashboardSelectedYM();
+  // ダッシュボードの推移は対象月まで。補完で年度末まで一周表示される誤解を防ぐ。
+  const visibleMonths = selectedYM && months.includes(selectedYM) ? months.filter(ym => ym <= selectedYM) : months;
+  return visibleMonths.map(ym => activeDatasetByYM(ym)).filter(Boolean);
 }
 
 function datasetsForSelectedFiscalYear() {
