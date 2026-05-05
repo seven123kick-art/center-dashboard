@@ -1408,7 +1408,9 @@ const CLOUD = {
     }
   },
 
-  async pullDeletionMarkers() {
+  async pullDeletionMarkersFast() {
+    // 起動直後用：重い full_state は読まず、manifest の削除マーカーだけ取得する。
+    // これにより、ローカルに残った削除済みデータを初期描画前に除外する。
     try {
       const manifest = await this._downloadJSON(this._manifestKey());
       if (manifest && manifest.deleted) {
@@ -1417,6 +1419,16 @@ const CLOUD = {
         STORE.save();
         return { ok:true, source:'manifest' };
       }
+      return { ok:false, error:'manifest deleted markerなし' };
+    } catch(e) {
+      return { ok:false, error:e.message };
+    }
+  },
+
+  async pullDeletionMarkers() {
+    try {
+      const fast = await this.pullDeletionMarkersFast();
+      if (fast && fast.ok) return fast;
       const full = await this._downloadJSON(this._fullStateKey());
       if (full && full.deleted) {
         STATE.deleted = mergeDeletedStates(STATE.deleted, full.deleted);
@@ -4671,9 +4683,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 1. ローカルストレージから読込
   STORE.load();
 
-  // 1.1 ローカルに保存済みの削除マーカーだけ即時適用する。
-  // ※ここでSupabaseを待つと、起動時に画面全体が重くなるためクラウド取得は後段で非同期実行する。
+  // 1.1 削除済みマーカーを初期描画前に適用する。
+  // ローカルだけだと過去に削除した補完/計画が一瞬復活するため、
+  // manifest の軽量マーカーだけ最大1.5秒待って取得する（重い full_state は読まない）。
   if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+  try {
+    if (CLOUD && typeof CLOUD.pullDeletionMarkersFast === 'function') {
+      await Promise.race([
+        CLOUD.pullDeletionMarkersFast(),
+        new Promise(resolve => setTimeout(() => resolve({ ok:false, timeout:true }), 1500))
+      ]);
+      if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+    }
+  } catch(e) {
+    console.warn('deleted marker fast pull skipped', e);
+  }
 
   // 1.5 保存・取込・更新時の自動同期を有効化
   AUTO_SYNC.install();
@@ -5174,4 +5198,147 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   `;
   document.head.appendChild(st);
+})();
+
+
+/* ════════ v32 削除統一マネージャー（選択削除＋完全削除＋復活防止） ════════════════
+   目的：
+   ・月単位で削除対象を選択できる状態を維持する
+   ・選んだ項目だけを削除する
+   ・ローカル / Supabase / full_state / manifest のどこからも復活させない
+   ・削除済みマーカーを最優先し、古いローカル・古いクラウドデータとの重複を防ぐ
+*/
+(function(){
+  function safeArray(v){ return Array.isArray(v) ? v : []; }
+  function getYMLabel(ym){ return (typeof ymLabel === 'function') ? ymLabel(ym) : String(ym || ''); }
+  function toast(msg, type){ if (window.UI && UI.toast) UI.toast(msg, type || 'ok'); }
+  function applyAndSave(){
+    if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+    if (window.STORE && STORE.save) STORE.save();
+  }
+  async function uploadDeletionState(){
+    if (!window.CLOUD) return { ok:false, error:'CLOUDなし' };
+    try {
+      if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+      if (CLOUD._uploadJSON && CLOUD._fullStateKey) await CLOUD._uploadJSON(CLOUD._fullStateKey(), CLOUD._makeFullState ? CLOUD._makeFullState() : STATE);
+      if (CLOUD._uploadJSON && CLOUD._manifestKey && CLOUD._makeManifest) await CLOUD._uploadJSON(CLOUD._manifestKey(), CLOUD._makeManifest());
+      if (CLOUD._uploadJSON && CLOUD._planKey) await CLOUD._uploadJSON(CLOUD._planKey(), STATE.planData || {});
+      if (CLOUD._uploadJSON && CLOUD._fieldKey) await CLOUD._uploadJSON(CLOUD._fieldKey(), STATE.fieldData || []);
+      return { ok:true };
+    } catch(e) {
+      return { ok:false, error:e.message };
+    }
+  }
+  async function finalizeDeletion(label){
+    applyAndSave();
+    const r = await uploadDeletionState();
+    if (!r.ok) toast(`${label}はローカル削除済みですが、クラウド反映に失敗しました: ${r.error || '不明'}`, 'warn');
+    if (window.NAV && NAV.refresh) NAV.refresh();
+    return r;
+  }
+  function confirmDelete(label, detail){
+    return confirm(`${label}を削除しますか？\n${detail || ''}\n\n※この操作は削除済みとして記録し、クラウド同期後も復活させません。`);
+  }
+  async function deleteDatasetMonth(ym, type){
+    type = type || 'confirmed';
+    const label = type === 'daily' ? '速報CSV' : '確定CSV';
+    const rows = safeArray(STATE.datasets).filter(d => d && d.ym === ym && d.source !== 'history' && (d.type || 'confirmed') === type);
+    if (!rows.length) { toast(`${getYMLabel(ym)}の${label}は未登録です`, 'warn'); return false; }
+    if (!confirmDelete(`${getYMLabel(ym)}の${label}`, `対象：${rows.length}件\n収支補完・計画・現場CSVは削除しません。`)) return false;
+    rows.forEach(d => markDataDeleted && markDataDeleted('datasets', dataDeleteKey(d.ym, d.type || 'confirmed')));
+    STATE.datasets = safeArray(STATE.datasets).filter(d => !(d && d.ym === ym && d.source !== 'history' && (d.type || 'confirmed') === type));
+    try { if (CLOUD && CLOUD.deleteFile && CLOUD._datasetKey) await CLOUD.deleteFile(CLOUD._datasetKey(ym, type)); } catch(e) {}
+    await finalizeDeletion(`${getYMLabel(ym)}の${label}`);
+    toast(`${getYMLabel(ym)}の${label}を削除しました`, 'warn');
+    return true;
+  }
+  async function deleteHistoryMonth(ym){
+    const rows = safeArray(STATE.datasets).filter(d => d && d.ym === ym && d.source === 'history');
+    if (!rows.length) { toast(`${getYMLabel(ym)}の収支補完は未登録です`, 'warn'); return false; }
+    if (!confirmDelete(`${getYMLabel(ym)}の収支補完`, `対象：${rows.length}件\n収支CSV・計画・現場CSVは削除しません。`)) return false;
+    if (typeof markDataDeleted === 'function') markDataDeleted('historyMonths', ym);
+    STATE.datasets = safeArray(STATE.datasets).filter(d => !(d && d.ym === ym && d.source === 'history'));
+    await finalizeDeletion(`${getYMLabel(ym)}の収支補完`);
+    toast(`${getYMLabel(ym)}の収支補完を削除しました`, 'warn');
+    return true;
+  }
+  async function deletePlanFiscalYear(fy){
+    fy = String(fy || '');
+    const exists = STATE.planData && STATE.planData[fy];
+    if (!exists) { toast(`${fy}年度の計画データは未登録です`, 'warn'); return false; }
+    if (!confirmDelete(`${fy}年度の計画データ`, '他年度・収支CSV・補完・現場CSVは削除しません。')) return false;
+    if (typeof markDataDeleted === 'function') markDataDeleted('planFiscalYears', fy);
+    if (STATE.planData) delete STATE.planData[fy];
+    await finalizeDeletion(`${fy}年度の計画データ`);
+    toast(`${fy}年度の計画データを削除しました`, 'warn');
+    return true;
+  }
+  async function deleteHistoryFiscalYear(fy){
+    fy = String(fy || '');
+    const rows = safeArray(STATE.datasets).filter(d => d && d.source === 'history' && String(d.fiscalYear || (typeof fiscalYearFromYM === 'function' ? fiscalYearFromYM(d.ym) : '')) === fy);
+    if (!rows.length) { toast(`${fy}年度の収支補完は未登録です`, 'warn'); return false; }
+    if (!confirmDelete(`${fy}年度の収支補完`, `対象：${rows.length}件\n通常CSV・計画・現場CSVは削除しません。`)) return false;
+    if (typeof markDataDeleted === 'function') markDataDeleted('historyFiscalYears', fy);
+    STATE.datasets = safeArray(STATE.datasets).filter(d => !(d && d.source === 'history' && String(d.fiscalYear || (typeof fiscalYearFromYM === 'function' ? fiscalYearFromYM(d.ym) : '')) === fy));
+    await finalizeDeletion(`${fy}年度の収支補完`);
+    toast(`${fy}年度の収支補完を削除しました`, 'warn');
+    return true;
+  }
+  async function deleteFieldMonth(ym, kind){
+    kind = kind || 'all';
+    const hasW = safeArray(STATE.workerCsvData).some(d => d && d.ym === ym);
+    const hasP = safeArray(STATE.productAddressData).some(d => d && d.ym === ym);
+    if (kind === 'worker' && !hasW) { toast(`${getYMLabel(ym)}の作業者CSVは未登録です`, 'warn'); return false; }
+    if (kind === 'product' && !hasP) { toast(`${getYMLabel(ym)}の商品住所CSVは未登録です`, 'warn'); return false; }
+    if (kind === 'all' && !hasW && !hasP) { toast(`${getYMLabel(ym)}の現場CSVは未登録です`, 'warn'); return false; }
+    const label = kind === 'worker' ? '作業者CSV' : kind === 'product' ? '商品住所CSV' : '現場CSV（作業者・商品住所）';
+    if (!confirmDelete(`${getYMLabel(ym)}の${label}`, '収支CSV・収支補完・計画データは削除しません。')) return false;
+    if (kind === 'worker' || kind === 'all') {
+      if (typeof markDataDeleted === 'function') markDataDeleted('workerMonths', ym);
+      STATE.workerCsvData = safeArray(STATE.workerCsvData).filter(d => !(d && d.ym === ym));
+    }
+    if (kind === 'product' || kind === 'all') {
+      if (typeof markDataDeleted === 'function') markDataDeleted('productMonths', ym);
+      STATE.productAddressData = safeArray(STATE.productAddressData).filter(d => !(d && d.ym === ym));
+    }
+    // 旧混在データは再表示・重複の原因になるため、同月は必ず掃除する。
+    if (typeof markDataDeleted === 'function') markDataDeleted('fieldMonths', ym);
+    STATE.fieldData = safeArray(STATE.fieldData).filter(d => !(d && d.ym === ym));
+    STATE.areaData = safeArray(STATE.areaData).filter(d => !(d && d.ym === ym));
+    await finalizeDeletion(`${getYMLabel(ym)}の${label}`);
+    toast(`${getYMLabel(ym)}の${label}を削除しました`, 'warn');
+    if (window.FIELD_CSV_REBUILD && FIELD_CSV_REBUILD.refresh) FIELD_CSV_REBUILD.refresh();
+    return true;
+  }
+  async function runMonthAction(ym, action){
+    if (!ym || !action) { toast('削除対象を選択してください', 'warn'); return false; }
+    if (action === 'csv_confirmed') return deleteDatasetMonth(ym, 'confirmed');
+    if (action === 'csv_daily') return deleteDatasetMonth(ym, 'daily');
+    if (action === 'history') return deleteHistoryMonth(ym);
+    if (action === 'worker') return deleteFieldMonth(ym, 'worker');
+    if (action === 'product') return deleteFieldMonth(ym, 'product');
+    if (action === 'field_all') return deleteFieldMonth(ym, 'all');
+    toast('未対応の削除対象です', 'warn');
+    return false;
+  }
+
+  window.DATA_DELETE_MANAGER = {
+    runMonthAction,
+    deleteDatasetMonth,
+    deleteHistoryMonth,
+    deletePlanFiscalYear,
+    deleteHistoryFiscalYear,
+    deleteFieldMonth,
+    finalizeDeletion,
+  };
+
+  if (window.DATA_STORAGE_TABLE) {
+    DATA_STORAGE_TABLE.deletePlan = deletePlanFiscalYear;
+    DATA_STORAGE_TABLE.deleteHistory = deleteHistoryFiscalYear;
+    DATA_STORAGE_TABLE.deleteHistoryMonth = deleteHistoryMonth;
+    DATA_STORAGE_TABLE.deleteCsvMonth = deleteDatasetMonth;
+  }
+  if (window.IMPORT) {
+    IMPORT.deleteDataset = deleteDatasetMonth;
+  }
 })();
