@@ -116,6 +116,24 @@
     return yen(t?.amount || t?.sales || t?.value || t?.['金額'] || t?.['売上']);
   }
 
+  function validPrefName(v){
+    const s = clean(v).replace(/\s+/g,'');
+    return /^(北海道|東京都|(?:京都|大阪)府|.{2,3}県)$/.test(s) ? s : '';
+  }
+  function validCityName(v){
+    const s = clean(v).replace(/\s+/g,'');
+    if (!s || s === '未設定') return '';
+    if (/^[0-9０-９\-ー]+$/.test(s)) return '';
+    if (/^[0-9０-９]/.test(s)) return '';
+    if (!/[市区町村]$/.test(s) && !/^さいたま市.+区$/.test(s)) return '';
+    return s;
+  }
+  function validAreaObject(pref, city){
+    const p = validPrefName(pref);
+    const c = validCityName(city);
+    return p && c ? { pref:p, city:c, status:'SAVED' } : null;
+  }
+
   function splitAddressToCity(address){
     const t = clean(address).replace(/\s+/g,'');
     if (!t) return { pref:'未設定', city:'未設定', status:'NO_ADDRESS' };
@@ -192,10 +210,10 @@
 
     // 個人情報保護：住所全文やraw行は見ない。郵便番号マスタ→保存済みpref/city/areaの順で解決する。
     let area = areaFromZip(zip);
-    if (!area && t?.pref && t?.city) area = { pref: clean(t.pref), city: clean(t.city), status:'SAVED' };
+    if (!area && t?.pref && t?.city) area = validAreaObject(t.pref, t.city);
     if (!area && t?.area) {
       const p = splitAddressToCity(String(t.area));
-      area = { pref:p.pref, city:p.city, status:'SAVED' };
+      area = validAreaObject(p.pref, p.city);
     }
     if (!area) area = { pref:'未設定', city:'未設定', status: zip ? 'ZIP_NOT_FOUND' : 'NO_AREA' };
 
@@ -233,9 +251,11 @@
       if (!obj(x)) return;
       const ym = normYM(x.ym || x.YM || x.month || x.targetYM || x.date || x.name || source);
       // 個人情報保護：保存済みの安全化済み tickets だけを使う。rows/data/rawRows は参照しない。
-      const tickets = normalizeRecordTickets(x);
-      const has = tickets.length || Number(x.uniqueCount || 0) > 0 || Number(x.detailRows || 0) > 0;
-      if (!ym || !has) return;
+      const tickets = normalizeRecordTickets(x).filter(t => t && typeof t === 'object');
+      // エリア分析は市区町村判定に tickets が必須。
+      // manifest の軽量メタ（uniqueCount/detailRowsだけ）や壊れた旧データを拾うと、
+      // 郵便番号の一部（1350等）が市区町村として表示されるため除外する。
+      if (!ym || !tickets.length) return;
       out.push({ ...x, ym, tickets, __source:source });
     }
 
@@ -1095,9 +1115,9 @@
       #field-map .fa3-trend-row{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:12px;align-items:end;border-bottom:1px solid #eef2f7;padding-bottom:10px}
       #field-map .fa3-trend-name{font-size:13px;font-weight:950;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #field-map .fa3-sparks{display:flex;align-items:end;gap:8px;min-height:82px}
-      #field-map .fa3-spark{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;min-width:22px}
+      #field-map .fa3-spark{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;min-width:30px}
       #field-map .fa3-spark i{width:16px;border-radius:999px 999px 3px 3px;background:linear-gradient(180deg,#60a5fa,#1d4ed8);display:block}
-      #field-map .fa3-spark span{font-size:10px;color:#64748b;font-weight:850}
+      #field-map .fa3-spark span{font-size:10px;color:#64748b;font-weight:850;white-space:nowrap;word-break:keep-all;line-height:1;display:block}
 
       #field-map .fa3-pref-detail{margin-top:22px;border-top:1px solid #e5e7eb;padding-top:18px}
       #field-map .fa3-pref-title{font-size:16px;font-weight:950;color:#0f172a;margin:0 0 12px;border-left:4px solid #16a34a;padding-left:10px}
