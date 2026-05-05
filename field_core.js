@@ -174,6 +174,18 @@ IMPORT.deleteFieldData = function(ym) {
   function fieldAccessSignature(list){
     return safeArray(list).map(r => `${r && r.ym || ''}:${r && (r.importedAt || r.updatedAt || r.savedAt || '')}:${r && (r.rowCount || r.uniqueCount || r.workerCount || '')}`).join('|');
   }
+
+  function fieldAllYms(){
+    return [...new Set([
+      ...fieldAccessUnique(fieldAccessClone(safeArray(STATE.workerCsvData)), 'worker').map(d=>d.ym),
+      ...fieldAccessUnique(fieldAccessClone(safeArray(STATE.productAddressData)), 'product').map(d=>d.ym)
+    ].filter(Boolean))].sort();
+  }
+  function latestFieldYM(){
+    const yms = fieldAllYms();
+    return yms.length ? yms[yms.length - 1] : '';
+  }
+
   window.FIELD_DATA_ACCESS = {
     getWorkerRecords(){
       const sig = fieldAccessSignature(STATE.workerCsvData);
@@ -257,9 +269,8 @@ IMPORT.deleteFieldData = function(ym) {
     const years = new Set();
     const now = new Date();
     for (let y = now.getFullYear() - 2; y <= now.getFullYear() + 1; y++) years.add(String(y));
-    safeArray(STATE.datasets).forEach(d => d?.ym && years.add(fiscalFromYM2(d.ym)));
-    (window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData)).forEach(d => d?.ym && years.add(fiscalFromYM2(d.ym)));
-    (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).forEach(d => d?.ym && years.add(fiscalFromYM2(d.ym)));
+    const fieldYmsForImport = fieldAllYms();
+    fieldYmsForImport.forEach(ym => years.add(fiscalFromYM2(ym)));
     const sortedYears = [...years].sort((a,b)=>Number(b)-Number(a));
 
     function fillPair(fyId, mId, noteId){
@@ -267,8 +278,10 @@ IMPORT.deleteFieldData = function(ym) {
       const mSel = document.getElementById(mId);
       const note = document.getElementById(noteId);
       if (!fySel || !mSel) return;
-      const keepFY = fySel.value || localStorage.getItem(`${STORE._p}${fyId}`) || fiscalFromYM2(STATE.selYM || latestDS()?.ym || `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}`);
-      const keepM = mSel.value || localStorage.getItem(`${STORE._p}${mId}`) || String((STATE.selYM || latestDS()?.ym || `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}`).slice(4,6));
+      const latestField = latestFieldYM();
+      const baseYM = (STATE.selYM && fieldAllYms().includes(STATE.selYM)) ? STATE.selYM : (latestField || `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}`);
+      const keepFY = fySel.value || localStorage.getItem(`${STORE._p}${fyId}`) || fiscalFromYM2(baseYM);
+      const keepM = mSel.value || localStorage.getItem(`${STORE._p}${mId}`) || String(baseYM.slice(4,6));
       fySel.innerHTML = sortedYears.map(y => `<option value="${y}">${y}年度</option>`).join('');
       mSel.innerHTML = MONTHS.map(mm => `<option value="${mm}">${Number(mm)}月</option>`).join('');
       fySel.value = sortedYears.includes(String(keepFY)) ? String(keepFY) : sortedYears[0];
@@ -893,14 +906,13 @@ IMPORT.deleteFieldData = function(ym) {
     const fySel = document.getElementById('field-common-fy-select');
     const mSel = document.getElementById('field-common-month-select');
     if (!fySel || !mSel) return;
-    const yset = new Set([getDefaultFiscalYear()]);
-    safeArray(STATE.datasets).forEach(d=>d?.ym && yset.add(fiscalFromYM2(d.ym)));
-    (window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData)).forEach(d=>d?.ym && yset.add(fiscalFromYM2(d.ym)));
-    (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).forEach(d=>d?.ym && yset.add(fiscalFromYM2(d.ym)));
+    const fieldYms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : fieldAllYms();
+    const yset = new Set(fieldYms.map(ym=>fiscalFromYM2(ym)));
+    if (!yset.size) yset.add(getDefaultFiscalYear());
     const years = [...yset].sort((a,b)=>Number(b)-Number(a));
-    const accessProducts = window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData);
-    const accessWorkers = window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData);
-    const keepFY = fySel.value || fiscalFromYM2(STATE.selYM || accessProducts.at(-1)?.ym || accessWorkers.at(-1)?.ym || latestDS()?.ym || `${new Date().getFullYear()}04`);
+    const latestField = fieldYms.length ? fieldYms[fieldYms.length - 1] : '';
+    const baseYM = (STATE.selYM && fieldYms.includes(STATE.selYM)) ? STATE.selYM : (latestField || `${new Date().getFullYear()}04`);
+    const keepFY = fySel.value || fiscalFromYM2(baseYM);
     fySel.innerHTML = years.map(y=>`<option value="${y}">${y}年度</option>`).join('');
     fySel.value = years.includes(keepFY) ? keepFY : years[0];
     function fillMonths(){
@@ -908,14 +920,13 @@ IMPORT.deleteFieldData = function(ym) {
       const current = mSel.value || STATE.selYM;
       mSel.innerHTML = MONTHS.map(mm => {
         const ym = ymFromFiscalMonth(fy, mm);
-        const hasW = (window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData)).some(d=>d.ym===ym);
-        const hasP = (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).some(d=>d.ym===ym);
-        const label = ymText(ym);
-        return `<option value="${ym}">${label}</option>`;
+        const hasData = fieldYms.includes(ym);
+        const label = ymText(ym) + (hasData ? '' : '（未登録）');
+        return `<option value="${ym}" ${hasData ? '' : 'disabled'}>${label}</option>`;
       }).join('');
       if ([...mSel.options].some(o=>o.value===current)) mSel.value = current;
       else {
-        const latest = [...mSel.options].reverse().find(o => (window.FIELD_DATA_ACCESS?.getWorkerRecords() || safeArray(STATE.workerCsvData)).some(d=>d.ym===o.value) || (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).some(d=>d.ym===o.value));
+        const latest = [...mSel.options].reverse().find(o => !o.disabled && fieldYms.includes(o.value));
         mSel.value = latest ? latest.value : ymFromFiscalMonth(fy, '04');
       }
       STATE.fiscalYear = fy;
