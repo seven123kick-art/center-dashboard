@@ -587,23 +587,48 @@ IMPORT.deleteFieldData = function(ym) {
   function parseProductAddressRows(rows, fileName){
     if (!rows.length) return { rawRows:0, detailRows:0, uniqueCount:0, tickets:[], multiAddressSlipCount:0, multiZipSlipCount:0 };
 
+    const header = rows[0] || [];
     const body = rows.slice(1).filter(r => r && r.some(c => clean(c)));
 
-    // 商品・住所CSVは列位置を固定する。
+    // 商品・住所CSVは原則列位置で読む。ただしセンターや出力条件で金額列・名称列がずれるため、
+    // 共通ロジックとしてヘッダー名を優先し、見つからない場合だけ既定列へフォールバックする。
     // 個人情報保護：顧客氏名・住所全文（番地/建物含む）・電話番号・CSV生行は保存しない。
-    // I列：エスライン原票番号、L列：郵便番号、N列：住所（取込時に市区町村/区へ変換後破棄）、P列：商品、R列：作業内容、U列：金額、Y列：荷主基本コード、AA列：荷主名
-    // 重要：I列原票番号が重複する前提。
-    // 件数・商品・サイズ・エリアは、I列原票番号ごとに1件だけ採用する。
-    // R列作業内容とU列金額だけは、重複行を原票番号へ紐づけて集計する。
-    const idxDate    = 0;   // A列 日付（ある場合のみ）
-    const idxSlip    = 8;   // I列 エスライン原票番号
-    const idxZip     = 11;  // L列 郵便番号
-    const idxAddress = 13;  // N列 住所（保存しない）
-    const idxProduct = 15;  // P列 商品
-    const idxWork    = 17;  // R列 作業内容
-    const idxAmount  = 20;  // U列 金額
-    const idxShipperCode = 24; // Y列 荷主基本コード
-    const idxShipperName = 26; // AA列 荷主名
+    const headerNorm = header.map(h => clean(h).replace(/[\s　]/g,''));
+    const findIdx = (names, fallback) => {
+      const ns = names.map(x => clean(x).replace(/[\s　]/g,''));
+      const exact = headerNorm.findIndex(h => ns.includes(h));
+      if (exact >= 0) return exact;
+      const partial = headerNorm.findIndex(h => ns.some(n => n && h.includes(n)));
+      return partial >= 0 ? partial : fallback;
+    };
+
+    const idxDate    = findIdx(['日付','作業日','配送日','配達日','完了日'], 0);
+    const idxSlip    = findIdx(['エスライン原票番号','原票番号','伝票番号','送り状番号'], 8);
+    const idxZip     = findIdx(['郵便番号','お届け先郵便番号','届け先郵便番号'], 11);
+    const idxAddress = findIdx(['住所','お届け先住所','届け先住所','納品先住所'], 13);
+    const idxProduct = findIdx(['商品','商品名','品名','商品名称'], 15);
+    const idxWork    = findIdx(['作業内容','作業名','作業区分','内容'], 17);
+    const idxAmount  = findIdx(['金額','売上','売上金額','請求金額','請求額','作業金額','作業料','料金','直収','直収金額'], 20);
+    const idxShipperCode = findIdx(['荷主基本コード','荷主コード','荷主CD','荷主ＣＤ'], 24);
+    const idxShipperName = findIdx(['荷主名','荷主名称','契約名','契約名称'], 26);
+
+    const amountFromProductRow = (row) => {
+      let v = yen(row[idxAmount]);
+      if (v) return v;
+      // 金額列がU列から前後にずれるCSVへの共通保険。荷主コード列（Y列以降）を誤読しないよう、
+      // 作業内容列の右側からX列相当までに限定して金額らしい列だけ確認する。
+      const start = Math.max(0, Math.min(idxWork + 1, row.length - 1));
+      const end = Math.min(row.length - 1, 23);
+      for (let i = start; i <= end; i++) {
+        if (i === idxSlip || i === idxZip || i === idxShipperCode) continue;
+        const h = headerNorm[i] || '';
+        const looksAmount = /金額|売上|請求|料金|直収|単価|小計|合計/.test(h) || i === 20 || i === 21 || i === 19;
+        if (!looksAmount) continue;
+        const n = yen(row[i]);
+        if (n) return n;
+      }
+      return 0;
+    };
 
     const slipMap = new Map();
     let detailRows = 0;
@@ -618,7 +643,7 @@ IMPORT.deleteFieldData = function(ym) {
       const address = clean(row[idxAddress]);
       const product = clean(row[idxProduct]);
       const work = clean(row[idxWork]) || '未設定';
-      const amount = yen(row[idxAmount]);
+      const amount = amountFromProductRow(row);
       const shipperCode = clean(row[idxShipperCode]);
       const shipperName = clean(row[idxShipperName]);
       const area0 = sanitizeAreaFromZipOrAddress(zip, address);
