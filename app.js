@@ -1407,6 +1407,21 @@ const CLOUD = {
     finally { this._busy = false; }
   },
   async push() { return this.pushAll(); },
+  _validWorkerMonthRecord(rec, meta={}) {
+    if (!rec || typeof rec !== 'object' || !rec.ym) return false;
+    const hasRows = Number(rec.rowCount || rec.lineRowCount || 0) > 0;
+    const hasWorkers = rec.workers && typeof rec.workers === 'object' && Object.keys(rec.workers).length > 0;
+    const metaRows = Number(meta.rowCount || meta.lineRowCount || 0);
+    if (metaRows && !hasRows && !hasWorkers) return false;
+    return hasRows || hasWorkers;
+  },
+  _validProductMonthRecord(rec, meta={}) {
+    if (!rec || typeof rec !== 'object' || !rec.ym) return false;
+    if (!Array.isArray(rec.tickets) || !rec.tickets.length) return false;
+    const metaUnique = Number(meta.uniqueCount || 0);
+    if (metaUnique && rec.tickets.length < Math.max(1, Math.floor(metaUnique * 0.5))) return false;
+    return true;
+  },
   async pullManifestAndMissing() {
     const manifest = await this._downloadJSON(this._manifestKey());
     if (!manifest) return { ok:false, error:'manifestなし' };
@@ -1432,9 +1447,9 @@ const CLOUD = {
     for (const meta of workerMetas) {
       if (!meta.ym || deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
       const local = STATE.workerCsvData.find(d => d.ym === meta.ym);
-      if (!local || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
+      if (!local || !this._validWorkerMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
         const rec = await this._downloadJSON(this._workerMonthKey(meta.ym));
-        if (rec && rec.ym) {
+        if (rec && rec.ym && this._validWorkerMonthRecord(rec, meta)) {
           STATE.workerCsvData = STATE.workerCsvData.filter(d => d.ym !== rec.ym);
           STATE.workerCsvData.push(rec);
           changed++;
@@ -1446,9 +1461,9 @@ const CLOUD = {
     for (const meta of productMetas) {
       if (!meta.ym || deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
       const local = STATE.productAddressData.find(d => d.ym === meta.ym);
-      if (!local || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
+      if (!local || !this._validProductMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
         const rec = await this._downloadJSON(this._productMonthKey(meta.ym));
-        if (rec && rec.ym) {
+        if (rec && rec.ym && this._validProductMonthRecord(rec, meta)) {
           STATE.productAddressData = STATE.productAddressData.filter(d => d.ym !== rec.ym);
           STATE.productAddressData.push(rec);
           changed++;
