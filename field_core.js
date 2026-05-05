@@ -1367,3 +1367,40 @@ IMPORT.deleteFieldData = function(ym) {
 
   window.FIELD_UI = FIELD_UI;
 })();
+
+
+/* v32：月別削除操作を DATA_DELETE_MANAGER に統一 */
+(function(){
+  function toast(msg, type){ if (window.UI && UI.toast) UI.toast(msg, type || 'warn'); }
+  window.FIELD_MONTH_OPS = window.FIELD_MONTH_OPS || {};
+  window.FIELD_MONTH_OPS.run = function(ym, action){
+    if (!ym || !action) { toast('削除対象を選択してください', 'warn'); return false; }
+    if (window.DATA_DELETE_MANAGER && DATA_DELETE_MANAGER.runMonthAction) {
+      return DATA_DELETE_MANAGER.runMonthAction(ym, action);
+    }
+    // 保険：DATA_DELETE_MANAGER が読み込まれていない場合だけ旧処理へフォールバック
+    if (action === 'csv_confirmed') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'confirmed') : null;
+    if (action === 'csv_daily') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'daily') : null;
+    if (action === 'history') return DATA_STORAGE_TABLE?.deleteHistoryMonth ? DATA_STORAGE_TABLE.deleteHistoryMonth(ym) : null;
+    if (action === 'worker') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'worker') : null;
+    if (action === 'product') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'product') : null;
+    if (action === 'field_all') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'all') : null;
+    return false;
+  };
+  window.FIELD_MONTH_OPS.runFromSelect = function(btn){
+    const wrap = btn && btn.closest ? btn.closest('.field-month-op-wrap') : null;
+    const sel = wrap ? wrap.querySelector('.field-month-op-select') : null;
+    const ym = sel ? sel.dataset.monthOpYm : '';
+    const action = sel ? sel.value : '';
+    if (!action) { toast('削除対象を選択してください', 'warn'); return false; }
+    const result = window.FIELD_MONTH_OPS.run(ym, action);
+    if (sel) sel.value = '';
+    return result;
+  };
+  if (window.FIELD_CSV_REBUILD) {
+    window.FIELD_CSV_REBUILD.deleteMonthType = function(ym, type){
+      const action = type === 'worker' ? 'worker' : type === 'product' ? 'product' : 'field_all';
+      return window.FIELD_MONTH_OPS.run(ym, action);
+    };
+  }
+})();
