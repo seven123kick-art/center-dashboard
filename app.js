@@ -380,7 +380,7 @@ function sanitizeProductTicketForStorage(t) {
     if (t[from] !== undefined && t[from] !== null && t[from] !== '') safe[to] = t[from];
   };
 
-  ['slip','slipNo','ticketNo','invoiceNo','date','deliveryDate','workDate','ym','zip','zipcode','postalCode','pref','city','ward','area','areaUnit','product','productName','category','sizeBucket','amount','rowCount','hasMultipleZip','hasMultipleAddress','shipperCode','clientCode','customerCode','shipperName','shipper','clientName','customerName','shipperGroup'].forEach(k => copy(k));
+  ['slip','slipNo','ticketNo','invoiceNo','date','deliveryDate','workDate','ym','zip','zipcode','postalCode','pref','city','ward','area','areaUnit','product','productName','category','sizeBucket','amount','salesAmount','totalAmount','value','price','rowCount','hasMultipleZip','hasMultipleAddress','shipperCode','clientCode','customerCode','shipperName','shipper','clientName','customerName','shipperGroup'].forEach(k => copy(k));
 
   // 互換名を安全項目へ寄せる
   if (!safe.slip) safe.slip = t['原票番号'] || t['エスライン原票番号'] || '';
@@ -4281,7 +4281,7 @@ const NAV = {
       case 'library':    PAST_LIBRARY.renderList(); break;
       case 'field':      FIELD_UI.renderDataList(); FIELD_UI.updatePeriodBadge(); break;
       case 'field-worker':  if (window.FIELD_WORKER_UI?.render) FIELD_WORKER_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
-      case 'field-content': if (window.FIELD_TASK_UI?.render) FIELD_TASK_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
+      case 'field-content': if (window.FIELD_CONTENT_UI?.render) FIELD_CONTENT_UI.render(); else if (window.FIELD_TASK_UI?.render) FIELD_TASK_UI.render(); else if (window.FIELD_CSV_REBUILD?.renderContent) FIELD_CSV_REBUILD.renderContent(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'field-product': if (window.FIELD_PRODUCT_UI?.render) FIELD_PRODUCT_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'field-area':    if (window.FIELD_AREA_UI?.render) FIELD_AREA_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'report':     REPORT_UI.refresh(); break;
