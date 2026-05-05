@@ -1580,6 +1580,8 @@ function datasetPriority(ds) {
 }
 function activeDatasets() {
   // 表示・分析用：同じ年月に複数データがある場合は、CSV確定 > CSV速報 > 収支補完 の順で優先する
+  // 削除済みマーカーは、画面描画のたびに必ず適用する。
+  applyDeletionTombstonesToState(STATE);
   const map = {};
   for (const d of STATE.datasets || []) {
     if (!d || !d.ym) continue;
@@ -1601,48 +1603,39 @@ function activeDatasets() {
 function activeDatasetByYM(ym) {
   return activeDatasets().find(d => d.ym === ym) || null;
 }
+function isRealCsvDataset(ds) {
+  return !!ds && datasetSourceKind(ds) !== 'history';
+}
+function activeRealCsvDatasets() {
+  return activeDatasets().filter(isRealCsvDataset);
+}
+function activeRealCsvDatasetByYM(ym) {
+  return activeRealCsvDatasets().find(d => d.ym === ym) || null;
+}
 
-function dashboardActualDatasets() {
-  // ダッシュボードの初期表示は、収支補完ではなく実CSV（確定/速報）を優先する。
-  // 収支補完はCSVがない月の参考値として使うが、未来月・年度末月を勝手に初期表示にしない。
-  return activeDatasets().filter(d => d && datasetSourceKind(d) !== 'history');
-}
-function latestActualDS() {
-  const list = dashboardActualDatasets();
-  return list.length ? list[list.length - 1] : null;
-}
-function activeDatasetByYMActual(ym) {
-  return dashboardActualDatasets().find(d => d.ym === ym) || null;
-}
 function dashboardAvailableFiscalYears() {
+  // ダッシュボードは「実CSV」を基準にする。
+  // 収支補完だけで年度末まで一周表示される誤表示を防ぐ。
   const set = new Set();
-  for (const d of activeDatasets()) {
+  for (const d of activeRealCsvDatasets()) {
     if (d && d.ym) set.add(fiscalYearFromYM(d.ym));
   }
-  const latestActual = latestActualDS();
-  if (latestActual && latestActual.ym) set.add(fiscalYearFromYM(latestActual.ym));
+  const latest = latestRealDS();
+  if (latest && latest.ym) set.add(fiscalYearFromYM(latest.ym));
   set.add(getDefaultFiscalYear());
   return [...set].sort((a,b)=>parseInt(b,10)-parseInt(a,10));
 }
 function dashboardSelectedFiscalYear() {
   if (STATE.fiscalYear) return String(STATE.fiscalYear);
-  const latestActual = latestActualDS();
-  if (latestActual && latestActual.ym) return fiscalYearFromYM(latestActual.ym);
-  const latest = latestDS();
+  const latest = latestRealDS();
   return latest && latest.ym ? fiscalYearFromYM(latest.ym) : getDefaultFiscalYear();
 }
 function dashboardSelectedYM() {
   const fy = dashboardSelectedFiscalYear();
   const months = monthsOfFiscalYear(fy);
-  const validActualMonths = months.filter(ym => activeDatasetByYMActual(ym));
-  const validMonths = months.filter(ym => activeDatasetByYM(ym));
-
-  if (STATE.selYM && months.includes(STATE.selYM) && activeDatasetByYM(STATE.selYM)) {
-    return STATE.selYM;
-  }
-
-  // 初期値は実CSVの最新月。実CSVがない年度だけ収支補完を使う。
-  const latestInFY = validActualMonths.length ? validActualMonths[validActualMonths.length - 1] : (validMonths.length ? validMonths[validMonths.length - 1] : null);
+  const validMonths = months.filter(ym => activeRealCsvDatasetByYM(ym));
+  if (STATE.selYM && months.includes(STATE.selYM) && activeRealCsvDatasetByYM(STATE.selYM)) return STATE.selYM;
+  const latestInFY = validMonths.length ? validMonths[validMonths.length - 1] : null;
   if (latestInFY) {
     STATE.selYM = latestInFY;
     return latestInFY;
@@ -1653,8 +1646,7 @@ function dashboardSelectedYM() {
     return null;
   }
 
-  const latestActual = latestActualDS();
-  const latest = latestActual || latestDS();
+  const latest = latestRealDS();
   if (latest && latest.ym) {
     STATE.fiscalYear = fiscalYearFromYM(latest.ym);
     STATE.selYM = latest.ym;
@@ -1664,10 +1656,10 @@ function dashboardSelectedYM() {
 }
 function selectedDashboardDS() {
   const ym = dashboardSelectedYM();
-  if (ym) return activeDatasetByYM(ym);
-  // 年度を明示選択していて対象月が無い場合は「データなし」を返す。
+  if (ym) return activeRealCsvDatasetByYM(ym);
+  // ダッシュボードでは収支補完だけの月を初期表示しない。
   if (STATE.fiscalYear) return null;
-  return latestDS();
+  return latestRealDS();
 }
 
 
@@ -1683,10 +1675,8 @@ function selectedFiscalYearForImport() {
 function dashboardDatasetsForSelectedFiscalYear() {
   const fy = dashboardSelectedFiscalYear();
   const months = monthsOfFiscalYear(fy);
-  const selectedYM = dashboardSelectedYM();
-  // ダッシュボードの推移は対象月まで。補完で年度末まで一周表示される誤解を防ぐ。
-  const visibleMonths = selectedYM && months.includes(selectedYM) ? months.filter(ym => ym <= selectedYM) : months;
-  return visibleMonths.map(ym => activeDatasetByYM(ym)).filter(Boolean);
+  // ダッシュボードの推移グラフは実CSVのみ。収支補完だけで12ヶ月分を表示しない。
+  return months.map(ym => activeRealCsvDatasetByYM(ym)).filter(Boolean);
 }
 
 function datasetsForSelectedFiscalYear() {
@@ -1803,7 +1793,7 @@ function renderDashboardSelector() {
   const months = monthsOfFiscalYear(fy);
   const selectedYM = dashboardSelectedYM();
   const monthOptions = months.map(ym => {
-    const ds = activeDatasetByYM(ym);
+    const ds = activeRealCsvDatasetByYM(ym);
     const label = ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`;
     return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${ds?'':'disabled'}>${label}</option>`;
   }).join('');
@@ -1832,7 +1822,7 @@ function renderDashboardSelector() {
   const ymSel = document.getElementById('dashboard-ym-select');
   if (fySel) fySel.onchange = () => {
     STATE.fiscalYear = fySel.value;
-    const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => activeDatasetByYM(ym));
+    const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => activeRealCsvDatasetByYM(ym));
     STATE.selYM = list.length ? list[list.length - 1] : null;
     renderDashboard();
     UI.updateTopbar('dashboard');
@@ -1846,6 +1836,10 @@ function renderDashboardSelector() {
 
 function latestDS() {
   const list = activeDatasets();
+  return list.length ? list[list.length-1] : null;
+}
+function latestRealDS() {
+  const list = activeRealCsvDatasets();
   return list.length ? list[list.length-1] : null;
 }
 function prevDS(ym) {
@@ -4287,7 +4281,7 @@ const NAV = {
       case 'library':    PAST_LIBRARY.renderList(); break;
       case 'field':      FIELD_UI.renderDataList(); FIELD_UI.updatePeriodBadge(); break;
       case 'field-worker':  if (window.FIELD_WORKER_UI?.render) FIELD_WORKER_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
-      case 'field-content': if (window.FIELD_CONTENT_UI?.render) FIELD_CONTENT_UI.render(); else if (window.FIELD_TASK_UI?.render) FIELD_TASK_UI.render(); else if (window.FIELD_CSV_REBUILD?.renderContent) FIELD_CSV_REBUILD.renderContent(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
+      case 'field-content': if (window.FIELD_TASK_UI?.render) FIELD_TASK_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'field-product': if (window.FIELD_PRODUCT_UI?.render) FIELD_PRODUCT_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'field-area':    if (window.FIELD_AREA_UI?.render) FIELD_AREA_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'report':     REPORT_UI.refresh(); break;
@@ -4641,6 +4635,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 1. ローカルストレージから読込
   STORE.load();
+  // 削除済みマーカー適用後の状態をローカルへ即保存し、リロード直後の古い補完・計画復活を防ぐ
+  STORE.save();
 
   // 1.5 保存・取込・更新時の自動同期を有効化
   AUTO_SYNC.install();
@@ -4684,21 +4680,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   UI.updateSaveStatus();
   UI.updateTopbar('dashboard');
 
-  // 11. 起動時の全クラウド同期は画面表示を重くするため、初期描画後に遅延実行する。
-  //     削除済みデータの除外はローカルSTATEに対して先に適用済み。手動同期でも最新化できます。
-  setTimeout(() => {
-    CLOUD.pull()
-      .then(r => {
-        if (r && r.ok) {
-          if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
-          NAV.refresh();
-          UI.updateTopbar(STATE.view || 'dashboard');
-          UI.updateSaveStatus();
-          if (r.changed) UI.toast('クラウドの最新データを反映しました');
-        }
-      })
-      .catch(() => {});
-  }, 1200);
+  // 11. 起動時はまず取得を優先し、full_state と月別CSVの両方を確認する
+  CLOUD.pull()
+    .then(r => {
+      if (r && r.ok) {
+        NAV.refresh();
+        UI.updateTopbar(STATE.view || 'dashboard');
+        UI.updateSaveStatus();
+        if (r.changed) UI.toast('クラウドの最新データを反映しました');
+      }
+    })
+    .catch(() => {});
 });
 
 
