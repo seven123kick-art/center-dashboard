@@ -160,7 +160,7 @@
     const avgDirect = workDayCount > 0 ? directAmount / workDayCount : 0;
     kpi.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
     kpi.innerHTML = `
-      <div class="kpi-card accent-navy"><div class="kpi-label">対象月</div><div class="kpi-value">${esc(ymText(ym))}</div></div>
+      <div class="kpi-card accent-navy kpi-target-month"><div class="kpi-label">対象月</div><div class="kpi-value">${esc(ymText(ym))}</div></div>
       <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div></div>
       <div class="kpi-card accent-green"><div class="kpi-label">平均件数/日</div><div class="kpi-value">${workDayCount ? fmt1(avgCount) : '—'}件</div></div>
@@ -254,6 +254,7 @@
       #view-field-worker #f-kpi-worker .kpi-card{min-height:148px!important;padding:20px 22px!important;display:flex!important;flex-direction:column!important;justify-content:flex-start!important}
       #view-field-worker #f-kpi-worker .kpi-label{font-size:13px!important;font-weight:900!important;line-height:1.25!important;margin:0 0 14px!important;color:#1f2a44!important}
       #view-field-worker #f-kpi-worker .kpi-value{font-size:31px!important;font-weight:950!important;line-height:1.08!important;letter-spacing:.01em!important;margin:0!important;color:#0f172a!important}
+      #view-field-worker #f-kpi-worker .kpi-target-month .kpi-value{font-size:27px!important;white-space:nowrap!important;letter-spacing:-.04em!important;line-height:1.12!important}
       #view-field-worker #f-kpi-worker .kpi-sub{font-size:12px!important;font-weight:900!important;line-height:1.35!important;color:#8aa0bb!important;margin-top:12px!important}
       #view-field-worker #f-kpi-worker .kpi-amount-breakdown{white-space:nowrap!important}
       #view-field-worker #f-kpi-worker .kpi-card-amount{align-items:flex-start!important;text-align:left!important}
