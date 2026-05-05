@@ -167,20 +167,29 @@ IMPORT.deleteFieldData = function(ym) {
     return [...map.values()].sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
   }
 
-  function fieldAccessReadStorageArray(name){
-    // v29: 重量化・別センター混入防止のため、画面描画時のlocalStorage全探索は行わない。
-    // app.js / STORE.load がセンター別の workerCsvData / productAddressData をSTATEへ復元する。
-    return [];
+  // 画面表示のたびに localStorage 全探索を行うと、作業者分析・作業内容分析が極端に重くなる。
+  // 現場CSVは STORE.load() で STATE.workerCsvData / STATE.productAddressData に読み込み済みのため、
+  // ここではSTATEだけを参照する。必要時の復元・同期は STORE.load / CLOUD.pull 側で行う。
+  let __fieldAccessCache = { workerSig:'', productSig:'', worker:null, product:null };
+  function fieldAccessSignature(list){
+    return safeArray(list).map(r => `${r && r.ym || ''}:${r && (r.importedAt || r.updatedAt || r.savedAt || '')}:${r && (r.rowCount || r.uniqueCount || r.workerCount || '')}`).join('|');
   }
-
   window.FIELD_DATA_ACCESS = {
     getWorkerRecords(){
-      const list = safeArray(STATE.workerCsvData);
-      return fieldAccessUnique(fieldAccessClone(list), 'worker');
+      const sig = fieldAccessSignature(STATE.workerCsvData);
+      if (__fieldAccessCache.worker && __fieldAccessCache.workerSig === sig) return __fieldAccessCache.worker;
+      const records = fieldAccessUnique(fieldAccessClone(safeArray(STATE.workerCsvData)), 'worker');
+      __fieldAccessCache.workerSig = sig;
+      __fieldAccessCache.worker = records;
+      return records;
     },
     getProductRecords(){
-      const list = safeArray(STATE.productAddressData);
-      return fieldAccessUnique(fieldAccessClone(list), 'product');
+      const sig = fieldAccessSignature(STATE.productAddressData);
+      if (__fieldAccessCache.product && __fieldAccessCache.productSig === sig) return __fieldAccessCache.product;
+      const records = fieldAccessUnique(fieldAccessClone(safeArray(STATE.productAddressData)), 'product');
+      __fieldAccessCache.productSig = sig;
+      __fieldAccessCache.product = records;
+      return records;
     },
     getAllYms(){
       return [...new Set([
@@ -188,12 +197,13 @@ IMPORT.deleteFieldData = function(ym) {
         ...this.getProductRecords().map(d=>d.ym)
       ].filter(Boolean))].sort();
     },
+    invalidate(){
+      __fieldAccessCache = { workerSig:'', productSig:'', worker:null, product:null };
+    },
     syncStateFromStorage(){
-      const w = this.getWorkerRecords();
-      const p = this.getProductRecords();
-      if (w.length) STATE.workerCsvData = w;
-      if (p.length) STATE.productAddressData = p;
-      return { worker:w, product:p };
+      // 旧名互換。localStorage全探索はしない。
+      this.invalidate();
+      return { worker:this.getWorkerRecords(), product:this.getProductRecords() };
     }
   };
 
@@ -202,14 +212,15 @@ IMPORT.deleteFieldData = function(ym) {
   const originalStoreSave = STORE.save.bind(STORE);
   STORE.load = function(){
     originalStoreLoad();
-    STATE.workerCsvData = Array.isArray(STATE.workerCsvData) && STATE.workerCsvData.length ? STATE.workerCsvData : (this._g('workerCsvData') || []);
-    STATE.productAddressData = Array.isArray(STATE.productAddressData) && STATE.productAddressData.length ? STATE.productAddressData : (this._g('productAddressData') || []);
+    STATE.workerCsvData = this._g('workerCsvData') || [];
+    STATE.productAddressData = this._g('productAddressData') || [];
     ensureState();
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
-    if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
   };
   STORE.save = function(){
     ensureState();
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
     originalStoreSave();
     this._s('workerCsvData', STATE.workerCsvData);
@@ -778,6 +789,7 @@ IMPORT.deleteFieldData = function(ym) {
 
     if (typeof clearDataDeleted === 'function') { clearDataDeleted('workerMonths', ym); clearDataDeleted('fieldMonths', ym); }
     upsertByYm('workerCsvData', { ym, source:'worker_csv', importedAt:new Date().toISOString(), ...combined });
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     STORE.save();
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
     refreshFieldAll();
@@ -828,6 +840,7 @@ IMPORT.deleteFieldData = function(ym) {
     };
     if (typeof clearDataDeleted === 'function') { clearDataDeleted('productMonths', ym); clearDataDeleted('fieldMonths', ym); }
     upsertByYm('productAddressData', record);
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     STORE.save();
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
     refreshFieldAll();
@@ -1219,10 +1232,12 @@ IMPORT.deleteFieldData = function(ym) {
     if (type === 'worker' || type === 'all') {
       if (typeof markDataDeleted === 'function') markDataDeleted('workerMonths', ym);
       STATE.workerCsvData = safeArray(STATE.workerCsvData).filter(d => d.ym !== ym);
+      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     }
     if (type === 'product' || type === 'all') {
       if (typeof markDataDeleted === 'function') markDataDeleted('productMonths', ym);
       STATE.productAddressData = safeArray(STATE.productAddressData).filter(d => d.ym !== ym);
+      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     }
     if (type === 'all' && typeof markDataDeleted === 'function') markDataDeleted('fieldMonths', ym);
     // 旧混在データも同じ年月は消して復活を防止
@@ -1366,41 +1381,4 @@ IMPORT.deleteFieldData = function(ym) {
 
 
   window.FIELD_UI = FIELD_UI;
-})();
-
-
-/* v32：月別削除操作を DATA_DELETE_MANAGER に統一 */
-(function(){
-  function toast(msg, type){ if (window.UI && UI.toast) UI.toast(msg, type || 'warn'); }
-  window.FIELD_MONTH_OPS = window.FIELD_MONTH_OPS || {};
-  window.FIELD_MONTH_OPS.run = function(ym, action){
-    if (!ym || !action) { toast('削除対象を選択してください', 'warn'); return false; }
-    if (window.DATA_DELETE_MANAGER && DATA_DELETE_MANAGER.runMonthAction) {
-      return DATA_DELETE_MANAGER.runMonthAction(ym, action);
-    }
-    // 保険：DATA_DELETE_MANAGER が読み込まれていない場合だけ旧処理へフォールバック
-    if (action === 'csv_confirmed') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'confirmed') : null;
-    if (action === 'csv_daily') return DATA_STORAGE_TABLE?.deleteCsvMonth ? DATA_STORAGE_TABLE.deleteCsvMonth(ym, 'daily') : null;
-    if (action === 'history') return DATA_STORAGE_TABLE?.deleteHistoryMonth ? DATA_STORAGE_TABLE.deleteHistoryMonth(ym) : null;
-    if (action === 'worker') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'worker') : null;
-    if (action === 'product') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'product') : null;
-    if (action === 'field_all') return FIELD_CSV_REBUILD?.deleteMonthType ? FIELD_CSV_REBUILD.deleteMonthType(ym, 'all') : null;
-    return false;
-  };
-  window.FIELD_MONTH_OPS.runFromSelect = function(btn){
-    const wrap = btn && btn.closest ? btn.closest('.field-month-op-wrap') : null;
-    const sel = wrap ? wrap.querySelector('.field-month-op-select') : null;
-    const ym = sel ? sel.dataset.monthOpYm : '';
-    const action = sel ? sel.value : '';
-    if (!action) { toast('削除対象を選択してください', 'warn'); return false; }
-    const result = window.FIELD_MONTH_OPS.run(ym, action);
-    if (sel) sel.value = '';
-    return result;
-  };
-  if (window.FIELD_CSV_REBUILD) {
-    window.FIELD_CSV_REBUILD.deleteMonthType = function(ym, type){
-      const action = type === 'worker' ? 'worker' : type === 'product' ? 'product' : 'field_all';
-      return window.FIELD_MONTH_OPS.run(ym, action);
-    };
-  }
 })();
