@@ -23,13 +23,13 @@
   function selectedYM(){
     const sel = document.getElementById('field-common-month-select');
     if (sel && sel.value) return sel.value;
-    return (window.STATE && STATE.selYM)
-      || safeArray(STATE?.productAddressData).at(-1)?.ym
-      || safeArray(STATE?.workerCsvData).at(-1)?.ym
-      || (typeof latestDS === 'function' ? latestDS()?.ym : '')
-      || '';
+    const yms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : [...new Set([...safeArray(STATE?.productAddressData).map(d=>d.ym), ...safeArray(STATE?.workerCsvData).map(d=>d.ym)])].filter(Boolean).sort();
+    return (window.STATE && STATE.selYM && yms.includes(STATE.selYM)) ? STATE.selYM : (yms.at(-1) || '');
   }
-  function productRecord(ym){ return safeArray(STATE?.productAddressData).find(d => d && d.ym === ym) || null; }
+  function productRecord(ym){
+    const records = window.FIELD_DATA_ACCESS?.getProductRecords ? FIELD_DATA_ACCESS.getProductRecords() : safeArray(STATE?.productAddressData);
+    return records.find(d => d && d.ym === ym) || null;
+  }
 
   function clean(v){ return String(v ?? '').replace(/[\u0000-\u001f]/g,'').trim(); }
   function compact(v){ return clean(v).replace(/[\s　]/g,''); }
