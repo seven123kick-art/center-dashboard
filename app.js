@@ -1161,6 +1161,8 @@ const CLOUD = {
   _datasetKey(ym, type='confirmed') { return `${CENTER.id}/skdl/${ym}_${type || 'confirmed'}.json`; },
   _capacityKey() { return `${CENTER.id}/capacity/master.json`; },
   _fieldKey() { return `${CENTER.id}/field/data.json`; },
+  _workerMonthKey(ym) { return `${CENTER.id}/field/worker/${ym}.json`; },
+  _productMonthKey(ym) { return `${CENTER.id}/field/product/${ym}.json`; },
   _fullStateKey() { return `${CENTER.id}/full_state.json`; },
   _planKey() { return `${CENTER.id}/plan/data.json`; },
   _memosKey() { return `${CENTER.id}/memos/data.json`; },
@@ -1176,11 +1178,37 @@ const CLOUD = {
   },
   _legacyKey() { return `${CENTER.id}/data_v5.json`; },
   _makeManifest() {
+    const workerCsv = Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData : [];
+    const productCsv = Array.isArray(STATE.productAddressData) ? STATE.productAddressData : [];
     return {
-      version: 6,
+      version: 31,
       center: CENTER.id,
       savedAt: new Date().toISOString(),
-      datasets: STATE.datasets.filter(d => d.source !== 'history').map(d => ({ ym:d.ym, type:d.type, source:d.source || 'csv', importedAt:d.importedAt || null, totalIncome:d.totalIncome || 0, totalExpense:d.totalExpense || 0, profit:d.profit || 0 })),
+      datasets: STATE.datasets.filter(d => d.source !== 'history').map(d => ({
+        ym:d.ym,
+        type:d.type || 'confirmed',
+        source:d.source || 'csv',
+        importedAt:d.importedAt || null,
+        totalIncome:d.totalIncome || 0,
+        totalExpense:d.totalExpense || 0,
+        profit:d.profit || 0
+      })),
+      workerCsvData: workerCsv.map(d => ({
+        ym:d.ym,
+        source:d.source || 'worker_csv',
+        importedAt:d.importedAt || d.updatedAt || d.savedAt || null,
+        rowCount:d.rowCount || 0,
+        workerCount:d.workerCount || 0
+      })),
+      productAddressData: productCsv.map(d => ({
+        ym:d.ym,
+        source:d.source || 'product_address_csv',
+        importedAt:d.importedAt || d.updatedAt || d.savedAt || null,
+        uniqueCount:d.uniqueCount || 0,
+        detailRows:d.detailRows || 0,
+        rawRows:d.rawRows || 0,
+        amount:d.amount || 0
+      })),
       hasCapacity: !!STATE.capacity,
       hasFieldData: !!(STATE.fieldData && STATE.fieldData.length),
       hasPlanData: !!(STATE.planData && Object.keys(STATE.planData).length),
@@ -1192,23 +1220,24 @@ const CLOUD = {
     };
   },
   _makeFullState() {
+    // full_state は起動・復元用の軽量台帳だけにする。
+    // CSV本体（収支・作業者・商品住所）は月単位JSONへ分割保存し、ここへ入れない。
+    // ここへ大きい配列を入れると Supabase Storage の object size 上限で同期失敗する。
     sanitizePersonalDataState(STATE);
     return {
-      version: 15,
+      version: 31,
       center: CENTER.id,
       savedAt: new Date().toISOString(),
-      datasets: STATE.datasets || [],
-      fieldData: STATE.fieldData || [],
-      areaData: STATE.areaData || [],
+      fiscalYear: STATE.fiscalYear || null,
       capacity: STATE.capacity || null,
       planData: STATE.planData || {},
-      fiscalYear: STATE.fiscalYear || null,
       memos: STATE.memos || {},
       library: STATE.library || [],
       reportKnowledge: STATE.reportKnowledge || { policies:{}, references:[] },
       deleted: STATE.deleted || {},
     };
   },
+
   _applyFullState(full) {
     if (!full || typeof full !== 'object') return false;
     if (full.center && full.center !== CENTER.id) return false;
@@ -1231,21 +1260,72 @@ const CLOUD = {
     }
     return true;
   },
-  async _uploadJSON(key, value) {
-    value = sanitizedCloneForExport(value);
+  _isSizeError(error) {
+    const msg = String(error?.message || error || '').toLowerCase();
+    return msg.includes('maximum allowed size') || msg.includes('payload too large') || msg.includes('413') || (msg.includes('object') && msg.includes('size'));
+  },
+  _chunkKey(key, idx) {
+    return `${key}.chunks/${String(idx).padStart(4,'0')}.part`;
+  },
+  async _uploadBlob(key, blob, contentType='application/octet-stream') {
     const sb = await this._client();
     if (!sb) return { ok:false, error:'Supabase未設定' };
-    const blob = new Blob([JSON.stringify(value)], { type:'application/json' });
-    const { error } = await sb.storage.from(this._bucket()).upload(key, blob, { upsert:true, contentType:'application/json' });
+    const { error } = await sb.storage.from(this._bucket()).upload(key, blob, { upsert:true, contentType });
     if (error) throw error;
     return { ok:true };
+  },
+  async _uploadJSON(key, value) {
+    value = sanitizedCloneForExport(value);
+    const json = JSON.stringify(value);
+    const blob = new Blob([json], { type:'application/json' });
+
+    try {
+      await this._uploadBlob(key, blob, 'application/json');
+      return { ok:true, chunked:false };
+    } catch(error) {
+      if (!this._isSizeError(error)) throw error;
+    }
+
+    // Supabase bucketのobject size上限を超える場合は、小さいテキスト片に分割して保存する。
+    // 元のkeyには「分割台帳」だけを置くため、既存の downloadJSON 呼び出しはそのまま使える。
+    const chunkSize = 24 * 1024;
+    const chunks = [];
+    for (let i=0; i<json.length; i += chunkSize) chunks.push(json.slice(i, i + chunkSize));
+
+    for (let i=0; i<chunks.length; i++) {
+      await this._uploadBlob(this._chunkKey(key, i), new Blob([chunks[i]], { type:'text/plain' }), 'text/plain');
+    }
+
+    const pointer = {
+      __chunked: true,
+      version: 1,
+      center: CENTER.id,
+      key,
+      chunks: chunks.length,
+      chunkSize,
+      savedAt: new Date().toISOString(),
+      bytes: json.length
+    };
+    await this._uploadBlob(key, new Blob([JSON.stringify(pointer)], { type:'application/json' }), 'application/json');
+    return { ok:true, chunked:true, chunks:chunks.length };
   },
   async _downloadJSON(key) {
     const sb = await this._client();
     if (!sb) return null;
     const { data, error } = await sb.storage.from(this._bucket()).download(key);
     if (error) return null;
-    return JSON.parse(await data.text());
+    const text = await data.text();
+    const first = JSON.parse(text);
+    if (first && first.__chunked && Number(first.chunks) > 0) {
+      let joined = '';
+      for (let i=0; i<Number(first.chunks); i++) {
+        const part = await sb.storage.from(this._bucket()).download(this._chunkKey(key, i));
+        if (part.error || !part.data) throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
+        joined += await part.data.text();
+      }
+      return JSON.parse(joined);
+    }
+    return first;
   },
   async uploadFile(key, file) {
     const sb = await this._client();
@@ -1277,8 +1357,12 @@ const CLOUD = {
     this._busy = true;
     try {
       const targets = STATE.datasets.filter(d => d.ym === ym && d.source !== 'history');
-      if (!targets.length) return { ok:false, error:'対象月データなし' };
+      const workers = (STATE.workerCsvData || []).filter(d => d && d.ym === ym);
+      const products = (STATE.productAddressData || []).filter(d => d && d.ym === ym);
+      if (!targets.length && !workers.length && !products.length) return { ok:false, error:'対象月データなし' };
       for (const ds of targets) await this._uploadJSON(this._datasetKey(ym, ds.type || 'confirmed'), ds);
+      for (const w of workers) await this._uploadJSON(this._workerMonthKey(ym), w);
+      for (const pr of products) await this._uploadJSON(this._productMonthKey(ym), pr);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
       await this._uploadJSON(this._fullStateKey(), this._makeFullState());
       UI.updateCloudBadge('ok');
@@ -1304,13 +1388,17 @@ const CLOUD = {
     this._busy = true;
     try {
       for (const ds of STATE.datasets.filter(d => d.source !== 'history')) await this._uploadJSON(this._datasetKey(ds.ym, ds.type || 'confirmed'), ds);
+      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
+      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
       if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
-      await this._uploadJSON(this._fieldKey(), STATE.fieldData || []);
       await this._uploadJSON(this._planKey(), STATE.planData || {});
       if (STATE.memos && Object.keys(STATE.memos).length) await this._uploadJSON(this._memosKey(), STATE.memos);
       if (STATE.library && STATE.library.length) await this._uploadJSON(this._libraryKey(), STATE.library);
-      // 旧形式data_v5.jsonに個人情報を含む古い現場データが残る可能性があるため削除する。
-      try { const sb = await this._client(); if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey()]); } catch(e) {}
+      // 旧形式data_v5.json / 旧field/data.json は大きいデータ・個人情報混入リスクがあるため削除する。
+      try {
+        const sb = await this._client();
+        if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]);
+      } catch(e) {}
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
       await this._uploadJSON(this._fullStateKey(), this._makeFullState());
       UI.updateCloudBadge('ok');
@@ -1321,10 +1409,12 @@ const CLOUD = {
   async push() { return this.pushAll(); },
   async pullManifestAndMissing() {
     const manifest = await this._downloadJSON(this._manifestKey());
-    if (!manifest || !Array.isArray(manifest.datasets)) return { ok:false, error:'manifestなし' };
+    if (!manifest) return { ok:false, error:'manifestなし' };
     if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
     let changed = 0;
-    for (const meta of manifest.datasets) {
+
+    const datasetMetas = Array.isArray(manifest.datasets) ? manifest.datasets : [];
+    for (const meta of datasetMetas) {
       if (!meta.ym) continue;
       const metaType = meta.type || 'confirmed';
       if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
@@ -1334,15 +1424,45 @@ const CLOUD = {
         if (ds && ds.ym) { upsertDataset(ds); changed++; }
       }
     }
+
+    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
+    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
+
+    const workerMetas = Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [];
+    for (const meta of workerMetas) {
+      if (!meta.ym || deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+      const local = STATE.workerCsvData.find(d => d.ym === meta.ym);
+      if (!local || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
+        const rec = await this._downloadJSON(this._workerMonthKey(meta.ym));
+        if (rec && rec.ym) {
+          STATE.workerCsvData = STATE.workerCsvData.filter(d => d.ym !== rec.ym);
+          STATE.workerCsvData.push(rec);
+          changed++;
+        }
+      }
+    }
+
+    const productMetas = Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [];
+    for (const meta of productMetas) {
+      if (!meta.ym || deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+      const local = STATE.productAddressData.find(d => d.ym === meta.ym);
+      if (!local || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
+        const rec = await this._downloadJSON(this._productMonthKey(meta.ym));
+        if (rec && rec.ym) {
+          STATE.productAddressData = STATE.productAddressData.filter(d => d.ym !== rec.ym);
+          STATE.productAddressData.push(rec);
+          changed++;
+        }
+      }
+    }
+
     if (manifest.hasCapacity && !STATE.capacity) {
       const cap = await this._downloadJSON(this._capacityKey());
       if (cap) { STATE.capacity = cap; changed++; }
     }
 
-    if (manifest.hasFieldData) {
-      const field = await this._downloadJSON(this._fieldKey());
-      if (Array.isArray(field)) { STATE.fieldData = field; changed++; }
-    }
+    // 旧field/data.jsonは大容量化・個人情報混入防止のため原則使わない。
+    // 既存クラウドからの復元互換は full_state/manifest 側に寄せる。
 
     if (manifest.hasPlanData) {
       const cloudPlan = await this._downloadJSON(this._planKey());
@@ -1364,6 +1484,7 @@ const CLOUD = {
     }
 
     applyDeletionTombstonesToState(STATE);
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     if (changed) STORE.save();
     UI.updateCloudBadge('ok');
     return { ok:true, changed };
@@ -1449,9 +1570,10 @@ const CLOUD = {
       await this._uploadJSON(this._fullStateKey(), finalFull);
 
       await this._uploadJSON(this._planKey(), STATE.planData || {});
+      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
+      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
       if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
-      await this._uploadJSON(this._fieldKey(), STATE.fieldData || []);
-      try { const sb = await this._client(); if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey()]); } catch(e) {}
+      try { const sb = await this._client(); if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]); } catch(e) {}
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
 
       UI.updateCloudBadge('ok');
@@ -1471,11 +1593,11 @@ const CLOUD = {
       STORE.save();
       const sb = await this._client();
       if (!sb) return { ok:false, error:'Supabase未設定' };
-      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
-      if (STATE.fieldData && STATE.fieldData.length) await this._uploadJSON(this._fieldKey(), STATE.fieldData);
-      if (STATE.productAddressData || STATE.workerCsvData) await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
+      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
-      try { await sb.storage.from(this._bucket()).remove([this._legacyKey()]); } catch(e) {}
+      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      try { await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]); } catch(e) {}
       UI.updateCloudBadge('ok');
       return { ok:true };
     } catch(e) {
@@ -1952,15 +2074,12 @@ function mergeFullState(localFull, cloudFull) {
   const local = localFull || {};
   const cloud = cloudFull || {};
   const deleted = mergeDeletedStates(local.deleted || {}, cloud.deleted || {});
+  // full_state は軽量台帳専用。CSV本体（datasets / workerCsvData / productAddressData）は
+  // 月単位JSONを manifest から取得するため、ここで空配列を作ってSTATEを上書きしない。
   const merged = {
     version: 31,
     center: CENTER.id,
     savedAt: new Date().toISOString(),
-    datasets: mergeDatasetsByImportedAt(local.datasets || [], cloud.datasets || []),
-    fieldData: (local.fieldData && local.fieldData.length) ? local.fieldData : (cloud.fieldData || []),
-    areaData: (local.areaData && local.areaData.length) ? local.areaData : (cloud.areaData || []),
-    workerCsvData: (local.workerCsvData && local.workerCsvData.length) ? local.workerCsvData : (cloud.workerCsvData || []),
-    productAddressData: (local.productAddressData && local.productAddressData.length) ? local.productAddressData : (cloud.productAddressData || []),
     capacity: cloud.capacity || local.capacity || null,
     planData: mergePlanDataByUpdatedAt(local.planData || {}, cloud.planData || {}),
     fiscalYear: local.fiscalYear || cloud.fiscalYear || null,
