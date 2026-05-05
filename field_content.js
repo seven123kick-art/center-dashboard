@@ -169,6 +169,12 @@
 
   function render(){
     ensureStyles();
+    // 作業内容分析だけ共通の年度・月セレクターが消えていたため、
+    // field_core.js の共通セレクターを必ず先に描画する。
+    // センター別・年度別・月別の判定ロジックは他の現場分析画面と同じ関数を使う。
+    if (typeof window.setupFieldCommonSelectors === 'function') {
+      try { window.setupFieldCommonSelectors(); } catch(e) { console.warn('[field_content] setupFieldCommonSelectors failed', e); }
+    }
     const pane = document.getElementById('fpane-content');
     if (!pane) return;
     const ym = selectedYM();
