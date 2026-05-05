@@ -124,9 +124,13 @@
       const details = safeArray(t.workDetails).length
         ? t.workDetails
         : Object.entries(t.works || {}).map(([work, amount]) => ({ work, amount }));
-      details.forEach(d => {
+      const ticketAmount = amountOf(t.amount || t.salesAmount || t.totalAmount || t.value);
+      const detailAmountTotal = details.reduce((sum,d)=>sum + amountOf(d.amount), 0);
+      details.forEach((d, idx) => {
         const raw = d.work || d.label || d.name || '未設定';
-        const amount = amountOf(d.amount);
+        // 旧保存データ対策：明細金額が0で原票合計だけ残っている場合は先頭明細へ寄せる。
+        // 新規取込はfield_coreの共通取込ロジックで明細金額を保持する。
+        const amount = detailAmountTotal > 0 ? amountOf(d.amount) : (idx === 0 ? ticketAmount : 0);
         const product = t.product || t.productName || t.product_name || '';
         if (isKansen(raw)) return;
         const c = classifyWork(raw, product);
