@@ -48,15 +48,13 @@
   function selectedYM(){
     const sel = document.getElementById('field-common-month-select');
     if (sel && sel.value) return sel.value;
-    return STATE.selYM
-      || safeArray(STATE.workerCsvData).at(-1)?.ym
-      || safeArray(STATE.productAddressData).at(-1)?.ym
-      || (typeof latestDS === 'function' ? latestDS()?.ym : '')
-      || '';
+    const yms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : [...new Set([...safeArray(STATE.workerCsvData).map(d=>d.ym), ...safeArray(STATE.productAddressData).map(d=>d.ym)])].filter(Boolean).sort();
+    return STATE.selYM && yms.includes(STATE.selYM) ? STATE.selYM : (yms.at(-1) || '');
   }
 
   function workerRecord(ym){
-    return safeArray(STATE.workerCsvData).find(d => d && d.ym === ym) || null;
+    const records = window.FIELD_DATA_ACCESS?.getWorkerRecords ? FIELD_DATA_ACCESS.getWorkerRecords() : safeArray(STATE.workerCsvData);
+    return records.find(d => d && d.ym === ym) || null;
   }
 
   function rowsFromRecord(rec){
