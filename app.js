@@ -3876,9 +3876,14 @@ function normalizeReportKnowledge(raw) {
       ym: r.ym || '',
       scope: r.scope || (r.ym ? 'month' : 'half'),
       title: r.title || '無題',
+      materialType: r.materialType || '',
+      inputType: r.inputType || 'text',
       category: r.category || 'その他',
       priority: r.priority || '中',
       content: r.content || '',
+      fileName: r.fileName || '',
+      fileMime: r.fileMime || '',
+      fileSize: r.fileSize || 0,
       savedAt: r.savedAt || new Date().toISOString()
     }))
   };
@@ -3917,9 +3922,11 @@ function reportFYFromYM(ym) {
   return ym ? fiscalYearFromYM(ym) : getDefaultFiscalYear();
 }
 
-/* ════════ §23 REPORT_UI（スタブ） ═════════════════════════════ */
+/* ════════ §23 REPORT_UI（会議報告書AI入力・4区分資料管理） ═════════════════════════════ */
 const REPORT_UI = {
   _tab:'policy',
+  _pendingFile:null,
+  _pendingFileText:'',
 
   getFY() {
     return document.getElementById('report-fy')?.value || dashboardSelectedFiscalYear() || getDefaultFiscalYear();
@@ -3935,6 +3942,27 @@ const REPORT_UI = {
     return STATE.reportKnowledge.policies[reportPolicyKey(this.getFY(), this.getHalf())] || null;
   },
 
+  materialLabel(type) {
+    return ({
+      policy_half:'経営方針（半期）',
+      monthly_pl:'月次収支',
+      landing_forecast:'着地予測',
+      other:'その他'
+    })[type] || 'その他';
+  },
+
+  inputLabel(type) {
+    return ({ text:'文字ベタ打ち', file:'ファイル', screenshot:'スクリーンショット' })[type] || '文字ベタ打ち';
+  },
+
+  prevYM(ym) {
+    if (!ym || String(ym).length < 6) return '';
+    const y = Number(String(ym).slice(0,4));
+    const m = Number(String(ym).slice(4,6));
+    const d = new Date(y, m - 2, 1);
+    return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}`;
+  },
+
   switchTab(tab) {
     this._tab = tab || 'policy';
     document.querySelectorAll('.report-tab').forEach(b=>b.classList.toggle('active', b.dataset.reportTab === this._tab));
@@ -3942,6 +3970,7 @@ const REPORT_UI = {
     const pane = document.getElementById('report-pane-' + this._tab);
     if (pane) pane.style.display = '';
     this.refreshReferenceList();
+    this.toggleReferenceFileArea();
   },
 
   refresh() {
@@ -3959,14 +3988,15 @@ const REPORT_UI = {
     const halfSel = document.getElementById('report-half');
     if (!fySel) return;
 
-    const years = [...new Set([...dashboardAvailableFiscalYears(), getDefaultFiscalYear(), ...Object.keys(STATE.reportKnowledge.policies || {}).map(k=>k.slice(0,4))])]
+    const refYears = (STATE.reportKnowledge?.references || []).map(r=>r.fiscalYear).filter(Boolean);
+    const years = [...new Set([...dashboardAvailableFiscalYears(), getDefaultFiscalYear(), ...Object.keys(STATE.reportKnowledge.policies || {}).map(k=>k.slice(0,4)), ...refYears])]
       .filter(Boolean).sort((a,b)=>Number(b)-Number(a));
     const oldFY = fySel.value || dashboardSelectedFiscalYear() || getDefaultFiscalYear();
     fySel.innerHTML = years.map(y=>`<option value="${esc(y)}" ${String(y)===String(oldFY)?'selected':''}>${esc(y)}年度</option>`).join('');
     if (!fySel.value && years.length) fySel.value = years[0];
 
     const fym = monthsOfFiscalYear(fySel.value);
-    const validYms = fym.filter(ym => activeDatasetByYM(ym) || (STATE.fieldData || []).some(d=>d.ym===ym) || (STATE.productAddressData || []).some(d=>d.ym===ym));
+    const validYms = fym.filter(ym => activeDatasetByYM(ym) || (STATE.fieldData || []).some(d=>d.ym===ym) || (STATE.productAddressData || []).some(d=>d.ym===ym) || (STATE.reportKnowledge?.references || []).some(r=>r.ym===ym));
     const currentYM = ymSel?.value || dashboardSelectedYM() || validYms.at(-1) || fym[0] || '';
     if (ymSel) {
       ymSel.innerHTML = fym.map(ym=>{
@@ -4009,38 +4039,88 @@ const REPORT_UI = {
     set('report-policy-issues', p?.issues);
   },
 
+  syncReferenceScopeByType() {
+    const type = document.getElementById('report-ref-material-type')?.value || 'other';
+    const scope = document.getElementById('report-ref-scope');
+    const priority = document.getElementById('report-ref-priority');
+    if (!scope) return;
+    if (type === 'policy_half') scope.value = 'half';
+    if (type === 'monthly_pl' || type === 'landing_forecast') scope.value = 'month';
+    if (type === 'policy_half' && priority) priority.value = '高';
+  },
+
+  toggleReferenceFileArea() {
+    const inputType = document.getElementById('report-ref-input-type')?.value || 'text';
+    const wrap = document.getElementById('report-ref-file-wrap');
+    if (wrap) wrap.style.display = inputType === 'text' ? 'none' : '';
+  },
+
+  handleReferenceFile(file) {
+    this._pendingFile = file || null;
+    this._pendingFileText = '';
+    const note = document.getElementById('report-ref-file-note');
+    if (!file) { if (note) note.textContent = ''; return; }
+    const title = document.getElementById('report-ref-title');
+    if (title && !title.value) title.value = file.name.replace(/\.[^.]+$/, '');
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (note) note.textContent = `選択中：${file.name} / ${Math.round(file.size/1024)}KB`;
+    if (['txt','csv'].includes(ext)) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        this._pendingFileText = String(reader.result || '').slice(0,12000);
+        const content = document.getElementById('report-ref-content');
+        if (content && !content.value.trim()) content.value = this._pendingFileText;
+        if (note) note.textContent = `選択中：${file.name} / テキスト内容を読み込みました`;
+      };
+      reader.onerror = () => { if (note) note.textContent = `選択中：${file.name} / テキスト読込はできませんでした`; };
+      reader.readAsText(file, 'utf-8');
+    }
+  },
+
   saveReference() {
     STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
     const title = document.getElementById('report-ref-title')?.value?.trim();
     const content = document.getElementById('report-ref-content')?.value?.trim();
-    if (!title && !content) { UI.toast('資料名または内容を入力してください','warn'); return; }
+    const file = this._pendingFile;
+    if (!title && !content && !file) { UI.toast('資料名、内容、ファイルのいずれかを登録してください','warn'); return; }
     const fy = this.getFY();
     const half = this.getHalf();
-    const scope = document.getElementById('report-ref-scope')?.value || 'month';
+    const materialType = document.getElementById('report-ref-material-type')?.value || 'other';
+    const inputType = document.getElementById('report-ref-input-type')?.value || 'text';
+    const scope = document.getElementById('report-ref-scope')?.value || (materialType === 'policy_half' ? 'half' : 'month');
     const ym = scope === 'month' ? this.getYM() : '';
     STATE.reportKnowledge.references.push({
       id: Date.now(), fiscalYear: fy, half, ym, scope,
-      title: title || '参考メモ',
-      category: document.getElementById('report-ref-category')?.value || 'その他',
-      priority: document.getElementById('report-ref-priority')?.value || '中',
-      content: content || '',
+      materialType,
+      inputType,
+      title: title || file?.name || this.materialLabel(materialType),
+      category: this.materialLabel(materialType),
+      priority: document.getElementById('report-ref-priority')?.value || (materialType === 'policy_half' ? '高' : '中'),
+      content: content || this._pendingFileText || '',
+      fileName: file?.name || '',
+      fileMime: file?.type || '',
+      fileSize: file?.size || 0,
       savedAt: new Date().toISOString()
     });
     STORE.save();
     this.clearReferenceForm();
     this.refreshReferenceList();
-    UI.toast('参考資料メモを保存しました');
+    UI.toast('AI用資料を保存しました');
   },
 
   clearReferenceForm() {
     ['report-ref-title','report-ref-content'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+    const file=document.getElementById('report-ref-file'); if(file) file.value='';
+    const note=document.getElementById('report-ref-file-note'); if(note) note.textContent='';
     const msg=document.getElementById('report-ref-msg'); if(msg) msg.textContent='';
+    this._pendingFile = null;
+    this._pendingFileText = '';
   },
 
-  referenceMatches(ref) {
+  referenceMatches(ref, options={}) {
     const fy = this.getFY();
     const half = this.getHalf();
-    const ym = this.getYM();
+    const ym = options.ym || this.getYM();
     if (String(ref.fiscalYear) !== String(fy)) return false;
     if (ref.scope === 'year') return true;
     if ((ref.half || half) !== half) return false;
@@ -4048,81 +4128,194 @@ const REPORT_UI = {
     return true;
   },
 
-  selectedReferences() {
+  selectedReferences(options={}) {
     STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
-    const direct = (STATE.reportKnowledge.references || []).filter(r=>this.referenceMatches(r));
-    const fy = this.getFY(), half = this.getHalf(), ym = this.getYM();
+    const fy = this.getFY(), half = this.getHalf(), ym = options.ym || this.getYM();
+    const prevYm = this.prevYM(ym);
+    const includePrev = options.includePrev !== false;
+    const direct = (STATE.reportKnowledge.references || []).filter(r => {
+      const type = r.materialType || this.inferMaterialType(r.category);
+      if (String(r.fiscalYear) !== String(fy)) return false;
+      if (r.scope !== 'year' && (r.half || half) !== half) return false;
+      if (type === 'policy_half') return r.scope !== 'month';
+      if (type === 'monthly_pl') return r.ym === ym || (includePrev && r.ym === prevYm) || r.scope === 'half' || r.scope === 'year';
+      if (type === 'landing_forecast') return r.ym === ym || r.scope === 'half' || r.scope === 'year';
+      if (r.scope === 'month') return r.ym === ym;
+      return true;
+    });
     const lib = (STATE.library || []).filter(item => {
       if (item.fiscalYear && String(item.fiscalYear) !== String(fy)) return false;
       const cat = String(item.category || '');
-      const monthMatch = !item.month || (ym && item.month === ym.slice(4,6));
+      const monthMatch = !item.month || (ym && item.month === ym.slice(4,6)) || (includePrev && prevYm && item.month === prevYm.slice(4,6));
       const isPolicy = cat.includes('方針');
-      const isMeeting = cat.includes('会議') || cat.includes('報告') || cat.includes('資料') || cat.includes('メモ') || cat.includes('スクショ');
+      const isMeeting = cat.includes('会議') || cat.includes('報告') || cat.includes('資料') || cat.includes('メモ') || cat.includes('スクショ') || cat.includes('収支') || cat.includes('着地');
       return monthMatch || isPolicy || isMeeting || !item.month;
-    }).map(item => ({
-      id:'lib_' + item.id,
-      fiscalYear: item.fiscalYear || fy,
-      half,
-      ym: item.month ? `${fy}${item.month}` : '',
-      scope: item.month ? 'month' : 'half',
-      title: item.title || item.fileName || '過去資料',
-      category: item.category || '過去資料',
-      priority: item.category && String(item.category).includes('方針') ? '高' : '中',
-      content: [item.memo, item.content, item.fileName ? `添付ファイル：${item.fileName}` : ''].filter(Boolean).join('\n'),
-      savedAt: item.savedAt || ''
-    }));
+    }).map(item => {
+      const type = this.inferMaterialType(item.category);
+      return {
+        id:'lib_' + item.id,
+        fiscalYear: item.fiscalYear || fy,
+        half,
+        ym: item.month ? `${fy}${item.month}` : '',
+        scope: item.month ? 'month' : 'half',
+        materialType: type,
+        inputType: item.fileName ? 'file' : 'text',
+        title: item.title || item.fileName || '過去資料',
+        category: this.materialLabel(type),
+        priority: type === 'policy_half' ? '高' : '中',
+        content: [item.memo, item.content, item.fileName ? `添付ファイル：${item.fileName}` : ''].filter(Boolean).join('\n'),
+        fileName: item.fileName || '',
+        savedAt: item.savedAt || ''
+      };
+    });
     return [...direct, ...lib].sort((a,b)=>{
       const rank = {高:3,中:2,低:1};
       return (rank[b.priority]||0)-(rank[a.priority]||0) || String(b.savedAt||'').localeCompare(String(a.savedAt||''));
-    }).slice(0,20);
+    }).slice(0,30);
+  },
+
+  inferMaterialType(category) {
+    const c = String(category || '');
+    if (c.includes('方針')) return 'policy_half';
+    if (c.includes('月次') || c.includes('収支') || c.includes('売上')) return 'monthly_pl';
+    if (c.includes('着地') || c.includes('予測')) return 'landing_forecast';
+    return 'other';
+  },
+
+  groupReferences(refs) {
+    const groups = { policy_half:[], monthly_pl:[], landing_forecast:[], other:[] };
+    (refs || []).forEach(r => {
+      const type = r.materialType || this.inferMaterialType(r.category);
+      (groups[type] || groups.other).push(r);
+    });
+    return groups;
   },
 
   refreshReferenceList() {
     const box = document.getElementById('report-reference-list');
-    const sum = document.getElementById('report-generate-summary');
     const refs = this.selectedReferences();
     if (box) {
-      box.innerHTML = refs.length ? refs.map(r=>`
-        <div style="border-bottom:1px solid var(--border);padding:8px 0">
-          <div style="font-weight:800;color:var(--text)">${esc(r.title)} <span style="font-size:11px;color:var(--text3)">[${esc(r.category)} / ${esc(r.priority)}]</span></div>
-          <div style="white-space:pre-wrap;color:var(--text2);font-size:12px">${esc((r.content || '').slice(0,500)) || '添付資料のみ。必要に応じて資料内容を確認してください。'}</div>
-        </div>`).join('') : '対象期間に紐づく参考資料はまだありません';
+      if (!refs.length) {
+        box.innerHTML = '対象期間に紐づくAI用資料はまだありません';
+      } else {
+        const groups = this.groupReferences(refs);
+        box.innerHTML = ['policy_half','monthly_pl','landing_forecast','other'].map(type => {
+          const arr = groups[type] || [];
+          if (!arr.length) return '';
+          return `<div style="margin-bottom:10px"><div style="font-weight:900;color:var(--text);margin-bottom:4px">${esc(this.materialLabel(type))}：${arr.length}件</div>` +
+            arr.map(r=>`
+              <div style="border-top:1px solid var(--border);padding:8px 0">
+                <div style="font-weight:800;color:var(--text)">${esc(r.title)} <span style="font-size:11px;color:var(--text3)">[${esc(r.priority)} / ${esc(r.scope || '')}${r.ym ? ' / ' + esc(ymLabel(r.ym)) : ''}]</span></div>
+                <div style="font-size:11px;color:var(--text3)">${r.fileName ? '添付：' + esc(r.fileName) + ' / ' : ''}${esc(this.inputLabel(r.inputType))}</div>
+                <div style="white-space:pre-wrap;color:var(--text2);font-size:12px">${esc((r.content || '').slice(0,500)) || '添付資料のみ。必要に応じて内容メモを追記してください。'}</div>
+              </div>`).join('') + `</div>`;
+        }).join('');
+      }
     }
-    if (sum) this.refreshGenerateSummary();
+    this.refreshGenerateSummary();
   },
 
   refreshGenerateSummary() {
     const sum = document.getElementById('report-generate-summary');
     if (!sum) return;
-    const fy=this.getFY(), half=this.getHalf(), ym=this.getYM();
+    const fy=this.getFY(), half=this.getHalf(), ym=this.getYM(), prevYm=this.prevYM(ym);
     const p=this.getPolicy();
     const refs=this.selectedReferences();
+    const groups=this.groupReferences(refs);
     const ds=ym ? activeDatasetByYM(ym) : null;
-    sum.innerHTML = `対象：${esc(fy)}年度 ${esc(half)} / ${esc(ymLabel(ym))}<br>` +
-      `方針：${p ? '登録済' : '未登録'} / 月次収支：${ds ? datasetKindLabel(ds) + 'あり' : 'なし'} / 参考資料：${refs.length}件`;
+    const prev=prevYm ? activeDatasetByYM(prevYm) || prevDS(ym) : null;
+    sum.innerHTML = `作成対象：${esc(fy)}年度 ${esc(half)} / ${esc(ymLabel(ym))}<br>` +
+      `前月参考：${esc(ymLabel(prevYm))} ${prev ? '収支データあり' : '収支データなし'}<br>` +
+      `方針：${p ? '登録済' : '未登録'} / 月次収支：${ds ? datasetKindLabel(ds) + 'あり' : 'なし'} / AI用資料：方針${groups.policy_half.length}件・月次${groups.monthly_pl.length}件・着地${groups.landing_forecast.length}件・その他${groups.other.length}件`;
+  },
+
+  planSummary(ym, ds) {
+    const fy = ym ? fiscalYearFromYM(ym) : this.getFY();
+    const mm = ym ? ym.slice(4,6) : '';
+    const planRows = typeof storagePlanRows === 'function' ? storagePlanRows(fy) : null;
+    const lines = [];
+    if (!planRows || !Object.keys(planRows).length) return ['- 計画データ: 未登録'];
+    const salesPlanK = getPlanValueK(planRows, '営業収益計', mm, ['家電収入','一般収入','委託収入','その他収入','保管料収入']);
+    const expensePlanK = getPlanValueK(planRows, '売上原価合計', mm, ['人件費','集配傭車料','委託料','施設費','車両費','その他費用']);
+    const profitPlanK = getPlanValueK(planRows, 'センター利益（粗利）', mm, ['粗利益']);
+    lines.push(`- 計画 営業収益: ${salesPlanK != null ? fmt(salesPlanK) + '千円' : '確認できません'}`);
+    lines.push(`- 計画 費用合計: ${expensePlanK != null ? fmt(expensePlanK) + '千円' : '確認できません'}`);
+    lines.push(`- 計画 センター利益: ${profitPlanK != null ? fmt(profitPlanK) + '千円' : '確認できません'}`);
+    if (ds && salesPlanK != null) lines.push(`- 計画比 営業収益: ${ratio(ds.totalIncome, salesPlanK * 1000)} / 差異 ${diff(ds.totalIncome, salesPlanK * 1000)}千円`);
+    if (ds && profitPlanK != null) lines.push(`- 計画比 センター利益: ${ratio(ds.profit, profitPlanK * 1000)} / 差異 ${diff(ds.profit, profitPlanK * 1000)}千円`);
+    return lines;
+  },
+
+  topShipperSummary(ds) {
+    if (!ds || !ds.shippers || !Object.keys(ds.shippers).length) return ['- 荷主別売上: 確認できません'];
+    return Object.entries(ds.shippers).sort((a,b)=>(b[1].income||0)-(a[1].income||0)).slice(0,5).map(([name,d],i)=>`- 荷主${i+1}: ${name} ${fmtK(d.income)}千円`);
+  },
+
+  fieldSummary(ym) {
+    const lines = [];
+    const field = (STATE.fieldData || []).find(r=>r.ym===ym);
+    const prod = (STATE.productAddressData || []).find(r=>r.ym===ym);
+    if (field?.areas) {
+      const areas = Object.entries(field.areas).map(([name,d])=>({name,count:n(d.count)})).sort((a,b)=>b.count-a.count).slice(0,5);
+      if (areas.length) lines.push(`- エリア上位: ${areas.map(a=>`${a.name} ${fmt(a.count)}件`).join(' / ')}`);
+    }
+    if (prod) lines.push(`- 商品・住所CSV: 原票${fmt(prod.slipCount || prod.uniqueSlips || prod.tickets?.length || 0)}件 / 明細${fmt(prod.detailRows || prod.rows || 0)}行`);
+    if (!lines.length) lines.push('- 現場明細・エリア分析: 対象月データなし');
+    return lines;
   },
 
   buildDataSummary(ym) {
     const ds = ym ? activeDatasetByYM(ym) : latestDS();
-    const prev = ds ? prevDS(ds.ym) : null;
+    const prevYm = this.prevYM(ym || ds?.ym);
+    const prev = prevYm ? (activeDatasetByYM(prevYm) || prevDS(ds?.ym)) : null;
     const lastYear = ds ? sameMonthLastYear(ds.ym) : null;
     const lines = [];
     if (ds) {
+      lines.push(`【当月実績｜${ymLabel(ds.ym)}】`);
       lines.push(`- 営業収益: ${fmtK(ds.totalIncome)}千円`);
       lines.push(`- 費用合計: ${fmtK(ds.totalExpense)}千円`);
       lines.push(`- センター利益: ${fmtK(ds.profit)}千円`);
       lines.push(`- 利益率: ${pct(ds.profitRate)}`);
       lines.push(`- みなし人件費率: ${pct(ds.pseudoLaborRate)}（目標: ${CONFIG.TARGETS.pseudoLaborRate}%以内）`);
-      if (prev) lines.push(`- 前月比 営業収益: ${ratio(ds.totalIncome, prev.totalIncome)}`);
-      if (lastYear) lines.push(`- 前年同月比 営業収益: ${ratio(ds.totalIncome, lastYear.totalIncome)}`);
+      lines.push('');
+      lines.push(`【前月参考｜${ymLabel(prevYm)}】`);
+      if (prev) {
+        lines.push(`- 前月 営業収益: ${fmtK(prev.totalIncome)}千円 / 当月差異 ${diff(ds.totalIncome, prev.totalIncome)}千円 / 前月比 ${ratio(ds.totalIncome, prev.totalIncome)}`);
+        lines.push(`- 前月 センター利益: ${fmtK(prev.profit)}千円 / 当月差異 ${diff(ds.profit, prev.profit)}千円 / 前月比 ${ratio(ds.profit, prev.profit)}`);
+        lines.push(`- 前月 利益率: ${pct(prev.profitRate)} / 当月 ${pct(ds.profitRate)}`);
+        lines.push(`- 前月 みなし人件費率: ${pct(prev.pseudoLaborRate)} / 当月 ${pct(ds.pseudoLaborRate)}`);
+      } else {
+        lines.push('- 前月収支データなし');
+      }
+      if (lastYear) {
+        lines.push('');
+        lines.push('【前年同月参考】');
+        lines.push(`- 前年同月比 営業収益: ${ratio(ds.totalIncome, lastYear.totalIncome)} / 差異 ${diff(ds.totalIncome, lastYear.totalIncome)}千円`);
+        lines.push(`- 前年同月比 センター利益: ${ratio(ds.profit, lastYear.profit)} / 差異 ${diff(ds.profit, lastYear.profit)}千円`);
+      }
+      lines.push('');
+      lines.push('【計画比】');
+      lines.push(...this.planSummary(ds.ym, ds));
+      lines.push('');
+      lines.push('【荷主別上位】');
+      lines.push(...this.topShipperSummary(ds));
     } else {
       lines.push('- 月次収支データなし');
     }
-    const field = (STATE.productAddressData || []).find(r=>r.ym===ym);
-    if (field) {
-      lines.push(`- 商品・住所CSV: 原票${fmt(field.slipCount || field.uniqueSlips || field.tickets?.length || 0)}件 / 明細${fmt(field.detailRows || field.rows || 0)}行`);
-    }
+    lines.push('');
+    lines.push('【現場・エリア参考】');
+    lines.push(...this.fieldSummary(ym));
     return lines.join('\n');
+  },
+
+  referenceTextForPrompt(refs, type) {
+    const arr = (refs || []).filter(r => (r.materialType || this.inferMaterialType(r.category)) === type);
+    if (!arr.length) return '登録なし';
+    return arr.map((r,i)=>`【${this.materialLabel(type)}${i+1}｜${r.priority}｜${r.scope}${r.ym ? '｜' + ymLabel(r.ym) : ''}】\n${r.title}\n${r.content || (r.fileName ? '添付ファイル：' + r.fileName + '（内容メモ未入力）' : '内容未入力')}`).join('\n\n');
+  },
+
+  checkedSources() {
+    return [...document.querySelectorAll('.report-source:checked')].map(i=>i.value);
   },
 
   generatePrompt() {
@@ -4131,27 +4324,34 @@ const REPORT_UI = {
     const fy = this.getFY();
     const half = this.getHalf();
     const ym = this.getYM();
+    const prevYm = this.prevYM(ym);
     const type = document.getElementById('report-type')?.value || 'monthly';
     const style = document.getElementById('report-style')?.value || 'a4';
     const tone = document.getElementById('report-tone')?.value || '結論先出し・実務的・数字重視';
     const policy = this.getPolicy();
-    const refs = this.selectedReferences();
-    const refText = refs.length ? refs.map((r,i)=>`【参考資料${i+1}｜${r.category}｜重要度:${r.priority}】\n${r.title}\n${r.content || '添付資料あり。資料名・メモを参考にしてください。'}`).join('\n\n') : '参考資料なし';
+    const refs = this.selectedReferences({ym, includePrev:true});
+    const sources = this.checkedSources();
 
     out.value = `# ${CENTER.name} 会議報告書 作成依頼\n\n` +
 `## 作成条件\n` +
-`- 作成タイプ: ${type}\n- 対象: ${fy}年度 ${half} / ${ymLabel(ym)}\n- 出力形式: ${style}\n- 文章トーン: ${tone}\n\n` +
-`## 年度・半期方針\n` +
+`- 作成タイプ: ${type}\n- 作成対象: ${fy}年度 ${half} / ${ymLabel(ym)}\n- 前月参考: ${ymLabel(prevYm)}まで使用\n- 出力形式: ${style}\n- 文章トーン: ${tone}\n\n` +
+`## 半期方針（入力欄）\n` +
 `- 運営方針: ${policy?.direction || '未登録'}\n- 重点施策: ${policy?.actions || '未登録'}\n- 数値目標・管理指標: ${policy?.targets || '未登録'}\n- 前期からの課題・振り返り: ${policy?.issues || '未登録'}\n\n` +
-`## 月次実績データ\n${this.buildDataSummary(ym)}\n\n` +
-`## 参考資料ストック\n${refText}\n\n` +
+`## 経営方針（半期）資料\n${this.referenceTextForPrompt(refs, 'policy_half')}\n\n` +
+`${sources.includes('monthly') || sources.includes('compare') || sources.includes('plan') ? `## 月次実績・比較データ\n${this.buildDataSummary(ym)}\n\n` : ''}` +
+`## 月次収支資料（登録資料）\n${this.referenceTextForPrompt(refs, 'monthly_pl')}\n\n` +
+`## 着地予測\n${this.referenceTextForPrompt(refs, 'landing_forecast')}\n\n` +
+`${sources.includes('references') ? `## その他資料・補足\n${this.referenceTextForPrompt(refs, 'other')}\n\n` : ''}` +
 `## 作成ルール\n` +
-`- 構成は「結論 → 数字結果 → 進捗評価 → 原因・課題 → 今月実施したこと → 来月以降の打ち手 → まとめ」。\n` +
-`- 推測で書かず、数字・方針・参考資料に基づいて書く。確認できない内容は書かない。\n` +
-`- 文章は管理者会議でそのまま読める社内向けの丁寧な文体にする。\n` +
-`- 重点施策と月次実績のつながりを必ず書く。\n` +
-`- 過剰な経営提案ではなく、現場判断に直結する打ち手に絞る。\n` +
-`- A4 1枚想定で、見出し付きの本文として作成する。`;
+`- 推測で書かない。確認できない内容は「確認できません」と書く。\n` +
+`- 構成は必ず「①結論 → ②数字 → ③原因 → ④打ち手 → ⑤次月確認事項」。\n` +
+`- 主材料は${ymLabel(ym)}、原因分析は${ymLabel(prevYm)}との比較までを使う。前々月以前は原則使わない。\n` +
+`- 半期方針とのつながりを必ず入れる。\n` +
+`- 役員向けに、結論先出し・数字根拠・実行内容が分かる文章にする。\n` +
+`- 数字は千円単位を基本にし、率は%で表記する。\n` +
+`- 過剰な経営提案ではなく、現場判断に直結する打ち手に絞る。\n\n` +
+`## 出力フォーマット\n` +
+`① 結論\n② 数字\n③ 原因\n④ 打ち手\n⑤ 次月確認事項`;
     UI.toast('会議報告書用プロンプトを生成しました');
   },
 

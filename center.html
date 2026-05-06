@@ -497,7 +497,7 @@
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
           <span class="card-title">会議報告書</span>
-          <span style="font-size:11px;color:var(--text3)">年度・半期方針、参考資料ストック、月次実績から報告書本文を作成します</span>
+          <span style="font-size:11px;color:var(--text3)">年度・半期方針、月次収支、着地予測、その他資料、前月実績から報告書本文を作成します</span>
         </div>
         <div class="card-body">
           <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px">
@@ -528,7 +528,7 @@
 
           <div class="report-tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 14px">
             <button type="button" class="btn report-tab active" data-report-tab="policy" onclick="REPORT_UI.switchTab('policy')" style="font-size:12px">年度・半期方針</button>
-            <button type="button" class="btn report-tab" data-report-tab="references" onclick="REPORT_UI.switchTab('references')" style="font-size:12px">参考資料ストック</button>
+            <button type="button" class="btn report-tab" data-report-tab="references" onclick="REPORT_UI.switchTab('references')" style="font-size:12px">AI用資料登録</button>
             <button type="button" class="btn report-tab" data-report-tab="generate" onclick="REPORT_UI.switchTab('generate')" style="font-size:12px">報告書生成</button>
           </div>
 
@@ -562,31 +562,24 @@
           </div>
 
           <div class="report-pane" id="report-pane-references" style="display:none">
+            <div style="background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:12px">
+              <div style="font-size:12px;font-weight:900;color:var(--text);margin-bottom:4px">AI用資料登録</div>
+              <div style="font-size:11px;color:var(--text3);line-height:1.6">
+                資料は「経営方針（半期）」「月次収支」「着地予測」「その他」の4区分で登録します。PDF・Excel・画像はファイル名と補足メモ、テキスト/CSVは内容も読み込みます。
+              </div>
+            </div>
             <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px">
               <div>
                 <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">資料名</label>
-                <input id="report-ref-title" placeholder="例：4月 管理者会議メモ / 方針スクショ補足" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+                <input id="report-ref-title" placeholder="例：2026年度上期方針 / 4月着地予測 / 4月管理者会議メモ" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
               </div>
               <div>
-                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">資料区分</label>
-                <select id="report-ref-category" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
-                  <option value="現場メモ">現場メモ</option>
-                  <option value="会議資料">会議資料</option>
-                  <option value="半期方針">半期方針</option>
-                  <option value="施策メモ">施策メモ</option>
-                  <option value="荷主対応">荷主対応</option>
-                  <option value="キャパ分析">キャパ分析</option>
-                  <option value="売上分析">売上分析</option>
-                  <option value="トラブル記録">トラブル記録</option>
-                  <option value="その他">その他</option>
-                </select>
-              </div>
-              <div>
-                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">重要度</label>
-                <select id="report-ref-priority" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
-                  <option value="高">高</option>
-                  <option value="中" selected>中</option>
-                  <option value="低">低</option>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">登録先</label>
+                <select id="report-ref-material-type" onchange="REPORT_UI.syncReferenceScopeByType()" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+                  <option value="policy_half">経営方針（半期）</option>
+                  <option value="monthly_pl">月次収支</option>
+                  <option value="landing_forecast">着地予測</option>
+                  <option value="other">その他</option>
                 </select>
               </div>
               <div>
@@ -597,15 +590,38 @@
                   <option value="year">年度全体</option>
                 </select>
               </div>
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">重要度</label>
+                <select id="report-ref-priority" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+                  <option value="高">高</option>
+                  <option value="中" selected>中</option>
+                  <option value="低">低</option>
+                </select>
+              </div>
             </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">取り込み方法</label>
+                <select id="report-ref-input-type" onchange="REPORT_UI.toggleReferenceFileArea()" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border2);border-radius:6px">
+                  <option value="text">文字ベタ打ち</option>
+                  <option value="file">PDF / Excel / Word / CSV / TXT</option>
+                  <option value="screenshot">スクリーンショット画像</option>
+                </select>
+              </div>
+              <div id="report-ref-file-wrap" style="display:none">
+                <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">ファイル選択</label>
+                <input type="file" id="report-ref-file" accept=".pdf,.xlsx,.xls,.doc,.docx,.txt,.csv,.png,.jpg,.jpeg,.webp" onchange="REPORT_UI.handleReferenceFile(this.files[0])" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border2);border-radius:6px;background:#fff">
+              </div>
+            </div>
+            <div id="report-ref-file-note" style="font-size:11px;color:var(--text3);margin:-4px 0 10px"></div>
             <div style="margin-bottom:12px">
               <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">内容・メモ</label>
-              <textarea id="report-ref-content" placeholder="資料から読み取った要点、会議で使った数字、現場判断、AIに必ず使わせたい表現を入れてください。スクショの場合は見出しや重要数字を短く補足してください。" style="width:100%;height:110px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
+              <textarea id="report-ref-content" placeholder="資料から読み取った要点、会議で使った数字、AIに必ず使わせたい表現を入力してください。PDF・Excel・スクショの場合は、重要な数字や見出しをここに補足してください。" style="width:100%;height:130px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-              <button class="btn btn-primary" onclick="REPORT_UI.saveReference()" style="font-size:12px">参考資料メモを保存</button>
+              <button class="btn btn-primary" onclick="REPORT_UI.saveReference()" style="font-size:12px">AI用資料を保存</button>
               <button class="btn" onclick="REPORT_UI.clearReferenceForm()" style="font-size:12px">入力クリア</button>
-              <button class="btn" onclick="NAV.go('library')" style="font-size:12px">PDF・画像・Excelを過去資料へ登録</button>
+              <button class="btn" onclick="NAV.go('library')" style="font-size:12px">過去資料ライブラリも開く</button>
               <span id="report-ref-msg" style="font-size:11px;color:var(--text2)"></span>
             </div>
             <div id="report-reference-list" style="font-size:12px;color:var(--text2);background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:10px;line-height:1.7">参考資料はまだありません</div>
