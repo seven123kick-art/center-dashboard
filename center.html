@@ -1010,10 +1010,10 @@
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-            <button class="btn btn-primary" onclick="document.getElementById('capacity-master-input').click()" style="font-size:12px">キャパExcel取込</button>
-            <input type="file" id="capacity-master-input" accept=".xlsx,.xls" style="display:none" onchange="CAPACITY_UI.importCapacityExcel(this.files[0]);this.value=''">
-            <button class="btn" onclick="document.getElementById('capacity-csv-input').click()" style="font-size:12px">配送エリアCSV取込</button>
-            <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none" onchange="CAPACITY_UI.importAreaCsv(this.files);this.value=''">
+            <button class="btn btn-primary" onclick="CAPACITY_UI.openMasterInput()" style="font-size:12px">キャパExcel取込</button>
+            <input type="file" id="capacity-master-input" accept=".xlsx,.xls" style="display:none">
+            <button class="btn" onclick="CAPACITY_UI.openCsvInput()" style="font-size:12px">配送エリアCSV取込</button>
+            <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none">
             <button class="btn" onclick="CAPACITY_UI._cacheKey='';CAPACITY_UI.render()" style="font-size:12px">再集計</button>
             <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()" style="font-size:12px">キャパマスタ削除</button>
             <span id="capacity-msg" style="font-size:11px;color:var(--text2)"></span>
