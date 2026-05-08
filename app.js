@@ -3393,7 +3393,6 @@ const CAPACITY_UI = {
             <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()">キャパ区分を初期化</button>
             <span id="capacity-msg">${hasCap ? `キャパ区分登録済：${STATE.capacity.capacityGroups.length}区分` : '荷主キャパ区分が未作成です'}</span>
           </div>
-          <div class="capx-note">旧Excelキャパ・旧地区マスタは使用しません。先に「荷主キャパ」で区／市を選択して区分を作成すると、月別・日別・曜日・カレンダーへ自動反映します。</div>
         </div>
 
         <div class="capx-kpis">
@@ -3405,7 +3404,7 @@ const CAPACITY_UI = {
 
         <div class="capx-tabs">
           ${[
-            ['monthly','月別使用状況'],['daily','日別超過'],['integrated','連動分析'],['shipperCap','荷主キャパ'],['weekday','曜日分析'],['calendar','カレンダー']
+            ['monthly','月別使用状況'],['daily','日別超過'],['integrated','連動分析'],['shipperCap','荷主キャパ'],['weekday','曜日分析'],['calendar','カレンダー'],['unmatched','未分類']
           ].map(([k,l])=>`<button type="button" class="${this._tab===k?'active':''}" data-capx-tab="${k}">${l}</button>`).join('')}
         </div>
 
@@ -3415,6 +3414,7 @@ const CAPACITY_UI = {
         ${this._tab==='shipperCap'?this.shipperCapacityHtml(actual):''}
         ${this._tab==='weekday'?this.weekdayHtml(daily, actual):''}
         ${this._tab==='calendar'?this.calendarHtml(daily, actual):''}
+        ${this._tab==='unmatched'?this.unmatchedHtml(actual):''}
       </div>`;
   },
 
@@ -3422,7 +3422,7 @@ const CAPACITY_UI = {
     if (!this.hasValidCapacityGroups()) {
       return `<div class="capx-card capx-empty">
         <h3>荷主キャパ区分を作成してください</h3>
-        <p class="capx-note2">現在は旧Excelキャパ・旧地区マスタを使わない設計です。先に「荷主キャパ」タブで、区／市を選択して区分を作成し、コジマ＋ビック・でんきち・エディオンのキャパを入力してください。</p>
+        <p class="capx-note2">「荷主キャパ」タブで区／市を選択し、区分名と荷主別キャパを入力してください。</p>
         <button class="btn btn-primary" type="button" data-capx-tab="shipperCap">荷主キャパを作成する</button>
       </div>`;
     }
@@ -3440,7 +3440,7 @@ const CAPACITY_UI = {
   needCapacityGroupHtml() {
     return `<div class="capx-card capx-empty">
       <h3>荷主キャパ区分が未作成です</h3>
-      <p class="capx-note2">旧地区キャパは参照しません。「荷主キャパ」タブで区／市を選び、区分名と荷主別キャパを入力してください。</p>
+      <p class="capx-note2">「荷主キャパ」タブで区／市を選び、区分名と荷主別キャパを入力してください。</p>
       <button class="btn btn-primary" type="button" data-capx-tab="shipperCap">荷主キャパを作成する</button>
     </div>`;
   },
@@ -4076,7 +4076,7 @@ const CAPACITY_UI = {
 
   unmatchedHtml(actual) {
     const rows = [...(actual.unmatched || new Map()).entries()].sort((a,b)=>b[1]-a[1]);
-    return `<div class="capx-card"><h3>未分類</h3><p class="capx-note2">地区マッピングに当たらなかった市区町村です。必要に応じて地区マッピングへ追加してください。</p>
+    return `<div class="capx-card"><h3>未分類</h3><p class="capx-note2">商品・住所CSVには存在するが、どの荷主キャパ区分にも含まれていない市区町村です。キャパ判定に入れる場合は「荷主キャパ」で区分へ追加してください。</p>
       ${rows.length ? `<div class="capx-cause-list">${rows.map(([c,n],i)=>`<div class="capx-cause-row"><b>${i+1}</b><span>${esc(c)}</span><em>${fmt(n)}件</em></div>`).join('')}</div>` : '<div class="capx-empty">未分類はありません。</div>'}
     </div>`;
   },
