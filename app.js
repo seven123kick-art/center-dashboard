@@ -879,11 +879,16 @@ const IMPORT = {
     }
 
     let imported = 0;
+    const importErrors = [];
     for (const f of files) {
       try {
         const text = await CSV.read(f);
         const rows = CSV.parseSKDL(text, monthCol);
-        if (!rows) { UI.toast(`${f.name}: データ行が見つかりません`,'warn'); continue; }
+        if (!rows) {
+          importErrors.push(`${f.name}: データ行が見つかりません`);
+          UI.toast(`${f.name}: データ行が見つかりません`,'warn', { title:'取込確認' });
+          continue;
+        }
         const type = importType;
         const ds = processDataset(ym, type, rows);
         ds.source = 'csv';
@@ -897,13 +902,21 @@ const IMPORT = {
         STATE.datasets = STATE.datasets.filter(d => !(d.ym === ym && (d.type || 'confirmed') === type && d.source !== 'history'));
         upsertDataset(ds);
         imported++;
-      } catch(e) { UI.toast(`${f.name}: ${e.message}`,'error'); }
+      } catch(e) {
+        const msg = errorMessage(e);
+        importErrors.push(`${f.name}: ${msg}`);
+        UI.toast(`${f.name} の取込に失敗しました`, 'error', { title:'CSV取込エラー', detail: msg });
+      }
+    }
+    if (importErrors.length) {
+      console.warn('CSV import errors', importErrors);
+      UI.toast(`${importErrors.length}件の取込エラーがあります`, 'warn', { title:'取込結果確認', detail: importErrors.slice(0,5).join('\n') + (importErrors.length > 5 ? '\n...' : '') });
     }
     if (imported > 0) {
       STORE.save();
-      CLOUD.pushMonth(ym).catch(()=>{}); // 取込月だけ自動同期
+      CLOUD.pushMonth(ym).catch(e=>UI.toast('CSVは保存しましたが、クラウド同期に失敗しました', 'warn', { title:'同期確認', detail:errorMessage(e) })); // 取込月だけ自動同期
       NAV.refresh();
-      UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`);
+      UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`, 'ok', { title:'CSV取込完了' });
       UI.updateSaveStatus();
     }
   },
@@ -1054,6 +1067,10 @@ function ratio(a,b) { if(!a||!b) return '—'; return pct((a/b-1)*100); }
 function ymLabel(ym) { return ym ? `${ym.slice(0,4)}年${parseInt(ym.slice(4,6))}月` : '—'; }
 function dt() { return new Date().toISOString().slice(0,10); }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function safeLocalGet(key) { try { return localStorage.getItem(key); } catch(e) { return ''; } }
+function safeLocalSet(key, value) { try { localStorage.setItem(key, String(value)); } catch(e) {} }
+function safeLocalRemove(key) { try { localStorage.removeItem(key); } catch(e) {} }
+function errorMessage(e) { return (e && (e.message || e.error_description || e.details)) ? String(e.message || e.error_description || e.details) : String(e || '不明なエラー'); }
 
 function datasetStoredAsKyen(ds) {
   if (!ds) return false;
@@ -2569,6 +2586,9 @@ function renderCloudInventoryCard() {
           <button class="btn" onclick="CLOUD.syncNow()" style="font-size:12px">今すぐ同期</button>
         </div>
       </div>
+      <div style="padding:0 14px 10px">
+        <div id="sync-live-status"></div>
+      </div>
       <div id="cloud-inventory-body" style="padding:0 14px 14px">
         ${cloudBody}
       </div>
@@ -2812,6 +2832,7 @@ function renderImport() {
       </details>`;
 
     listEl.innerHTML = cloudInventoryHtml + backupSyncHtml + healthHtml + storageHtml + monthlyHtml + qualityHtml + historyHtml;
+    UI.updateSyncPanelStatus();
   }
 
   const storageEl = document.getElementById('storage-info');
@@ -2970,8 +2991,43 @@ const UI = {
   updateSaveStatus() {
     const label = document.getElementById('autosave-label');
     const dot   = document.getElementById('autosave-dot');
-    if (label) label.textContent = `クラウド同期済 (${STATE.datasets.length}件)`;
-    if (dot)   dot.style.background = STATE.datasets.length ? '#4d9fea' : '#607d9a';
+    const syncStatus = safeLocalGet('center:lastSyncStatus') || 'idle';
+    const lastSyncAt = safeLocalGet('center:lastSyncAt') || '';
+    const lastSaveAt = safeLocalGet('center:lastLocalSaveAt') || '';
+    const count = STATE.datasets.length;
+    const timeLabel = lastSyncAt
+      ? new Date(lastSyncAt).toLocaleString('ja-JP', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })
+      : (lastSaveAt ? '未同期あり' : '未同期');
+    if (label) {
+      if (syncStatus === 'syncing') label.textContent = `クラウド同期中... (${count}件)`;
+      else if (syncStatus === 'error') label.textContent = `クラウド同期エラー / 最終成功 ${timeLabel}`;
+      else label.textContent = `クラウド同期 ${timeLabel} (${count}件)`;
+    }
+    if (dot) {
+      dot.style.background = syncStatus === 'syncing' ? '#f59e0b' : syncStatus === 'error' ? '#dc2626' : (STATE.datasets.length ? '#16a34a' : '#607d9a');
+      dot.style.boxShadow = syncStatus === 'syncing' ? '0 0 0 4px rgba(245,158,11,.18)' : '';
+    }
+  },
+
+  setSyncStatus(status, message) {
+    safeLocalSet('center:lastSyncStatus', status || 'idle');
+    if (status === 'ok') safeLocalSet('center:lastSyncAt', new Date().toISOString());
+    if (message) safeLocalSet('center:lastSyncMessage', message);
+    this.updateSaveStatus();
+    this.updateSyncPanelStatus();
+  },
+
+  updateSyncPanelStatus() {
+    const el = document.getElementById('sync-live-status');
+    if (!el) return;
+    const status = safeLocalGet('center:lastSyncStatus') || 'idle';
+    const at = safeLocalGet('center:lastSyncAt') || '';
+    const msg = safeLocalGet('center:lastSyncMessage') || '';
+    const label = status === 'syncing' ? '同期中' : status === 'error' ? '同期エラー' : at ? '同期済み' : '未同期';
+    const color = status === 'syncing' ? '#92400e' : status === 'error' ? '#991b1b' : at ? '#166534' : '#475569';
+    const bg = status === 'syncing' ? '#fffbeb' : status === 'error' ? '#fef2f2' : at ? '#f0fdf4' : '#f8fafc';
+    el.style.cssText = `border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:${bg};color:${color};font-size:12px;line-height:1.6`;
+    el.innerHTML = `<strong>${label}</strong>${at ? ` ／ 最終同期 ${esc(new Date(at).toLocaleString('ja-JP'))}` : ''}${msg ? `<br>${esc(msg)}` : ''}`;
   },
 
   updateCloudBadge(status) {
@@ -3012,15 +3068,42 @@ const UI = {
   renderMemo() { renderMemo(); },
 
   // トースト通知
-  toast(msg, type='ok') {
+  toast(msg, type='ok', opt={}) {
+    const stackId = 'toast-stack';
+    let stack = document.getElementById(stackId);
+    if (!stack) {
+      stack = document.createElement('div');
+      stack.id = stackId;
+      stack.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99999;display:flex;flex-direction:column;gap:10px;align-items:flex-end;pointer-events:none';
+      document.body.appendChild(stack);
+    }
+    const palette = {
+      error:['#991b1b','#fef2f2','#fecaca','✕'],
+      warn:['#92400e','#fffbeb','#fcd34d','!'],
+      info:['#1e3a8a','#eff6ff','#bfdbfe','i'],
+      ok:['#14532d','#f0fdf4','#bbf7d0','✓']
+    };
+    const p = palette[type] || palette.ok;
     const el = document.createElement('div');
-    el.style.cssText = `position:fixed;bottom:20px;right:20px;z-index:99999;
-      padding:10px 16px;border-radius:8px;font-size:12px;font-family:inherit;
-      box-shadow:0 4px 12px rgba(0,0,0,.2);max-width:320px;animation:fadeIn .2s;
-      background:${type==='error'?'#dc2626':type==='warn'?'#d97706':'#1a4d7c'};color:#fff`;
-    el.textContent = msg;
-    document.body.appendChild(el);
-    setTimeout(()=>el.remove(), type==='error'?5000:3000);
+    el.style.cssText = `pointer-events:auto;min-width:260px;max-width:420px;border:1px solid ${p[2]};background:${p[1]};color:${p[0]};
+      border-radius:12px;padding:11px 12px;box-shadow:0 12px 32px rgba(15,23,42,.18);font-size:12px;line-height:1.55;
+      font-family:inherit;white-space:normal;animation:fadeIn .16s ease-out`;
+    const title = opt.title || (type==='error'?'エラー':type==='warn'?'確認':type==='info'?'お知らせ':'完了');
+    const detail = opt.detail ? `<div style="margin-top:5px;color:${p[0]};opacity:.86;white-space:pre-wrap">${esc(opt.detail)}</div>` : '';
+    el.innerHTML = `
+      <div style="display:flex;gap:9px;align-items:flex-start">
+        <div style="width:20px;height:20px;border-radius:999px;background:${p[0]};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;flex:0 0 auto">${p[3]}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:900;margin-bottom:2px">${esc(title)}</div>
+          <div style="white-space:pre-wrap">${esc(msg)}</div>
+          ${detail}
+        </div>
+        <button type="button" aria-label="閉じる" style="border:0;background:transparent;color:${p[0]};font-weight:900;cursor:pointer;font-size:15px;line-height:1">×</button>
+      </div>`;
+    el.querySelector('button')?.addEventListener('click', () => el.remove());
+    stack.appendChild(el);
+    const ms = opt.duration || (type==='error' ? 8000 : type==='warn' ? 5500 : 3500);
+    setTimeout(()=>el.remove(), ms);
   },
 };
 
@@ -3050,6 +3133,54 @@ const SIMPLE_STORE = {
 const CLOUD_DEBUG = { run() { CLOUD.saveConfig(); } };
 const PUBLISH = { go() { UI.toast('GitHub Pages での公開はHTMLファイルを直接アップロードしてください'); } };
 const EVENTS = { handleFiles(files) { IMPORT.handleFiles(files); } };
+
+function installStoreTelemetry() {
+  if (!window.STORE || STORE.__telemetryInstalled || typeof STORE.save !== 'function') return;
+  STORE.__telemetryInstalled = true;
+  const originalSave = STORE.save.bind(STORE);
+  STORE.save = function(...args) {
+    const result = originalSave(...args);
+    safeLocalSet('center:lastLocalSaveAt', new Date().toISOString());
+    UI.updateSaveStatus();
+    return result;
+  };
+}
+
+function installCloudTelemetry() {
+  if (!window.CLOUD || CLOUD.__telemetryInstalled) return;
+  CLOUD.__telemetryInstalled = true;
+  const targets = [
+    ['pushAll', 'クラウド全体同期'],
+    ['pushMonth', '月次データ同期'],
+    ['syncSmart', 'クラウド同期'],
+    ['syncNow', '手動同期'],
+    ['pull', 'クラウド読込'],
+    ['refreshInventoryPanel', 'クラウド保存状況確認']
+  ];
+  targets.forEach(([name, label]) => {
+    if (typeof CLOUD[name] !== 'function' || CLOUD[name].__wrapped) return;
+    const original = CLOUD[name].bind(CLOUD);
+    const wrapped = async function(...args) {
+      const isInventory = name === 'refreshInventoryPanel';
+      const isPull = name === 'pull';
+      UI.setSyncStatus('syncing', `${label}を実行中...`);
+      try {
+        const result = await original(...args);
+        UI.setSyncStatus('ok', `${label}が完了しました`);
+        if (name === 'syncNow') UI.toast('クラウド同期が完了しました', 'ok', { title:'同期完了' });
+        if (isInventory) UI.toast('クラウド保存状況を確認しました', 'ok', { title:'確認完了' });
+        return result;
+      } catch(e) {
+        const msg = errorMessage(e);
+        UI.setSyncStatus('error', `${label}に失敗しました：${msg}`);
+        if (!isPull) UI.toast(`${label}に失敗しました`, 'error', { title:'クラウドエラー', detail: msg });
+        throw e;
+      }
+    };
+    wrapped.__wrapped = true;
+    CLOUD[name] = wrapped;
+  });
+}
 
 // 計画データ取込（PLAN）
 const PLAN = {
@@ -3241,12 +3372,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ※ loadScreenModules()は削除済み。shipper.jsはcenter.html末尾で読み込んでいる。
 
   // 1. ローカルストレージから読込
+  installStoreTelemetry();
   STORE.load();
   // 削除済みマーカー適用後の状態をローカルへ即保存し、リロード直後の古い補完・計画復活を防ぐ
   STORE.save();
 
   // 1.5 保存・取込・更新時の自動同期を有効化
   AUTO_SYNC.install();
+  installCloudTelemetry();
+  UI.updateSaveStatus();
 
   // 2. センター情報を画面に反映
   document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
@@ -3283,6 +3417,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 9. クラウド設定フォームとバッジを初期化
   CLOUD.renderForm();
+  window.addEventListener('offline', () => {
+    UI.setSyncStatus('error', 'ネットワークがオフラインです。保存はローカルに残りますが、クラウド同期は復旧後に確認してください。');
+    UI.toast('ネットワークがオフラインになりました', 'warn', { title:'接続確認' });
+  });
+  window.addEventListener('online', () => {
+    UI.toast('ネットワークが復旧しました。必要に応じて「今すぐ同期」を押してください', 'info', { title:'接続復旧' });
+    UI.updateSaveStatus();
+  });
 
   // 10. Supabase同期 → 完了後にオーバーレイをフェードアウトして画面表示
   const _lastView = (() => { try { return sessionStorage.getItem('lastView') || 'dashboard'; } catch(e){ return 'dashboard'; } })();
