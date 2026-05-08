@@ -1076,7 +1076,18 @@
           <div style="margin-top:4px"><span id="import-target-note">ページは共通ですが、保存キー・クラウドパス・IndexedDBはセンターIDで分離します。</span></div>
         </div>
       </div>
-      <details class="card" style="margin-bottom:14px" open>
+      <div class="card no-print" style="margin-bottom:14px;border:1px solid var(--border);background:#f8fafc">
+        <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px">
+          <div style="font-size:12px;color:var(--text2);line-height:1.6">
+            データ取り込みページは、初期表示では全項目を閉じています。必要な項目だけ開いて作業してください。
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn" onclick="IMPORT_PAGE_TOGGLE.setAll(true)" style="font-size:12px;padding:5px 10px">すべて開く</button>
+            <button class="btn" onclick="IMPORT_PAGE_TOGGLE.setAll(false)" style="font-size:12px;padding:5px 10px">すべて閉じる</button>
+          </div>
+        </div>
+      </div>
+      <details class="card" style="margin-bottom:14px">
         <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
           <span class="card-title">収支実績CSV取込</span>
           <span style="font-size:11px;color:var(--text3)">▼ 開閉</span>
@@ -1097,7 +1108,7 @@
           <div id="upload-msg"></div>
         </div>
       </details>
-      <details class="card" style="margin-bottom:14px" open>
+      <details class="card" style="margin-bottom:14px">
         <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
           <span class="card-title">データ管理・正常性チェック</span>
           <span style="font-size:11px;color:var(--text3)">▼ 開閉</span>
@@ -1169,7 +1180,7 @@
 
 
       <!-- 現場明細データ取込・管理 -->
-      <details class="card" style="margin-bottom:14px" open>
+      <details class="card" style="margin-bottom:14px">
         <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
           <div style="display:flex;align-items:center;gap:8px">
             <span class="card-title">🚚 現場明細データ（CSV専用）</span>
@@ -1339,7 +1350,7 @@
           <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
         </summary>
         <div class="card-body" style="display:grid;gap:10px">
-          <details open style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
+          <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
             <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
               <span>① 月次データ登録の基本順序</span><span style="font-size:11px;color:var(--text3)">▼</span>
             </summary>

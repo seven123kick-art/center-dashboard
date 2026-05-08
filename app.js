@@ -2155,7 +2155,7 @@ function renderMonthlyCheckTable() {
         : storageBadge('12ヶ月 OK', 'ok');
 
   return `
-    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden" ${missingCount || abnormalCount ? 'open' : ''}>
+    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
       <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px">
         <div>
           <div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div>
@@ -2237,7 +2237,7 @@ function renderDataQualityCheckTable() {
   const rows = storageDataQualityRows(fy);
   const summary = rows.length ? storageBadge(`確認 ${rows.length}件`, 'danger') : storageBadge('異常なし', 'ok');
   return `
-    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden" ${rows.length ? 'open' : ''}>
+    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
       <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px">
         <div>
           <div style="font-weight:900;font-size:14px">重複・異常データ確認</div>
@@ -2370,7 +2370,7 @@ function renderDataHealthDashboard() {
       <div style="font-size:11px;color:var(--text3);margin-top:2px">${esc(sub)}</div>
     </div>`;
   return `
-    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:16px;background:#f8fafc;overflow:hidden" open>
+    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:16px;background:#f8fafc;overflow:hidden">
       <summary style="cursor:pointer;padding:14px;list-style:none;background:#f8fafc;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
         <div>
           <div style="font-weight:900;font-size:15px;color:var(--text)">データ正常性チェック</div>
@@ -2392,7 +2392,7 @@ function renderDataHealthDashboard() {
         ${mini('住所/地区欠落', `${addressMissing}件`, '郵便番号・市区町村', addressMissing?'warn':'ok')}
         ${mini('キャパ区分', `${capStats.groupCount}区分`, capStats.hasValid?'登録済':'未設定', capStats.hasValid?'ok':'danger')}
       </div>
-      <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden" ${dangerCount || warnCount ? 'open' : ''}>
+      <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
         <summary style="cursor:pointer;padding:11px 12px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fff">
           <span style="font-size:13px;font-weight:900;color:var(--text)">月別チェック表</span>
           <span style="font-size:11px;color:var(--text3)">長い表はここで開閉できます ▼</span>
@@ -2457,7 +2457,7 @@ function renderStorageMapTable() {
       </summary>
       <div style="padding:0 12px 12px">
       ${warnings.length ? `<div style="border:1px solid #fca5a5;background:#fef2f2;color:#991b1b;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px;line-height:1.7"><strong>確認が必要なデータがあります</strong><br>${warnings.map(w=>'・'+esc(w)).join('<br>')}</div>` : `<div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px">この年度の保管状況に大きな異常は見つかりません。</div>`}
-      <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden" open>
+      <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
         <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f8fafc">
           <span style="font-size:13px;font-weight:900;color:var(--text)">保管区分別の登録状況</span>
           <span style="font-size:11px;color:var(--text3)">開閉できます ▼</span>
@@ -2536,6 +2536,12 @@ window.DATA_STORAGE_TABLE = {
     } catch(e) {}
     await this._syncAfterDelete(`${ymLabel(ym)}の${label}`);
     UI.toast(`${ymLabel(ym)}の${label}を削除しました`);
+  }
+};
+
+window.IMPORT_PAGE_TOGGLE = {
+  setAll(open) {
+    document.querySelectorAll('#view-import details').forEach(el => { el.open = !!open; });
   }
 };
 
