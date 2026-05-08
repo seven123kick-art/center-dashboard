@@ -2215,26 +2215,28 @@ function renderDataQualityCheckTable() {
   const rows = storageDataQualityRows(fy);
   const summary = rows.length ? storageBadge(`確認 ${rows.length}件`, 'danger') : storageBadge('異常なし', 'ok');
   return `
-    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden" ${rows.length ? 'open' : ''}>
+      <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px">
         <div>
           <div style="font-weight:900;font-size:14px">重複・異常データ確認</div>
           <div style="font-size:11px;color:var(--text3);margin-top:3px">同じ年月＋同じ区分の重複、単位ズレ、年度ズレ、極端に小さい金額を確認</div>
         </div>
-        <div>${summary}</div>
+        <div style="display:flex;align-items:center;gap:8px">${summary}<span style="font-size:11px;color:var(--text3)">▼</span></div>
+      </summary>
+      <div style="padding:0 12px 12px">
+        ${rows.length ? `
+          <div class="scroll-x"><table class="tbl"><thead><tr><th>区分</th><th>月</th><th>データ</th><th>確認内容</th><th>対応</th></tr></thead><tbody>
+            ${rows.map(r=>`<tr>
+              <td>${storageBadge(r.level, r.level === '異常' ? 'danger' : 'warn')}</td>
+              <td><strong>${ymLabel(r.ym)}</strong></td>
+              <td>${esc(r.item)}</td>
+              <td style="min-width:280px;color:var(--text2)">${esc(r.detail)}</td>
+              <td style="min-width:280px;color:var(--text2)">${esc(r.action)}</td>
+            </tr>`).join('')}
+          </tbody></table></div>` : `
+          <div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;font-size:12px">この年度では、同一月・同一区分の重複や単位異常は見つかりません。</div>`}
       </div>
-      ${rows.length ? `
-        <div class="scroll-x"><table class="tbl"><thead><tr><th>区分</th><th>月</th><th>データ</th><th>確認内容</th><th>対応</th></tr></thead><tbody>
-          ${rows.map(r=>`<tr>
-            <td>${storageBadge(r.level, r.level === '異常' ? 'danger' : 'warn')}</td>
-            <td><strong>${ymLabel(r.ym)}</strong></td>
-            <td>${esc(r.item)}</td>
-            <td style="min-width:280px;color:var(--text2)">${esc(r.detail)}</td>
-            <td style="min-width:280px;color:var(--text2)">${esc(r.action)}</td>
-          </tr>`).join('')}
-        </tbody></table></div>` : `
-        <div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;font-size:12px">この年度では、同一月・同一区分の重複や単位異常は見つかりません。</div>`}
-    </div>`;
+    </details>`;
 }
 
 
@@ -2358,22 +2360,30 @@ function renderDataHealthDashboard() {
         ${mini('住所/地区欠落', `${addressMissing}件`, '郵便番号・市区町村', addressMissing?'warn':'ok')}
         ${mini('キャパ区分', `${capStats.groupCount}区分`, capStats.hasValid?'登録済':'未設定', capStats.hasValid?'ok':'danger')}
       </div>
-      <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支</th><th>作業者</th><th>商品住所</th><th>計画</th><th>キャパ</th><th>金額欠落</th><th>住所/地区欠落</th><th>キャパ未分類</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
-        ${states.map(s=>`
-          <tr>
-            <td><strong>${ymLabel(s.ym)}</strong></td>
-            <td>${storageBadge(s.csvOk?'OK':'未登録', s.csvOk?'ok':'danger')}</td>
-            <td>${storageBadge(s.workerOk?'OK':'未登録', s.workerOk?'ok':'warn')}</td>
-            <td>${storageBadge(s.productOk?'OK':'未登録', s.productOk?'ok':'danger')}</td>
-            <td>${storageBadge(s.planOk?'OK':'未登録', s.planOk?'ok':'warn')}</td>
-            <td>${storageBadge(s.capOk?'OK':'未設定', s.capOk?'ok':'danger')}</td>
-            <td style="text-align:right;font-weight:800">${fmt(s.productStats.amountMissing)}</td>
-            <td style="text-align:right;font-weight:800">${fmt(s.productStats.addressMissing)}</td>
-            <td style="text-align:right;font-weight:800">${fmt(s.capStats.unmatched)}</td>
-            <td>${storageBadge(s.judge, s.kind)}</td>
-            <td style="min-width:260px;color:var(--text2)">${s.problems.length ? esc(s.problems.join(' / ')) : '登録状況に大きな問題はありません'}</td>
-          </tr>`).join('')}
-      </tbody></table></div>
+      <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden" ${dangerCount || warnCount ? 'open' : ''}>
+        <summary style="cursor:pointer;padding:11px 12px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fff">
+          <span style="font-size:13px;font-weight:900;color:var(--text)">月別チェック表</span>
+          <span style="font-size:11px;color:var(--text3)">長い表はここで開閉できます ▼</span>
+        </summary>
+        <div style="padding:0 10px 10px">
+          <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支</th><th>作業者</th><th>商品住所</th><th>計画</th><th>キャパ</th><th>金額欠落</th><th>住所/地区欠落</th><th>キャパ未分類</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
+            ${states.map(s=>`
+              <tr>
+                <td><strong>${ymLabel(s.ym)}</strong></td>
+                <td>${storageBadge(s.csvOk?'OK':'未登録', s.csvOk?'ok':'danger')}</td>
+                <td>${storageBadge(s.workerOk?'OK':'未登録', s.workerOk?'ok':'warn')}</td>
+                <td>${storageBadge(s.productOk?'OK':'未登録', s.productOk?'ok':'danger')}</td>
+                <td>${storageBadge(s.planOk?'OK':'未登録', s.planOk?'ok':'warn')}</td>
+                <td>${storageBadge(s.capOk?'OK':'未設定', s.capOk?'ok':'danger')}</td>
+                <td style="text-align:right;font-weight:800">${fmt(s.productStats.amountMissing)}</td>
+                <td style="text-align:right;font-weight:800">${fmt(s.productStats.addressMissing)}</td>
+                <td style="text-align:right;font-weight:800">${fmt(s.capStats.unmatched)}</td>
+                <td>${storageBadge(s.judge, s.kind)}</td>
+                <td style="min-width:260px;color:var(--text2)">${s.problems.length ? esc(s.problems.join(' / ')) : '登録状況に大きな問題はありません'}</td>
+              </tr>`).join('')}
+          </tbody></table></div>
+        </div>
+      </details>
       ${capUnmatched ? `<div style="margin-top:10px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;border-radius:10px;padding:9px 10px;font-size:12px;line-height:1.6">キャパ未分類が ${fmt(capUnmatched)}件あります。商品・住所CSVに存在する市区町村が、荷主キャパ区分に入っていない可能性があります。</div>` : ''}
     </div>`;
 }
@@ -2417,9 +2427,17 @@ function renderStorageMapTable() {
         </div>
       </div>
       ${warnings.length ? `<div style="border:1px solid #fca5a5;background:#fef2f2;color:#991b1b;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px;line-height:1.7"><strong>確認が必要なデータがあります</strong><br>${warnings.map(w=>'・'+esc(w)).join('<br>')}</div>` : `<div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px">この年度の保管状況に大きな異常は見つかりません。</div>`}
-      <div class="scroll-x"><table class="tbl"><thead><tr><th>保管区分</th><th>対象</th><th>登録状況</th><th>件数/月数</th><th>元単位</th><th>最終更新</th><th>説明</th><th>操作</th></tr></thead><tbody>
-        ${tableRows.map(r=>`<tr><td><strong>${esc(r[0])}</strong></td><td>${esc(r[1])}</td><td>${r[2]}</td><td>${r[3]}</td><td>${esc(r[4])}</td><td>${esc(r[5])}</td><td style="min-width:260px;color:var(--text2)">${esc(r[6])}</td><td>${r[7]}</td></tr>`).join('')}
-      </tbody></table></div>
+      <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden" open>
+        <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f8fafc">
+          <span style="font-size:13px;font-weight:900;color:var(--text)">保管区分別の登録状況</span>
+          <span style="font-size:11px;color:var(--text3)">開閉できます ▼</span>
+        </summary>
+        <div style="padding:10px 10px 12px">
+          <div class="scroll-x"><table class="tbl"><thead><tr><th>保管区分</th><th>対象</th><th>登録状況</th><th>件数/月数</th><th>元単位</th><th>最終更新</th><th>説明</th><th>操作</th></tr></thead><tbody>
+            ${tableRows.map(r=>`<tr><td><strong>${esc(r[0])}</strong></td><td>${esc(r[1])}</td><td>${r[2]}</td><td>${r[3]}</td><td>${esc(r[4])}</td><td>${esc(r[5])}</td><td style="min-width:260px;color:var(--text2)">${esc(r[6])}</td><td>${r[7]}</td></tr>`).join('')}
+          </tbody></table></div>
+        </div>
+      </details>
     </div>`;
 }
 window.DATA_STORAGE_TABLE = {

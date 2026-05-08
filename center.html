@@ -1094,7 +1094,7 @@
         </div>
       </div>
       <div class="card" style="margin-bottom:14px">
-        <div class="card-header"><span class="card-title">読み込み済みデータ</span></div>
+        <div class="card-header"><span class="card-title">データ管理・正常性チェック</span></div>
         <div id="data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
       </div>
       <!-- 計画データ取込 -->
@@ -1316,18 +1316,52 @@
 
       <div class="card">
         <div class="card-header"><span class="card-title">運用ガイド</span></div>
-        <div class="card-body">
-          <div class="rule-list">
-            <p>このタブは <strong>収支実績データ（SKDL形式）</strong> 専用です</p>
-            <p><strong>SKDL0001</strong> … 日報（月中の速報確認用）／ <strong>SKDL0003</strong> … 確定値（月末締め後の正式数値）</p>
-            <p>ファイル名に「1」が含まれれば日報、「3」が含まれれば確定として自動判別します</p>
-            <p>同一月に両方読み込んだ場合は <strong>確定値を優先</strong> して表示します</p>
-            <p>複数月まとめて選択すると推移グラフが自動生成されます</p>
-            <p>同一月のファイルを再度読み込むと上書き更新されます</p>
-            <p>データはこのPCのブラウザ内のみで処理します（外部送信・クラウド保存なし）</p>
-            <p>ブラウザを閉じるとデータはリセットされます。毎月読み込み直してください</p>
-            <p>2名それぞれのPCでこのHTMLファイルを開いて使います（データは各自で管理）</p>
-          </div>
+        <div class="card-body" style="display:grid;gap:10px">
+          <details open style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
+            <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
+              <span>① 月次データ登録の基本順序</span><span style="font-size:11px;color:var(--text3)">▼</span>
+            </summary>
+            <div class="rule-list" style="padding:10px 12px">
+              <p><strong>収支実績CSV</strong> → <strong>計画データ</strong> → <strong>作業者CSV</strong> → <strong>商品・住所CSV</strong> → <strong>荷主キャパ区分</strong> の順で登録します</p>
+              <p>AI会議報告書に進む前に、上部の <strong>データ正常性チェック</strong> で対象月がOKになっているか確認します</p>
+              <p>未登録・金額欠落・住所/地区欠落・キャパ未分類がある月は、分析結果やAI文面が弱くなるため先に修正します</p>
+            </div>
+          </details>
+
+          <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
+            <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
+              <span>② 収支実績CSVの扱い</span><span style="font-size:11px;color:var(--text3)">▼</span>
+            </summary>
+            <div class="rule-list" style="padding:10px 12px">
+              <p><strong>SKDL0001</strong> は日報・速報値、<strong>SKDL0003</strong> は月末締め後の確定値として扱います</p>
+              <p>同一月に速報と確定がある場合、画面表示・分析は <strong>確定値を優先</strong> します</p>
+              <p>同一月のファイルを再度読み込むと、対象月・対象区分のデータを入れ替えます</p>
+              <p>過去月でSKDL詳細CSVがない場合のみ、<strong>過去実績補完データ</strong> を使用します</p>
+            </div>
+          </details>
+
+          <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
+            <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
+              <span>③ 現場明細データの扱い</span><span style="font-size:11px;color:var(--text3)">▼</span>
+            </summary>
+            <div class="rule-list" style="padding:10px 12px">
+              <p><strong>作業者CSV</strong> は作業者分析・作業内容分析の元データです</p>
+              <p><strong>商品・住所CSV</strong> は商品カテゴリ分析・エリア分析・キャパ分析の元データです</p>
+              <p>商品・住所CSVは、I列「エスライン原票番号」のユニーク件数を基準にします</p>
+              <p>顧客氏名・電話番号・住所番地・raw行は保存しません</p>
+            </div>
+          </details>
+
+          <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
+            <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
+              <span>④ 削除・同期・復元の注意</span><span style="font-size:11px;color:var(--text3)">▼</span>
+            </summary>
+            <div class="rule-list" style="padding:10px 12px">
+              <p>月別削除は、ローカル削除・Supabase削除・削除マーカーを使って復活を防ぎます</p>
+              <p>自動同期は軽量化済みです。通常は手動操作不要ですが、反映が不安な場合は「今すぐ同期」を押します</p>
+              <p>データ正常性チェックで未登録や欠落が残る場合は、対象月を再取込してください</p>
+            </div>
+          </details>
         </div>
       </div>
     </div>
