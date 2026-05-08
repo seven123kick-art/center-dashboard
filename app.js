@@ -1708,8 +1708,11 @@ const ANALYTICS_UI = {
       </div>`;
   },
   kpiGrid(cards, cols=4, extraStyle='') {
-    const cls = cols === 3 ? 'kpi-row kpi-row-3' : 'kpi-row';
+    const cls = cols === 3 ? 'kpi-row kpi-row-3' : 'kpi-row kpi-row-4';
     return `<div class="${cls}" style="${extraStyle}">${cards.join('')}</div>`;
+  },
+  kpiCards(cards) {
+    return (cards || []).join('');
   },
   card(title, body, opts={}) {
     const style = opts.style || '';
@@ -1766,7 +1769,7 @@ function renderDashboard() {
   const profitAccent = ds.profit >= 0 ? 'accent-green' : 'accent-red';
   const prevDs = prevDS(ds.ym);
 
-  area.innerHTML = ANALYTICS_UI.kpiGrid([
+  area.innerHTML = ANALYTICS_UI.kpiCards([
     ANALYTICS_UI.kpiCard({
       label:'営業収益（当月）',
       value:fmtK(ds.totalIncome),
@@ -2093,7 +2096,7 @@ function renderAnnual() {
   const prf = list.reduce((s,d)=>s+d.profit,0);
 
   if (kpi) {
-    kpi.innerHTML = ANALYTICS_UI.kpiGrid([
+    kpi.innerHTML = ANALYTICS_UI.kpiCards([
       ANALYTICS_UI.kpiCard({
         label:`年度累計収入（${fy}年度）`,
         value:fmtK(inc),
