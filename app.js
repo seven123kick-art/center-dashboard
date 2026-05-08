@@ -2472,6 +2472,41 @@ function renderStorageMapTable() {
     </details>`;
 }
 
+function renderCloudInventoryCard() {
+  const summary = window.CLOUD?._lastInventory || null;
+  const cloudBody = summary ? CLOUD.renderInventorySummary(summary) : `
+    <div style="border:1px dashed var(--border2);background:#fff;border-radius:12px;padding:12px;font-size:12px;color:var(--text2);line-height:1.7">
+      まだ確認していません。右上の「確認」を押すと、Supabase の manifest.json を読み取り、クラウド保存済みの件数を表示します。
+    </div>`;
+  const checkedAt = summary?.fetchedAt ? new Date(summary.fetchedAt).toLocaleString('ja-JP') : '未確認';
+  const savedAt = summary?.savedAt ? new Date(summary.savedAt).toLocaleString('ja-JP') : '未確認';
+  const statusBadge = summary
+    ? storageBadge('確認済', 'ok')
+    : storageBadge('未確認', 'warn');
+  return `
+    <div style="margin-bottom:10px;border:1px solid var(--border);border-radius:16px;background:#f8fafc;overflow:hidden;box-shadow:0 8px 22px rgba(15,23,42,.06)">
+      <div style="padding:14px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="font-weight:900;font-size:14px">☁ クラウド保存状況確認</div>
+            ${statusBadge}
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">
+            Supabase の manifest.json を基準に、クラウド側へ保存済みのデータ件数を確認します。<br>
+            最終保存：${esc(savedAt)} ／ 確認日時：${esc(checkedAt)}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="CLOUD.refreshInventoryPanel()" style="font-size:12px">確認</button>
+          <button class="btn" onclick="CLOUD.syncNow()" style="font-size:12px">今すぐ同期</button>
+        </div>
+      </div>
+      <div id="cloud-inventory-body" style="padding:0 14px 14px">
+        ${cloudBody}
+      </div>
+    </div>`;
+}
+
 function renderBackupAndSyncPanel() {
   const info = STORE.storageInfo();
   const backups = STORE.listLocalBackups ? STORE.listLocalBackups() : [];
@@ -2489,17 +2524,12 @@ function renderBackupAndSyncPanel() {
 
   const capacityKind = info.totalBytes > 4.5 * 1024 * 1024 ? 'danger' : info.totalBytes > 3.5 * 1024 * 1024 ? 'warn' : 'ok';
   const capacityBadge = storageBadge(`合計 ${info.totalKb} KB`, capacityKind);
-  const cloudSummary = CLOUD?._lastInventory ? CLOUD.renderInventorySummary(CLOUD._lastInventory) : `
-    <div style="border:1px solid var(--border);background:#fff;border-radius:12px;padding:12px;font-size:12px;color:var(--text2)">
-      未確認です。「クラウド保存状況を確認」を押すと、manifest.json の保存済み件数を表示します。
-    </div>`;
-
   return `
     <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:16px;background:#f8fafc;overflow:hidden">
       <summary style="cursor:pointer;padding:14px;list-style:none;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <div>
           <div style="font-weight:900;font-size:14px">バックアップ・同期状態</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:3px">ローカル容量、世代バックアップ、クラウド保存済み件数を確認</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">ローカル容量と世代バックアップを確認</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           ${capacityBadge}
@@ -2527,15 +2557,7 @@ function renderBackupAndSyncPanel() {
 
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
           <button class="btn btn-primary" onclick="DATA_STORAGE_TABLE.createLocalBackup()" style="font-size:12px">ローカル世代バックアップ作成</button>
-          <button class="btn" onclick="CLOUD.refreshInventoryPanel()" style="font-size:12px">クラウド保存状況を確認</button>
-          <button class="btn" onclick="CLOUD.syncNow()" style="font-size:12px">今すぐ同期</button>
         </div>
-
-        <div style="margin-bottom:14px">
-          <div style="font-size:12px;font-weight:900;margin-bottom:6px">クラウド保存済み状況</div>
-          <div id="cloud-inventory-body">${cloudSummary}</div>
-        </div>
-
         <div>
           <div style="font-size:12px;font-weight:900;margin-bottom:6px">ローカル世代バックアップ</div>
           <div class="scroll-x"><table class="tbl"><thead><tr><th>作成日時</th><th>容量</th><th>内容</th><th>操作</th></tr></thead><tbody>${backupRows}</tbody></table></div>
@@ -2652,6 +2674,7 @@ window.IMPORT_PAGE_TOGGLE = {
 function renderImport() {
   const listEl = document.getElementById('data-list');
   if (listEl) {
+    const cloudInventoryHtml = renderCloudInventoryCard();
     const backupSyncHtml = renderBackupAndSyncPanel();
     const healthHtml = renderDataHealthDashboard();
     const storageHtml = renderStorageMapTable();
@@ -2720,7 +2743,7 @@ function renderImport() {
         </div>
       </details>`;
 
-    listEl.innerHTML = backupSyncHtml + healthHtml + storageHtml + monthlyHtml + qualityHtml + historyHtml;
+    listEl.innerHTML = cloudInventoryHtml + backupSyncHtml + healthHtml + storageHtml + monthlyHtml + qualityHtml + historyHtml;
   }
 
   const storageEl = document.getElementById('storage-info');
