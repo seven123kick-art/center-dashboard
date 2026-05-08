@@ -506,6 +506,68 @@ window.CLOUD = {
     }
   },
 
+  _manifestSummary(manifest) {
+    manifest = manifest || {};
+    return {
+      ok: !!manifest.center,
+      center: manifest.center || CENTER.id,
+      savedAt: manifest.savedAt || '',
+      datasets: Array.isArray(manifest.datasets) ? manifest.datasets.length : 0,
+      workers: Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData.length : 0,
+      products: Array.isArray(manifest.productAddressData) ? manifest.productAddressData.length : 0,
+      hasCapacity: !!manifest.hasCapacity,
+      hasPlanData: !!manifest.hasPlanData,
+      hasMemos: !!manifest.hasMemos,
+      hasLibrary: !!manifest.hasLibrary,
+      deleted: manifest.deleted || {},
+      version: manifest.version || ''
+    };
+  },
+
+  async getCloudInventory() {
+    try {
+      const manifest = await this._downloadJSON(this._manifestKey());
+      if (!manifest) return { ok:false, error:'manifest.json が見つかりません' };
+      if (manifest.center && manifest.center !== CENTER.id) return { ok:false, error:`別センター(${manifest.center})のmanifestです` };
+      const summary = this._manifestSummary(manifest);
+      this._lastInventory = { ...summary, fetchedAt:new Date().toISOString() };
+      return { ok:true, manifest, summary:this._lastInventory };
+    } catch(e) {
+      return { ok:false, error:e.message || String(e) };
+    }
+  },
+
+  renderInventorySummary(summary) {
+    const at = summary?.savedAt ? new Date(summary.savedAt).toLocaleString('ja-JP') : '未確認';
+    const fetched = summary?.fetchedAt ? new Date(summary.fetchedAt).toLocaleString('ja-JP') : '';
+    const badge = (text, ok=true) => `<span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${ok?'#d1fae5':'#fef3c7'};color:${ok?'#065f46':'#92400e'};font-weight:900;font-size:11px;white-space:nowrap">${text}</span>`;
+    return `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px">
+        <div style="border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff"><div style="font-size:11px;color:var(--text2);font-weight:900">クラウド最終保存</div><div style="font-size:12px;margin-top:4px">${at}</div></div>
+        <div style="border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff"><div style="font-size:11px;color:var(--text2);font-weight:900">収支CSV</div><div style="font-size:18px;font-weight:900;margin-top:2px">${summary?.datasets || 0}</div></div>
+        <div style="border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff"><div style="font-size:11px;color:var(--text2);font-weight:900">作業者CSV</div><div style="font-size:18px;font-weight:900;margin-top:2px">${summary?.workers || 0}</div></div>
+        <div style="border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff"><div style="font-size:11px;color:var(--text2);font-weight:900">商品住所CSV</div><div style="font-size:18px;font-weight:900;margin-top:2px">${summary?.products || 0}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:12px">
+        ${badge(summary?.hasCapacity ? 'キャパ保存済' : 'キャパ未保存', !!summary?.hasCapacity)}
+        ${badge(summary?.hasPlanData ? '計画保存済' : '計画未保存', !!summary?.hasPlanData)}
+        ${badge(summary?.hasLibrary ? '参考資料あり' : '参考資料なし', true)}
+        <span style="color:var(--text3);font-size:11px;align-self:center">${fetched ? `確認日時：${fetched}` : ''}</span>
+      </div>`;
+  },
+
+  async refreshInventoryPanel() {
+    const body = document.getElementById('cloud-inventory-body');
+    if (!body) return;
+    body.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:8px">クラウド保存状況を確認中...</div>';
+    const r = await this.getCloudInventory();
+    if (!r.ok) {
+      body.innerHTML = `<div style="border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:10px;padding:10px;font-size:12px">クラウド保存状況を確認できません：${r.error || '不明'}</div>`;
+      return;
+    }
+    body.innerHTML = this.renderInventorySummary(r.summary);
+  },
+
   async saveConfig() {
     const urlEl=document.getElementById('sb-url'), keyEl=document.getElementById('sb-key'), bucketEl=document.getElementById('sb-bucket'), msgEl=document.getElementById('cloud-test-msg');
     const url=urlEl?.value?.trim()||CONFIG.SUPABASE_URL;

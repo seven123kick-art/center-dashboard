@@ -2471,8 +2471,111 @@ function renderStorageMapTable() {
       </div>
     </details>`;
 }
+
+function renderBackupAndSyncPanel() {
+  const info = STORE.storageInfo();
+  const backups = STORE.listLocalBackups ? STORE.listLocalBackups() : [];
+  const backupRows = backups.length ? backups.map(b => `
+    <tr>
+      <td><strong>${new Date(b.savedAt).toLocaleString('ja-JP')}</strong><br><span style="font-size:10px;color:var(--text3)">${esc(b.reason || '')}</span></td>
+      <td>${((Number(b.bytes)||0)/1024).toFixed(1)} KB</td>
+      <td>収支 ${n(b.datasets)} / 作業者 ${n(b.workers)} / 商品 ${n(b.products)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn" onclick="DATA_STORAGE_TABLE.restoreLocalBackup('${esc(b.id)}')" style="font-size:11px;padding:3px 8px">復元</button>
+        <button class="btn btn-danger" onclick="DATA_STORAGE_TABLE.deleteLocalBackup('${esc(b.id)}')" style="font-size:11px;padding:3px 8px">削除</button>
+      </td>
+    </tr>`).join('') : `
+    <tr><td colspan="4" style="color:var(--text3);font-size:12px;padding:12px">まだローカル世代バックアップはありません。</td></tr>`;
+
+  const capacityKind = info.totalBytes > 4.5 * 1024 * 1024 ? 'danger' : info.totalBytes > 3.5 * 1024 * 1024 ? 'warn' : 'ok';
+  const capacityBadge = storageBadge(`合計 ${info.totalKb} KB`, capacityKind);
+  const cloudSummary = CLOUD?._lastInventory ? CLOUD.renderInventorySummary(CLOUD._lastInventory) : `
+    <div style="border:1px solid var(--border);background:#fff;border-radius:12px;padding:12px;font-size:12px;color:var(--text2)">
+      未確認です。「クラウド保存状況を確認」を押すと、manifest.json の保存済み件数を表示します。
+    </div>`;
+
+  return `
+    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:16px;background:#f8fafc;overflow:hidden">
+      <summary style="cursor:pointer;padding:14px;list-style:none;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:900;font-size:14px">バックアップ・同期状態</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">ローカル容量、世代バックアップ、クラウド保存済み件数を確認</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          ${capacityBadge}
+          <span style="font-size:11px;color:var(--text3)">▼</span>
+        </div>
+      </summary>
+      <div style="padding:12px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:12px">
+          <div style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:12px">
+            <div style="font-size:11px;color:var(--text2);font-weight:900">通常データ容量</div>
+            <div style="font-size:22px;font-weight:900;margin-top:2px">${info.kb} KB</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">STORE管理キーのみ集計</div>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:12px">
+            <div style="font-size:11px;color:var(--text2);font-weight:900">世代バックアップ容量</div>
+            <div style="font-size:22px;font-weight:900;margin-top:2px">${info.backupKb} KB</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">最大3世代まで保持</div>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:12px">
+            <div style="font-size:11px;color:var(--text2);font-weight:900">同期方式</div>
+            <div style="font-size:14px;font-weight:900;margin-top:6px">月単位分割＋軽量台帳</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">full_state は軽量化済み</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-primary" onclick="DATA_STORAGE_TABLE.createLocalBackup()" style="font-size:12px">ローカル世代バックアップ作成</button>
+          <button class="btn" onclick="CLOUD.refreshInventoryPanel()" style="font-size:12px">クラウド保存状況を確認</button>
+          <button class="btn" onclick="CLOUD.syncNow()" style="font-size:12px">今すぐ同期</button>
+        </div>
+
+        <div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:900;margin-bottom:6px">クラウド保存済み状況</div>
+          <div id="cloud-inventory-body">${cloudSummary}</div>
+        </div>
+
+        <div>
+          <div style="font-size:12px;font-weight:900;margin-bottom:6px">ローカル世代バックアップ</div>
+          <div class="scroll-x"><table class="tbl"><thead><tr><th>作成日時</th><th>容量</th><th>内容</th><th>操作</th></tr></thead><tbody>${backupRows}</tbody></table></div>
+          <div style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.7">
+            ※ 世代バックアップはブラウザ内保存です。PC故障・ブラウザ削除には備えられないため、重要時は左下の「書出」も併用してください。<br>
+            ※ 復元はローカル状態を戻します。必要に応じて復元後に「今すぐ同期」を実行してください。
+          </div>
+        </div>
+      </div>
+    </details>`;
+}
+
 window.DATA_STORAGE_TABLE = {
   changeFY(fy){ STATE.fiscalYear = String(fy); renderImport(); },
+
+  createLocalBackup(){
+    const r = STORE.createLocalBackup ? STORE.createLocalBackup('データ管理画面から作成') : { ok:false, error:'バックアップ機能なし' };
+    if (r.ok) UI.toast('ローカル世代バックアップを作成しました');
+    else UI.toast('バックアップ作成に失敗しました: ' + (r.error || '不明'), 'error');
+    renderImport();
+  },
+
+  restoreLocalBackup(id){
+    if (!confirm('この世代バックアップでローカルデータを復元しますか？\n現在のローカル状態は上書きされます。')) return;
+    const r = STORE.restoreLocalBackup ? STORE.restoreLocalBackup(id) : { ok:false, error:'復元機能なし' };
+    if (r.ok) {
+      UI.toast('ローカル世代バックアップを復元しました');
+      NAV.refresh();
+    } else {
+      UI.toast('復元に失敗しました: ' + (r.error || '不明'), 'error');
+    }
+  },
+
+  deleteLocalBackup(id){
+    if (!confirm('この世代バックアップを削除しますか？')) return;
+    const r = STORE.deleteLocalBackup ? STORE.deleteLocalBackup(id) : { ok:false, error:'削除機能なし' };
+    if (r.ok) UI.toast('ローカル世代バックアップを削除しました');
+    else UI.toast('削除に失敗しました: ' + (r.error || '不明'), 'error');
+    renderImport();
+  },
 
   async _syncAfterDelete(label){
     STORE.save();
@@ -2549,6 +2652,7 @@ window.IMPORT_PAGE_TOGGLE = {
 function renderImport() {
   const listEl = document.getElementById('data-list');
   if (listEl) {
+    const backupSyncHtml = renderBackupAndSyncPanel();
     const healthHtml = renderDataHealthDashboard();
     const storageHtml = renderStorageMapTable();
     const monthlyHtml = renderMonthlyCheckTable();
@@ -2616,13 +2720,13 @@ function renderImport() {
         </div>
       </details>`;
 
-    listEl.innerHTML = healthHtml + storageHtml + monthlyHtml + qualityHtml + historyHtml;
+    listEl.innerHTML = backupSyncHtml + healthHtml + storageHtml + monthlyHtml + qualityHtml + historyHtml;
   }
 
   const storageEl = document.getElementById('storage-info');
   if (storageEl) {
     const info = STORE.storageInfo();
-    storageEl.innerHTML = `使用容量: <strong>${info.kb} KB</strong>（センター: ${CENTER.name}）`;
+    storageEl.innerHTML = `使用容量: <strong>${info.totalKb} KB</strong>（通常 ${info.kb} KB / 世代 ${info.backupKb} KB・センター: ${CENTER.name}）`;
   }
 
   CLOUD.renderForm();
