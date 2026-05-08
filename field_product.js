@@ -81,27 +81,9 @@
     return [];
   }
 
-  function localStorageRecords(){
-    const out = [];
-    try {
-      for (let i=0; i<localStorage.length; i++) {
-        const key = localStorage.key(i) || '';
-        // センター別データ混入防止：現在のセンター用 localStorage キーだけ参照する
-        // 例：mgmt5_kitasaitama_productAddressData は北埼玉だけ、mgmt5_toda_productAddressData は戸田だけ
-        if (typeof STORE !== 'undefined' && STORE._p && !key.startsWith(STORE._p)) continue;
-        if (!/(^|_)productAddressData$|(^|_)workerCsvData$|(^|_)full_state$/.test(key)) continue;
-        const raw = localStorage.getItem(key);
-        if (!raw || !/^[\[{]/.test(String(raw).trim())) continue;
-        const val = JSON.parse(raw);
-        if (Array.isArray(val)) out.push({ key, value: val });
-        else if (val && typeof val === 'object') {
-          if (Array.isArray(val.productAddressData)) out.push({ key:key + '.productAddressData', value: val.productAddressData });
-          if (Array.isArray(val.workerCsvData)) out.push({ key:key + '.workerCsvData', value: val.workerCsvData });
-        }
-      }
-    } catch(e) {}
-    return out;
-  }
+  // localStorage全体探索は行わない。
+  // 現場CSVは field_core.js の FIELD_DATA_ACCESS / STATE に集約し、
+  // 別センター混入・削除済みデータ復活・表示遅延を防ぐ。
 
   function collectRecords(){
     const out = { product:[], worker:[] };
@@ -143,12 +125,8 @@
     arr(st.workerCsvData).forEach((x,i)=>pushWorker(x, `STATE.workerCsvData.${i}`));
     arr(st.fieldData).forEach((x,i)=>{ pushProduct(x, `STATE.fieldData.${i}`); pushWorker(x, `STATE.fieldData.${i}`); });
 
-    // STATEが未初期化・別描画で空に見える場合の保険。保存済みの安全化済みデータだけ拾う。
-    localStorageRecords().forEach(pack=>{
-      if (/workerCsvData/.test(pack.key)) arr(pack.value).forEach((x,i)=>pushWorker(x, `${pack.key}.${i}`));
-      else arr(pack.value).forEach((x,i)=>pushProduct(x, `${pack.key}.${i}`));
-    });
-
+    // localStorageの保険探索はしない。
+    // ここで全探索すると重くなり、別センターや削除済みデータを拾うため。
     return out;
   }
 
