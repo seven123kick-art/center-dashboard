@@ -1,16 +1,14 @@
 /**
- * config.template.js
- * このファイルはGitで管理するテンプレートです。
+ * config.template.js  —  Gitで管理するテンプレート。
  *
- * セットアップ手順:
- *   1. このファイルを config.local.js という名前でコピーする
- *   2. コピーしたファイルに Supabase の接続情報を記入する
- *   3. config.local.js は .gitignore で除外済みのため、コミットされません
+ * セットアップ:
+ *   cp config.template.js config.local.js
+ *   → config.local.js に Supabase の接続情報を記入
  *
- * cp config.template.js config.local.js
+ * config.local.js は .gitignore 除外済み。各自のPCで作成してください。
  */
 window.SUPABASE_CONFIG = {
-  url:    '',  // 例: https://xxxxxxxxxxxxxx.supabase.co
-  key:    '',  // Supabase > Project Settings > API > anon public キー
+  url:    '',  // https://xxxxxx.supabase.co
+  key:    '',  // Project Settings > API > anon public
   bucket: 'center-data',
 };

@@ -1,6 +1,5 @@
 /**
  * config.local.js  —  .gitignore で除外済み。コミット禁止。
- * Supabase の接続情報を記入してください。
  */
 window.SUPABASE_CONFIG = {
   url:    "https://udjibwlgscdkoheceyds.supabase.co",
