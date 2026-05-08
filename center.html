@@ -1076,7 +1076,11 @@
           <div style="margin-top:4px"><span id="import-target-note">ページは共通ですが、保存キー・クラウドパス・IndexedDBはセンターIDで分離します。</span></div>
         </div>
       </div>
-      <div class="card" style="margin-bottom:14px">
+      <details class="card" style="margin-bottom:14px" open>
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+          <span class="card-title">収支実績CSV取込</span>
+          <span style="font-size:11px;color:var(--text3)">▼ 開閉</span>
+        </summary>
         <div class="card-body">
           <div class="upload-zone no-print" id="upload-zone">
             <input type="file" id="file-input" accept=".csv" multiple style="display:none">
@@ -1092,17 +1096,23 @@
           </div>
           <div id="upload-msg"></div>
         </div>
-      </div>
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-header"><span class="card-title">データ管理・正常性チェック</span></div>
+      </details>
+      <details class="card" style="margin-bottom:14px" open>
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+          <span class="card-title">データ管理・正常性チェック</span>
+          <span style="font-size:11px;color:var(--text3)">▼ 開閉</span>
+        </summary>
         <div id="data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
-      </div>
+      </details>
       <!-- 計画データ取込 -->
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-header">
-          <span class="card-title" id="plan-import-title">📋 計画データ取込（予算管理）</span>
-          <span id="plan-badge" class="badge badge-warn">未登録</span>
-        </div>
+      <details class="card" style="margin-bottom:14px">
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="card-title" id="plan-import-title">📋 計画データ取込（予算管理）</span>
+            <span id="plan-badge" class="badge badge-warn">未登録</span>
+          </div>
+          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
+        </summary>
         <div class="card-body">
           <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8">
             月次収支表の「計画」値をコピペで取込みます。<br>
@@ -1124,7 +1134,7 @@
             <span id="plan-import-msg" style="font-size:11px;color:var(--text2)"></span>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- 過去実績補完データ取込 -->
       <details class="card" style="margin-bottom:14px">
@@ -1159,17 +1169,20 @@
 
 
       <!-- 現場明細データ取込・管理 -->
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+      <details class="card" style="margin-bottom:14px" open>
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
           <div style="display:flex;align-items:center;gap:8px">
             <span class="card-title">🚚 現場明細データ（CSV専用）</span>
             <span id="field-import-badge" class="badge badge-warn">未読込</span>
           </div>
-          <button onclick="renderFieldDataList2()" title="一覧を最新状態に更新"
-            style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border2);background:#f8fafc;cursor:pointer;font-family:inherit;color:var(--text2)">
-            🔄 更新
-          </button>
-        </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button onclick="event.stopPropagation();renderFieldDataList2()" title="一覧を最新状態に更新"
+              style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border2);background:#f8fafc;cursor:pointer;font-family:inherit;color:var(--text2)">
+              🔄 更新
+            </button>
+            <span style="font-size:11px;color:var(--text3)">▼ 開閉</span>
+          </div>
+        </summary>
         <div class="card-body">
           <div class="msg msg-info" style="margin-bottom:12px">
             PDF取込は使用しません。現場明細はCSV専用です。<br>
@@ -1243,14 +1256,17 @@
             </button>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- クラウド同期設定 -->
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-header">
-          <span class="card-title">☁ クラウド同期設定（Supabase）</span>
-          <span id="cloud-status-badge" class="badge badge-info">設定済（未同期）</span>
-        </div>
+      <details class="card" style="margin-bottom:14px">
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="card-title">☁ クラウド同期設定（Supabase）</span>
+            <span id="cloud-status-badge" class="badge badge-info">設定済（未同期）</span>
+          </div>
+          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
+        </summary>
         <div class="card-body">
           <div id="cloud-setup-form">
             <!-- 接続情報はアプリに埋め込まれています -->
@@ -1299,23 +1315,29 @@
             </details>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- ストレージ管理 -->
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-header">
+      <details class="card" style="margin-bottom:14px">
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
           <span class="card-title">ストレージ管理</span>
-          <button onclick="DB.showStorageInfo()" class="btn" style="font-size:11px;padding:3px 10px">更新</button>
-          <button onclick="SIMPLE_STORE.debug()" class="btn" style="font-size:11px;padding:3px 10px;background:#f59e0b;color:#fff;border-color:#f59e0b">🗄 DB確認</button>
-        </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button onclick="event.stopPropagation();DB.showStorageInfo()" class="btn" style="font-size:11px;padding:3px 10px">更新</button>
+            <button onclick="event.stopPropagation();SIMPLE_STORE.debug()" class="btn" style="font-size:11px;padding:3px 10px;background:#f59e0b;color:#fff;border-color:#f59e0b">🗄 DB確認</button>
+            <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
+          </div>
+        </summary>
         <div class="card-body">
           <div id="storage-info" style="font-size:12px;color:var(--text2);margin-bottom:12px">読み込み中...</div>
           <div id="month-manage-list"></div>
         </div>
-      </div>
+      </details>
 
-      <div class="card">
-        <div class="card-header"><span class="card-title">運用ガイド</span></div>
+      <details class="card">
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+          <span class="card-title">運用ガイド</span>
+          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
+        </summary>
         <div class="card-body" style="display:grid;gap:10px">
           <details open style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
             <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
@@ -1363,7 +1385,7 @@
             </div>
           </details>
         </div>
-      </div>
+      </details>
     </div>
 
     <!-- ════ 科目分析ビュー ════ -->

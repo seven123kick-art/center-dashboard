@@ -2024,7 +2024,7 @@ function renderAlerts() {
 /* ════════ §19 RENDER — Capacity（capacity.jsへ分割） ═══════════════════ */
 
 function storageFiscalYear() {
-  const ids = ['data-health-fy-select', 'monthly-check-fy-select', 'storage-fy-select', 'plan-year-sel'];
+  const ids = ['data-health-fy-select', 'monthly-check-fy-select', 'storage-fy-select', 'data-quality-fy-select', 'import-history-fy-select', 'plan-year-sel'];
   for (const id of ids) {
     const el = document.getElementById(id);
     if (el && el.value) return String(el.value);
@@ -2243,7 +2243,11 @@ function renderDataQualityCheckTable() {
           <div style="font-weight:900;font-size:14px">重複・異常データ確認</div>
           <div style="font-size:11px;color:var(--text3);margin-top:3px">同じ年月＋同じ区分の重複、単位ズレ、年度ズレ、極端に小さい金額を確認</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px">${summary}<span style="font-size:11px;color:var(--text3)">▼</span></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <span style="font-size:11px;color:var(--text2);font-weight:800">対象年度</span>
+          <select id="data-quality-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(fy)}</select>
+          ${summary}<span style="font-size:11px;color:var(--text3)">▼</span>
+        </div>
       </summary>
       <div style="padding:0 12px 12px">
         ${rows.length ? `
@@ -2366,18 +2370,20 @@ function renderDataHealthDashboard() {
       <div style="font-size:11px;color:var(--text3);margin-top:2px">${esc(sub)}</div>
     </div>`;
   return `
-    <div style="padding:14px;margin-bottom:12px;border:1px solid var(--border);border-radius:16px;background:#f8fafc">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:16px;background:#f8fafc;overflow:hidden" open>
+      <summary style="cursor:pointer;padding:14px;list-style:none;background:#f8fafc;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
         <div>
           <div style="font-weight:900;font-size:15px;color:var(--text)">データ正常性チェック</div>
           <div style="font-size:11px;color:var(--text3);margin-top:4px">AI会議報告書・キャパ分析に進む前に、月別の登録漏れと欠落を確認します。</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
           <span style="font-size:11px;color:var(--text2);font-weight:800">対象年度</span>
-          <select id="data-health-fy-select" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(fy)}</select>
+          <select id="data-health-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(fy)}</select>
           ${headerBadge}
+          <span style="font-size:11px;color:var(--text3)">▼</span>
         </div>
-      </div>
+      </summary>
+      <div style="padding:0 14px 14px">
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">
         ${mini('収支データ', `${csvCount}/12`, 'CSVまたは補完', csvCount===12?'ok':'warn')}
         ${mini('作業者CSV', `${workerCount}/12`, '現場明細', workerCount===12?'ok':'warn')}
@@ -2411,7 +2417,8 @@ function renderDataHealthDashboard() {
         </div>
       </details>
       ${capUnmatched ? `<div style="margin-top:10px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;border-radius:10px;padding:9px 10px;font-size:12px;line-height:1.6">キャパ未分類が ${fmt(capUnmatched)}件あります。商品・住所CSVに存在する市区町村が、荷主キャパ区分に入っていない可能性があります。</div>` : ''}
-    </div>`;
+      </div>
+    </details>`;
 }
 
 function renderStorageMapTable() {
@@ -2439,14 +2446,16 @@ function renderStorageMapTable() {
   ];
 
   return `
-    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
+      <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
         <div style="font-weight:900;font-size:14px">データ保管場所 対応表</div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap">
           <span style="color:var(--text2)">対象年度</span>
-          <select id="storage-fy-select" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${yearOptions}</select>
+          <select id="storage-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${yearOptions}</select>
+          <span style="font-size:11px;color:var(--text3)">▼</span>
         </div>
-      </div>
+      </summary>
+      <div style="padding:0 12px 12px">
       ${warnings.length ? `<div style="border:1px solid #fca5a5;background:#fef2f2;color:#991b1b;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px;line-height:1.7"><strong>確認が必要なデータがあります</strong><br>${warnings.map(w=>'・'+esc(w)).join('<br>')}</div>` : `<div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px">この年度の保管状況に大きな異常は見つかりません。</div>`}
       <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden" open>
         <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f8fafc">
@@ -2459,7 +2468,8 @@ function renderStorageMapTable() {
           </tbody></table></div>
         </div>
       </details>
-    </div>`;
+      </div>
+    </details>`;
 }
 window.DATA_STORAGE_TABLE = {
   changeFY(fy){ STATE.fiscalYear = String(fy); renderImport(); },
@@ -2537,21 +2547,25 @@ function renderImport() {
     const storageHtml = renderStorageMapTable();
     const monthlyHtml = renderMonthlyCheckTable();
     const qualityHtml = renderDataQualityCheckTable();
+    const historyFY = storageFiscalYear();
     const statusMap = {};
-    (STATE.datasets || []).forEach(d => {
+    (STATE.datasets || []).filter(d => String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(historyFY)).forEach(d => {
       const fy = d.fiscalYear || fiscalYearFromYM(d.ym);
-      if (!statusMap[fy]) statusMap[fy] = { confirmed:new Set(), daily:new Set() };
-      if (d.type === 'daily') statusMap[fy].daily.add(d.ym);
+      if (!statusMap[fy]) statusMap[fy] = { confirmed:new Set(), daily:new Set(), history:new Set() };
+      if (d.source === 'history') statusMap[fy].history.add(d.ym);
+      else if (d.type === 'daily') statusMap[fy].daily.add(d.ym);
       else statusMap[fy].confirmed.add(d.ym);
     });
     const statusHtml = Object.keys(statusMap).sort().reverse().map(fy => `
       <div style="padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;font-size:12px">
         <strong>${fy}年度の登録状況</strong>
-        <span style="margin-left:10px;color:var(--text2)">確定 ${statusMap[fy].confirmed.size}ヶ月 / 速報 ${statusMap[fy].daily.size}ヶ月</span>
+        <span style="margin-left:10px;color:var(--text2)">確定 ${statusMap[fy].confirmed.size}ヶ月 / 速報 ${statusMap[fy].daily.size}ヶ月 / 補完 ${statusMap[fy].history.size}ヶ月</span>
       </div>
     `).join('');
 
-    const sorted = [...(STATE.datasets || [])].sort((a,b)=>a.ym.localeCompare(b.ym) || ((a.type||'confirmed')==='confirmed'?-1:1));
+    const sorted = [...(STATE.datasets || [])]
+      .filter(d => String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(historyFY))
+      .sort((a,b)=>a.ym.localeCompare(b.ym) || ((a.type||'confirmed')==='confirmed'?-1:1));
     const detailHtml = sorted.length ? sorted.map(ds=>{
       const fy = ds.fiscalYear || fiscalYearFromYM(ds.ym);
       const sourceLabel = ds.source === 'history' ? '収支補完' : (ds.fileName ? esc(ds.fileName) : 'ファイル名なし');
@@ -2582,7 +2596,14 @@ function renderImport() {
 
     const historyHtml = `
       <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-        <summary style="cursor:pointer;padding:12px 14px;font-weight:900;background:#f8fafc;color:var(--text)">詳細履歴を表示</summary>
+        <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#f8fafc;color:var(--text);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-weight:900">詳細履歴を表示</span>
+          <span style="display:flex;align-items:center;gap:8px;font-size:12px">
+            <span style="color:var(--text2);font-weight:800">対象年度</span>
+            <select id="import-history-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(historyFY)}</select>
+            <span style="font-size:11px;color:var(--text3)">▼</span>
+          </span>
+        </summary>
         <div style="padding:10px 12px">
           ${statusHtml || '<div style="padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;font-size:12px;color:var(--text3)">年度別登録状況はまだありません</div>'}
           ${detailHtml}
