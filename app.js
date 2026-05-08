@@ -5786,42 +5786,65 @@ document.addEventListener('DOMContentLoaded', async () => {
   initFiscalYearSelects();
   setupFieldImportYMControls();
 
-  // 8. 前回開いていたページを復元（なければダッシュボード）
-  const _lastView = (() => { try { return sessionStorage.getItem('lastView') || 'dashboard'; } catch(e){ return 'dashboard'; } })();
-  NAV.go(_lastView);
+  // 8. オーバーレイにセンター名を表示
+  const _overlayName = document.getElementById('overlay-center-name');
+  if (_overlayName) _overlayName.textContent = CENTER.name;
 
   // 9. クラウド設定フォームとバッジを初期化
   CLOUD.renderForm();
 
-  // 10. ステータス更新
-  UI.updateSaveStatus();
-  UI.updateTopbar(_lastView);
+  // 10. Supabase同期 → 完了後にオーバーレイをフェードアウトして画面表示
+  const _lastView = (() => { try { return sessionStorage.getItem('lastView') || 'dashboard'; } catch(e){ return 'dashboard'; } })();
+  const _overlayStatus = document.getElementById('overlay-status');
 
-  // 11. 起動時クラウド同期。ローカルにデータがなければローディング表示。
-  const _hasLocal = STATE.datasets && STATE.datasets.length > 0;
-  if (!_hasLocal) {
-    const _sub = document.getElementById('page-sub');
-    if (_sub) _sub.textContent = 'クラウドから読み込み中...';
-    const _topR = document.getElementById('topbar-right');
-    if (_topR) _topR.insertAdjacentHTML('afterbegin',
-      '<span id="cloud-loading-badge" style="font-size:11px;color:#1a4d7c;display:flex;align-items:center;gap:5px;margin-right:8px">' +
-      '<span style="width:8px;height:8px;border:2px solid #1a4d7c;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;display:inline-block"></span>' +
-      'Supabaseから読み込み中</span>');
+  function _hideOverlay() {
+    const ov = document.getElementById('app-loading-overlay');
+    if (!ov) return;
+    ov.style.opacity = '0';
+    setTimeout(() => ov.remove(), 420);
   }
-  AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
-    .then(r => {
-      document.getElementById('cloud-loading-badge')?.remove();
-      if (r && r.ok) {
-        NAV.refresh();
-        UI.updateTopbar(STATE.view || _lastView);
+
+  // ローカルキャッシュがあれば即表示してからバックグラウンド同期
+  const _hasLocal = STATE.datasets && STATE.datasets.length > 0;
+  if (_hasLocal) {
+    // キャッシュあり: 先にページを描画してオーバーレイを外す（体感ゼロ秒）
+    NAV.go(_lastView);
+    UI.updateSaveStatus();
+    UI.updateTopbar(_lastView);
+    _hideOverlay();
+    // バックグラウンドでSupabase同期（画面表示後に静かに更新）
+    AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
+      .then(r => {
+        if (r && r.ok && r.changed) {
+          NAV.refresh();
+          UI.updateTopbar(STATE.view || _lastView);
+          UI.updateSaveStatus();
+          UI.toast('クラウドの最新データを反映しました');
+        }
+      })
+      .catch(() => {});
+  } else {
+    // キャッシュなし（初回・新PC）: Supabase同期が完了するまでオーバーレイを表示
+    if (_overlayStatus) _overlayStatus.textContent = 'Supabaseからデータを取得中...';
+    AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
+      .then(r => {
+        NAV.go(_lastView);
         UI.updateSaveStatus();
-        if (r.changed) UI.toast('クラウドの最新データを反映しました');
-      } else if (!_hasLocal) {
-        const _sub = document.getElementById('page-sub');
-        if (_sub && _sub.textContent.includes('読み込み中')) _sub.textContent = 'データなし（CSVを取込んでください）';
-      }
-    })
-    .catch(() => { document.getElementById('cloud-loading-badge')?.remove(); });
+        UI.updateTopbar(_lastView);
+        _hideOverlay();
+        if (r && r.ok && r.changed) {
+          setTimeout(() => UI.toast('クラウドの最新データを読み込みました'), 500);
+        }
+      })
+      .catch(() => {
+        // 同期失敗でもオーバーレイは外す
+        NAV.go(_lastView);
+        UI.updateSaveStatus();
+        UI.updateTopbar(_lastView);
+        _hideOverlay();
+        UI.toast('クラウド接続に失敗しました（オフライン？）', 'warn');
+      });
+  }
 });
 
 
