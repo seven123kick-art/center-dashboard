@@ -3387,8 +3387,6 @@ const CAPACITY_UI = {
             </div>
           </div>
           <div class="capx-actions">
-            <button class="btn btn-primary" onclick="document.getElementById('capacity-csv-input').click()">商品・住所CSV取込</button>
-            <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none" onchange="CAPACITY_UI.importAreaCsv(this.files)">
             <button class="btn" onclick="CAPACITY_UI.render()">再集計</button>
             <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()">キャパ区分を初期化</button>
             <span id="capacity-msg">${hasCap ? `キャパ区分登録済：${STATE.capacity.capacityGroups.length}区分` : '荷主キャパ区分が未作成です'}</span>
@@ -5660,22 +5658,9 @@ const AUTO_SYNC = {
 
   install() {
     if (this._installed) return;
-    if (typeof STORE === 'undefined' || !STORE || STORE._autoSyncInstalled) return;
-
-    const originalSave = STORE.save.bind(STORE);
-
-    STORE.save = (...args) => {
-      const result = originalSave(...args);
-
-      // クラウド取得・復元中のローカル保存では、再アップロードを予約しない
-      if (!AUTO_SYNC._suppress) {
-        AUTO_SYNC.queue('STORE.save');
-      }
-
-      return result;
-    };
-
-    STORE._autoSyncInstalled = true;
+    // STORE.save() 全呼び出しで自動同期を予約すると、画面描画・設定保存・補正保存まで
+    // full_state 同期対象になり重くなるため、同期予約はCSV取込・削除・計画保存・参考資料保存など
+    // 明示的に CLOUD.pushXXX() / AUTO_SYNC.queue() を呼ぶ処理に限定する。
     this._installed = true;
   },
 

@@ -6,14 +6,8 @@
 
 <link rel="stylesheet" href="app.css">
 
-<!-- ★ Supabase接続設定（このファイルに直書き。どのPCでもそのまま動く） -->
-<script>
-window.SUPABASE_CONFIG = {
-  url:    'https://udjibwlgscdkoheceyds.supabase.co',
-  key:    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkamlid2xnc2Nka29oZWNleWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTQ5NjksImV4cCI6MjA5MjQzMDk2OX0.4whX8OuFFvjXYrfsJMIthMlPM7oxzbrqychlMu81G7w',
-  bucket: 'center-data',
-};
-</script>
+<!-- Supabase接続設定：値は config.local.js に分離 -->
+<script src="config.local.js"></script>
 
 <style>
 /* ===== PL 見やすさ改善 ===== */
@@ -1023,7 +1017,7 @@ window.SUPABASE_CONFIG = {
       <div class="card" style="margin-bottom:14px;border-top:3px solid var(--navy)">
         <div class="card-header">
           <span class="card-title">キャパ分析</span>
-          <span style="font-size:11px;color:var(--text3)">キャパExcelと配送エリアCSVを突合し、月別使用率・日別超過・カレンダー補正を確認します</span>
+          <span style="font-size:11px;color:var(--text3)">荷主キャパ区分を基準に、月別・日別・地区別の超過件数を確認します</span>
         </div>
         <div class="card-body">
           <div class="grid3" style="margin-bottom:12px">
@@ -1044,16 +1038,12 @@ window.SUPABASE_CONFIG = {
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-            <button class="btn btn-primary" onclick="CAPACITY_UI.openMasterInput()" style="font-size:12px">キャパExcel取込</button>
-            <input type="file" id="capacity-master-input" accept=".xlsx,.xls" style="display:none">
-            <button class="btn" onclick="CAPACITY_UI.openCsvInput()" style="font-size:12px">配送エリアCSV取込</button>
-            <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none">
             <button class="btn" onclick="CAPACITY_UI._cacheKey='';CAPACITY_UI.render()" style="font-size:12px">再集計</button>
-            <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()" style="font-size:12px">キャパマスタ削除</button>
+            <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()" style="font-size:12px">キャパ区分を初期化</button>
             <span id="capacity-msg" style="font-size:11px;color:var(--text2)"></span>
           </div>
           <div style="font-size:11px;color:var(--text3);line-height:1.7">
-            ※ 商品・住所CSVは原票番号でユニーク化済みのデータを使用します。日付がない月間CSVは「月間件数 ÷ 稼働日数」の平均で日別判定します。
+            ※ キャパは「荷主キャパ区分」で手入力します。商品・住所CSVはデータ管理で登録済みの月次データを参照します。日付がない月間CSVは「月間件数 ÷ 稼働日数」の平均で日別判定します。
           </div>
         </div>
       </div>
