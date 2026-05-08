@@ -1689,6 +1689,62 @@ const CHART_MGR = {
   },
 };
 
+
+/* ════════ §11.5 ANALYTICS_UI（分析画面 共通UI部品） ════════════════════════ */
+const ANALYTICS_UI = {
+  noData(message, extraStyle='') {
+    return `<div style="grid-column:1/-1;${extraStyle}" class="msg msg-info">${esc(message || 'データがありません')}</div>`;
+  },
+  kpiCard({label, value, unit='', accent='accent-navy', valueClass='', sub='', pill='', pillClass='flat'}) {
+    const unitHtml = unit ? `<span style="font-size:13px;font-weight:400">${esc(unit)}</span>` : '';
+    const subHtml = sub ? `<span class="kpi-sub">${sub}</span>` : '';
+    const pillHtml = pill ? `<span class="pill ${esc(pillClass)}">${pill}</span>` : '';
+    const footer = (subHtml || pillHtml) ? `<div class="kpi-sub-row">${subHtml}${pillHtml}</div>` : '';
+    return `
+      <div class="kpi-card ${esc(accent)}">
+        <div class="kpi-label">${label}</div>
+        <div class="kpi-value ${esc(valueClass)}">${value}${unitHtml}</div>
+        ${footer}
+      </div>`;
+  },
+  kpiGrid(cards, cols=4, extraStyle='') {
+    const cls = cols === 3 ? 'kpi-row kpi-row-3' : 'kpi-row';
+    return `<div class="${cls}" style="${extraStyle}">${cards.join('')}</div>`;
+  },
+  card(title, body, opts={}) {
+    const style = opts.style || '';
+    const subtitle = opts.subtitle ? `<div style="font-size:11px;color:var(--text3);margin-top:3px">${opts.subtitle}</div>` : '';
+    return `<div class="card" style="${style}"><div class="card-header"><div><span class="card-title">${title}</span>${subtitle}</div></div><div class="card-body">${body}</div></div>`;
+  },
+  progressRows(items, {maxValue=null, denominator=null, empty='データがありません'}={}) {
+    const rows = (items || []).filter(item => item && n(item.value) > 0);
+    if (!rows.length) return `<div style="padding:10px;font-size:12px;color:var(--text3)">${esc(empty)}</div>`;
+    const max = maxValue || Math.max(...rows.map(item => n(item.value)), 1);
+    const den = denominator || rows.reduce((sum, item) => sum + n(item.value), 0) || 1;
+    return `<div style="display:grid;gap:7px">${rows.map((item, i) => {
+      const value = n(item.value);
+      const width = (value / max * 100).toFixed(1);
+      const rate = den > 0 ? (value / den * 100) : 0;
+      return `
+        <div style="display:grid;grid-template-columns:120px 1fr 96px;gap:8px;align-items:center">
+          <div style="font-size:12px;font-weight:700;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.label)}">${esc(item.label)}</div>
+          <div style="height:14px;background:#e5e7eb;border-radius:999px;overflow:hidden">
+            <div style="height:100%;width:${width}%;background:${CONFIG.COLORS[i%CONFIG.COLORS.length]};border-radius:999px"></div>
+          </div>
+          <div style="font-size:12px;font-weight:800;text-align:right;white-space:nowrap">${fmtK(value)}千 <span style="color:var(--text3);font-weight:700">${rate.toFixed(1)}%</span></div>
+        </div>`;
+    }).join('')}</div>`;
+  },
+  basicMoneyTrendOptions(yTitle='千円') {
+    return {
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{legend:{position:'top'}, tooltip:{mode:'index'}},
+      scales:{y:{title:{display:true,text:yTitle},grid:{color:'#f0f0f0'}}}
+    };
+  }
+};
+
 /* ════════ §12 RENDER — Dashboard ══════════════════════════════ */
 function renderDashboard() {
   const area = document.getElementById('kpi-area');
@@ -1710,37 +1766,44 @@ function renderDashboard() {
   const profitAccent = ds.profit >= 0 ? 'accent-green' : 'accent-red';
   const prevDs = prevDS(ds.ym);
 
-  area.innerHTML = `
-    <div class="kpi-card accent-navy">
-      <div class="kpi-label">営業収益（当月）</div>
-      <div class="kpi-value navy">${fmtK(ds.totalIncome)}<span style="font-size:13px;font-weight:400">千円</span></div>
-      <div class="kpi-sub-row">
-        <span class="kpi-sub">${ymLabel(ds.ym)}（${datasetKindLabel(ds)}）</span>
-        ${prevDs ? `<span class="pill ${ds.totalIncome>=prevDs.totalIncome?'up':'down'}">${ratio(ds.totalIncome,prevDs.totalIncome)} 前月比</span>` : ''}
-      </div>
-    </div>
-    <div class="kpi-card accent-red">
-      <div class="kpi-label">費用合計（当月）</div>
-      <div class="kpi-value red">${fmtK(ds.totalExpense)}<span style="font-size:13px;font-weight:400">千円</span></div>
-      <div class="kpi-sub-row">
-        <span class="kpi-sub">利益率目標：${CONFIG.TARGETS.pseudoLaborRate}%以下（人件費率）</span>
-      </div>
-    </div>
-    <div class="kpi-card ${profitAccent}">
-      <div class="kpi-label">センター利益（粗利）</div>
-      <div class="kpi-value ${profitClass}">${fmtK(ds.profit)}<span style="font-size:13px;font-weight:400">千円</span></div>
-      <div class="kpi-sub-row">
-        <span class="pill ${ds.profit>=0?'up':'down'}">${pct(ds.profitRate)} 利益率</span>
-      </div>
-    </div>
-    <div class="kpi-card accent-amber">
-      <div class="kpi-label">みなし人件費率</div>
-      <div class="kpi-value ${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'green' : 'red'}">${pct(ds.pseudoLaborRate)}</div>
-      <div class="kpi-sub-row">
-        <span class="kpi-sub">目標：${CONFIG.TARGETS.pseudoLaborRate}%以内</span>
-        <span class="pill ${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'up' : 'down'}">${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? '✓ 達成' : '⚠ 超過'}</span>
-      </div>
-    </div>`;
+  area.innerHTML = ANALYTICS_UI.kpiGrid([
+    ANALYTICS_UI.kpiCard({
+      label:'営業収益（当月）',
+      value:fmtK(ds.totalIncome),
+      unit:'千円',
+      accent:'accent-navy',
+      valueClass:'navy',
+      sub:`${ymLabel(ds.ym)}（${datasetKindLabel(ds)}）`,
+      pill: prevDs ? `${ratio(ds.totalIncome,prevDs.totalIncome)} 前月比` : '',
+      pillClass: prevDs ? (ds.totalIncome>=prevDs.totalIncome?'up':'down') : 'flat'
+    }),
+    ANALYTICS_UI.kpiCard({
+      label:'費用合計（当月）',
+      value:fmtK(ds.totalExpense),
+      unit:'千円',
+      accent:'accent-red',
+      valueClass:'red',
+      sub:`利益率目標：${CONFIG.TARGETS.pseudoLaborRate}%以下（人件費率）`
+    }),
+    ANALYTICS_UI.kpiCard({
+      label:'センター利益（粗利）',
+      value:fmtK(ds.profit),
+      unit:'千円',
+      accent:profitAccent,
+      valueClass:profitClass,
+      pill:`${pct(ds.profitRate)} 利益率`,
+      pillClass:ds.profit>=0?'up':'down'
+    }),
+    ANALYTICS_UI.kpiCard({
+      label:'みなし人件費率',
+      value:pct(ds.pseudoLaborRate),
+      accent:'accent-amber',
+      valueClass:ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'green' : 'red',
+      sub:`目標：${CONFIG.TARGETS.pseudoLaborRate}%以内`,
+      pill:ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? '✓ 達成' : '⚠ 超過',
+      pillClass:ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'up' : 'down'
+    })
+  ]);
 
   // メインチャート（月次収支推移）
   const dashboardTrendList = dashboardDatasetsForSelectedFiscalYear();
@@ -1920,48 +1983,50 @@ function renderIndicators() {
   }
 
   view.innerHTML = `
-    <div class="kpi-row kpi-row-3" style="margin-bottom:16px">
-      <div class="kpi-card ${laborOk?'accent-green':'accent-red'}">
-        <div class="kpi-label">みなし人件費率（${ymLabel(ds.ym)}）</div>
-        <div class="kpi-value ${laborOk?'green':'red'}">${pct(ds.pseudoLaborRate)}</div>
-        <div class="kpi-sub-row"><span class="pill ${laborOk?'up':'down'}">${laborOk?'✓ 達成':'⚠ 超過'} 目標${T.pseudoLaborRate}%</span></div>
-      </div>
-      <div class="kpi-card ${varOk?'accent-green':'accent-amber'}">
-        <div class="kpi-label">変動費率（${ymLabel(ds.ym)}）</div>
-        <div class="kpi-value ${varOk?'green':'amber'}">${pct(ds.variableRate)}</div>
-        <div class="kpi-sub-row"><span class="pill ${varOk?'up':'flat'}">${varOk?'✓ 正常':'⚠ 高め'} 目標${T.variableRateMax}%以内</span></div>
-      </div>
-      <div class="kpi-card ${smOk?'accent-green':smWarn?'accent-amber':'accent-red'}">
-        <div class="kpi-label">利益率（安全余裕率）</div>
-        <div class="kpi-value ${smOk?'green':smWarn?'':'red'}">${pct(smRate)}</div>
-        <div class="kpi-sub-row"><span class="pill ${smOk?'up':smWarn?'flat':'down'}">${smOk?'✓ 安全':smWarn?'△ 要注意':'⚠ 危険'}</span></div>
-      </div>
-    </div>
+    ${ANALYTICS_UI.kpiGrid([
+      ANALYTICS_UI.kpiCard({
+        label:`みなし人件費率（${ymLabel(ds.ym)}）`,
+        value:pct(ds.pseudoLaborRate),
+        accent:laborOk?'accent-green':'accent-red',
+        valueClass:laborOk?'green':'red',
+        pill:`${laborOk?'✓ 達成':'⚠ 超過'} 目標${T.pseudoLaborRate}%`,
+        pillClass:laborOk?'up':'down'
+      }),
+      ANALYTICS_UI.kpiCard({
+        label:`変動費率（${ymLabel(ds.ym)}）`,
+        value:pct(ds.variableRate),
+        accent:varOk?'accent-green':'accent-amber',
+        valueClass:varOk?'green':'amber',
+        pill:`${varOk?'✓ 正常':'⚠ 高め'} 目標${T.variableRateMax}%以内`,
+        pillClass:varOk?'up':'flat'
+      }),
+      ANALYTICS_UI.kpiCard({
+        label:'利益率（安全余裕率）',
+        value:pct(smRate),
+        accent:smOk?'accent-green':smWarn?'accent-amber':'accent-red',
+        valueClass:smOk?'green':smWarn?'':'red',
+        pill:smOk?'✓ 安全':smWarn?'△ 要注意':'⚠ 危険',
+        pillClass:smOk?'up':smWarn?'flat':'down'
+      })
+    ], 3, 'margin-bottom:16px')}
 
     <div class="grid2" style="margin-bottom:14px">
-      <div class="card"><div class="card-header"><span class="card-title">固定費 / 変動費　構成（年度最新月）</span></div>
-        <div class="card-body">
-          ${gauge(ds.fixedRate, 50, 65, '%', true)}
-          ${gauge(ds.variableRate, T.variableRateMax, 90, '%', true)}
-          <div style="font-size:12px;color:var(--text2);line-height:1.8">
-            固定費：${fmtK(ds.fixedCost)}千円 / 変動費：${fmtK(ds.varCost)}千円
-          </div>
-        </div></div>
-      <div class="card"><div class="card-header"><span class="card-title">損益分岐点　簡易判定（年度最新月）</span></div>
-        <div class="card-body">
-          <div style="font-size:12px;color:var(--text2);line-height:1.9">
-            営業収益：${fmtK(ds.totalIncome)}千円<br>
-            費用合計：${fmtK(ds.totalExpense)}千円<br>
-            粗利益：${fmtK(ds.profit)}千円<br>
-            利益率：${pct(ds.profitRate)}
-          </div>
-        </div></div>
+      ${ANALYTICS_UI.card('固定費 / 変動費　構成（年度最新月）', `
+        ${gauge(ds.fixedRate, 50, 65, '%', true)}
+        ${gauge(ds.variableRate, T.variableRateMax, 90, '%', true)}
+        <div style="font-size:12px;color:var(--text2);line-height:1.8">
+          固定費：${fmtK(ds.fixedCost)}千円 / 変動費：${fmtK(ds.varCost)}千円
+        </div>`)}
+      ${ANALYTICS_UI.card('損益分岐点　簡易判定（年度最新月）', `
+        <div style="font-size:12px;color:var(--text2);line-height:1.9">
+          営業収益：${fmtK(ds.totalIncome)}千円<br>
+          費用合計：${fmtK(ds.totalExpense)}千円<br>
+          粗利益：${fmtK(ds.profit)}千円<br>
+          利益率：${pct(ds.profitRate)}
+        </div>`)}
     </div>
 
-    <div class="card" style="margin-bottom:14px">
-      <div class="card-header"><span class="card-title">各指標　月次推移（選択年度内）</span></div>
-      <div class="card-body"><div class="chart-wrap" style="height:220px"><canvas id="c-ind-trend"></canvas></div></div>
-    </div>`;
+    ${ANALYTICS_UI.card('各指標　月次推移（選択年度内）', '<div class="chart-wrap" style="height:220px"><canvas id="c-ind-trend"></canvas></div>', {style:'margin-bottom:14px'})}`;
 
   renderCommonPeriodSelector('indicators', {useMonth:false});
 
@@ -2028,15 +2093,32 @@ function renderAnnual() {
   const prf = list.reduce((s,d)=>s+d.profit,0);
 
   if (kpi) {
-    kpi.innerHTML = `
-      <div class="kpi-card accent-navy"><div class="kpi-label">年度累計収入（${fy}年度）</div>
-        <div class="kpi-value navy">${fmtK(inc)}<span style="font-size:13px;font-weight:400">千円</span></div>
-        <div class="kpi-sub">${list.length}ヶ月分</div></div>
-      <div class="kpi-card accent-red"><div class="kpi-label">年度累計費用</div>
-        <div class="kpi-value red">${fmtK(exp)}<span style="font-size:13px;font-weight:400">千円</span></div></div>
-      <div class="kpi-card ${prf>=0?'accent-green':'accent-red'}"><div class="kpi-label">年度累計利益</div>
-        <div class="kpi-value ${prf>=0?'green':'red'}">${fmtK(prf)}<span style="font-size:13px;font-weight:400">千円</span></div>
-        <div class="kpi-sub-row"><span class="pill ${prf>=0?'up':'down'}">${pct(prf/inc*100)} 利益率</span></div></div>`;
+    kpi.innerHTML = ANALYTICS_UI.kpiGrid([
+      ANALYTICS_UI.kpiCard({
+        label:`年度累計収入（${fy}年度）`,
+        value:fmtK(inc),
+        unit:'千円',
+        accent:'accent-navy',
+        valueClass:'navy',
+        sub:`${list.length}ヶ月分`
+      }),
+      ANALYTICS_UI.kpiCard({
+        label:'年度累計費用',
+        value:fmtK(exp),
+        unit:'千円',
+        accent:'accent-red',
+        valueClass:'red'
+      }),
+      ANALYTICS_UI.kpiCard({
+        label:'年度累計利益',
+        value:fmtK(prf),
+        unit:'千円',
+        accent:prf>=0?'accent-green':'accent-red',
+        valueClass:prf>=0?'green':'red',
+        pill:`${pct(prf/inc*100)} 利益率`,
+        pillClass:prf>=0?'up':'down'
+      })
+    ], 3);
   }
 
   CHART_MGR.make('c-annual-trend', {
