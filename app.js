@@ -339,6 +339,7 @@ const CONFIG = {
     library:'過去資料', field:'作業者・エリア分析',
     'field-worker':'作業者分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
     capacity:'キャパ分析', import:'データ取込',
+    kamoku:'収支科目 詳細分析',
   },
 };
 
