@@ -2237,6 +2237,147 @@ function renderDataQualityCheckTable() {
     </div>`;
 }
 
+
+function healthProductRecord(ym) {
+  const records = window.FIELD_DATA_ACCESS?.getProductRecords ? FIELD_DATA_ACCESS.getProductRecords() : (STATE.productAddressData || []);
+  return (records || []).find(d => d && d.ym === ym) || null;
+}
+function healthWorkerRecord(ym) {
+  const records = window.FIELD_DATA_ACCESS?.getWorkerRecords ? FIELD_DATA_ACCESS.getWorkerRecords() : (STATE.workerCsvData || []);
+  return (records || []).find(d => d && d.ym === ym) || null;
+}
+function healthProductStats(rec) {
+  const tickets = Array.isArray(rec?.tickets) ? rec.tickets : [];
+  const hasAmount = (t) => {
+    const direct = n(t?.amount || t?.salesAmount || t?.totalAmount || t?.value || t?.price);
+    if (direct > 0) return true;
+    if (t?.works && typeof t.works === 'object') {
+      return Object.values(t.works).some(v => n(v) > 0);
+    }
+    if (Array.isArray(t?.workDetails)) {
+      return t.workDetails.some(d => n(d?.amount || d?.value) > 0);
+    }
+    return false;
+  };
+  const hasAddressUnit = (t) => {
+    return !!String(t?.zip || t?.zipcode || t?.postalCode || t?.pref || t?.city || t?.ward || t?.area || t?.areaUnit || '').trim();
+  };
+  const total = tickets.length || n(rec?.uniqueCount);
+  const amountMissing = tickets.length ? tickets.filter(t => !hasAmount(t)).length : 0;
+  const addressMissing = tickets.length ? tickets.filter(t => !hasAddressUnit(t)).length : Math.max(0, n(rec?.uniqueCount) - n(rec?.zipCount));
+  const amount = tickets.length ? tickets.reduce((sum,t)=>sum + n(t.amount || t.salesAmount || t.totalAmount || t.value || t.price),0) : n(rec?.amount);
+  return { total, amountMissing, addressMissing, amount };
+}
+function healthNormalizeUnit(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (window.CAPACITY_UI?.normalizeCapacityUnit) {
+    try { return CAPACITY_UI.normalizeCapacityUnit(raw); } catch(e) {}
+  }
+  return raw.replace(/[\s　]/g,'').replace(/さいたま市(.+区)$/,'さいたま市$1');
+}
+function healthCapacityStats(productRec) {
+  const groups = STATE.capacity?.capacityGroups || [];
+  const validGroups = groups.filter(g => Array.isArray(g.units) && g.units.length);
+  const unitSet = new Set();
+  validGroups.forEach(g => (g.units || []).forEach(u => {
+    const normalized = healthNormalizeUnit(u);
+    if (normalized) unitSet.add(normalized);
+  }));
+  const tickets = Array.isArray(productRec?.tickets) ? productRec.tickets : [];
+  let unmatched = 0;
+  tickets.forEach(t => {
+    const candidates = [t.areaUnit, t.area, t.city && t.ward ? `${t.city}${t.ward}` : '', t.city, t.ward].map(healthNormalizeUnit).filter(Boolean);
+    if (candidates.length && !candidates.some(c => unitSet.has(c))) unmatched += 1;
+  });
+  const hasValid = typeof CAPACITY_UI !== 'undefined' && CAPACITY_UI?.hasValidCapacityGroups
+    ? !!CAPACITY_UI.hasValidCapacityGroups()
+    : validGroups.some(g => Object.values(g.capacity || {}).some(v => n(v?.weekday) > 0 || n(v?.weekend) > 0));
+  return { groupCount: validGroups.length, hasValid, unmatched };
+}
+function dataHealthMonthState(fy, ym) {
+  const monthState = storageMonthState(fy, ym);
+  const worker = healthWorkerRecord(ym);
+  const product = healthProductRecord(ym);
+  const productStats = healthProductStats(product);
+  const capStats = healthCapacityStats(product);
+  const csvOk = monthState.confirmed.length > 0 || monthState.daily.length > 0 || monthState.histRows.length > 0;
+  const planOk = !!storagePlanRows(fy);
+  const workerOk = !!worker;
+  const productOk = !!product;
+  const capOk = capStats.hasValid;
+  const problems = [];
+  if (!csvOk) problems.push('収支未登録');
+  if (!planOk) problems.push('計画未登録');
+  if (!workerOk) problems.push('作業者CSV未登録');
+  if (!productOk) problems.push('商品住所CSV未登録');
+  if (productOk && productStats.amountMissing > 0) problems.push(`金額欠落 ${productStats.amountMissing}件`);
+  if (productOk && productStats.addressMissing > 0) problems.push(`住所/地区欠落 ${productStats.addressMissing}件`);
+  if (!capOk) problems.push('キャパ未設定');
+  if (productOk && capOk && capStats.unmatched > 0) problems.push(`キャパ未分類 ${capStats.unmatched}件`);
+  let judge = 'OK';
+  let kind = 'ok';
+  if (problems.some(x => /未登録|未設定|欠落|未分類/.test(x))) { judge = '確認'; kind = 'warn'; }
+  if (!csvOk || !productOk || !capOk) { judge = '要対応'; kind = 'danger'; }
+  return { ym, csvOk, planOk, workerOk, productOk, capOk, productStats, capStats, problems, judge, kind };
+}
+function renderDataHealthDashboard() {
+  const fy = storageFiscalYear();
+  const months = storageFiscalMonths(fy);
+  const states = months.map(ym => dataHealthMonthState(fy, ym));
+  const csvCount = states.filter(s => s.csvOk).length;
+  const workerCount = states.filter(s => s.workerOk).length;
+  const productCount = states.filter(s => s.productOk).length;
+  const amountMissing = states.reduce((sum,s)=>sum + s.productStats.amountMissing, 0);
+  const addressMissing = states.reduce((sum,s)=>sum + s.productStats.addressMissing, 0);
+  const capUnmatched = states.reduce((sum,s)=>sum + s.capStats.unmatched, 0);
+  const capStats = healthCapacityStats(null);
+  const dangerCount = states.filter(s => s.kind === 'danger').length;
+  const warnCount = states.filter(s => s.kind === 'warn').length;
+  const headerBadge = dangerCount ? storageBadge(`要対応 ${dangerCount}ヶ月`, 'danger') : warnCount ? storageBadge(`確認 ${warnCount}ヶ月`, 'warn') : storageBadge('AI生成前チェック OK', 'ok');
+  const mini = (label, value, sub, kind) => `
+    <div style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:12px 14px;min-width:150px">
+      <div style="font-size:11px;color:var(--text2);font-weight:900;margin-bottom:4px">${esc(label)}</div>
+      <div style="font-size:22px;font-weight:900;color:${kind==='danger'?'#991b1b':kind==='warn'?'#92400e':'var(--text)'}">${esc(value)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">${esc(sub)}</div>
+    </div>`;
+  return `
+    <div style="padding:14px;margin-bottom:12px;border:1px solid var(--border);border-radius:16px;background:#f8fafc">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px">
+        <div>
+          <div style="font-weight:900;font-size:15px;color:var(--text)">データ正常性チェック</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">AI会議報告書・キャパ分析に進む前に、月別の登録漏れと欠落を確認します。</div>
+        </div>
+        <div>${headerBadge}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">
+        ${mini('収支データ', `${csvCount}/12`, 'CSVまたは補完', csvCount===12?'ok':'warn')}
+        ${mini('作業者CSV', `${workerCount}/12`, '現場明細', workerCount===12?'ok':'warn')}
+        ${mini('商品住所CSV', `${productCount}/12`, '商品・住所・金額', productCount===12?'ok':'warn')}
+        ${mini('金額欠落', `${amountMissing}件`, '商品住所CSV内', amountMissing?'danger':'ok')}
+        ${mini('住所/地区欠落', `${addressMissing}件`, '郵便番号・市区町村', addressMissing?'warn':'ok')}
+        ${mini('キャパ区分', `${capStats.groupCount}区分`, capStats.hasValid?'登録済':'未設定', capStats.hasValid?'ok':'danger')}
+      </div>
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支</th><th>作業者</th><th>商品住所</th><th>計画</th><th>キャパ</th><th>金額欠落</th><th>住所/地区欠落</th><th>キャパ未分類</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
+        ${states.map(s=>`
+          <tr>
+            <td><strong>${ymLabel(s.ym)}</strong></td>
+            <td>${storageBadge(s.csvOk?'OK':'未登録', s.csvOk?'ok':'danger')}</td>
+            <td>${storageBadge(s.workerOk?'OK':'未登録', s.workerOk?'ok':'warn')}</td>
+            <td>${storageBadge(s.productOk?'OK':'未登録', s.productOk?'ok':'danger')}</td>
+            <td>${storageBadge(s.planOk?'OK':'未登録', s.planOk?'ok':'warn')}</td>
+            <td>${storageBadge(s.capOk?'OK':'未設定', s.capOk?'ok':'danger')}</td>
+            <td style="text-align:right;font-weight:800">${fmt(s.productStats.amountMissing)}</td>
+            <td style="text-align:right;font-weight:800">${fmt(s.productStats.addressMissing)}</td>
+            <td style="text-align:right;font-weight:800">${fmt(s.capStats.unmatched)}</td>
+            <td>${storageBadge(s.judge, s.kind)}</td>
+            <td style="min-width:260px;color:var(--text2)">${s.problems.length ? esc(s.problems.join(' / ')) : '登録状況に大きな問題はありません'}</td>
+          </tr>`).join('')}
+      </tbody></table></div>
+      ${capUnmatched ? `<div style="margin-top:10px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;border-radius:10px;padding:9px 10px;font-size:12px;line-height:1.6">キャパ未分類が ${fmt(capUnmatched)}件あります。商品・住所CSVに存在する市区町村が、荷主キャパ区分に入っていない可能性があります。</div>` : ''}
+    </div>`;
+}
+
 function renderStorageMapTable() {
   const fy = storageFiscalYear();
   const rows = storageRowsForFY(fy);
@@ -2353,6 +2494,7 @@ window.DATA_STORAGE_TABLE = {
 function renderImport() {
   const listEl = document.getElementById('data-list');
   if (listEl) {
+    const healthHtml = renderDataHealthDashboard();
     const storageHtml = renderStorageMapTable();
     const monthlyHtml = renderMonthlyCheckTable();
     const qualityHtml = renderDataQualityCheckTable();
@@ -2408,7 +2550,7 @@ function renderImport() {
         </div>
       </details>`;
 
-    listEl.innerHTML = storageHtml + monthlyHtml + qualityHtml + historyHtml;
+    listEl.innerHTML = healthHtml + storageHtml + monthlyHtml + qualityHtml + historyHtml;
   }
 
   const storageEl = document.getElementById('storage-info');
