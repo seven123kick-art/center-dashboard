@@ -2637,7 +2637,11 @@ const DATA_RESET = {
   },
 };
 const SIMPLE_STORE = {
-  debug() { console.log('STATE', STATE); console.log('STORE keys', STORE._p, Object.keys(localStorage).filter(k=>k.startsWith(STORE._p))); UI.toast('コンソールにSTATEをダンプしました'); },
+  debug() {
+    console.log('STATE', STATE);
+    console.log('STORE managed keys', STORE._p, typeof STORE.managedKeys === 'function' ? STORE.managedKeys() : []);
+    UI.toast('コンソールにSTATEをダンプしました');
+  },
   restoreAll() { STORE.load(); return STATE.datasets.length; },
 };
 const CLOUD_DEBUG = { run() { CLOUD.saveConfig(); } };

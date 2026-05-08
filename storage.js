@@ -1,6 +1,7 @@
 /* ════════ §4 STORE（localStorage、センター別） ════════════════ */
 window.STORE = {
   _p: `mgmt5_${CENTER.id}_`,
+  _keys: ['datasets','fieldData','areaData','capacity','planData','memos','library','reportKnowledge','deleted','workerCsvData','productAddressData'],
 
   _s(k, v) { try { localStorage.setItem(this._p+k, JSON.stringify(v)); } catch(e){} },
   _g(k)    { try { const v=localStorage.getItem(this._p+k); return v?JSON.parse(v):null; } catch(e){ return null; } },
@@ -68,11 +69,16 @@ window.STORE = {
   },
 
   storageInfo() {
+    // localStorage全探索は行わない。STOREが管理する既知キーだけを集計する。
     let size = 0;
-    for (const k of Object.keys(localStorage)) {
-      if (k.startsWith(this._p)) size += (localStorage.getItem(k)||'').length * 2;
+    for (const key of this._keys) {
+      try { size += (localStorage.getItem(this._p + key) || '').length * 2; } catch(e) {}
     }
     return { bytes: size, kb: (size/1024).toFixed(1) };
+  },
+
+  managedKeys() {
+    return this._keys.map(key => this._p + key);
   },
 };
 

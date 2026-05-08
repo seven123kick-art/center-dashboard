@@ -133,7 +133,8 @@ IMPORT.deleteFieldData = function(ym) {
 
   /* 現場CSVデータ取得を一元化
      目的：画面ごとの独自 localStorage 探索で、年度が出ない・別センター混入・削除済み復活が起きないようにする。
-     優先順位：STATE → STORE直読 → localStorage full_state。削除済みマーカーは必ず反映する。
+     優先順位：STATEの専用配列のみ。削除済みマーカーは必ず反映する。
+     localStorage全探索・保険探索・旧full_state優先復元は行わない。
   */
   function fieldAccessDeleted(kind, ym){
     try {

@@ -65,15 +65,6 @@
     return !!(v && v.classList.contains('active'));
   }
 
-  function localJSON(key){
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      if (!/^[\[{]/.test(raw.trim())) return null;
-      return JSON.parse(raw);
-    } catch(e) { return null; }
-  }
-
   function normalizeRecordTickets(x){
     if (!x || typeof x !== 'object') return [];
     if (Array.isArray(x.tickets)) return x.tickets.filter(Boolean);
