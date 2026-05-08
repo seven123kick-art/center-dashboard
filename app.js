@@ -2024,16 +2024,31 @@ function renderAlerts() {
 /* ════════ §19 RENDER — Capacity（capacity.jsへ分割） ═══════════════════ */
 
 function storageFiscalYear() {
-  const sel = document.getElementById('storage-fy-select');
-  if (sel && sel.value) return String(sel.value);
-  const plan = document.getElementById('plan-year-sel');
-  if (plan && plan.value) return String(plan.value);
+  const ids = ['data-health-fy-select', 'monthly-check-fy-select', 'storage-fy-select', 'plan-year-sel'];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el && el.value) return String(el.value);
+  }
   return STATE.fiscalYear || getDefaultFiscalYear();
 }
 function storageFiscalMonths(fy) { return monthsOfFiscalYear(String(fy)); }
 function storageRowsForFY(fy) {
   const months = storageFiscalMonths(fy);
   return (STATE.datasets || []).filter(d => months.includes(d.ym));
+}
+function storageFiscalYearOptionsHtml(selectedFY) {
+  const selected = String(selectedFY || storageFiscalYear());
+  const years = new Set([selected, getDefaultFiscalYear()]);
+  (STATE.datasets || []).forEach(d => {
+    const y = d?.fiscalYear || (d?.ym ? fiscalYearFromYM(d.ym) : '');
+    if (/^\d{4}$/.test(String(y))) years.add(String(y));
+  });
+  (STATE.workerCsvData || []).forEach(d => d?.ym && years.add(fiscalYearFromYM(d.ym)));
+  (STATE.productAddressData || []).forEach(d => d?.ym && years.add(fiscalYearFromYM(d.ym)));
+  if (STATE.planData && typeof STATE.planData === 'object') {
+    Object.keys(STATE.planData).forEach(y => /^\d{4}$/.test(y) && years.add(y));
+  }
+  return [...years].sort().reverse().map(y => `<option value="${y}" ${String(y)===selected?'selected':''}>${y}年度</option>`).join('');
 }
 function storageIsHistory(ds) { return ds && ds.source === 'history'; }
 function storageAmountK(ds, key) {
@@ -2140,27 +2155,34 @@ function renderMonthlyCheckTable() {
         : storageBadge('12ヶ月 OK', 'ok');
 
   return `
-    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden" ${missingCount || abnormalCount ? 'open' : ''}>
+      <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px">
         <div>
           <div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div>
           <div style="font-size:11px;color:var(--text3);margin-top:3px">${fy}年度：${fy}年4月 ～ ${parseInt(fy,10)+1}年3月（年度順）</div>
         </div>
-        <div>${summary}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--text2);font-weight:800">対象年度</span>
+          <select id="monthly-check-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(fy)}</select>
+          ${summary}
+          <span style="font-size:11px;color:var(--text3)">▼</span>
+        </div>
+      </summary>
+      <div style="padding:0 10px 10px">
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
+          ${states.map(s=>`
+            <tr>
+              <td><strong>${ymLabel(s.ym)}</strong></td>
+              <td>${storageBadge(s.csvLabel, s.csvKind)}</td>
+              <td>${storageBadge(s.histLabel, s.histKind)}</td>
+              <td>${storageBadge(s.planLabel, s.planKind)}</td>
+              <td>${storageBadge(s.judge, s.kind)}</td>
+              <td style="min-width:220px;color:var(--text2)">${esc(s.note)}</td>
+            </tr>
+          `).join('')}
+        </tbody></table></div>
       </div>
-      <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
-        ${states.map(s=>`
-          <tr>
-            <td><strong>${ymLabel(s.ym)}</strong></td>
-            <td>${storageBadge(s.csvLabel, s.csvKind)}</td>
-            <td>${storageBadge(s.histLabel, s.histKind)}</td>
-            <td>${storageBadge(s.planLabel, s.planKind)}</td>
-            <td>${storageBadge(s.judge, s.kind)}</td>
-            <td style="min-width:220px;color:var(--text2)">${esc(s.note)}</td>
-          </tr>
-        `).join('')}
-      </tbody></table></div>
-    </div>`;
+    </details>`;
 }
 
 
@@ -2345,12 +2367,16 @@ function renderDataHealthDashboard() {
     </div>`;
   return `
     <div style="padding:14px;margin-bottom:12px;border:1px solid var(--border);border-radius:16px;background:#f8fafc">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap">
         <div>
           <div style="font-weight:900;font-size:15px;color:var(--text)">データ正常性チェック</div>
           <div style="font-size:11px;color:var(--text3);margin-top:4px">AI会議報告書・キャパ分析に進む前に、月別の登録漏れと欠落を確認します。</div>
         </div>
-        <div>${headerBadge}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <span style="font-size:11px;color:var(--text2);font-weight:800">対象年度</span>
+          <select id="data-health-fy-select" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(fy)}</select>
+          ${headerBadge}
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">
         ${mini('収支データ', `${csvCount}/12`, 'CSVまたは補完', csvCount===12?'ok':'warn')}
@@ -2402,12 +2428,7 @@ function renderStorageMapTable() {
   const productRows = (STATE.productAddressData || []).filter(d => d && storageFiscalMonths(fy).includes(d.ym));
   const warnings = storageWarnings(fy);
 
-  const years = new Set([String(fy), getDefaultFiscalYear()]);
-  (STATE.datasets || []).forEach(d => years.add(String(d.fiscalYear || fiscalYearFromYM(d.ym))));
-  if (STATE.planData && typeof STATE.planData === 'object') {
-    Object.keys(STATE.planData).forEach(y => /^\d{4}$/.test(y) && years.add(y));
-  }
-  const yearOptions = [...years].sort().reverse().map(y => `<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('');
+  const yearOptions = storageFiscalYearOptionsHtml(fy);
 
   const tableRows = [
     ['収支実績CSV', `${fy}年度`, (monthsConfirmed||monthsDaily)?storageBadge('登録済','ok'):storageBadge('未登録','warn'), `確定 ${monthsConfirmed}ヶ月 / 速報 ${monthsDaily}ヶ月`, '円', formatImportedAt(storageLatestAt(csvRows)), 'SKDL0001/0003。速報と確定は両方保持。表示は確定優先。', '月別チェック表から月単位で削除'],
