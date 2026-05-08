@@ -6,9 +6,14 @@
 
 <link rel="stylesheet" href="app.css">
 
-<!-- Supabase接続情報（.gitignore除外。コミットしないこと） -->
-<script>window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};</script>
-<script src="config.local.js" onerror="console.info('[config] config.local.js なし。Supabase同期は無効。')"></script>
+<!-- ★ Supabase接続設定（このファイルに直書き。どのPCでもそのまま動く） -->
+<script>
+window.SUPABASE_CONFIG = {
+  url:    'https://udjibwlgscdkoheceyds.supabase.co',
+  key:    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkamlid2xnc2Nka29oZWNleWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTQ5NjksImV4cCI6MjA5MjQzMDk2OX0.4whX8OuFFvjXYrfsJMIthMlPM7oxzbrqychlMu81G7w',
+  bucket: 'center-data',
+};
+</script>
 
 <style>
 /* ===== PL 見やすさ改善 ===== */
@@ -97,6 +102,7 @@
   }
 }
 
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -1350,7 +1356,7 @@
 
 <script src="app.js"></script>
 <script src="dashboard.js"></script>
-<script src="shipper.js"></script>
+<script src="shipper.js" id="module-shipper"></script>
 <script src="pl.js"></script>
 <script src="trend.js"></script>
 

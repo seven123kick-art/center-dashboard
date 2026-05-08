@@ -75,7 +75,6 @@ const ASSETS = {
 
 /* ════════ §1 CONFIG ════════════════════════════════════════════ */
 const CONFIG = {
-  // Supabase接続情報は config.local.js（.gitignore除外）から読み込む
   SUPABASE_URL:    (window.SUPABASE_CONFIG||{}).url    || '',
   SUPABASE_KEY:    (window.SUPABASE_CONFIG||{}).key    || '',
   SUPABASE_BUCKET: (window.SUPABASE_CONFIG||{}).bucket || 'center-data',
@@ -5322,6 +5321,7 @@ const NAV = {
     const view = (el && el.dataset) ? el.dataset.view : (typeof el==='string' ? el : 'dashboard');
     if (!view) return;
     STATE.view = view;
+    try { sessionStorage.setItem('lastView', view); } catch(e) {}
 
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
@@ -5746,13 +5746,8 @@ async function loadScreenModules() {
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
 function setupFieldImportYMControls(){}
 document.addEventListener('DOMContentLoaded', async () => {
-  // 0. 画面別モジュール読込（荷主分析など）
-  try {
-    await loadScreenModules();
-  } catch(e) {
-    console.warn(e);
-    UI.toast('一部画面モジュールの読み込みに失敗しました', 'warn');
-  }
+  // 0. 画面別モジュール読込（shipper.jsはHTMLで読込済みのためスキップ）
+  // ※ loadScreenModules()は削除済み。shipper.jsはcenter.html末尾で読み込んでいる。
 
   // 1. ローカルストレージから読込
   STORE.load();
@@ -5791,28 +5786,42 @@ document.addEventListener('DOMContentLoaded', async () => {
   initFiscalYearSelects();
   setupFieldImportYMControls();
 
-  // 8. ダッシュボードを初期表示
-  NAV.go('dashboard');
+  // 8. 前回開いていたページを復元（なければダッシュボード）
+  const _lastView = (() => { try { return sessionStorage.getItem('lastView') || 'dashboard'; } catch(e){ return 'dashboard'; } })();
+  NAV.go(_lastView);
 
   // 9. クラウド設定フォームとバッジを初期化
   CLOUD.renderForm();
 
   // 10. ステータス更新
   UI.updateSaveStatus();
-  UI.updateTopbar('dashboard');
+  UI.updateTopbar(_lastView);
 
-  // 11. 起動時はクラウド → ローカルの取得を優先する。
-  // 取得中に STORE.save() が走っても、自動アップロードは予約しない。
+  // 11. 起動時クラウド同期。ローカルにデータがなければローディング表示。
+  const _hasLocal = STATE.datasets && STATE.datasets.length > 0;
+  if (!_hasLocal) {
+    const _sub = document.getElementById('page-sub');
+    if (_sub) _sub.textContent = 'クラウドから読み込み中...';
+    const _topR = document.getElementById('topbar-right');
+    if (_topR) _topR.insertAdjacentHTML('afterbegin',
+      '<span id="cloud-loading-badge" style="font-size:11px;color:#1a4d7c;display:flex;align-items:center;gap:5px;margin-right:8px">' +
+      '<span style="width:8px;height:8px;border:2px solid #1a4d7c;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;display:inline-block"></span>' +
+      'Supabaseから読み込み中</span>');
+  }
   AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
     .then(r => {
+      document.getElementById('cloud-loading-badge')?.remove();
       if (r && r.ok) {
         NAV.refresh();
-        UI.updateTopbar(STATE.view || 'dashboard');
+        UI.updateTopbar(STATE.view || _lastView);
         UI.updateSaveStatus();
         if (r.changed) UI.toast('クラウドの最新データを反映しました');
+      } else if (!_hasLocal) {
+        const _sub = document.getElementById('page-sub');
+        if (_sub && _sub.textContent.includes('読み込み中')) _sub.textContent = 'データなし（CSVを取込んでください）';
       }
     })
-    .catch(() => {});
+    .catch(() => { document.getElementById('cloud-loading-badge')?.remove(); });
 });
 
 
