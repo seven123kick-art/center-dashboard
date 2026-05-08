@@ -239,10 +239,8 @@
     return [];
   }
 
-  function localStorageRecords(){
-    // v29: 表示時のlocalStorage全探索は重く、別センター混入・削除済み復活の原因になるため廃止。
-    return [];
-  }
+  // localStorage全体探索は行わない。
+  // エリア分析は FIELD_DATA_ACCESS / STATE の商品住所CSVだけを参照する。
 
   function rawRecords(){
     const out = [];
