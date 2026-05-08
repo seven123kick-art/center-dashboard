@@ -75,9 +75,11 @@ const ASSETS = {
 
 /* ════════ §1 CONFIG ════════════════════════════════════════════ */
 const CONFIG = {
-  SUPABASE_URL:    'https://udjibwlgscdkoheceyds.supabase.co',
-  SUPABASE_KEY:    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkamlid2xnc2Nka29oZWNleWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTQ5NjksImV4cCI6MjA5MjQzMDk2OX0.4whX8OuFFvjXYrfsJMIthMlPM7oxzbrqychlMu81G7w',
-  SUPABASE_BUCKET: 'center-data',
+  // Supabase接続情報は config.local.js（.gitignore除外）から読み込む
+  // config.local.js が存在しない場合は空文字（Supabase同期は無効になる）
+  SUPABASE_URL:    (window.SUPABASE_CONFIG||{}).url    || '',
+  SUPABASE_KEY:    (window.SUPABASE_CONFIG||{}).key    || '',
+  SUPABASE_BUCKET: (window.SUPABASE_CONFIG||{}).bucket || 'center-data',
 
   CENTERS: [
     { id: 'kitasaitama', name: '北埼玉センター', color: '#1a4d7c' },
@@ -539,38 +541,108 @@ window.markDataDeleted = markDataDeleted;
 window.clearDataDeleted = clearDataDeleted;
 window.applyDeletionTombstonesToState = applyDeletionTombstonesToState;
 
-/* ════════ §4 STORE（localStorage、センター別） ════════════════ */
+/* ════════ §4 STORE（IndexedDB / Dexie、センター別） ════════════════
+   localStorage（上限5MB）をIndexedDBに移行。容量はほぼ無制限。
+   ・save()はvoid/fire-and-forgetのまま維持（呼出元を変更しない）
+   ・load()はasyncに変更。DOMContentLoadedで await STORE.load() する。
+   ・初回起動時に旧localStorageデータを自動移行し、移行後は旧データを削除する。
+================================================================== */
 const STORE = {
-  _p: `mgmt5_${CENTER.id}_`,
+  _p:  `mgmt5_${CENTER.id}_`,   // localStorage移行チェック用プレフィックス
+  _db: null,
 
-  _s(k, v) { try { localStorage.setItem(this._p+k, JSON.stringify(v)); } catch(e){} },
-  _g(k)    { try { const v=localStorage.getItem(this._p+k); return v?JSON.parse(v):null; } catch(e){ return null; } },
+  /* ── IndexedDB（Dexie）を初期化して返す ── */
+  async _getDb() {
+    if (this._db) return this._db;
+    const db = new Dexie(`mgmt5_${CENTER.id}`);
+    db.version(1).stores({ kv: 'key' });
+    this._db = db;
+    return db;
+  },
 
-  load() {
-    STATE.datasets  = this._g('datasets')  || [];
-    STATE.fieldData = this._g('fieldData') || [];
-    STATE.areaData  = this._g('areaData')  || [];
-    STATE.capacity  = this._g('capacity')  || null;
-    STATE.planData  = normalizePlanData(this._g('planData'));
-    STATE.memos     = this._g('memos')     || {};
-    STATE.library   = this._g('library')   || [];
-    STATE.reportKnowledge = normalizeReportKnowledge(this._g('reportKnowledge') || STATE.reportKnowledge);
-    STATE.deleted = normalizeDeletedState(this._g('deleted') || STATE.deleted);
+  /* ── 書込（非同期） ── */
+  async _idbSet(k, v) {
+    const db = await this._getDb();
+    await db.kv.put({ key: k, value: v });
+  },
+
+  /* ── 読込（非同期） ── */
+  async _idbGet(k) {
+    const db = await this._getDb();
+    const row = await db.kv.get(k);
+    return row ? row.value : null;
+  },
+
+  /* ── localStorageから1キー読む（移行用） ── */
+  _lsGet(k) {
+    try { const v=localStorage.getItem(this._p+k); return v?JSON.parse(v):null; } catch(e){ return null; }
+  },
+
+  /* ── 旧localStorageデータをIndexedDBへ移行し、旧データを削除 ── */
+  async _migrateFromLS() {
+    const keys = ['datasets','fieldData','areaData','capacity','planData','memos','library','reportKnowledge','deleted'];
+    let migrated = false;
+    for (const k of keys) {
+      const lsVal = this._lsGet(k);
+      if (lsVal !== null) {
+        await this._idbSet(k, lsVal);
+        try { localStorage.removeItem(this._p+k); } catch(e){}
+        migrated = true;
+      }
+    }
+    if (migrated) console.log('[STORE] localStorageからIndexedDBへ移行完了');
+  },
+
+  /* ── 非同期ロード（DOMContentLoadedで await する） ── */
+  async load() {
+    try {
+      // 旧localStorageデータがあれば移行
+      await this._migrateFromLS();
+
+      STATE.datasets  = (await this._idbGet('datasets'))  || [];
+      STATE.fieldData = (await this._idbGet('fieldData')) || [];
+      STATE.areaData  = (await this._idbGet('areaData'))  || [];
+      STATE.capacity  = (await this._idbGet('capacity'))  || null;
+      STATE.planData  = normalizePlanData(await this._idbGet('planData'));
+      STATE.memos     = (await this._idbGet('memos'))     || {};
+      STATE.library   = (await this._idbGet('library'))   || [];
+      STATE.reportKnowledge = normalizeReportKnowledge((await this._idbGet('reportKnowledge')) || STATE.reportKnowledge);
+      STATE.deleted   = normalizeDeletedState((await this._idbGet('deleted')) || STATE.deleted);
+    } catch(e) {
+      console.warn('[STORE] IndexedDB読込エラー、localStorageにフォールバック:', e);
+      STATE.datasets  = this._lsGet('datasets')  || [];
+      STATE.fieldData = this._lsGet('fieldData') || [];
+      STATE.areaData  = this._lsGet('areaData')  || [];
+      STATE.capacity  = this._lsGet('capacity')  || null;
+      STATE.planData  = normalizePlanData(this._lsGet('planData'));
+      STATE.memos     = this._lsGet('memos')     || {};
+      STATE.library   = this._lsGet('library')   || [];
+      STATE.reportKnowledge = normalizeReportKnowledge(this._lsGet('reportKnowledge') || STATE.reportKnowledge);
+      STATE.deleted   = normalizeDeletedState(this._lsGet('deleted') || STATE.deleted);
+    }
     sanitizePersonalDataState(STATE);
     applyDeletionTombstonesToState(STATE);
   },
 
+  /* ── 保存（void / fire-and-forget で呼び出し元を変更しない） ── */
   save() {
+    this._saveAsync().catch(e => console.warn('[STORE] save error:', e));
+  },
+
+  async _saveAsync() {
     sanitizePersonalDataState(STATE);
-    this._s('datasets',  STATE.datasets);
-    this._s('fieldData', STATE.fieldData);
-    this._s('areaData',  STATE.areaData);
-    this._s('capacity',  STATE.capacity);
-    this._s('planData',  STATE.planData);
-    this._s('memos',     STATE.memos);
-    this._s('library',   STATE.library);
-    this._s('reportKnowledge', STATE.reportKnowledge);
-    this._s('deleted', STATE.deleted);
+    const db = await this._getDb();
+    await db.kv.bulkPut([
+      { key:'datasets',        value: STATE.datasets },
+      { key:'fieldData',       value: STATE.fieldData },
+      { key:'areaData',        value: STATE.areaData },
+      { key:'capacity',        value: STATE.capacity },
+      { key:'planData',        value: STATE.planData },
+      { key:'memos',           value: STATE.memos },
+      { key:'library',         value: STATE.library },
+      { key:'reportKnowledge', value: STATE.reportKnowledge },
+      { key:'deleted',         value: STATE.deleted },
+    ]);
   },
 
   exportJSON() {
@@ -578,7 +650,8 @@ const STORE = {
     const blob = new Blob([JSON.stringify({
       center:CENTER.id, exportedAt:new Date().toISOString(),
       datasets:STATE.datasets, fieldData:STATE.fieldData, areaData:STATE.areaData,
-      capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos, library:STATE.library, reportKnowledge:STATE.reportKnowledge, deleted:STATE.deleted,
+      capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos,
+      library:STATE.library, reportKnowledge:STATE.reportKnowledge, deleted:STATE.deleted,
     },null,2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -595,11 +668,11 @@ const STORE = {
       if (d.fieldData) STATE.fieldData = d.fieldData;
       if (d.areaData)  STATE.areaData  = d.areaData;
       if (d.capacity)  STATE.capacity  = d.capacity;
-      if (d.planData) STATE.planData = normalizePlanData(d.planData);
+      if (d.planData)  STATE.planData  = normalizePlanData(d.planData);
       if (d.memos)     STATE.memos     = d.memos;
       if (d.library)   STATE.library   = d.library;
       if (d.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(d.reportKnowledge);
-      if (d.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, d.deleted);
+      if (d.deleted)   STATE.deleted   = mergeDeletedStates(STATE.deleted, d.deleted);
       sanitizePersonalDataState(STATE);
       applyDeletionTombstonesToState(STATE);
       this.save();
@@ -608,12 +681,21 @@ const STORE = {
     } catch(e) { UI.toast('読込エラー: '+e.message, 'error'); }
   },
 
-  storageInfo() {
-    let size = 0;
+  /* ── ストレージ使用量を返す（IndexedDB + localStorage の合計） ── */
+  async storageInfo() {
+    let idbBytes = 0;
+    try {
+      const db = await this._getDb();
+      const all = await db.kv.toArray();
+      idbBytes = all.reduce((s, r) => s + JSON.stringify(r.value).length * 2, 0);
+    } catch(e) {}
+    // 旧localStorageの残骸も計上
+    let lsBytes = 0;
     for (const k of Object.keys(localStorage)) {
-      if (k.startsWith(this._p)) size += (localStorage.getItem(k)||'').length * 2;
+      if (k.startsWith(this._p)) lsBytes += (localStorage.getItem(k)||'').length * 2;
     }
-    return { bytes: size, kb: (size/1024).toFixed(1) };
+    const total = idbBytes + lsBytes;
+    return { bytes: total, kb: (total/1024).toFixed(1), idbKb: (idbBytes/1024).toFixed(1) };
   },
 };
 
@@ -4725,8 +4807,12 @@ function renderImport() {
 
   const storageEl = document.getElementById('storage-info');
   if (storageEl) {
-    const info = STORE.storageInfo();
-    storageEl.innerHTML = `使用容量: <strong>${info.kb} KB</strong>（センター: ${CENTER.name}）`;
+    storageEl.innerHTML = '使用容量: 計算中...';
+    STORE.storageInfo().then(info => {
+      storageEl.innerHTML = `使用容量（IndexedDB）: <strong>${info.idbKb} KB</strong>（センター: ${CENTER.name}）`;
+    }).catch(() => {
+      storageEl.innerHTML = `使用容量: 取得エラー（センター: ${CENTER.name}）`;
+    });
   }
 
   CLOUD.renderForm();
@@ -5456,7 +5542,7 @@ const DATA_RESET = {
 };
 const SIMPLE_STORE = {
   debug() { console.log('STATE', STATE); console.log('STORE keys', STORE._p, Object.keys(localStorage).filter(k=>k.startsWith(STORE._p))); UI.toast('コンソールにSTATEをダンプしました'); },
-  restoreAll() { STORE.load(); return STATE.datasets.length; },
+  async restoreAll() { await STORE.load(); return STATE.datasets.length; },
 };
 const CLOUD_DEBUG = { run() { CLOUD.saveConfig(); } };
 const PUBLISH = { go() { UI.toast('GitHub Pages での公開はHTMLファイルを直接アップロードしてください'); } };
@@ -5753,9 +5839,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     UI.toast('一部画面モジュールの読み込みに失敗しました', 'warn');
   }
 
-  // 1. ローカルストレージから読込
-  STORE.load();
-  // 削除済みマーカー適用後の状態をローカルへ即保存し、リロード直後の古い補完・計画復活を防ぐ
+  // 1. IndexedDB（Dexie）から読込（旧localStorageデータがあれば自動移行）
+  await STORE.load();
+  // 削除済みマーカー適用後の状態をIndexedDBへ即保存し、リロード直後の古い補完・計画復活を防ぐ
   STORE.save();
 
   // 1.5 保存・取込・更新時の自動同期を有効化

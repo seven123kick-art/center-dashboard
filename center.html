@@ -6,6 +6,17 @@
 
 <link rel="stylesheet" href="app.css">
 
+<!-- IndexedDB ラッパー（localStorage 5MB 上限を回避） -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dexie/3.2.7/dexie.min.js"></script>
+
+<!-- Supabase接続情報（.gitignoreで除外。コミットしないこと） -->
+<!-- config.local.js が存在しない場合は Supabase同期が無効になるだけで動作します -->
+<script>
+  // config.local.js が存在しなくてもエラーにならないよう事前に空オブジェクトを設定
+  window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
+</script>
+<script src="config.local.js" onerror="console.info('[config] config.local.js が見つかりません。Supabase同期は無効です。')"></script>
+
 <style>
 /* ===== PL 見やすさ改善 ===== */
 
