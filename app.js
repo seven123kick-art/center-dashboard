@@ -1428,6 +1428,13 @@ const CLOUD = {
     if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
     let changed = 0;
 
+    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
+    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
+
+    // ── 並列ダウンロード: 必要なファイルを洗い出して一斉取得 ──
+    const tasks = []; // { type, key, meta, promise }
+
+    // datasets（月次収支）
     const datasetMetas = Array.isArray(manifest.datasets) ? manifest.datasets : [];
     for (const meta of datasetMetas) {
       if (!meta.ym) continue;
@@ -1435,67 +1442,86 @@ const CLOUD = {
       if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
       const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
       if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
-        const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
-        if (ds && ds.ym) { upsertDataset(ds); changed++; }
+        tasks.push({ type:'dataset', meta, promise: this._downloadJSON(this._datasetKey(meta.ym, metaType)) });
       }
     }
 
-    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
-    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
-
+    // workerCsvData（作業者）
     const workerMetas = Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [];
     for (const meta of workerMetas) {
       if (!meta.ym || deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
       const local = STATE.workerCsvData.find(d => d.ym === meta.ym);
       if (!local || !this._validWorkerMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
-        const rec = await this._downloadJSON(this._workerMonthKey(meta.ym));
-        if (rec && rec.ym && this._validWorkerMonthRecord(rec, meta)) {
-          STATE.workerCsvData = STATE.workerCsvData.filter(d => d.ym !== rec.ym);
-          STATE.workerCsvData.push(rec);
-          changed++;
-        }
+        tasks.push({ type:'worker', meta, promise: this._downloadJSON(this._workerMonthKey(meta.ym)) });
       }
     }
 
+    // productAddressData（商品住所）
     const productMetas = Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [];
     for (const meta of productMetas) {
       if (!meta.ym || deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
       const local = STATE.productAddressData.find(d => d.ym === meta.ym);
       if (!local || !this._validProductMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
-        const rec = await this._downloadJSON(this._productMonthKey(meta.ym));
-        if (rec && rec.ym && this._validProductMonthRecord(rec, meta)) {
-          STATE.productAddressData = STATE.productAddressData.filter(d => d.ym !== rec.ym);
-          STATE.productAddressData.push(rec);
+        tasks.push({ type:'product', meta, promise: this._downloadJSON(this._productMonthKey(meta.ym)) });
+      }
+    }
+
+    // capacity / planData / memos / library（単発ファイル）
+    const singleTasks = {};
+    if (manifest.hasCapacity && !STATE.capacity)
+      singleTasks.capacity = this._downloadJSON(this._capacityKey());
+    if (manifest.hasPlanData)
+      singleTasks.plan    = this._downloadJSON(this._planKey());
+    if (manifest.hasMemos)
+      singleTasks.memos   = this._downloadJSON(this._memosKey());
+    if (manifest.hasLibrary)
+      singleTasks.library = this._downloadJSON(this._libraryKey());
+
+    // ── 全ファイルを同時並列で待つ ──
+    const allPromises = [
+      ...tasks.map(t => t.promise),
+      ...Object.values(singleTasks),
+    ];
+    const allResults = await Promise.allSettled(allPromises);
+
+    // tasks の結果を適用
+    const taskResults = allResults.slice(0, tasks.length);
+    for (let i = 0; i < tasks.length; i++) {
+      if (taskResults[i].status !== 'fulfilled') continue;
+      const data = taskResults[i].value;
+      const { type, meta } = tasks[i];
+      if (type === 'dataset') {
+        if (data && data.ym) { upsertDataset(data); changed++; }
+      } else if (type === 'worker') {
+        if (data && data.ym && this._validWorkerMonthRecord(data, meta)) {
+          STATE.workerCsvData = STATE.workerCsvData.filter(d => d.ym !== data.ym);
+          STATE.workerCsvData.push(data);
+          changed++;
+        }
+      } else if (type === 'product') {
+        if (data && data.ym && this._validProductMonthRecord(data, meta)) {
+          STATE.productAddressData = STATE.productAddressData.filter(d => d.ym !== data.ym);
+          STATE.productAddressData.push(data);
           changed++;
         }
       }
     }
 
-    if (manifest.hasCapacity && !STATE.capacity) {
-      const cap = await this._downloadJSON(this._capacityKey());
-      if (cap) { STATE.capacity = cap; changed++; }
-    }
-
-    // 旧field/data.jsonは大容量化・個人情報混入防止のため原則使わない。
-    // 既存クラウドからの復元互換は full_state/manifest 側に寄せる。
-
-    if (manifest.hasPlanData) {
-      const cloudPlan = await this._downloadJSON(this._planKey());
-      if (cloudPlan && typeof cloudPlan === 'object') {
-        STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
+    // 単発ファイルの結果を適用
+    const singleKeys = Object.keys(singleTasks);
+    const singleResults = allResults.slice(tasks.length);
+    for (let i = 0; i < singleKeys.length; i++) {
+      if (singleResults[i].status !== 'fulfilled') continue;
+      const data = singleResults[i].value;
+      const key  = singleKeys[i];
+      if (key === 'capacity' && data) { STATE.capacity = data; changed++; }
+      else if (key === 'plan' && data && typeof data === 'object') {
+        STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, data);
         applyDeletionTombstonesToState(STATE);
         changed++;
       }
-    }
-
-    if (manifest.hasMemos) {
-      const memos = await this._downloadJSON(this._memosKey());
-      if (memos && typeof memos === 'object') { STATE.memos = memos; changed++; }
-    }
-
-    if (manifest.hasLibrary) {
-      const library = await this._downloadJSON(this._libraryKey());
-      if (Array.isArray(library)) { STATE.library = library; changed++; }
+      else if (key === 'memos' && data && typeof data === 'object') { STATE.memos = data; changed++; }
+      else if (key === 'library' && Array.isArray(data)) { STATE.library = data; changed++; }
     }
 
     applyDeletionTombstonesToState(STATE);
@@ -1536,19 +1562,14 @@ const CLOUD = {
       let changed = false;
       let gotAny = false;
 
-      const full = await this.pullFullState();
-      if (full && full.ok) {
-        changed = true;
-        gotAny = true;
-      }
+      // full_state と manifest を並列取得して合計待ち時間を短縮
+      const [full, r] = await Promise.all([
+        this.pullFullState(),
+        this.pullManifestAndMissing(),
+      ]);
 
-      // full_state が古い場合に備え、必ず manifest / skdl 月別データも確認する。
-      // これにより、別PCで入れた確定CSVが full_state 未反映でも取得できる。
-      const r = await this.pullManifestAndMissing();
-      if (r && r.ok) {
-        changed = changed || !!r.changed;
-        gotAny = true;
-      }
+      if (full && full.ok) { changed = true; gotAny = true; }
+      if (r && r.ok) { changed = changed || !!r.changed; gotAny = true; }
 
       if (gotAny) {
         STORE.save();
