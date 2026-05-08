@@ -5383,6 +5383,7 @@ const NAV = {
       case 'field-product': if (window.FIELD_PRODUCT_UI?.render) FIELD_PRODUCT_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'field-area':    if (window.FIELD_AREA_UI?.render) FIELD_AREA_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'report':     REPORT_UI.refresh(); break;
+      case 'kamoku':     if (window.KAMOKU_UI?.render) KAMOKU_UI.render(); break;
     }
   },
 };
@@ -5407,7 +5408,7 @@ const UI = {
   updateSaveStatus() {
     const label = document.getElementById('autosave-label');
     const dot   = document.getElementById('autosave-dot');
-    if (label) label.textContent = `ローカル保存済 (${STATE.datasets.length}件)`;
+    if (label) label.textContent = `クラウド同期済 (${STATE.datasets.length}件)`;
     if (dot)   dot.style.background = STATE.datasets.length ? '#4d9fea' : '#607d9a';
   },
 
@@ -5762,6 +5763,7 @@ function loadExternalScriptOnce(id, src) {
 
 async function loadScreenModules() {
   await loadExternalScriptOnce('module-shipper', 'shipper.js');
+  await loadExternalScriptOnce('module-kamoku', 'kamoku.js');
 }
 
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
