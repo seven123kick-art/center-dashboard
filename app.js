@@ -769,6 +769,68 @@ function upsertDataset(ds) {
   });
 }
 
+
+/* ════════ §6.5 取込ガード（重複・月違い・センター違い警告） ══════════════ */
+const DATA_IMPORT_GUARD = {
+  fileSig(file) {
+    if (!file) return '';
+    return [file.name || '', file.size || 0, file.lastModified || 0].join('|');
+  },
+  fileNames(files) { return Array.from(files || []).map(f => f?.name || '').filter(Boolean); },
+  extractYMFromName(name) {
+    const str = String(name || '');
+    let m = str.match(/(20\d{2})[-_年\/]?\s*(0?[1-9]|1[0-2])(?:月)?/);
+    if (m) return `${m[1]}${String(m[2]).padStart(2,'0')}`;
+    m = str.match(/(0?[1-9]|1[0-2])月/);
+    if (m) {
+      const y = String(document.getElementById('modal-year')?.value || new Date().getFullYear());
+      return `${y}${String(m[1]).padStart(2,'0')}`;
+    }
+    return '';
+  },
+  centerNameWarning(names) {
+    const current = String(CENTER?.name || '').replace(/センター$/,'');
+    const centers = ['戸田','北埼玉','南埼玉','船橋','練馬','群馬','さいたま','東松山','静岡','東北','三河'];
+    const hits = [];
+    names.forEach(name => {
+      centers.forEach(c => {
+        if (c !== current && String(name).includes(c)) hits.push(`${name}：${c}`);
+      });
+    });
+    return [...new Set(hits)];
+  },
+  buildWarnings({ kind, ym, type, files, existingRecord }) {
+    const names = this.fileNames(files);
+    const warnings = [];
+    const kindLabel = kind || 'CSV';
+    if (!ym || !/^20\d{4}$/.test(String(ym))) warnings.push('取込年月が正しく選択されていません。');
+    if (names.length > 1 && kind === '収支CSV') warnings.push('収支CSVが複数選択されています。同じ年月・同じ区分では最後のファイルで上書きされる可能性があります。');
+    names.forEach(name => {
+      const fileYM = this.extractYMFromName(name);
+      if (fileYM && ym && fileYM !== ym) warnings.push(`ファイル名の年月（${ymLabel(fileYM)}）と選択年月（${ymLabel(ym)}）が違う可能性があります：${name}`);
+    });
+    this.centerNameWarning(names).forEach(x => warnings.push(`ファイル名に別センター名らしき文字があります：${x}`));
+    if (existingRecord) {
+      warnings.push(`${ymLabel(ym)}の${kindLabel}${type ? `（${type === 'daily' ? '速報' : '確定'}）` : ''}は既に登録済みです。続行すると入替になります。`);
+      const oldNames = [existingRecord.fileName, ...(existingRecord.files || [])].filter(Boolean);
+      const sameName = names.find(n => oldNames.includes(n));
+      if (sameName) warnings.push(`同じファイル名が既に取り込まれています：${sameName}`);
+    }
+    return [...new Set(warnings)];
+  },
+  confirm(opts) {
+    const warnings = this.buildWarnings(opts || {});
+    if (!warnings.length) return true;
+    const title = `${opts.kind || 'CSV'}取込前の確認`;
+    return confirm(`${title}
+
+${warnings.map((w,i)=>`${i+1}. ${w}`).join('\n')}
+
+このまま取込を続行しますか？`);
+  }
+};
+window.DATA_IMPORT_GUARD = DATA_IMPORT_GUARD;
+
 /* ════════ §7 IMPORT ════════════════════════════════════════════ */
 const IMPORT = {
   _pending: [],
@@ -802,9 +864,14 @@ const IMPORT = {
     const importType = selectedType === 'daily' ? 'daily' : 'confirmed';
     const existing = STATE.datasets.find(d => d.ym === ym && (d.type || 'confirmed') === importType && d.source !== 'history');
 
-    if (existing && !opt.replace) {
-      const label = `${ymLabel(ym)}（${importType==='confirmed'?'確定':'速報'} / ${existing.fileName || 'ファイル名なし'}）`;
-      const ok = confirm(`${label} は既に登録されています。\n\n新しいCSVで入れ替えますか？`);
+    if (!opt.replace) {
+      const ok = DATA_IMPORT_GUARD.confirm({
+        kind:'収支CSV',
+        ym,
+        type: importType,
+        files,
+        existingRecord: existing
+      });
       if (!ok) {
         UI.toast('取込を中止しました', 'warn');
         return;
@@ -821,6 +888,7 @@ const IMPORT = {
         const ds = processDataset(ym, type, rows);
         ds.source = 'csv';
         ds.fileName = f.name;
+        ds.fileSig = DATA_IMPORT_GUARD.fileSig(f);
         ds.fiscalYear = fiscalYearFromYM(ym);
         ds.unit = '円';
         ds.replacedAt = existing ? new Date().toISOString() : null;

@@ -133,8 +133,7 @@ IMPORT.deleteFieldData = function(ym) {
 
   /* 現場CSVデータ取得を一元化
      目的：画面ごとの独自 localStorage 探索で、年度が出ない・別センター混入・削除済み復活が起きないようにする。
-     優先順位：STATEの専用配列のみ。削除済みマーカーは必ず反映する。
-     localStorage全探索・保険探索・旧full_state優先復元は行わない。
+     優先順位：STATE → STORE直読 → localStorage full_state。削除済みマーカーは必ず反映する。
   */
   function fieldAccessDeleted(kind, ym){
     try {
@@ -713,6 +712,12 @@ IMPORT.deleteFieldData = function(ym) {
   async function importWorker(files){
     ensureState(); setupYmSelects();
     const ym = selectedWorkerYM();
+    const fileList = Array.from(files || []);
+    const existingWorker = safeArray(STATE.workerCsvData).find(d => d && d.ym === ym);
+    if (window.DATA_IMPORT_GUARD && !DATA_IMPORT_GUARD.confirm({ kind:'作業者CSV', ym, files:fileList, existingRecord:existingWorker })) {
+      msg('作業者CSV取込を中止しました', 'warn');
+      return;
+    }
     let combined = {
       rowCount:0,
       lineRowCount:0,
@@ -735,7 +740,7 @@ IMPORT.deleteFieldData = function(ym) {
     const allDays = new Set();
     const allSlips = new Set();
 
-    for (const file of Array.from(files || [])) {
+    for (const file of fileList) {
       const text = await readCsvFile(file);
       const parsed = parseWorkerCsvRows(csvRowsFromText(text), file.name);
       combined.lineRowCount += parsed.lineRowCount || 0;
@@ -820,7 +825,7 @@ IMPORT.deleteFieldData = function(ym) {
     combined.amountMode = '単一CSV：幹線料系除外後';
 
     if (typeof clearDataDeleted === 'function') { clearDataDeleted('workerMonths', ym); clearDataDeleted('fieldMonths', ym); }
-    upsertByYm('workerCsvData', { ym, source:'worker_csv', importedAt:new Date().toISOString(), ...combined });
+    upsertByYm('workerCsvData', { ym, source:'worker_csv', importedAt:new Date().toISOString(), files:fileList.map(f=>f.name), fileSigs:fileList.map(f=>window.DATA_IMPORT_GUARD?.fileSig ? DATA_IMPORT_GUARD.fileSig(f) : '').filter(Boolean), ...combined });
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     STORE.save();
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
@@ -831,9 +836,15 @@ IMPORT.deleteFieldData = function(ym) {
   async function importProduct(files){
     ensureState(); setupYmSelects();
     const ym = selectedProductYM();
+    const fileList = Array.from(files || []);
+    const existingProduct = safeArray(STATE.productAddressData).find(d => d && d.ym === ym);
+    if (window.DATA_IMPORT_GUARD && !DATA_IMPORT_GUARD.confirm({ kind:'商品住所CSV', ym, files:fileList, existingRecord:existingProduct })) {
+      msg('商品・住所CSV取込を中止しました', 'warn');
+      return;
+    }
     let allTickets = [];
     let rawRows = 0, detailRows = 0, filesUsed = [];
-    for (const file of Array.from(files || [])) {
+    for (const file of fileList) {
       const text = await readCsvFile(file);
       const parsed = parseProductAddressRows(csvRowsFromText(text), file.name);
       rawRows += parsed.rawRows;
@@ -859,6 +870,7 @@ IMPORT.deleteFieldData = function(ym) {
       source:'product_address_csv',
       importedAt:new Date().toISOString(),
       files: filesUsed,
+      fileSigs: fileList.map(f=>window.DATA_IMPORT_GUARD?.fileSig ? DATA_IMPORT_GUARD.fileSig(f) : '').filter(Boolean),
       rawRows,
       detailRows,
       uniqueCount: tickets.length,
