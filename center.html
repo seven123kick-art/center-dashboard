@@ -6,8 +6,14 @@
 
 <link rel="stylesheet" href="app.css">
 
-<!-- Supabase接続設定：値は config.local.js に分離 -->
-<script src="config.local.js"></script>
+<!-- ★ Supabase接続設定（このファイルに直書き。どのPCでもそのまま動く） -->
+<script>
+window.SUPABASE_CONFIG = {
+  url:    'https://udjibwlgscdkoheceyds.supabase.co',
+  key:    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkamlid2xnc2Nka29oZWNleWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTQ5NjksImV4cCI6MjA5MjQzMDk2OX0.4whX8OuFFvjXYrfsJMIthMlPM7oxzbrqychlMu81G7w',
+  bucket: 'center-data',
+};
+</script>
 
 <style>
 /* ===== PL 見やすさ改善 ===== */
@@ -1017,7 +1023,7 @@
       <div class="card" style="margin-bottom:14px;border-top:3px solid var(--navy)">
         <div class="card-header">
           <span class="card-title">キャパ分析</span>
-          <span style="font-size:11px;color:var(--text3)">荷主キャパ区分を基準に、月別・日別・地区別の超過件数を確認します</span>
+          <span style="font-size:11px;color:var(--text3)">キャパExcelと配送エリアCSVを突合し、月別使用率・日別超過・カレンダー補正を確認します</span>
         </div>
         <div class="card-body">
           <div class="grid3" style="margin-bottom:12px">
@@ -1038,12 +1044,16 @@
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn btn-primary" onclick="CAPACITY_UI.openMasterInput()" style="font-size:12px">キャパExcel取込</button>
+            <input type="file" id="capacity-master-input" accept=".xlsx,.xls" style="display:none">
+            <button class="btn" onclick="CAPACITY_UI.openCsvInput()" style="font-size:12px">配送エリアCSV取込</button>
+            <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none">
             <button class="btn" onclick="CAPACITY_UI._cacheKey='';CAPACITY_UI.render()" style="font-size:12px">再集計</button>
-            <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()" style="font-size:12px">キャパ区分を初期化</button>
+            <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()" style="font-size:12px">キャパマスタ削除</button>
             <span id="capacity-msg" style="font-size:11px;color:var(--text2)"></span>
           </div>
           <div style="font-size:11px;color:var(--text3);line-height:1.7">
-            ※ キャパは「荷主キャパ区分」で手入力します。商品・住所CSVはデータ管理で登録済みの月次データを参照します。日付がない月間CSVは「月間件数 ÷ 稼働日数」の平均で日別判定します。
+            ※ 商品・住所CSVは原票番号でユニーク化済みのデータを使用します。日付がない月間CSVは「月間件数 ÷ 稼働日数」の平均で日別判定します。
           </div>
         </div>
       </div>
@@ -1053,7 +1063,7 @@
       <div id="capacity-root"></div>
 
       <div class="card" style="margin-top:14px">
-        <div class="card-header"><span class="card-title">未分類住所・郵便番号</span><span style="font-size:11px;color:var(--text3)">キャパ区分追加候補</span></div>
+        <div class="card-header"><span class="card-title">未分類住所・郵便番号</span><span style="font-size:11px;color:var(--text3)">地区マッピング追加候補</span></div>
         <div class="scroll-x">
           <table class="tbl">
             <thead><tr><th>住所・市区町村</th><th>荷主</th><th class="r">件数</th></tr></thead>
@@ -1076,22 +1086,7 @@
           <div style="margin-top:4px"><span id="import-target-note">ページは共通ですが、保存キー・クラウドパス・IndexedDBはセンターIDで分離します。</span></div>
         </div>
       </div>
-      <div class="card no-print" style="margin-bottom:14px;border:1px solid var(--border);background:#f8fafc">
-        <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px">
-          <div style="font-size:12px;color:var(--text2);line-height:1.6">
-            データ取り込みページは、初期表示では全項目を閉じています。必要な項目だけ開いて作業してください。
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button class="btn" onclick="IMPORT_PAGE_TOGGLE.setAll(true)" style="font-size:12px;padding:5px 10px">すべて開く</button>
-            <button class="btn" onclick="IMPORT_PAGE_TOGGLE.setAll(false)" style="font-size:12px;padding:5px 10px">すべて閉じる</button>
-          </div>
-        </div>
-      </div>
-      <details class="card" style="margin-bottom:14px">
-        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-          <span class="card-title">収支実績CSV取込</span>
-          <span style="font-size:11px;color:var(--text3)">▼ 開閉</span>
-        </summary>
+      <div class="card" style="margin-bottom:14px">
         <div class="card-body">
           <div class="upload-zone no-print" id="upload-zone">
             <input type="file" id="file-input" accept=".csv" multiple style="display:none">
@@ -1107,23 +1102,17 @@
           </div>
           <div id="upload-msg"></div>
         </div>
-      </details>
-      <details class="card" style="margin-bottom:14px">
-        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-          <span class="card-title">データ管理・正常性チェック</span>
-          <span style="font-size:11px;color:var(--text3)">▼ 開閉</span>
-        </summary>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header"><span class="card-title">読み込み済みデータ</span></div>
         <div id="data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
-      </details>
+      </div>
       <!-- 計画データ取込 -->
-      <details class="card" style="margin-bottom:14px">
-        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span class="card-title" id="plan-import-title">📋 計画データ取込（予算管理）</span>
-            <span id="plan-badge" class="badge badge-warn">未登録</span>
-          </div>
-          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
-        </summary>
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header">
+          <span class="card-title" id="plan-import-title">📋 計画データ取込（予算管理）</span>
+          <span id="plan-badge" class="badge badge-warn">未登録</span>
+        </div>
         <div class="card-body">
           <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8">
             月次収支表の「計画」値をコピペで取込みます。<br>
@@ -1145,7 +1134,7 @@
             <span id="plan-import-msg" style="font-size:11px;color:var(--text2)"></span>
           </div>
         </div>
-      </details>
+      </div>
 
       <!-- 過去実績補完データ取込 -->
       <details class="card" style="margin-bottom:14px">
@@ -1180,20 +1169,17 @@
 
 
       <!-- 現場明細データ取込・管理 -->
-      <details class="card" style="margin-bottom:14px">
-        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
           <div style="display:flex;align-items:center;gap:8px">
             <span class="card-title">🚚 現場明細データ（CSV専用）</span>
             <span id="field-import-badge" class="badge badge-warn">未読込</span>
           </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <button onclick="event.stopPropagation();renderFieldDataList2()" title="一覧を最新状態に更新"
-              style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border2);background:#f8fafc;cursor:pointer;font-family:inherit;color:var(--text2)">
-              🔄 更新
-            </button>
-            <span style="font-size:11px;color:var(--text3)">▼ 開閉</span>
-          </div>
-        </summary>
+          <button onclick="renderFieldDataList2()" title="一覧を最新状態に更新"
+            style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border2);background:#f8fafc;cursor:pointer;font-family:inherit;color:var(--text2)">
+            🔄 更新
+          </button>
+        </div>
         <div class="card-body">
           <div class="msg msg-info" style="margin-bottom:12px">
             PDF取込は使用しません。現場明細はCSV専用です。<br>
@@ -1267,17 +1253,14 @@
             </button>
           </div>
         </div>
-      </details>
+      </div>
 
       <!-- クラウド同期設定 -->
-      <details class="card" style="margin-bottom:14px">
-        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span class="card-title">☁ クラウド同期設定（Supabase）</span>
-            <span id="cloud-status-badge" class="badge badge-info">設定済（未同期）</span>
-          </div>
-          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
-        </summary>
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header">
+          <span class="card-title">☁ クラウド同期設定（Supabase）</span>
+          <span id="cloud-status-badge" class="badge badge-info">設定済（未同期）</span>
+        </div>
         <div class="card-body">
           <div id="cloud-setup-form">
             <!-- 接続情報はアプリに埋め込まれています -->
@@ -1326,77 +1309,37 @@
             </details>
           </div>
         </div>
-      </details>
+      </div>
 
       <!-- ストレージ管理 -->
-      <details class="card" style="margin-bottom:14px">
-        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header">
           <span class="card-title">ストレージ管理</span>
-          <div style="display:flex;align-items:center;gap:8px">
-            <button onclick="event.stopPropagation();DB.showStorageInfo()" class="btn" style="font-size:11px;padding:3px 10px">更新</button>
-            <button onclick="event.stopPropagation();SIMPLE_STORE.debug()" class="btn" style="font-size:11px;padding:3px 10px;background:#f59e0b;color:#fff;border-color:#f59e0b">🗄 DB確認</button>
-            <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
-          </div>
-        </summary>
+          <button onclick="DB.showStorageInfo()" class="btn" style="font-size:11px;padding:3px 10px">更新</button>
+          <button onclick="SIMPLE_STORE.debug()" class="btn" style="font-size:11px;padding:3px 10px;background:#f59e0b;color:#fff;border-color:#f59e0b">🗄 DB確認</button>
+        </div>
         <div class="card-body">
           <div id="storage-info" style="font-size:12px;color:var(--text2);margin-bottom:12px">読み込み中...</div>
           <div id="month-manage-list"></div>
         </div>
-      </details>
+      </div>
 
-      <details class="card">
-        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-          <span class="card-title">運用ガイド</span>
-          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
-        </summary>
-        <div class="card-body" style="display:grid;gap:10px">
-          <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-            <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
-              <span>① 月次データ登録の基本順序</span><span style="font-size:11px;color:var(--text3)">▼</span>
-            </summary>
-            <div class="rule-list" style="padding:10px 12px">
-              <p><strong>収支実績CSV</strong> → <strong>計画データ</strong> → <strong>作業者CSV</strong> → <strong>商品・住所CSV</strong> → <strong>荷主キャパ区分</strong> の順で登録します</p>
-              <p>AI会議報告書に進む前に、上部の <strong>データ正常性チェック</strong> で対象月がOKになっているか確認します</p>
-              <p>未登録・金額欠落・住所/地区欠落・キャパ未分類がある月は、分析結果やAI文面が弱くなるため先に修正します</p>
-            </div>
-          </details>
-
-          <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-            <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
-              <span>② 収支実績CSVの扱い</span><span style="font-size:11px;color:var(--text3)">▼</span>
-            </summary>
-            <div class="rule-list" style="padding:10px 12px">
-              <p><strong>SKDL0001</strong> は日報・速報値、<strong>SKDL0003</strong> は月末締め後の確定値として扱います</p>
-              <p>同一月に速報と確定がある場合、画面表示・分析は <strong>確定値を優先</strong> します</p>
-              <p>同一月のファイルを再度読み込むと、対象月・対象区分のデータを入れ替えます</p>
-              <p>過去月でSKDL詳細CSVがない場合のみ、<strong>過去実績補完データ</strong> を使用します</p>
-            </div>
-          </details>
-
-          <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-            <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
-              <span>③ 現場明細データの扱い</span><span style="font-size:11px;color:var(--text3)">▼</span>
-            </summary>
-            <div class="rule-list" style="padding:10px 12px">
-              <p><strong>作業者CSV</strong> は作業者分析・作業内容分析の元データです</p>
-              <p><strong>商品・住所CSV</strong> は商品カテゴリ分析・エリア分析・キャパ分析の元データです</p>
-              <p>商品・住所CSVは、I列「エスライン原票番号」のユニーク件数を基準にします</p>
-              <p>顧客氏名・電話番号・住所番地・raw行は保存しません</p>
-            </div>
-          </details>
-
-          <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-            <summary style="cursor:pointer;list-style:none;padding:11px 12px;background:#f8fafc;font-weight:900;color:var(--text);display:flex;justify-content:space-between;align-items:center">
-              <span>④ 削除・同期・復元の注意</span><span style="font-size:11px;color:var(--text3)">▼</span>
-            </summary>
-            <div class="rule-list" style="padding:10px 12px">
-              <p>月別削除は、ローカル削除・Supabase削除・削除マーカーを使って復活を防ぎます</p>
-              <p>自動同期は軽量化済みです。通常は手動操作不要ですが、反映が不安な場合は「今すぐ同期」を押します</p>
-              <p>データ正常性チェックで未登録や欠落が残る場合は、対象月を再取込してください</p>
-            </div>
-          </details>
+      <div class="card">
+        <div class="card-header"><span class="card-title">運用ガイド</span></div>
+        <div class="card-body">
+          <div class="rule-list">
+            <p>このタブは <strong>収支実績データ（SKDL形式）</strong> 専用です</p>
+            <p><strong>SKDL0001</strong> … 日報（月中の速報確認用）／ <strong>SKDL0003</strong> … 確定値（月末締め後の正式数値）</p>
+            <p>ファイル名に「1」が含まれれば日報、「3」が含まれれば確定として自動判別します</p>
+            <p>同一月に両方読み込んだ場合は <strong>確定値を優先</strong> して表示します</p>
+            <p>複数月まとめて選択すると推移グラフが自動生成されます</p>
+            <p>同一月のファイルを再度読み込むと上書き更新されます</p>
+            <p>データはこのPCのブラウザ内のみで処理します（外部送信・クラウド保存なし）</p>
+            <p>ブラウザを閉じるとデータはリセットされます。毎月読み込み直してください</p>
+            <p>2名それぞれのPCでこのHTMLファイルを開いて使います（データは各自で管理）</p>
+          </div>
         </div>
-      </details>
+      </div>
     </div>
 
     <!-- ════ 科目分析ビュー ════ -->
@@ -1446,14 +1389,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 
 <script src="app.js"></script>
-<script src="storage.js"></script>
-<script src="sync.js"></script>
-<script src="capacity.js"></script>
-<script src="report.js"></script>
 <script src="dashboard.js"></script>
 <script src="shipper.js" id="module-shipper"></script>
 <script src="kamoku.js" id="module-kamoku" defer></script>
-<script src="docx.iife.js" defer></script>
+<script src="docx.iife.js"></script>
 <script src="ai_gen.js" id="module-ai-gen" defer></script>
 <script src="pl.js"></script>
 <script src="trend.js"></script>
