@@ -5347,8 +5347,8 @@ function fmtFileSize(bytes) {
 const NAV = {
   // メイン画面切替（同期なし、再描画のみ）
   go(el) {
-    const view = (el && el.dataset) ? el.dataset.view : (typeof el==='string' ? el : 'dashboard');
-    if (!view) return;
+    let view = (el && el.dataset) ? el.dataset.view : (typeof el==='string' ? el : 'dashboard');
+    if (!view || !document.getElementById('view-' + view)) view = 'dashboard';
     STATE.view = view;
     try { sessionStorage.setItem('lastView', view); } catch(e) {}
 
@@ -5776,6 +5776,22 @@ async function loadScreenModules() {
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
 function setupFieldImportYMControls(){}
 document.addEventListener('DOMContentLoaded', async () => {
+  // 起動停止防止: どこかで初期化が止まっても最大8秒でローディング画面を解除する
+  const _bootSafetyTimer = setTimeout(() => {
+    try {
+      const ov = document.getElementById('app-loading-overlay');
+      if (ov) {
+        ov.style.opacity = '0';
+        setTimeout(() => ov.remove(), 420);
+      }
+      const banner = document.getElementById('js-error-banner');
+      if (banner && !banner.textContent) {
+        banner.style.display = 'block';
+        banner.textContent = '起動処理が長くなったため、ローディング画面を解除しました。画面が空白の場合はコンソールエラーを確認してください。';
+        setTimeout(() => { banner.style.display = 'none'; }, 6000);
+      }
+    } catch(e) {}
+  }, 8000);
   // 0. 画面別モジュール読込（荷主分析など）
   try {
     await loadScreenModules();
@@ -5822,10 +5838,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupFieldImportYMControls();
 
   // 8. 前回ページを復元（F5対応）
-  const _lastView = (() => { try { return sessionStorage.getItem('lastView') || 'dashboard'; } catch(e){ return 'dashboard'; } })();
+  const _lastView = (() => {
+    try {
+      const v = sessionStorage.getItem('lastView') || 'dashboard';
+      return document.getElementById('view-' + v) ? v : 'dashboard';
+    } catch(e){ return 'dashboard'; }
+  })();
 
   // 安全弁: 最大8秒でオーバーレイを強制消去
   function _hideOverlay() {
+    clearTimeout(_bootSafetyTimer);
     const ov = document.getElementById('app-loading-overlay');
     if (!ov) return;
     ov.style.opacity = '0';
