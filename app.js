@@ -340,6 +340,7 @@ const CONFIG = {
     'field-worker':'作業者分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
     capacity:'キャパ分析', import:'データ取込',
     kamoku:'収支科目 詳細分析',
+    ai_gen:'🤖 AI分析レポート生成',
   },
 };
 
@@ -540,7 +541,83 @@ window.markDataDeleted = markDataDeleted;
 window.clearDataDeleted = clearDataDeleted;
 window.applyDeletionTombstonesToState = applyDeletionTombstonesToState;
 
-/* ════════ §4 STORE（storage.jsへ分割） ════════════════ */
+/* ════════ §4 STORE（localStorage、センター別） ════════════════ */
+const STORE = {
+  _p: `mgmt5_${CENTER.id}_`,
+
+  _s(k, v) { try { localStorage.setItem(this._p+k, JSON.stringify(v)); } catch(e){} },
+  _g(k)    { try { const v=localStorage.getItem(this._p+k); return v?JSON.parse(v):null; } catch(e){ return null; } },
+
+  load() {
+    STATE.datasets  = this._g('datasets')  || [];
+    STATE.fieldData = this._g('fieldData') || [];
+    STATE.areaData  = this._g('areaData')  || [];
+    STATE.capacity  = this._g('capacity')  || null;
+    STATE.planData  = normalizePlanData(this._g('planData'));
+    STATE.memos     = this._g('memos')     || {};
+    STATE.library   = this._g('library')   || [];
+    STATE.reportKnowledge = normalizeReportKnowledge(this._g('reportKnowledge') || STATE.reportKnowledge);
+    STATE.deleted = normalizeDeletedState(this._g('deleted') || STATE.deleted);
+    sanitizePersonalDataState(STATE);
+    applyDeletionTombstonesToState(STATE);
+  },
+
+  save() {
+    sanitizePersonalDataState(STATE);
+    this._s('datasets',  STATE.datasets);
+    this._s('fieldData', STATE.fieldData);
+    this._s('areaData',  STATE.areaData);
+    this._s('capacity',  STATE.capacity);
+    this._s('planData',  STATE.planData);
+    this._s('memos',     STATE.memos);
+    this._s('library',   STATE.library);
+    this._s('reportKnowledge', STATE.reportKnowledge);
+    this._s('deleted', STATE.deleted);
+  },
+
+  exportJSON() {
+    sanitizePersonalDataState(STATE);
+    const blob = new Blob([JSON.stringify({
+      center:CENTER.id, exportedAt:new Date().toISOString(),
+      datasets:STATE.datasets, fieldData:STATE.fieldData, areaData:STATE.areaData,
+      capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos, library:STATE.library, reportKnowledge:STATE.reportKnowledge, deleted:STATE.deleted,
+    },null,2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${CENTER.id}_backup_${dt()}.json`;
+    a.click();
+  },
+
+  async restoreJSON(file) {
+    try {
+      const d = JSON.parse(await file.text());
+      if (d.center && d.center !== CENTER.id &&
+          !confirm(`別センター(${d.center})のデータです。読み込みますか？`)) return;
+      if (d.datasets)  STATE.datasets  = d.datasets;
+      if (d.fieldData) STATE.fieldData = d.fieldData;
+      if (d.areaData)  STATE.areaData  = d.areaData;
+      if (d.capacity)  STATE.capacity  = d.capacity;
+      if (d.planData) STATE.planData = normalizePlanData(d.planData);
+      if (d.memos)     STATE.memos     = d.memos;
+      if (d.library)   STATE.library   = d.library;
+      if (d.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(d.reportKnowledge);
+      if (d.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, d.deleted);
+      sanitizePersonalDataState(STATE);
+      applyDeletionTombstonesToState(STATE);
+      this.save();
+      NAV.refresh();
+      UI.toast('バックアップを復元しました');
+    } catch(e) { UI.toast('読込エラー: '+e.message, 'error'); }
+  },
+
+  storageInfo() {
+    let size = 0;
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith(this._p)) size += (localStorage.getItem(k)||'').length * 2;
+    }
+    return { bytes: size, kb: (size/1024).toFixed(1) };
+  },
+};
 
 /* ════════ §5 CSV ════════════════════════════════════════════════ */
 const CSV = {
@@ -769,68 +846,6 @@ function upsertDataset(ds) {
   });
 }
 
-
-/* ════════ §6.5 取込ガード（重複・月違い・センター違い警告） ══════════════ */
-const DATA_IMPORT_GUARD = {
-  fileSig(file) {
-    if (!file) return '';
-    return [file.name || '', file.size || 0, file.lastModified || 0].join('|');
-  },
-  fileNames(files) { return Array.from(files || []).map(f => f?.name || '').filter(Boolean); },
-  extractYMFromName(name) {
-    const str = String(name || '');
-    let m = str.match(/(20\d{2})[-_年\/]?\s*(0?[1-9]|1[0-2])(?:月)?/);
-    if (m) return `${m[1]}${String(m[2]).padStart(2,'0')}`;
-    m = str.match(/(0?[1-9]|1[0-2])月/);
-    if (m) {
-      const y = String(document.getElementById('modal-year')?.value || new Date().getFullYear());
-      return `${y}${String(m[1]).padStart(2,'0')}`;
-    }
-    return '';
-  },
-  centerNameWarning(names) {
-    const current = String(CENTER?.name || '').replace(/センター$/,'');
-    const centers = ['戸田','北埼玉','南埼玉','船橋','練馬','群馬','さいたま','東松山','静岡','東北','三河'];
-    const hits = [];
-    names.forEach(name => {
-      centers.forEach(c => {
-        if (c !== current && String(name).includes(c)) hits.push(`${name}：${c}`);
-      });
-    });
-    return [...new Set(hits)];
-  },
-  buildWarnings({ kind, ym, type, files, existingRecord }) {
-    const names = this.fileNames(files);
-    const warnings = [];
-    const kindLabel = kind || 'CSV';
-    if (!ym || !/^20\d{4}$/.test(String(ym))) warnings.push('取込年月が正しく選択されていません。');
-    if (names.length > 1 && kind === '収支CSV') warnings.push('収支CSVが複数選択されています。同じ年月・同じ区分では最後のファイルで上書きされる可能性があります。');
-    names.forEach(name => {
-      const fileYM = this.extractYMFromName(name);
-      if (fileYM && ym && fileYM !== ym) warnings.push(`ファイル名の年月（${ymLabel(fileYM)}）と選択年月（${ymLabel(ym)}）が違う可能性があります：${name}`);
-    });
-    this.centerNameWarning(names).forEach(x => warnings.push(`ファイル名に別センター名らしき文字があります：${x}`));
-    if (existingRecord) {
-      warnings.push(`${ymLabel(ym)}の${kindLabel}${type ? `（${type === 'daily' ? '速報' : '確定'}）` : ''}は既に登録済みです。続行すると入替になります。`);
-      const oldNames = [existingRecord.fileName, ...(existingRecord.files || [])].filter(Boolean);
-      const sameName = names.find(n => oldNames.includes(n));
-      if (sameName) warnings.push(`同じファイル名が既に取り込まれています：${sameName}`);
-    }
-    return [...new Set(warnings)];
-  },
-  confirm(opts) {
-    const warnings = this.buildWarnings(opts || {});
-    if (!warnings.length) return true;
-    const title = `${opts.kind || 'CSV'}取込前の確認`;
-    return confirm(`${title}
-
-${warnings.map((w,i)=>`${i+1}. ${w}`).join('\n')}
-
-このまま取込を続行しますか？`);
-  }
-};
-window.DATA_IMPORT_GUARD = DATA_IMPORT_GUARD;
-
 /* ════════ §7 IMPORT ════════════════════════════════════════════ */
 const IMPORT = {
   _pending: [],
@@ -841,6 +856,8 @@ const IMPORT = {
     const arr = Array.from(files);
     if (!arr.length) return;
     const csv  = arr.filter(f=>/\.csv$/i.test(f.name));
+    const xlsx = arr.filter(f=>/\.(xlsx|xls)$/i.test(f.name));
+
     // 入替モード：年月選択モーダルを出さず、指定済みYMへ直接差替
     if (csv.length && this._replaceYM) {
       const ym = this._replaceYM;
@@ -854,7 +871,8 @@ const IMPORT = {
     }
 
     if (csv.length)  { this._pending = csv; MODAL.openYM(csv); return; }
-    UI.toast('対応形式：CSV（収支・現場明細）','warn');
+    if (xlsx.length) { this.importCapacityExcel(xlsx[0]).catch(e=>UI.toast(e.message,'error')); return; }
+    UI.toast('対応形式：CSV（収支・現場明細）・XLSX（キャパ）','warn');
   },
 
   async processCSV(files, ym, opt={}) {
@@ -864,14 +882,9 @@ const IMPORT = {
     const importType = selectedType === 'daily' ? 'daily' : 'confirmed';
     const existing = STATE.datasets.find(d => d.ym === ym && (d.type || 'confirmed') === importType && d.source !== 'history');
 
-    if (!opt.replace) {
-      const ok = DATA_IMPORT_GUARD.confirm({
-        kind:'収支CSV',
-        ym,
-        type: importType,
-        files,
-        existingRecord: existing
-      });
+    if (existing && !opt.replace) {
+      const label = `${ymLabel(ym)}（${importType==='confirmed'?'確定':'速報'} / ${existing.fileName || 'ファイル名なし'}）`;
+      const ok = confirm(`${label} は既に登録されています。\n\n新しいCSVで入れ替えますか？`);
       if (!ok) {
         UI.toast('取込を中止しました', 'warn');
         return;
@@ -879,21 +892,15 @@ const IMPORT = {
     }
 
     let imported = 0;
-    const importErrors = [];
     for (const f of files) {
       try {
         const text = await CSV.read(f);
         const rows = CSV.parseSKDL(text, monthCol);
-        if (!rows) {
-          importErrors.push(`${f.name}: データ行が見つかりません`);
-          UI.toast(`${f.name}: データ行が見つかりません`,'warn', { title:'取込確認' });
-          continue;
-        }
+        if (!rows) { UI.toast(`${f.name}: データ行が見つかりません`,'warn'); continue; }
         const type = importType;
         const ds = processDataset(ym, type, rows);
         ds.source = 'csv';
         ds.fileName = f.name;
-        ds.fileSig = DATA_IMPORT_GUARD.fileSig(f);
         ds.fiscalYear = fiscalYearFromYM(ym);
         ds.unit = '円';
         ds.replacedAt = existing ? new Date().toISOString() : null;
@@ -902,22 +909,101 @@ const IMPORT = {
         STATE.datasets = STATE.datasets.filter(d => !(d.ym === ym && (d.type || 'confirmed') === type && d.source !== 'history'));
         upsertDataset(ds);
         imported++;
-      } catch(e) {
-        const msg = errorMessage(e);
-        importErrors.push(`${f.name}: ${msg}`);
-        UI.toast(`${f.name} の取込に失敗しました`, 'error', { title:'CSV取込エラー', detail: msg });
-      }
-    }
-    if (importErrors.length) {
-      console.warn('CSV import errors', importErrors);
-      UI.toast(`${importErrors.length}件の取込エラーがあります`, 'warn', { title:'取込結果確認', detail: importErrors.slice(0,5).join('\n') + (importErrors.length > 5 ? '\n...' : '') });
+      } catch(e) { UI.toast(`${f.name}: ${e.message}`,'error'); }
     }
     if (imported > 0) {
       STORE.save();
-      CLOUD.pushMonth(ym).catch(e=>UI.toast('CSVは保存しましたが、クラウド同期に失敗しました', 'warn', { title:'同期確認', detail:errorMessage(e) })); // 取込月だけ自動同期
+      CLOUD.pushMonth(ym).catch(()=>{}); // 取込月だけ自動同期
       NAV.refresh();
-      UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`, 'ok', { title:'CSV取込完了' });
+      UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`);
       UI.updateSaveStatus();
+    }
+  },
+
+  async importCapacityExcel(file) {
+    try {
+      await ASSETS.xlsx();
+      if (!window.XLSX) { UI.toast('SheetJSが読み込まれていません','error'); return; }
+
+      const buf = await file.arrayBuffer();
+      const wb = window.XLSX.read(buf,{type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = window.XLSX.utils.sheet_to_json(ws,{header:1, defval:''});
+
+      function normAreaName(v){
+        return String(v || '')
+          .normalize('NFKC')
+          .replace(/\s+/g,'')
+          .replace(/_n/g,'_')
+          .replace(/＿n/g,'_')
+          .replace(/北\/板橋/g,'北/板')
+          .trim();
+      }
+      function n(v){
+        const x = Number(String(v ?? '').normalize('NFKC').replace(/,/g,'').replace(/[^\d.-]/g,''));
+        return Number.isFinite(x) ? x : 0;
+      }
+      function isHeader(row){
+        const s = row.map(x=>String(x||'')).join('|');
+        return /地区.*名称|時間.*区分|平日|土日/.test(s);
+      }
+
+      const areas = {};
+      let rowCount = 0;
+
+      for (const row of data) {
+        if (!row || !row.some(c=>String(c||'').trim())) continue;
+        if (isHeader(row)) continue;
+
+        // 標準フォーマット：B列=地区名称1、F列=時間区分、G列=平日、H列=土日
+        let area = normAreaName(row[1]);
+        let time = String(row[5] || '').normalize('NFKC').trim() || 'ALL';
+        let weekday = n(row[6]);
+        let weekend = n(row[7]);
+
+        // 旧簡易フォーマット：A列=地区、B列=平日/最大、C列=土日
+        if ((!area || (!weekday && !weekend)) && row[0]) {
+          const a0 = normAreaName(row[0]);
+          const w0 = n(row[1]);
+          const e0 = n(row[2]);
+          if (a0 && (w0 || e0)) {
+            area = a0;
+            time = String(row[3] || 'ALL').normalize('NFKC').trim() || 'ALL';
+            weekday = w0;
+            weekend = e0 || w0;
+          }
+        }
+
+        if (!area || (!weekday && !weekend)) continue;
+        if (!areas[area]) areas[area] = { weekday:0, weekend:0, rows:[], max:0 };
+        areas[area].weekday += weekday;
+        areas[area].weekend += (weekend || weekday);
+        areas[area].max += Math.max(weekday, weekend || weekday);
+        areas[area].rows.push({ time, weekday, weekend:weekend || weekday });
+        rowCount++;
+      }
+
+      if (!Object.keys(areas).length) {
+        UI.toast('地区データが見つかりません（想定：B列=地区、F列=時間、G列=平日、H列=土日）','warn');
+        return;
+      }
+
+      STATE.capacity = STATE.capacity || {};
+      STATE.capacity.areas = areas;
+      STATE.capacity.updatedAt = new Date().toISOString();
+      STATE.capacity.sourceFile = file.name;
+      STATE.capacity.rowCount = rowCount;
+      STATE.capacity.mapping = STATE.capacity.mapping || CAPACITY_UI.defaultMapping();
+      STATE.capacity.calendar = STATE.capacity.calendar || {};
+
+      STORE.save();
+      CLOUD.pushCapacity().catch(()=>{});
+      NAV.refresh();
+      UI.toast(`キャパ取込完了: ${Object.keys(areas).length}地区 / ${rowCount}行`);
+      if (window.CAPACITY_UI?.render) CAPACITY_UI.render();
+    } catch(e) {
+      console.error(e);
+      UI.toast('Excel読込エラー: '+e.message,'error');
     }
   },
 
@@ -1050,7 +1136,549 @@ const MODAL = {
   },
 };
 
-/* ════════ §9 CLOUD（sync.jsへ分割） ════════════════ */
+/* ════════ §9 CLOUD（Supabase — 取込時のみ自動実行） ═══════════ */
+const CLOUD = {
+  _sb: null,
+  _LSKEY: 'mgmt5_cloud_cfg',
+  _busy: false,
+
+  _cfg() {
+    try { const s = localStorage.getItem(this._LSKEY); if (s) return JSON.parse(s); } catch(e) {}
+    return { url: CONFIG.SUPABASE_URL, key: CONFIG.SUPABASE_KEY, bucket: CONFIG.SUPABASE_BUCKET };
+  },
+  _saveCfg(url, key, bucket) { try { localStorage.setItem(this._LSKEY, JSON.stringify({ url, key, bucket })); } catch(e) {} this._sb = null; },
+  async _client() {
+    if (this._sb) return this._sb;
+    try {
+      await ASSETS.supabase();
+      if (!window.supabase) return null;
+      const cfg = this._cfg();
+      if (!cfg.url || !cfg.key) return null;
+      this._sb = window.supabase.createClient(cfg.url, cfg.key);
+      return this._sb;
+    } catch(e) { return null; }
+  },
+  _bucket() { return this._cfg().bucket || CONFIG.SUPABASE_BUCKET; },
+  _manifestKey() { return `${CENTER.id}/manifest.json`; },
+  _datasetKey(ym, type='confirmed') { return `${CENTER.id}/skdl/${ym}_${type || 'confirmed'}.json`; },
+  _capacityKey() { return `${CENTER.id}/capacity/master.json`; },
+  _fieldKey() { return `${CENTER.id}/field/data.json`; },
+  _workerMonthKey(ym) { return `${CENTER.id}/field/worker/${ym}.json`; },
+  _productMonthKey(ym) { return `${CENTER.id}/field/product/${ym}.json`; },
+  _fullStateKey() { return `${CENTER.id}/full_state.json`; },
+  _planKey() { return `${CENTER.id}/plan/data.json`; },
+  _memosKey() { return `${CENTER.id}/memos/data.json`; },
+  _libraryKey() { return `${CENTER.id}/library/data.json`; },
+  _libraryFileKey(fileName, fy='unknown') {
+    // Supabase Storage の key はURLパスとして扱われるため、表示名と保存名を分離する。
+    // 日本語・括弧・空白などは使わず、英数字だけの保存名にする。元のファイル名は fileName として台帳に残す。
+    const extRaw = String(fileName || '').split('.').pop() || 'bin';
+    const ext = String(extRaw).toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+    const uid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const safeFy = String(fy || 'unknown').replace(/[^0-9a-zA-Z_-]/g, '_');
+    return `${CENTER.id}/library_files/${safeFy}/${uid}.${ext}`;
+  },
+  _legacyKey() { return `${CENTER.id}/data_v5.json`; },
+  _makeManifest() {
+    const workerCsv = Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData : [];
+    const productCsv = Array.isArray(STATE.productAddressData) ? STATE.productAddressData : [];
+    return {
+      version: 31,
+      center: CENTER.id,
+      savedAt: new Date().toISOString(),
+      datasets: STATE.datasets.filter(d => d.source !== 'history').map(d => ({
+        ym:d.ym,
+        type:d.type || 'confirmed',
+        source:d.source || 'csv',
+        importedAt:d.importedAt || null,
+        totalIncome:d.totalIncome || 0,
+        totalExpense:d.totalExpense || 0,
+        profit:d.profit || 0
+      })),
+      workerCsvData: workerCsv.map(d => ({
+        ym:d.ym,
+        source:d.source || 'worker_csv',
+        importedAt:d.importedAt || d.updatedAt || d.savedAt || null,
+        rowCount:d.rowCount || 0,
+        workerCount:d.workerCount || 0
+      })),
+      productAddressData: productCsv.map(d => ({
+        ym:d.ym,
+        source:d.source || 'product_address_csv',
+        importedAt:d.importedAt || d.updatedAt || d.savedAt || null,
+        uniqueCount:d.uniqueCount || 0,
+        detailRows:d.detailRows || 0,
+        rawRows:d.rawRows || 0,
+        amount:d.amount || 0
+      })),
+      hasCapacity: !!STATE.capacity,
+      hasFieldData: !!(STATE.fieldData && STATE.fieldData.length),
+      hasPlanData: !!(STATE.planData && Object.keys(STATE.planData).length),
+      planDataUpdatedAt: latestPlanUpdatedAt(),
+      hasMemos: !!(STATE.memos && Object.keys(STATE.memos).length),
+      hasLibrary: !!(STATE.library && STATE.library.length),
+      hasReportKnowledge: !!(STATE.reportKnowledge && ((STATE.reportKnowledge.references||[]).length || Object.keys(STATE.reportKnowledge.policies||{}).length)),
+      deleted: STATE.deleted || {},
+    };
+  },
+  _makeFullState() {
+    // full_state は起動・復元用の軽量台帳だけにする。
+    // CSV本体（収支・作業者・商品住所）は月単位JSONへ分割保存し、ここへ入れない。
+    // ここへ大きい配列を入れると Supabase Storage の object size 上限で同期失敗する。
+    sanitizePersonalDataState(STATE);
+    return {
+      version: 31,
+      center: CENTER.id,
+      savedAt: new Date().toISOString(),
+      fiscalYear: STATE.fiscalYear || null,
+      capacity: STATE.capacity || null,
+      planData: STATE.planData || {},
+      memos: STATE.memos || {},
+      library: STATE.library || [],
+      reportKnowledge: STATE.reportKnowledge || { policies:{}, references:[] },
+      deleted: STATE.deleted || {},
+    };
+  },
+
+  _applyFullState(full) {
+    if (!full || typeof full !== 'object') return false;
+    if (full.center && full.center !== CENTER.id) return false;
+    if (Array.isArray(full.datasets)) STATE.datasets = full.datasets;
+    if (Array.isArray(full.fieldData)) STATE.fieldData = full.fieldData;
+    if (Array.isArray(full.areaData)) STATE.areaData = full.areaData;
+    if ('capacity' in full) STATE.capacity = full.capacity || null;
+    if (full.planData) STATE.planData = normalizePlanData(full.planData);
+    if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
+    if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
+    if (Array.isArray(full.library)) STATE.library = full.library;
+    if (full.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(full.reportKnowledge);
+    STATE.deleted = mergeDeletedStates(STATE.deleted, full.deleted || {});
+    sanitizePersonalDataState(STATE);
+    applyDeletionTombstonesToState(STATE);
+    if (typeof AUTO_SYNC !== 'undefined') {
+      AUTO_SYNC.withoutSync(() => STORE.save());
+    } else {
+      STORE.save();
+    }
+    return true;
+  },
+  _isSizeError(error) {
+    const msg = String(error?.message || error || '').toLowerCase();
+    return msg.includes('maximum allowed size') || msg.includes('payload too large') || msg.includes('413') || (msg.includes('object') && msg.includes('size'));
+  },
+  _chunkKey(key, idx) {
+    return `${key}.chunks/${String(idx).padStart(4,'0')}.part`;
+  },
+  async _uploadBlob(key, blob, contentType='application/octet-stream') {
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
+    const { error } = await sb.storage.from(this._bucket()).upload(key, blob, { upsert:true, contentType });
+    if (error) throw error;
+    return { ok:true };
+  },
+  async _uploadJSON(key, value) {
+    value = sanitizedCloneForExport(value);
+    const json = JSON.stringify(value);
+    const blob = new Blob([json], { type:'application/json' });
+
+    try {
+      await this._uploadBlob(key, blob, 'application/json');
+      return { ok:true, chunked:false };
+    } catch(error) {
+      if (!this._isSizeError(error)) throw error;
+    }
+
+    // Supabase bucketのobject size上限を超える場合は、小さいテキスト片に分割して保存する。
+    // 元のkeyには「分割台帳」だけを置くため、既存の downloadJSON 呼び出しはそのまま使える。
+    const chunkSize = 24 * 1024;
+    const chunks = [];
+    for (let i=0; i<json.length; i += chunkSize) chunks.push(json.slice(i, i + chunkSize));
+
+    for (let i=0; i<chunks.length; i++) {
+      await this._uploadBlob(this._chunkKey(key, i), new Blob([chunks[i]], { type:'text/plain' }), 'text/plain');
+    }
+
+    const pointer = {
+      __chunked: true,
+      version: 1,
+      center: CENTER.id,
+      key,
+      chunks: chunks.length,
+      chunkSize,
+      savedAt: new Date().toISOString(),
+      bytes: json.length
+    };
+    await this._uploadBlob(key, new Blob([JSON.stringify(pointer)], { type:'application/json' }), 'application/json');
+    return { ok:true, chunked:true, chunks:chunks.length };
+  },
+  async _downloadJSON(key) {
+    const sb = await this._client();
+    if (!sb) return null;
+    const { data, error } = await sb.storage.from(this._bucket()).download(key);
+    if (error) return null;
+    const text = await data.text();
+    const first = JSON.parse(text);
+    if (first && first.__chunked && Number(first.chunks) > 0) {
+      let joined = '';
+      for (let i=0; i<Number(first.chunks); i++) {
+        const part = await sb.storage.from(this._bucket()).download(this._chunkKey(key, i));
+        if (part.error || !part.data) throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
+        joined += await part.data.text();
+      }
+      return JSON.parse(joined);
+    }
+    return first;
+  },
+  async uploadFile(key, file) {
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
+    const { error } = await sb.storage.from(this._bucket()).upload(key, file, {
+      upsert:true,
+      contentType: file.type || 'application/octet-stream'
+    });
+    if (error) throw error;
+    return { ok:true, key };
+  },
+  async deleteFile(key) {
+    const sb = await this._client();
+    if (!sb || !key) return { ok:false, error:'Supabase未設定またはキーなし' };
+    const { error } = await sb.storage.from(this._bucket()).remove([key]);
+    if (error) return { ok:false, error:error.message };
+    return { ok:true };
+  },
+  async createSignedUrl(key) {
+    const sb = await this._client();
+    if (!sb || !key) return null;
+    const { data, error } = await sb.storage.from(this._bucket()).createSignedUrl(key, 60 * 10);
+    if (error) return null;
+    return data?.signedUrl || null;
+  },
+  async pushMonth(ym) {
+    if (!ym) return { ok:false, error:'対象月なし' };
+    if (this._busy) return { ok:false, error:'同期処理中' };
+    this._busy = true;
+    try {
+      const targets = STATE.datasets.filter(d => d.ym === ym && d.source !== 'history');
+      const workers = (STATE.workerCsvData || []).filter(d => d && d.ym === ym);
+      const products = (STATE.productAddressData || []).filter(d => d && d.ym === ym);
+      if (!targets.length && !workers.length && !products.length) return { ok:false, error:'対象月データなし' };
+      for (const ds of targets) await this._uploadJSON(this._datasetKey(ym, ds.type || 'confirmed'), ds);
+      for (const w of workers) await this._uploadJSON(this._workerMonthKey(ym), w);
+      for (const pr of products) await this._uploadJSON(this._productMonthKey(ym), pr);
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      UI.updateCloudBadge('ok');
+      return { ok:true };
+    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
+    finally { this._busy = false; }
+  },
+  async pushCapacity() {
+    if (!STATE.capacity) return { ok:false, error:'キャパデータなし' };
+    if (this._busy) return { ok:false, error:'同期処理中' };
+    this._busy = true;
+    try {
+      await this._uploadJSON(this._capacityKey(), STATE.capacity);
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      UI.updateCloudBadge('ok');
+      return { ok:true };
+    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
+    finally { this._busy = false; }
+  },
+  async pushAll() {
+    if (this._busy) return { ok:false, error:'同期処理中' };
+    this._busy = true;
+    try {
+      for (const ds of STATE.datasets.filter(d => d.source !== 'history')) await this._uploadJSON(this._datasetKey(ds.ym, ds.type || 'confirmed'), ds);
+      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
+      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
+      if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
+      await this._uploadJSON(this._planKey(), STATE.planData || {});
+      if (STATE.memos && Object.keys(STATE.memos).length) await this._uploadJSON(this._memosKey(), STATE.memos);
+      if (STATE.library && STATE.library.length) await this._uploadJSON(this._libraryKey(), STATE.library);
+      // 旧形式data_v5.json / 旧field/data.json は大きいデータ・個人情報混入リスクがあるため削除する。
+      try {
+        const sb = await this._client();
+        if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]);
+      } catch(e) {}
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      UI.updateCloudBadge('ok');
+      return { ok:true };
+    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
+    finally { this._busy = false; }
+  },
+  async push() { return this.pushAll(); },
+  _validWorkerMonthRecord(rec, meta={}) {
+    if (!rec || typeof rec !== 'object' || !rec.ym) return false;
+    const hasRows = Number(rec.rowCount || rec.lineRowCount || 0) > 0;
+    const hasWorkers = rec.workers && typeof rec.workers === 'object' && Object.keys(rec.workers).length > 0;
+    const metaRows = Number(meta.rowCount || meta.lineRowCount || 0);
+    if (metaRows && !hasRows && !hasWorkers) return false;
+    return hasRows || hasWorkers;
+  },
+  _validProductMonthRecord(rec, meta={}) {
+    if (!rec || typeof rec !== 'object' || !rec.ym) return false;
+    if (!Array.isArray(rec.tickets) || !rec.tickets.length) return false;
+    const metaUnique = Number(meta.uniqueCount || 0);
+    if (metaUnique && rec.tickets.length < Math.max(1, Math.floor(metaUnique * 0.5))) return false;
+    return true;
+  },
+  async pullManifestAndMissing() {
+    const manifest = await this._downloadJSON(this._manifestKey());
+    if (!manifest) return { ok:false, error:'manifestなし' };
+    if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
+    let changed = 0;
+
+    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
+    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
+
+    // ── 並列ダウンロード: 必要なファイルを洗い出して一斉取得 ──
+    const tasks = []; // { type, key, meta, promise }
+
+    // datasets（月次収支）
+    const datasetMetas = Array.isArray(manifest.datasets) ? manifest.datasets : [];
+    for (const meta of datasetMetas) {
+      if (!meta.ym) continue;
+      const metaType = meta.type || 'confirmed';
+      if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
+      const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
+      if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
+        tasks.push({ type:'dataset', meta, promise: this._downloadJSON(this._datasetKey(meta.ym, metaType)) });
+      }
+    }
+
+    // workerCsvData（作業者）
+    const workerMetas = Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [];
+    for (const meta of workerMetas) {
+      if (!meta.ym || deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+      const local = STATE.workerCsvData.find(d => d.ym === meta.ym);
+      if (!local || !this._validWorkerMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
+        tasks.push({ type:'worker', meta, promise: this._downloadJSON(this._workerMonthKey(meta.ym)) });
+      }
+    }
+
+    // productAddressData（商品住所）
+    const productMetas = Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [];
+    for (const meta of productMetas) {
+      if (!meta.ym || deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+      const local = STATE.productAddressData.find(d => d.ym === meta.ym);
+      if (!local || !this._validProductMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
+        tasks.push({ type:'product', meta, promise: this._downloadJSON(this._productMonthKey(meta.ym)) });
+      }
+    }
+
+    // capacity / planData / memos / library（単発ファイル）
+    const singleTasks = {};
+    if (manifest.hasCapacity && !STATE.capacity)
+      singleTasks.capacity = this._downloadJSON(this._capacityKey());
+    if (manifest.hasPlanData)
+      singleTasks.plan    = this._downloadJSON(this._planKey());
+    if (manifest.hasMemos)
+      singleTasks.memos   = this._downloadJSON(this._memosKey());
+    if (manifest.hasLibrary)
+      singleTasks.library = this._downloadJSON(this._libraryKey());
+
+    // ── 全ファイルを同時並列で待つ ──
+    const allPromises = [
+      ...tasks.map(t => t.promise),
+      ...Object.values(singleTasks),
+    ];
+    const allResults = await Promise.allSettled(allPromises);
+
+    // tasks の結果を適用
+    const taskResults = allResults.slice(0, tasks.length);
+    for (let i = 0; i < tasks.length; i++) {
+      if (taskResults[i].status !== 'fulfilled') continue;
+      const data = taskResults[i].value;
+      const { type, meta } = tasks[i];
+      if (type === 'dataset') {
+        if (data && data.ym) { upsertDataset(data); changed++; }
+      } else if (type === 'worker') {
+        if (data && data.ym && this._validWorkerMonthRecord(data, meta)) {
+          STATE.workerCsvData = STATE.workerCsvData.filter(d => d.ym !== data.ym);
+          STATE.workerCsvData.push(data);
+          changed++;
+        }
+      } else if (type === 'product') {
+        if (data && data.ym && this._validProductMonthRecord(data, meta)) {
+          STATE.productAddressData = STATE.productAddressData.filter(d => d.ym !== data.ym);
+          STATE.productAddressData.push(data);
+          changed++;
+        }
+      }
+    }
+
+    // 単発ファイルの結果を適用
+    const singleKeys = Object.keys(singleTasks);
+    const singleResults = allResults.slice(tasks.length);
+    for (let i = 0; i < singleKeys.length; i++) {
+      if (singleResults[i].status !== 'fulfilled') continue;
+      const data = singleResults[i].value;
+      const key  = singleKeys[i];
+      if (key === 'capacity' && data) { STATE.capacity = data; changed++; }
+      else if (key === 'plan' && data && typeof data === 'object') {
+        STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, data);
+        applyDeletionTombstonesToState(STATE);
+        changed++;
+      }
+      else if (key === 'memos' && data && typeof data === 'object') { STATE.memos = data; changed++; }
+      else if (key === 'library' && Array.isArray(data)) { STATE.library = data; changed++; }
+    }
+
+    applyDeletionTombstonesToState(STATE);
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+    if (changed) STORE.save();
+    UI.updateCloudBadge('ok');
+    return { ok:true, changed };
+  },
+  async pullLegacy() {
+    const j = await this._downloadJSON(this._legacyKey());
+    if (!j) return { ok:false, error:'旧形式データなし' };
+    if (j.datasets)  STATE.datasets  = j.datasets;
+    if (j.fieldData) STATE.fieldData = j.fieldData;
+    if (j.capacity)  STATE.capacity  = j.capacity;
+    if (j.planData)  STATE.planData  = normalizePlanData(j.planData);
+    if (j.memos)     STATE.memos     = j.memos;
+    if (j.library)   STATE.library   = j.library;
+    if (j.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, j.deleted);
+    applyDeletionTombstonesToState(STATE);
+    STORE.save();
+    UI.updateCloudBadge('ok');
+    return { ok:true };
+  },
+  async pullFullState() {
+    try {
+      const full = await this._downloadJSON(this._fullStateKey());
+      if (!full) return { ok:false, error:'full_stateなし' };
+      const ok = this._applyFullState(full);
+      if (!ok) return { ok:false, error:'full_state適用失敗' };
+      UI.updateCloudBadge('ok');
+      return { ok:true, changed:true, source:'full_state' };
+    } catch(e) {
+      return { ok:false, error:e.message };
+    }
+  },
+  async pull() {
+    try {
+      let changed = false;
+      let gotAny = false;
+
+      // full_state と manifest を並列取得して合計待ち時間を短縮
+      const [full, r] = await Promise.all([
+        this.pullFullState(),
+        this.pullManifestAndMissing(),
+      ]);
+
+      if (full && full.ok) { changed = true; gotAny = true; }
+      if (r && r.ok) { changed = changed || !!r.changed; gotAny = true; }
+
+      if (gotAny) {
+        STORE.save();
+        UI.updateCloudBadge('ok');
+        return { ok:true, changed, source:'full_state+manifest' };
+      }
+
+      return await this.pullLegacy();
+    }
+    catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
+  },
+  async syncSmart() {
+    if (this._busy) return { ok:false, error:'同期処理中' };
+    this._busy = true;
+    try {
+      const cloudFull = await this._downloadJSON(this._fullStateKey());
+      const localFull = this._makeFullState();
+
+      // 先に full_state をマージ
+      const mergedBase = cloudFull && typeof cloudFull === 'object'
+        ? mergeFullState(localFull, cloudFull)
+        : localFull;
+
+      // 削除済みマーカーを先に統合し、削除を優先してから適用する
+      mergedBase.deleted = mergeDeletedStates(localFull.deleted || {}, cloudFull?.deleted || {});
+      applyDeletionTombstonesToState(mergedBase);
+      this._applyFullState(mergedBase);
+      this._busy = false;
+      const manifestResult = await this.pullManifestAndMissing();
+      this._busy = true;
+
+      // manifest取得後の最新STATEを full_state として再保存
+      const finalFull = this._makeFullState();
+      await this._uploadJSON(this._fullStateKey(), finalFull);
+
+      await this._uploadJSON(this._planKey(), STATE.planData || {});
+      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
+      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
+      if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
+      try { const sb = await this._client(); if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]); } catch(e) {}
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
+
+      UI.updateCloudBadge('ok');
+      return { ok:true, changed:true, source:'smart+manifest', manifestChanged: !!(manifestResult && manifestResult.changed) };
+    } catch(e) {
+      UI.updateCloudBadge('error');
+      return { ok:false, error:e.message };
+    } finally {
+      this._busy = false;
+    }
+  },
+  async purgePersonalData() {
+    // ローカル状態をサニタイズし、Supabase上のfull_state/field/data/manifestを安全データで上書きする。
+    // 旧形式data_v5.jsonは削除する。
+    try {
+      sanitizePersonalDataState(STATE);
+      STORE.save();
+      const sb = await this._client();
+      if (!sb) return { ok:false, error:'Supabase未設定' };
+      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
+      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
+      await this._uploadJSON(this._manifestKey(), this._makeManifest());
+      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      try { await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]); } catch(e) {}
+      UI.updateCloudBadge('ok');
+      return { ok:true };
+    } catch(e) {
+      UI.updateCloudBadge('error');
+      return { ok:false, error:e.message };
+    }
+  },
+
+  async saveConfig() {
+    const urlEl=document.getElementById('sb-url'), keyEl=document.getElementById('sb-key'), bucketEl=document.getElementById('sb-bucket'), msgEl=document.getElementById('cloud-test-msg');
+    const url=urlEl?.value?.trim()||CONFIG.SUPABASE_URL;
+    const key=keyEl?.value?.trim()||CONFIG.SUPABASE_KEY;
+    const bucket=bucketEl?.value?.trim()||CONFIG.SUPABASE_BUCKET;
+    const finalKey = key.includes('...') ? this._cfg().key : key;
+    this._saveCfg(url, finalKey, bucket);
+    if (msgEl) msgEl.textContent='接続テスト中...';
+    const r=await this.pushAll();
+    if (msgEl) msgEl.textContent = r.ok ? '✅ 接続OK・同期完了' : '❌ '+(r.error||'接続失敗');
+    UI.toast(r.ok ? '☁ クラウド接続OK・同期しました' : 'エラー: '+(r.error||''), r.ok?'ok':'error');
+  },
+  async syncNow() {
+    const msgEl=document.getElementById('cloud-test-msg');
+    if (msgEl) msgEl.textContent='クラウドと双方向同期中...';
+    UI.toast('クラウドと双方向同期中...');
+    const r = await this.syncSmart();
+    if (msgEl) msgEl.textContent = r.ok ? '✅ 双方向同期完了' : '❌ '+(r.error||'同期失敗');
+    if (r.ok) {
+      NAV.refresh();
+      UI.updateTopbar(STATE.view || 'dashboard');
+      UI.toast('クラウドと双方向同期しました');
+    } else {
+      UI.toast('同期失敗: '+(r.error||'不明'), 'error');
+    }
+  },
+  renderForm() {
+    const cfg=this._cfg();
+    const urlEl=document.getElementById('sb-url'), keyEl=document.getElementById('sb-key'), bucketEl=document.getElementById('sb-bucket');
+    if (urlEl) { urlEl.value=cfg.url||''; urlEl.readOnly=false; }
+    if (keyEl) { keyEl.value=cfg.key ? cfg.key.slice(0,40)+'...' : ''; keyEl.readOnly=false; }
+    if (bucketEl) { bucketEl.value=cfg.bucket||CONFIG.SUPABASE_BUCKET; }
+    UI.updateCloudBadge(cfg.url && cfg.key ? 'configured' : 'none');
+  }
+};
 
 /* ════════ §10 フォーマットヘルパー ════════════════════════════ */
 function fmt(v,d=0) {
@@ -1067,10 +1695,6 @@ function ratio(a,b) { if(!a||!b) return '—'; return pct((a/b-1)*100); }
 function ymLabel(ym) { return ym ? `${ym.slice(0,4)}年${parseInt(ym.slice(4,6))}月` : '—'; }
 function dt() { return new Date().toISOString().slice(0,10); }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function safeLocalGet(key) { try { return localStorage.getItem(key); } catch(e) { return ''; } }
-function safeLocalSet(key, value) { try { localStorage.setItem(key, String(value)); } catch(e) {} }
-function safeLocalRemove(key) { try { localStorage.removeItem(key); } catch(e) {} }
-function errorMessage(e) { return (e && (e.message || e.error_description || e.details)) ? String(e.message || e.error_description || e.details) : String(e || '不明なエラー'); }
 
 function datasetStoredAsKyen(ds) {
   if (!ds) return false;
@@ -1689,65 +2313,6 @@ const CHART_MGR = {
   },
 };
 
-
-/* ════════ §11.5 ANALYTICS_UI（分析画面 共通UI部品） ════════════════════════ */
-const ANALYTICS_UI = {
-  noData(message, extraStyle='') {
-    return `<div style="grid-column:1/-1;${extraStyle}" class="msg msg-info">${esc(message || 'データがありません')}</div>`;
-  },
-  kpiCard({label, value, unit='', accent='accent-navy', valueClass='', sub='', pill='', pillClass='flat'}) {
-    const unitHtml = unit ? `<span style="font-size:13px;font-weight:400">${esc(unit)}</span>` : '';
-    const subHtml = sub ? `<span class="kpi-sub">${sub}</span>` : '';
-    const pillHtml = pill ? `<span class="pill ${esc(pillClass)}">${pill}</span>` : '';
-    const footer = (subHtml || pillHtml) ? `<div class="kpi-sub-row">${subHtml}${pillHtml}</div>` : '';
-    return `
-      <div class="kpi-card ${esc(accent)}">
-        <div class="kpi-label">${label}</div>
-        <div class="kpi-value ${esc(valueClass)}">${value}${unitHtml}</div>
-        ${footer}
-      </div>`;
-  },
-  kpiGrid(cards, cols=4, extraStyle='') {
-    const cls = cols === 3 ? 'kpi-row kpi-row-3' : 'kpi-row kpi-row-4';
-    return `<div class="${cls}" style="${extraStyle}">${cards.join('')}</div>`;
-  },
-  kpiCards(cards) {
-    return (cards || []).join('');
-  },
-  card(title, body, opts={}) {
-    const style = opts.style || '';
-    const subtitle = opts.subtitle ? `<div style="font-size:11px;color:var(--text3);margin-top:3px">${opts.subtitle}</div>` : '';
-    return `<div class="card" style="${style}"><div class="card-header"><div><span class="card-title">${title}</span>${subtitle}</div></div><div class="card-body">${body}</div></div>`;
-  },
-  progressRows(items, {maxValue=null, denominator=null, empty='データがありません'}={}) {
-    const rows = (items || []).filter(item => item && n(item.value) > 0);
-    if (!rows.length) return `<div style="padding:10px;font-size:12px;color:var(--text3)">${esc(empty)}</div>`;
-    const max = maxValue || Math.max(...rows.map(item => n(item.value)), 1);
-    const den = denominator || rows.reduce((sum, item) => sum + n(item.value), 0) || 1;
-    return `<div style="display:grid;gap:7px">${rows.map((item, i) => {
-      const value = n(item.value);
-      const width = (value / max * 100).toFixed(1);
-      const rate = den > 0 ? (value / den * 100) : 0;
-      return `
-        <div style="display:grid;grid-template-columns:120px 1fr 96px;gap:8px;align-items:center">
-          <div style="font-size:12px;font-weight:700;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.label)}">${esc(item.label)}</div>
-          <div style="height:14px;background:#e5e7eb;border-radius:999px;overflow:hidden">
-            <div style="height:100%;width:${width}%;background:${CONFIG.COLORS[i%CONFIG.COLORS.length]};border-radius:999px"></div>
-          </div>
-          <div style="font-size:12px;font-weight:800;text-align:right;white-space:nowrap">${fmtK(value)}千 <span style="color:var(--text3);font-weight:700">${rate.toFixed(1)}%</span></div>
-        </div>`;
-    }).join('')}</div>`;
-  },
-  basicMoneyTrendOptions(yTitle='千円') {
-    return {
-      responsive:true,
-      maintainAspectRatio:false,
-      plugins:{legend:{position:'top'}, tooltip:{mode:'index'}},
-      scales:{y:{title:{display:true,text:yTitle},grid:{color:'#f0f0f0'}}}
-    };
-  }
-};
-
 /* ════════ §12 RENDER — Dashboard ══════════════════════════════ */
 function renderDashboard() {
   const area = document.getElementById('kpi-area');
@@ -1769,44 +2334,37 @@ function renderDashboard() {
   const profitAccent = ds.profit >= 0 ? 'accent-green' : 'accent-red';
   const prevDs = prevDS(ds.ym);
 
-  area.innerHTML = ANALYTICS_UI.kpiCards([
-    ANALYTICS_UI.kpiCard({
-      label:'営業収益（当月）',
-      value:fmtK(ds.totalIncome),
-      unit:'千円',
-      accent:'accent-navy',
-      valueClass:'navy',
-      sub:`${ymLabel(ds.ym)}（${datasetKindLabel(ds)}）`,
-      pill: prevDs ? `${ratio(ds.totalIncome,prevDs.totalIncome)} 前月比` : '',
-      pillClass: prevDs ? (ds.totalIncome>=prevDs.totalIncome?'up':'down') : 'flat'
-    }),
-    ANALYTICS_UI.kpiCard({
-      label:'費用合計（当月）',
-      value:fmtK(ds.totalExpense),
-      unit:'千円',
-      accent:'accent-red',
-      valueClass:'red',
-      sub:`利益率目標：${CONFIG.TARGETS.pseudoLaborRate}%以下（人件費率）`
-    }),
-    ANALYTICS_UI.kpiCard({
-      label:'センター利益（粗利）',
-      value:fmtK(ds.profit),
-      unit:'千円',
-      accent:profitAccent,
-      valueClass:profitClass,
-      pill:`${pct(ds.profitRate)} 利益率`,
-      pillClass:ds.profit>=0?'up':'down'
-    }),
-    ANALYTICS_UI.kpiCard({
-      label:'みなし人件費率',
-      value:pct(ds.pseudoLaborRate),
-      accent:'accent-amber',
-      valueClass:ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'green' : 'red',
-      sub:`目標：${CONFIG.TARGETS.pseudoLaborRate}%以内`,
-      pill:ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? '✓ 達成' : '⚠ 超過',
-      pillClass:ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'up' : 'down'
-    })
-  ]);
+  area.innerHTML = `
+    <div class="kpi-card accent-navy">
+      <div class="kpi-label">営業収益（当月）</div>
+      <div class="kpi-value navy">${fmtK(ds.totalIncome)}<span style="font-size:13px;font-weight:400">千円</span></div>
+      <div class="kpi-sub-row">
+        <span class="kpi-sub">${ymLabel(ds.ym)}（${datasetKindLabel(ds)}）</span>
+        ${prevDs ? `<span class="pill ${ds.totalIncome>=prevDs.totalIncome?'up':'down'}">${ratio(ds.totalIncome,prevDs.totalIncome)} 前月比</span>` : ''}
+      </div>
+    </div>
+    <div class="kpi-card accent-red">
+      <div class="kpi-label">費用合計（当月）</div>
+      <div class="kpi-value red">${fmtK(ds.totalExpense)}<span style="font-size:13px;font-weight:400">千円</span></div>
+      <div class="kpi-sub-row">
+        <span class="kpi-sub">利益率目標：${CONFIG.TARGETS.pseudoLaborRate}%以下（人件費率）</span>
+      </div>
+    </div>
+    <div class="kpi-card ${profitAccent}">
+      <div class="kpi-label">センター利益（粗利）</div>
+      <div class="kpi-value ${profitClass}">${fmtK(ds.profit)}<span style="font-size:13px;font-weight:400">千円</span></div>
+      <div class="kpi-sub-row">
+        <span class="pill ${ds.profit>=0?'up':'down'}">${pct(ds.profitRate)} 利益率</span>
+      </div>
+    </div>
+    <div class="kpi-card accent-amber">
+      <div class="kpi-label">みなし人件費率</div>
+      <div class="kpi-value ${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'green' : 'red'}">${pct(ds.pseudoLaborRate)}</div>
+      <div class="kpi-sub-row">
+        <span class="kpi-sub">目標：${CONFIG.TARGETS.pseudoLaborRate}%以内</span>
+        <span class="pill ${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'up' : 'down'}">${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? '✓ 達成' : '⚠ 超過'}</span>
+      </div>
+    </div>`;
 
   // メインチャート（月次収支推移）
   const dashboardTrendList = dashboardDatasetsForSelectedFiscalYear();
@@ -1986,50 +2544,48 @@ function renderIndicators() {
   }
 
   view.innerHTML = `
-    ${ANALYTICS_UI.kpiGrid([
-      ANALYTICS_UI.kpiCard({
-        label:`みなし人件費率（${ymLabel(ds.ym)}）`,
-        value:pct(ds.pseudoLaborRate),
-        accent:laborOk?'accent-green':'accent-red',
-        valueClass:laborOk?'green':'red',
-        pill:`${laborOk?'✓ 達成':'⚠ 超過'} 目標${T.pseudoLaborRate}%`,
-        pillClass:laborOk?'up':'down'
-      }),
-      ANALYTICS_UI.kpiCard({
-        label:`変動費率（${ymLabel(ds.ym)}）`,
-        value:pct(ds.variableRate),
-        accent:varOk?'accent-green':'accent-amber',
-        valueClass:varOk?'green':'amber',
-        pill:`${varOk?'✓ 正常':'⚠ 高め'} 目標${T.variableRateMax}%以内`,
-        pillClass:varOk?'up':'flat'
-      }),
-      ANALYTICS_UI.kpiCard({
-        label:'利益率（安全余裕率）',
-        value:pct(smRate),
-        accent:smOk?'accent-green':smWarn?'accent-amber':'accent-red',
-        valueClass:smOk?'green':smWarn?'':'red',
-        pill:smOk?'✓ 安全':smWarn?'△ 要注意':'⚠ 危険',
-        pillClass:smOk?'up':smWarn?'flat':'down'
-      })
-    ], 3, 'margin-bottom:16px')}
-
-    <div class="grid2" style="margin-bottom:14px">
-      ${ANALYTICS_UI.card('固定費 / 変動費　構成（年度最新月）', `
-        ${gauge(ds.fixedRate, 50, 65, '%', true)}
-        ${gauge(ds.variableRate, T.variableRateMax, 90, '%', true)}
-        <div style="font-size:12px;color:var(--text2);line-height:1.8">
-          固定費：${fmtK(ds.fixedCost)}千円 / 変動費：${fmtK(ds.varCost)}千円
-        </div>`)}
-      ${ANALYTICS_UI.card('損益分岐点　簡易判定（年度最新月）', `
-        <div style="font-size:12px;color:var(--text2);line-height:1.9">
-          営業収益：${fmtK(ds.totalIncome)}千円<br>
-          費用合計：${fmtK(ds.totalExpense)}千円<br>
-          粗利益：${fmtK(ds.profit)}千円<br>
-          利益率：${pct(ds.profitRate)}
-        </div>`)}
+    <div class="kpi-row kpi-row-3" style="margin-bottom:16px">
+      <div class="kpi-card ${laborOk?'accent-green':'accent-red'}">
+        <div class="kpi-label">みなし人件費率（${ymLabel(ds.ym)}）</div>
+        <div class="kpi-value ${laborOk?'green':'red'}">${pct(ds.pseudoLaborRate)}</div>
+        <div class="kpi-sub-row"><span class="pill ${laborOk?'up':'down'}">${laborOk?'✓ 達成':'⚠ 超過'} 目標${T.pseudoLaborRate}%</span></div>
+      </div>
+      <div class="kpi-card ${varOk?'accent-green':'accent-amber'}">
+        <div class="kpi-label">変動費率（${ymLabel(ds.ym)}）</div>
+        <div class="kpi-value ${varOk?'green':'amber'}">${pct(ds.variableRate)}</div>
+        <div class="kpi-sub-row"><span class="pill ${varOk?'up':'flat'}">${varOk?'✓ 正常':'⚠ 高め'} 目標${T.variableRateMax}%以内</span></div>
+      </div>
+      <div class="kpi-card ${smOk?'accent-green':smWarn?'accent-amber':'accent-red'}">
+        <div class="kpi-label">利益率（安全余裕率）</div>
+        <div class="kpi-value ${smOk?'green':smWarn?'':'red'}">${pct(smRate)}</div>
+        <div class="kpi-sub-row"><span class="pill ${smOk?'up':smWarn?'flat':'down'}">${smOk?'✓ 安全':smWarn?'△ 要注意':'⚠ 危険'}</span></div>
+      </div>
     </div>
 
-    ${ANALYTICS_UI.card('各指標　月次推移（選択年度内）', '<div class="chart-wrap" style="height:220px"><canvas id="c-ind-trend"></canvas></div>', {style:'margin-bottom:14px'})}`;
+    <div class="grid2" style="margin-bottom:14px">
+      <div class="card"><div class="card-header"><span class="card-title">固定費 / 変動費　構成（年度最新月）</span></div>
+        <div class="card-body">
+          ${gauge(ds.fixedRate, 50, 65, '%', true)}
+          ${gauge(ds.variableRate, T.variableRateMax, 90, '%', true)}
+          <div style="font-size:12px;color:var(--text2);line-height:1.8">
+            固定費：${fmtK(ds.fixedCost)}千円 / 変動費：${fmtK(ds.varCost)}千円
+          </div>
+        </div></div>
+      <div class="card"><div class="card-header"><span class="card-title">損益分岐点　簡易判定（年度最新月）</span></div>
+        <div class="card-body">
+          <div style="font-size:12px;color:var(--text2);line-height:1.9">
+            営業収益：${fmtK(ds.totalIncome)}千円<br>
+            費用合計：${fmtK(ds.totalExpense)}千円<br>
+            粗利益：${fmtK(ds.profit)}千円<br>
+            利益率：${pct(ds.profitRate)}
+          </div>
+        </div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><span class="card-title">各指標　月次推移（選択年度内）</span></div>
+      <div class="card-body"><div class="chart-wrap" style="height:220px"><canvas id="c-ind-trend"></canvas></div></div>
+    </div>`;
 
   renderCommonPeriodSelector('indicators', {useMonth:false});
 
@@ -2096,32 +2652,15 @@ function renderAnnual() {
   const prf = list.reduce((s,d)=>s+d.profit,0);
 
   if (kpi) {
-    kpi.innerHTML = ANALYTICS_UI.kpiCards([
-      ANALYTICS_UI.kpiCard({
-        label:`年度累計収入（${fy}年度）`,
-        value:fmtK(inc),
-        unit:'千円',
-        accent:'accent-navy',
-        valueClass:'navy',
-        sub:`${list.length}ヶ月分`
-      }),
-      ANALYTICS_UI.kpiCard({
-        label:'年度累計費用',
-        value:fmtK(exp),
-        unit:'千円',
-        accent:'accent-red',
-        valueClass:'red'
-      }),
-      ANALYTICS_UI.kpiCard({
-        label:'年度累計利益',
-        value:fmtK(prf),
-        unit:'千円',
-        accent:prf>=0?'accent-green':'accent-red',
-        valueClass:prf>=0?'green':'red',
-        pill:`${pct(prf/inc*100)} 利益率`,
-        pillClass:prf>=0?'up':'down'
-      })
-    ], 3);
+    kpi.innerHTML = `
+      <div class="kpi-card accent-navy"><div class="kpi-label">年度累計収入（${fy}年度）</div>
+        <div class="kpi-value navy">${fmtK(inc)}<span style="font-size:13px;font-weight:400">千円</span></div>
+        <div class="kpi-sub">${list.length}ヶ月分</div></div>
+      <div class="kpi-card accent-red"><div class="kpi-label">年度累計費用</div>
+        <div class="kpi-value red">${fmtK(exp)}<span style="font-size:13px;font-weight:400">千円</span></div></div>
+      <div class="kpi-card ${prf>=0?'accent-green':'accent-red'}"><div class="kpi-label">年度累計利益</div>
+        <div class="kpi-value ${prf>=0?'green':'red'}">${fmtK(prf)}<span style="font-size:13px;font-weight:400">千円</span></div>
+        <div class="kpi-sub-row"><span class="pill ${prf>=0?'up':'down'}">${pct(prf/inc*100)} 利益率</span></div></div>`;
   }
 
   CHART_MGR.make('c-annual-trend', {
@@ -2191,34 +2730,1645 @@ function renderAlerts() {
     </div>`).join('');
 }
 
-/* ════════ §19 RENDER — Capacity（capacity.jsへ分割） ═══════════════════ */
+/* ════════ §19 RENDER — Capacity（完全安定版） ═══════════════════ */
+const CAPACITY_UI = {
+  _tab:'monthly',
+  _lastRows:[],
+  _lastDailyRows:[],
 
-function storageFiscalYear() {
-  const ids = ['data-health-fy-select', 'monthly-check-fy-select', 'storage-fy-select', 'data-quality-fy-select', 'import-history-fy-select', 'plan-year-sel'];
-  for (const id of ids) {
-    const el = document.getElementById(id);
-    if (el && el.value) return String(el.value);
+  defaultMapping() {
+    return [
+      { pattern:'埼玉県さいたま市|さいたま市', area:'埼玉_さいたま', priority:30 },
+      { pattern:'東京都板橋区|東京都北区', area:'東京_北/板', priority:30 },
+      { pattern:'東京都豊島区|東京都文京区|東京都練馬区', area:'東京_豊島/文京', priority:30 },
+      { pattern:'埼玉県戸田市|埼玉県蕨市|埼玉県川口市', area:'埼玉_蕨/戸田', priority:30 },
+      { pattern:'埼玉県志木市|埼玉県朝霞市|埼玉県和光市|埼玉県新座市', area:'埼玉_志木朝霞', priority:30 },
+      { pattern:'東京都足立区|東京都荒川区|東京都台東区|東京都墨田区|東京都江東区|東京都葛飾区|東京都江戸川区', area:'東京_東部', priority:20 },
+      { pattern:'東京都', area:'東京_その他', priority:5 },
+      { pattern:'埼玉県', area:'埼玉_その他', priority:5 },
+      { pattern:'千葉県|神奈川県|群馬県|栃木県|茨城県', area:'その他', priority:1 }
+    ];
+  },
+
+  ensureState() {
+    STATE.capacity = STATE.capacity || {};
+    STATE.capacity.areas = {}; // 旧Excelキャパは使用しない
+    STATE.capacity.mapping = []; // 旧地区マッピングは使用しない
+    STATE.capacity.calendar = STATE.capacity.calendar || {};
+    STATE.capacity.shipperGroups = Array.isArray(STATE.capacity.shipperGroups) && STATE.capacity.shipperGroups.length ? STATE.capacity.shipperGroups : this.defaultShipperGroups();
+    STATE.capacity.shipperAreaCaps = {}; // 旧地区別荷主キャパは使用しない
+    STATE.capacity.capacityGroups = Array.isArray(STATE.capacity.capacityGroups) ? STATE.capacity.capacityGroups : [];
+    this._capRegionFilter = this._capRegionFilter || 'saitama_all';
+  },
+
+  defaultShipperGroups() {
+    return [
+      { key:'kojima_bic', label:'コジマ＋ビック', patterns:'コジマ|ビック|ビックカメラ|BIC|KOJIMA', codePrefixes:'', active:true, sort:10 },
+      { key:'denkichi', label:'でんきち', patterns:'でんきち|デンキチ', codePrefixes:'', active:true, sort:20 },
+      { key:'edion', label:'エディオン', patterns:'エディオン|EDION', codePrefixes:'', active:true, sort:30 },
+      { key:'other', label:'その他', patterns:'', codePrefixes:'', active:false, sort:99 }
+    ];
+  },
+
+  migrateShipperCaps() {
+    const cap = STATE.capacity || {};
+    cap.shipperAreaCaps = cap.shipperAreaCaps || {};
+    // 旧「荷主別1本キャパ」は、地区別キャパへは自動展開しない。二重計上防止のため参照だけ残す。
+    (cap.shipperGroups || this.defaultShipperGroups()).forEach(g=>{
+      cap.shipperAreaCaps[g.key] = cap.shipperAreaCaps[g.key] || {};
+    });
+  },
+
+  normArea(v) {
+    return String(v || '')
+      .normalize('NFKC')
+      .replace(/\s+/g,'')
+      .replace(/_n/g,'_')
+      .replace(/＿n/g,'_')
+      .replace(/北\/板橋/g,'北/板')
+      .trim();
+  },
+
+  n(v) {
+    const x = Number(String(v ?? '').normalize('NFKC').replace(/,/g,'').replace(/[^\d.-]/g,''));
+    return Number.isFinite(x) ? x : 0;
+  },
+
+  getYM() {
+    return document.getElementById('capacity-ym')?.value ||
+      (STATE.selYM || '') ||
+      ((STATE.productAddressData || []).at(-1)?.ym) ||
+      ((STATE.fieldData || []).at(-1)?.ym) ||
+      (latestDS()?.ym) || '';
+  },
+
+  getDays() {
+    // 週7稼働前提：月キャパは日別カレンダーを1日ずつ積み上げるため、手入力の稼働日数は使わない
+    const ym = this.getYM();
+    return this.daysInYM(ym) || 0;
+  },
+
+  getBaseMode() {
+    return 'calendar';
+  },
+
+  ymDate(ym, d) {
+    return `${String(ym).slice(0,4)}-${String(ym).slice(4,6)}-${String(d).padStart(2,'0')}`;
+  },
+
+  daysInYM(ym) {
+    const y = Number(String(ym).slice(0,4));
+    const m = Number(String(ym).slice(4,6));
+    return new Date(y, m, 0).getDate();
+  },
+
+  dow(dateStr) {
+    return new Date(dateStr + 'T00:00:00').getDay();
+  },
+
+  isWeekend(dateStr) {
+    const d = this.dow(dateStr);
+    return d === 0 || d === 6;
+  },
+
+  dateLabel(dateStr) {
+    const d = this.dow(dateStr);
+    return `${Number(dateStr.slice(5,7))}/${Number(dateStr.slice(8,10))}（${['日','月','火','水','木','金','土'][d]}）`;
+  },
+
+  parseDate(v, ym) {
+    if (v instanceof Date && !Number.isNaN(v.getTime())) {
+      return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}-${String(v.getDate()).padStart(2,'0')}`;
+    }
+    const raw = String(v ?? '').normalize('NFKC').trim();
+    if (!raw) return '';
+
+    const serial = Number(raw);
+    if (Number.isFinite(serial) && serial > 20000 && serial < 80000) {
+      const dt = new Date(Math.round((serial - 25569) * 86400 * 1000));
+      if (!Number.isNaN(dt.getTime())) {
+        return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+      }
+    }
+
+    const nums = raw.replace(/[^0-9]/g,'');
+    if (nums.length >= 8) return `${nums.slice(0,4)}-${nums.slice(4,6)}-${nums.slice(6,8)}`;
+    if (nums.length >= 1 && nums.length <= 2 && ym) {
+      const d = Number(nums);
+      if (d >= 1 && d <= 31) return this.ymDate(ym, d);
+    }
+    return '';
+  },
+
+  ticketDate(t, ym) {
+    const d = this.parseDate(t.date || t.deliveryDate || t.workDate || t['日付'] || t['作業日'] || t['配達完了日'], ym);
+    if (d) return d;
+    const row = t.representativeRow || t.firstRow || t.row || t.raw;
+    if (Array.isArray(row)) {
+      const d2 = this.parseDate(row[0], ym);
+      if (d2) return d2;
+    }
+    return '';
+  },
+
+  normalizeZip(v) {
+    if (window.JP_ZIP_LOADER?.normalizeZip) return JP_ZIP_LOADER.normalizeZip(v);
+    const s = String(v ?? '').replace(/[^0-9]/g,'');
+    return s.length >= 7 ? s.slice(0,7) : '';
+  },
+
+  cityFromAddress(address) {
+    const t = String(address || '').normalize('NFKC').replace(/\s+/g,'').trim();
+    if (!t) return '未設定';
+
+    const prefMatch = t.match(/^(北海道|東京都|(?:京都|大阪)府|.{2,3}県)/);
+    const pref = prefMatch ? prefMatch[1] : '';
+    const rest = pref ? t.slice(pref.length) : t;
+
+    // さいたま市は同じ市内でも区ごとにキャパが違うため、区が住所に含まれる場合は最優先で区まで保持する。
+    // 例：埼玉県さいたま市大宮区、さいたま大宮区、さいたま市桜区 など。
+    const saitamaWardMatch = rest.match(/さいたま(?:市)?(西区|北区|大宮区|見沼区|中央区|桜区|浦和区|南区|緑区|岩槻区)/);
+    if (saitamaWardMatch) return '埼玉県さいたま市' + saitamaWardMatch[1];
+
+    // エリア分析側と同じ考え方：郵便番号が取れない場合でも、町域・番地ではなく行政区・市で止める。
+    const known = [
+      'さいたま市西区','さいたま市北区','さいたま市大宮区','さいたま市見沼区','さいたま市中央区',
+      'さいたま市桜区','さいたま市浦和区','さいたま市南区','さいたま市緑区','さいたま市岩槻区',
+      '蕨市','戸田市','川口市','朝霞市','和光市','志木市','新座市','富士見市','ふじみ野市',
+      '川越市','所沢市','狭山市','上尾市','桶川市','北本市','鴻巣市','入間市','草加市','越谷市',
+      '熊谷市','本庄市','深谷市','秩父市','行田市','加須市','羽生市','久喜市','蓮田市','幸手市','白岡市',
+      '板橋区','北区','豊島区','練馬区','文京区','足立区','荒川区','台東区','江東区','大田区',
+      '世田谷区','新宿区','港区','墨田区','品川区','目黒区','中野区','杉並区','渋谷区','中央区','千代田区'
+    ];
+    for (const name of known) {
+      if (rest.startsWith(name)) return pref + name;
+    }
+
+    // 「蕨中央5-」「戸田美女木」など、市名の「市」が落ちた住所を補正する。
+    const saitamaFallbacks = [
+      ['蕨','蕨市'],['戸田','戸田市'],['川口','川口市'],['朝霞','朝霞市'],['和光','和光市'],['志木','志木市'],['新座','新座市'],
+      ['富士見','富士見市'],['ふじみ野','ふじみ野市'],['上尾','上尾市'],['桶川','桶川市'],['北本','北本市'],['鴻巣','鴻巣市'],
+      ['熊谷','熊谷市'],['深谷','深谷市'],['本庄','本庄市'],['秩父','秩父市']
+    ];
+    if (!pref || pref === '埼玉県') {
+      for (const [head, city] of saitamaFallbacks) {
+        if (rest.startsWith(head)) return '埼玉県' + city;
+      }
+    }
+
+    const tokyoFallbacks = [
+      ['板橋','板橋区'],['北','北区'],['豊島','豊島区'],['練馬','練馬区'],['文京','文京区'],['足立','足立区'],['荒川','荒川区'],
+      ['台東','台東区'],['江東','江東区'],['大田','大田区'],['世田谷','世田谷区'],['新宿','新宿区'],['港','港区'],['墨田','墨田区'],
+      ['品川','品川区'],['目黒','目黒区'],['中野','中野区'],['杉並','杉並区'],['渋谷','渋谷区'],['中央','中央区'],['千代田','千代田区']
+    ];
+    if (pref === '東京都') {
+      for (const [head, ward] of tokyoFallbacks) {
+        if (rest.startsWith(head)) return '東京都' + ward;
+      }
+    }
+
+    const wardCity = rest.match(/^(.+?市.+?区)/);
+    if (wardCity) return pref + wardCity[1];
+    const muni = rest.match(/^(.+?[市区町村])/);
+    if (muni) return pref + muni[1];
+    return '未設定';
+  },
+
+  cityFromZip(zip) {
+    const z = this.normalizeZip(zip);
+    if (!z) return '';
+    let hit = null;
+    if (window.JP_ZIP_LOADER?.get) hit = JP_ZIP_LOADER.get(z);
+    else if (window.JP_ZIP_MASTER) hit = JP_ZIP_MASTER[z];
+    if (!hit) return '';
+    if (Array.isArray(hit)) return String(hit[0]||'') + String(hit[1]||'');
+    if (typeof hit === 'object') return String(hit.pref || hit.prefecture || hit[0] || '') + String(hit.city || hit.municipality || hit.addr1 || hit[1] || '');
+    return this.cityFromAddress(String(hit));
+  },
+
+  ticketCity(t) {
+    // エリア分析と同じく、過去に生成された t.area / t.city は粗い値が残ることがあるため最優先しない。
+    // ただし、さいたま市は郵便番号マスタが未ロード／粗い値の場合に「さいたま市」止まりになるため、
+    // 住所に区が入っている場合は住所側を優先し、区単位を維持する。
+    const row = t.representativeRow || t.firstRow || t.row || t.raw;
+    const isCoarseSaitama = (v) => /^埼玉県さいたま市?$/.test(String(v || '').normalize('NFKC').replace(/\s+/g,''));
+
+    const addr = t.address || t.addr || t.destinationAddress ||
+      t['住所'] || t['届け先住所'] || t['配送先住所'] || t['お届け先住所'] ||
+      (Array.isArray(row) ? row[13] : '');
+    const addrCity = this.normalizeCapacityUnit(this.cityFromAddress(addr));
+    if (addrCity && addrCity !== '未設定' && !isCoarseSaitama(addrCity)) return addrCity;
+
+    const zip = this.normalizeZip(
+      t.zip || t.zipcode || t.postCode || t.postalCode ||
+      t['お届け先郵便番号'] || t['届け先郵便番号'] || t['郵便番号'] ||
+      (Array.isArray(row) ? row[11] : '')
+    );
+    const zipCity = this.normalizeCapacityUnit(this.cityFromZip(zip));
+    if (zipCity && zipCity !== '未設定' && !isCoarseSaitama(zipCity)) return zipCity;
+
+    if (t.pref && t.city && t.ward) {
+      const prefCityWard = this.normalizeCapacityUnit(String(t.pref) + String(t.city) + String(t.ward));
+      if (prefCityWard && prefCityWard !== '未設定' && !isCoarseSaitama(prefCityWard)) return prefCityWard;
+    }
+    if (t.pref && t.city) {
+      const prefCity = this.normalizeCapacityUnit(String(t.pref) + String(t.city));
+      if (prefCity && prefCity !== '未設定' && !isCoarseSaitama(prefCity)) return prefCity;
+    }
+
+    const oldCity = this.normalizeCapacityUnit(t.city || t.area || '');
+    if (oldCity && oldCity !== '未設定' && !isCoarseSaitama(oldCity)) return oldCity;
+
+    // どうしても区が取れない場合だけ粗いさいたま市を返す。
+    // 荷主キャパ設定側では区単位を優先するため、通常は郵便番号マスタ読込後に区へ分解される。
+    if (addrCity && addrCity !== '未設定') return addrCity;
+    if (zipCity && zipCity !== '未設定') return zipCity;
+    if (oldCity && oldCity !== '未設定') return oldCity;
+
+    return '未設定';
+  },
+
+  ticketSlip(t, idx) {
+    return String(t.slip || t.slipNo || t.ticketNo || t.invoiceNo || t['原票番号'] || t['エスライン原票番号'] || '').trim() || `no_${idx}`;
+  },
+
+  confirmedShipperInfoBySlip(slip, ym) {
+    const key = String(slip || '').trim();
+    if (!key) return null;
+    const list = (STATE.datasets || []).filter(d=>!ym || d.ym === ym);
+    for (const ds of list) {
+      const map = ds && ds.confirmedSlipSales;
+      if (!map || typeof map !== 'object') continue;
+      const hit = map[key] || map[key.replace(/^0+/, '')];
+      if (!hit) continue;
+      const name = String(hit.shipperName || hit.clientName || hit.name || '').trim();
+      const code = String(hit.shipperCode || hit.clientCode || hit.code || '').trim();
+      if (name || code) return { name, code };
+    }
+    return null;
+  },
+
+  confirmedShipperBySlip(slip, ym) {
+    const info = this.confirmedShipperInfoBySlip(slip, ym);
+    return info?.name || '';
+  },
+
+  ticketShipperCode(t, slip='', ym='') {
+    const direct = String(t.shipperCode || t.clientCode || t.customerCode || t['荷主コード'] || t['荷主基本コード'] || t['荷主ＣＤ'] || t['荷主CD'] || '').trim();
+    if (direct) return direct;
+    const row = t.representativeRow || t.firstRow || t.row || t.raw;
+    if (Array.isArray(row)) {
+      // 確定CSV標準：Y列=荷主基本コード。商品・住所CSV側に同等列がある場合も拾う。
+      const candidates = [row[24], row[25], row[23]];
+      for (const v of candidates) {
+        const code = String(v || '').normalize('NFKC').replace(/[^0-9A-Za-z]/g,'').trim();
+        if (code && /^\d{2,}/.test(code)) return code;
+      }
+    }
+    return this.confirmedShipperInfoBySlip(slip || this.ticketSlip(t,0), ym)?.code || '';
+  },
+
+  ticketShipperName(t, slip='', ym='') {
+    const direct = String(t.shipperName || t.shipper || t.clientName || t.customerName || t['荷主名'] || t['荷主名称'] || t['契約名'] || t['契約名称'] || '').trim();
+    if (direct) return direct;
+
+    const row = t.representativeRow || t.firstRow || t.row || t.raw;
+    if (Array.isArray(row)) {
+      // 確定CSVの標準位置：AA列=荷主名、AB列=契約名。商品・住所CSV側に同等列がある場合も拾う。
+      const candidates = [row[26], row[27], row[25]];
+      for (const v of candidates) {
+        const name = String(v || '').normalize('NFKC').trim();
+        if (name && !/^0+$/.test(name) && !/^\d{4,}$/.test(name)) return name;
+      }
+    }
+
+    return this.confirmedShipperInfoBySlip(slip || this.ticketSlip(t, 0), ym)?.name || '未設定';
+  },
+
+  normalizeShipperGroup(name='', code='') {
+    this.ensureState();
+    const n = String(name || '').normalize('NFKC').toUpperCase();
+    const c = String(code || '').normalize('NFKC').replace(/[^0-9A-Z]/g,'').toUpperCase();
+    const groups = (STATE.capacity.shipperGroups || this.defaultShipperGroups()).slice().sort((a,b)=>this.n(a.sort)-this.n(b.sort));
+    for (const g of groups) {
+      if (g.key === 'other') continue;
+      const codes = String(g.codePrefixes || '').split('|').map(x=>x.trim().toUpperCase()).filter(Boolean);
+      if (c && codes.some(prefix=>c.startsWith(prefix))) return g.label || g.key;
+      const pats = String(g.patterns || '').normalize('NFKC').toUpperCase().split('|').map(x=>x.trim()).filter(Boolean);
+      if (pats.some(p=>n.includes(p))) return g.label || g.key;
+    }
+    return 'その他';
+  },
+
+  shipperGroupKeyByLabel(label) {
+    this.ensureState();
+    const g = (STATE.capacity.shipperGroups || []).find(x=>String(x.label) === String(label) || String(x.key) === String(label));
+    return g?.key || 'other';
+  },
+
+  shipperGroupByKey(key) {
+    this.ensureState();
+    return (STATE.capacity.shipperGroups || []).find(x=>x.key === key) || { key:'other', label:'その他', active:false };
+  },
+
+  ticketShipper(t, slip='', ym='') {
+    const name = this.ticketShipperName(t, slip, ym);
+    const code = this.ticketShipperCode(t, slip, ym);
+    return this.normalizeShipperGroup(name, code);
+  },
+
+  mappedArea(city) {
+    const c = String(city || '').normalize('NFKC').trim();
+    const rules = (STATE.capacity?.mapping || this.defaultMapping()).slice().sort((a,b)=>this.n(b.priority)-this.n(a.priority));
+    for (const r of rules) {
+      const parts = String(r.pattern || '').normalize('NFKC').split('|').map(x=>x.trim()).filter(Boolean);
+      if (parts.some(p=>c.includes(p))) return this.normArea(r.area || '未分類');
+    }
+    return '未分類';
+  },
+
+  selectedProductRecord() {
+    const ym = this.getYM();
+    const list = STATE.productAddressData || [];
+    return list.find(r=>r.ym === ym) || list.at(-1) || null;
+  },
+
+  buildActual() {
+    const rec = this.selectedProductRecord();
+    if (!rec || !Array.isArray(rec.tickets) || !rec.tickets.length) {
+      return { ym:this.getYM(), source:'未取得', rawCount:0, tickets:[], byArea:new Map(), byDateArea:new Map(), unmatched:new Map(), hasDate:false };
+    }
+    const ym = rec.ym || this.getYM();
+    const uniq = new Map();
+    let hasDate = false;
+
+    rec.tickets.forEach((t, idx)=>{
+      const slip = this.ticketSlip(t, idx);
+      const dt = this.ticketDate(t, ym);
+      if (dt) hasDate = true;
+      const date = dt || '';
+      const city = this.ticketCity(t);
+      const capGroup = this.capacityGroupForUnit(city);
+      const area = capGroup ? (capGroup.name || '未設定区分') : '未区分';
+      const shipperName = this.ticketShipperName(t, slip, ym);
+      const shipperCode = this.ticketShipperCode(t, slip, ym);
+      const shipper = this.normalizeShipperGroup(shipperName, shipperCode);
+      const key = `${date || 'monthly'}__${slip}`;
+      if (!uniq.has(key)) uniq.set(key, { slip, date, city, area, shipper, shipperName, shipperCode });
+    });
+
+    const tickets = [...uniq.values()];
+    const byArea = new Map();
+    const byDateArea = new Map();
+    const unmatched = new Map();
+
+    tickets.forEach(t=>{
+      if (!byArea.has(t.area)) byArea.set(t.area,{ area:t.area, count:0, shippers:{}, cities:{} });
+      const a = byArea.get(t.area);
+      a.count++;
+      a.shippers[t.shipper] = (a.shippers[t.shipper] || 0) + 1;
+      a.cities[t.city] = (a.cities[t.city] || 0) + 1;
+
+      if (t.area === '未分類') {
+        const key = t.city || '未設定';
+        unmatched.set(key, (unmatched.get(key) || 0) + 1);
+      }
+
+      if (hasDate && t.date) {
+        const dk = `${t.date}__${t.area}`;
+        if (!byDateArea.has(dk)) byDateArea.set(dk,{ date:t.date, area:t.area, count:0, cities:{}, shippers:{} });
+        const d = byDateArea.get(dk);
+        d.count++;
+        d.cities[t.city] = (d.cities[t.city] || 0) + 1;
+        d.shippers[t.shipper] = (d.shippers[t.shipper] || 0) + 1;
+      }
+    });
+
+    // 日付がない月次CSVの場合は、月件数÷カレンダー日数で日別推定として展開する。
+    if (!hasDate) {
+      const days = this.daysInYM(ym);
+      byArea.forEach(a=>{
+        const avg = a.count / days;
+        for (let d=1; d<=days; d++) {
+          const date = this.ymDate(ym,d);
+          byDateArea.set(`${date}__${a.area}`, { date, area:a.area, count:avg, cities:a.cities, shippers:a.shippers || {}, estimated:true });
+        }
+      });
+    }
+
+    return { ym, source:rec.files?.join(', ') || rec.source || 'productAddressData', rawCount:rec.rawRows || rec.detailRows || rec.tickets.length, tickets, byArea, byDateArea, unmatched, hasDate };
+  },
+
+  dayType(dateStr) {
+    return STATE.capacity?.calendar?.[dateStr]?.type || 'normal';
+  },
+
+  dayAdj(dateStr) {
+    return this.n(STATE.capacity?.calendar?.[dateStr]?.adjust || 0);
+  },
+
+  activeShipperGroups() {
+    this.ensureState();
+    return (STATE.capacity.shipperGroups || this.defaultShipperGroups())
+      .filter(g=>g.active !== false && g.key !== 'other')
+      .sort((a,b)=>this.n(a.sort)-this.n(b.sort));
+  },
+
+  hasValidCapacityGroups() {
+    this.ensureState();
+    return (STATE.capacity?.capacityGroups || []).some(g => {
+      if (!Array.isArray(g.units) || !g.units.length) return false;
+      return this.activeShipperGroups().some(sg =>
+        this.n(g.capacity?.[sg.key]?.weekday) > 0 || this.n(g.capacity?.[sg.key]?.weekend) > 0
+      );
+    });
+  },
+
+  capacityGroupForUnit(unit) {
+    this.ensureState();
+    const normalized = this.normalizeCapacityUnit(unit);
+    if (!normalized) return null;
+    return (STATE.capacity.capacityGroups || []).find(g =>
+      Array.isArray(g.units) && g.units.some(u => this.normalizeCapacityUnit(u) === normalized)
+    ) || null;
+  },
+
+  getShipperAreaCap(groupKey, area, field) {
+    const row = STATE.capacity?.shipperAreaCaps?.[groupKey]?.[area] || {};
+    return this.n(row[field] ?? 0);
+  },
+
+  hasAnyShipperAreaCap(area='') {
+    this.ensureState();
+    const groups = STATE.capacity?.capacityGroups || [];
+    if (!groups.length) return false;
+    return groups.some(g => {
+      if (!Array.isArray(g.units) || !g.units.length) return false;
+      if (area && String(g.name || '') !== String(area)) return false;
+      return this.capacityGroupDailyCap(g, this.ymDate(this.getYM() || '202601', 1)) > 0;
+    });
+  },
+
+  baseDailyCap(dateStr, area) {
+    // 新方式：通常キャパは、荷主キャパ区分の合算のみ。
+    // 旧Excelキャパ・旧地区キャパ・旧shipperAreaCapsは参照しない。
+    return this.areaGroupCapSum(dateStr, area);
+  },
+
+  dailyCap(dateStr, area) {
+    return Math.max(0, this.baseDailyCap(dateStr, area) + this.dayAdj(dateStr));
+  },
+
+  shipperDailyCap(dateStr, area, groupLabelOrKey) {
+    const key = this.shipperGroupKeyByLabel(groupLabelOrKey);
+    return this.areaGroupCapSum(dateStr, area, key);
+  },
+
+  monthlyCap(ym, area) {
+    let total = 0;
+    const last = this.daysInYM(ym);
+    for (let d=1; d<=last; d++) {
+      total += this.dailyCap(this.ymDate(ym,d), area);
+    }
+    return total;
+  },
+
+  shipperMonthlyCap(ym, area, groupLabelOrKey) {
+    let total = 0;
+    const last = this.daysInYM(ym);
+    for (let d=1; d<=last; d++) total += this.shipperDailyCap(this.ymDate(ym,d), area, groupLabelOrKey);
+    return total;
+  },
+
+  capTargetCount(shippers) {
+    if (!shippers || !this.hasValidCapacityGroups()) return null;
+    const activeLabels = new Set(this.activeShipperGroups().map(g=>g.label));
+    return Object.entries(shippers).reduce((sum,[name,count])=>activeLabels.has(name) ? sum + this.n(count) : sum, 0);
+  },
+
+  judge(used, cap) {
+    const rate = cap > 0 ? used / cap * 100 : 0;
+    if (cap <= 0) return { rate:0, status:'未設定', cls:'unset' };
+    if (rate >= 150) return { rate, status:'崩壊', cls:'collapse' };
+    if (rate >= 120) return { rate, status:'逼迫', cls:'over' };
+    if (rate >= 100) return { rate, status:'注意', cls:'full' };
+    if (rate >= 80) return { rate, status:'適正', cls:'good' };
+    return { rate, status:'余裕あり', cls:'ok' };
+  },
+
+  areaRows() {
+    const actual = this.buildActual();
+    if (!this.hasValidCapacityGroups()) return [];
+    const groupNames = (STATE.capacity?.capacityGroups || [])
+      .filter(g => Array.isArray(g.units) && g.units.length)
+      .map(g => g.name)
+      .filter(Boolean);
+    const all = [...new Set(groupNames)];
+    return all.map(area=>{
+      const a = actual.byArea.get(area) || { area, count:0, shippers:{}, cities:{} };
+      const cap = this.monthlyCap(actual.ym, area);
+      const one = this.baseDailyCap(this.ymDate(actual.ym,1), area);
+      const targetCount = this.capTargetCount(a.shippers);
+      const used = targetCount === null ? a.count : targetCount;
+      const j = this.judge(used, cap);
+      return { ...a, used, cap, oneDay:one, rate:j.rate, status:j.status, cls:j.cls };
+    }).sort((a,b)=> b.rate-a.rate || b.count-a.count || String(a.area).localeCompare(String(b.area),'ja'));
+  },
+
+  dailyRows() {
+    const actual = this.buildActual();
+    const risk = { collapse:5, over:4, full:3, good:2, ok:1, unset:0 };
+    return [...actual.byDateArea.values()].map(r=>{
+      const cap = this.dailyCap(r.date, r.area);
+      const targetCount = this.capTargetCount(r.shippers);
+      const used = targetCount === null ? r.count : targetCount;
+      const j = this.judge(used, cap);
+      const diff = this.n(used) - this.n(cap);
+      return { ...r, used, cap, diff, rate:j.rate, status:j.status, cls:j.cls };
+    }).sort((a,b)=>(risk[b.cls]||0)-(risk[a.cls]||0) || this.n(b.diff)-this.n(a.diff) || b.rate-a.rate || String(a.date).localeCompare(String(b.date)));
+  },
+
+  ensureZipMasterForCapacity() {
+    const rec = this.selectedProductRecord();
+    if (!rec || !Array.isArray(rec.tickets) || !rec.tickets.length) return true;
+    if (!window.JP_ZIP_LOADER || typeof JP_ZIP_LOADER.loadForZips !== 'function') return true;
+
+    const zips = rec.tickets.map((t) => {
+      const row = t.representativeRow || t.firstRow || t.row || t.raw;
+      return this.normalizeZip(
+        t.zip || t.zipcode || t.postCode || t.postalCode ||
+        t['お届け先郵便番号'] || t['届け先郵便番号'] || t['郵便番号'] ||
+        (Array.isArray(row) ? row[11] : '')
+      );
+    }).filter(Boolean);
+
+    if (!zips.length) return true;
+    const prefixes = [...new Set(zips.map(z => String(z).slice(0, 2)))];
+    const loaded = new Set(typeof JP_ZIP_LOADER.loadedPrefixes === 'function' ? JP_ZIP_LOADER.loadedPrefixes() : []);
+    const missing = prefixes.filter(p => !(window.JP_ZIP_PARTS && window.JP_ZIP_PARTS[p]) && !loaded.has(p));
+    if (!missing.length) return true;
+
+    const key = missing.sort().join('|');
+    if (this._zipLoadingKey === key) return false;
+    this._zipLoadingKey = key;
+
+    JP_ZIP_LOADER.loadForZips(zips).then(() => {
+      this._zipLoadingKey = '';
+      this.render();
+    }).catch((e) => {
+      console.warn('郵便番号マスタ読込失敗', e);
+      this._zipLoadingKey = '';
+      // 読み込めない場合でも、住所文字列の補正で表示できる範囲を描画する。
+      this._zipLoadFailedKey = key;
+      this.render();
+    });
+
+    return false;
+  },
+
+  render() {
+    const view = document.getElementById('view-capacity');
+    if (!view || !view.classList.contains('active')) return;
+    this.ensureState();
+    this.ensureStyle();
+
+    if (!this.ensureZipMasterForCapacity()) {
+      view.innerHTML = `<div class="capx"><div class="capx-card capx-empty">郵便番号マスタを読み込み中です。完了後に自動で再表示します。</div></div>`;
+      return;
+    }
+
+    const actual = this.buildActual();
+    const rows = this.areaRows();
+    const daily = this.dailyRows(); window.__CAPACITY_LAST_DAILY_ROWS = daily;
+    this._lastRows = rows;
+    this._lastDailyRows = daily;
+
+    if (!['monthly','daily','integrated','shipperCap','weekday','calendar'].includes(this._tab)) this._tab = 'monthly';
+    view.innerHTML = this.layout(actual, rows, daily);
+    this.bind();
+  },
+
+  layout(actual, rows, daily) {
+    const hasCap = this.hasValidCapacityGroups();
+    const totalActual = actual.tickets?.length || 0;
+    const totalUsed = hasCap ? rows.reduce((s,r)=>s+this.n(r.used ?? r.count),0) : 0;
+    const totalCap = hasCap ? rows.reduce((s,r)=>s+this.n(r.cap),0) : 0;
+    const j = hasCap ? this.judge(totalUsed,totalCap) : { rate:0, status:'未設定', cls:'unset' };
+
+    const dailyRows = Array.isArray(daily) ? daily : [];
+    const overList = hasCap ? dailyRows.filter(r => r && this.n(r.cap) > 0 && this.n(r.rate) >= 100) : [];
+    const overDays = overList.length;
+    const weekendOver = overList.filter(r => [0,6].includes(this.dow(r.date))).length;
+    const weekendShare = overDays ? Math.round(weekendOver / overDays * 100) : 0;
+    const weekdayShare = overDays ? 100 - weekendShare : 0;
+    const worstOver = overList.slice().sort((a,b)=>this.n(b.diff)-this.n(a.diff) || this.n(b.rate)-this.n(a.rate))[0] || null;
+
+    const yms = [...new Set((STATE.productAddressData || []).map(r=>r.ym).filter(Boolean))].sort().reverse();
+    const curYM = actual.ym || this.getYM();
+
+    return `
+      <div class="capx">
+        <div class="capx-card capx-control">
+          <div class="capx-headline">
+            <div>
+              <h2>キャパ分析</h2>
+              <p>商品・住所CSVをもとに、区分作成と荷主別キャパ手入力で使用率・日別超過を確認します。</p>
+            </div>
+            <div class="capx-cond">
+              <label>対象月
+                <select id="capacity-ym">
+                  ${(yms.length?yms:[curYM]).map(ym=>`<option value="${esc(ym)}" ${ym===curYM?'selected':''}>${esc(ymLabel(ym))}</option>`).join('')}
+                </select>
+              </label>
+              <label>表示基準
+                <select id="capacity-base" disabled>
+                  <option value="calendar" selected>区分キャパ日別積み上げ</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="capx-actions">
+            <button class="btn btn-primary" onclick="document.getElementById('capacity-csv-input').click()">商品・住所CSV取込</button>
+            <input type="file" id="capacity-csv-input" accept=".csv" multiple style="display:none" onchange="CAPACITY_UI.importAreaCsv(this.files)">
+            <button class="btn" onclick="CAPACITY_UI.render()">再集計</button>
+            <button class="btn btn-danger" onclick="CAPACITY_UI.clearMaster()">キャパ区分を初期化</button>
+            <span id="capacity-msg">${hasCap ? `キャパ区分登録済：${STATE.capacity.capacityGroups.length}区分` : '荷主キャパ区分が未作成です'}</span>
+          </div>
+          <div class="capx-note">旧Excelキャパ・旧地区マスタは使用しません。先に「荷主キャパ」で区／市を選択して区分を作成すると、月別・日別・曜日・カレンダーへ自動反映します。</div>
+        </div>
+
+        <div class="capx-kpis">
+          <div class="capx-kpi blue"><span>実績件数</span><b>${fmt(totalActual)}</b><em>原票</em></div>
+          <div class="capx-kpi green"><span>月キャパ</span><b>${hasCap ? fmt(totalCap) : '—'}</b><em>${hasCap?'区分合算':'未設定'}</em></div>
+          <div class="capx-kpi ${j.cls}"><span>月使用率</span><b>${hasCap ? pct(j.rate) : '—'}</b><em>${esc(j.status)}</em></div>
+          <div class="capx-kpi amber"><span>日別超過（区分×日）</span><b>${hasCap ? fmt(overDays) : '—'}</b><em>${hasCap ? `土日 ${fmt(weekendShare)}% / 平日 ${fmt(weekdayShare)}% / 最大 ${worstOver ? esc(worstOver.area) + ' +' + fmt(this.n(worstOver.diff)) + '件（' + pct(worstOver.rate) + '）' : '—'}` : '区分作成後に表示'}</em></div>
+        </div>
+
+        <div class="capx-tabs">
+          ${[
+            ['monthly','月別使用状況'],['daily','日別超過'],['integrated','連動分析'],['shipperCap','荷主キャパ'],['weekday','曜日分析'],['calendar','カレンダー']
+          ].map(([k,l])=>`<button type="button" class="${this._tab===k?'active':''}" data-capx-tab="${k}">${l}</button>`).join('')}
+        </div>
+
+        ${this._tab==='monthly'?this.monthlyHtml(rows):''}
+        ${this._tab==='daily'?this.dailyHtml(daily, actual):''}
+        ${this._tab==='integrated'?this.integratedHtml(daily, actual):''}
+        ${this._tab==='shipperCap'?this.shipperCapacityHtml(actual):''}
+        ${this._tab==='weekday'?this.weekdayHtml(daily, actual):''}
+        ${this._tab==='calendar'?this.calendarHtml(daily, actual):''}
+      </div>`;
+  },
+
+  monthlyHtml(rows) {
+    if (!this.hasValidCapacityGroups()) {
+      return `<div class="capx-card capx-empty">
+        <h3>荷主キャパ区分を作成してください</h3>
+        <p class="capx-note2">現在は旧Excelキャパ・旧地区マスタを使わない設計です。先に「荷主キャパ」タブで、区／市を選択して区分を作成し、コジマ＋ビック・でんきち・エディオンのキャパを入力してください。</p>
+        <button class="btn btn-primary" type="button" data-capx-tab="shipperCap">荷主キャパを作成する</button>
+      </div>`;
+    }
+    return `<div class="capx-grid">
+      <div class="capx-card">
+        <h3>区分別 月キャパ使用状況</h3>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>区分</th><th class="r">実績</th><th class="r">判定対象</th><th class="r">日キャパ</th><th class="r">月キャパ</th><th class="r">使用率</th><th>状態</th></tr></thead><tbody>
+          ${rows.map((r,i)=>`<tr><td><button class="capx-link" data-capx-detail="${i}">${esc(r.area)}</button></td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.used ?? r.count)}</td><td class="r">${fmt(r.oneDay)}</td><td class="r"><b>${fmt(r.cap)}</b></td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td></tr>`).join('')}
+        </tbody></table></div>
+      </div>
+      <div class="capx-card"><h3>区分内訳</h3><div id="capacity-detail-box" class="capx-empty">区分をクリックしてください</div></div>
+    </div>`;
+  },
+
+  needCapacityGroupHtml() {
+    return `<div class="capx-card capx-empty">
+      <h3>荷主キャパ区分が未作成です</h3>
+      <p class="capx-note2">旧地区キャパは参照しません。「荷主キャパ」タブで区／市を選び、区分名と荷主別キャパを入力してください。</p>
+      <button class="btn btn-primary" type="button" data-capx-tab="shipperCap">荷主キャパを作成する</button>
+    </div>`;
+  },
+
+  dailyHtml(rows, actual) {
+    if (!this.hasValidCapacityGroups()) return this.needCapacityGroupHtml();
+    if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
+
+    this._lastDailyRows = rows;
+    const over = rows.filter(r=>r.cap > 0 && r.rate >= 100);
+    const weekendOver = over.filter(r=>[0,6].includes(this.dow(r.date))).length;
+    const weekendShare = over.length ? Math.round(weekendOver / over.length * 100) : 0;
+    const weekdayShare = over.length ? 100 - weekendShare : 0;
+    const worst = over.slice().sort((a,b)=>this.n(b.diff)-this.n(a.diff) || b.rate-a.rate)[0] || null;
+
+    setTimeout(()=>this.showDailyCause(0), 0);
+
+    return `<div class="capx-grid">
+      <div class="capx-card">
+        <div class="capx-section-head">
+          <div>
+            <h3>日別超過（原因確認）</h3>
+            <p class="capx-note2">行をクリックすると、右側に原因内訳を表示します。</p>
+          </div>
+          <div class="capx-cal-summary">
+            <span class="danger">超過 ${fmt(over.length)}件</span>
+            <span class="full">土日 ${fmt(weekendShare)}%</span>
+            <span class="good">平日 ${fmt(weekdayShare)}%</span>
+            <span>${worst ? `最大 ${esc(worst.area)} ${worst.diff > 0 ? '+' : ''}${fmt(worst.diff)}件 / ${pct(worst.rate)}` : '最大 —'}</span>
+          </div>
+        </div>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>日付</th><th>地区</th><th class="r">実績</th><th class="r">日キャパ</th><th class="r">差分</th><th class="r">使用率</th><th>状態</th><th>主な市区町村</th></tr></thead><tbody>
+          ${rows.map((r,i)=>`<tr class="capx-risk-${esc(r.cls)} capx-click-row ${i===0?'selected':''}" data-capx-daily-row="${i}"><td>${esc(this.dateLabel(r.date))}${r.estimated?' ※推定':''}</td><td>${esc(r.area)}</td><td class="r"><b>${fmt(r.count)}</b></td><td class="r">${fmt(r.cap)}</td><td class="r"><b class="capx-diff ${this.n(r.count)-this.n(r.cap)>0?'plus':'minus'}">${this.n(r.count)-this.n(r.cap)>0?'+':''}${fmt(this.n(r.count)-this.n(r.cap))}</b></td><td class="r">${r.cap > 0 ? pct(r.rate) : "-"}</td><td><span class="capacity-status ${esc(r.cls)}">${esc(r.status)}</span></td><td>${esc(Object.entries(r.cities||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} ${fmt(n)}件`).join(' / ') || '—')}</td></tr>`).join('')}
+        </tbody></table></div>
+      </div>
+      <div class="capx-card">
+        <h3>原因ドリルダウン</h3>
+        <div id="capacity-daily-cause-box" class="capx-empty">左の行をクリックしてください</div>
+      </div>
+    </div>`;
+  },
+
+
+  concentrationLabel(name, count, total) {
+    if (!name || !total) return '';
+    const share = count / total * 100;
+    if (share >= 50) return `${name}に${pct(share)}が集中しています`;
+    if (share >= 30) return `${name}が${pct(share)}を占めています`;
+    return `${name}が最多です（${pct(share)}）`;
+  },
+
+  integratedHtml(rows, actual) {
+    if (!this.hasValidCapacityGroups()) return this.needCapacityGroupHtml();
+    if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
+
+    const over = rows.filter(r=>r.cap > 0 && this.n(r.diff) > 0);
+    const overCount = over.reduce((s,r)=>s+this.n(r.count),0);
+    const overDiff = over.reduce((s,r)=>s+Math.max(0,this.n(r.diff)),0);
+    const overCap = over.reduce((s,r)=>s+this.n(r.cap),0);
+
+    const areaMap = new Map();
+    const shipperMap = new Map();
+    const cityMap = new Map();
+    over.forEach(r=>{
+      const area = r.area || '未設定';
+      const areaObj = areaMap.get(area) || { name:area, count:0, diff:0, days:0, maxRate:0 };
+      areaObj.count += this.n(r.count);
+      areaObj.diff += Math.max(0,this.n(r.diff));
+      areaObj.days += 1;
+      areaObj.maxRate = Math.max(areaObj.maxRate, this.n(r.rate));
+      areaMap.set(area, areaObj);
+
+      Object.entries(r.shippers || {}).forEach(([name,n])=>{
+        const x = shipperMap.get(name) || { name, count:0 };
+        x.count += this.n(n);
+        shipperMap.set(name, x);
+      });
+      Object.entries(r.cities || {}).forEach(([name,n])=>{
+        const x = cityMap.get(name) || { name, count:0 };
+        x.count += this.n(n);
+        cityMap.set(name, x);
+      });
+    });
+
+    const topAreas = [...areaMap.values()].sort((a,b)=>b.diff-a.diff || b.count-a.count).slice(0,8);
+    const topShippers = [...shipperMap.values()].sort((a,b)=>b.count-a.count).slice(0,8);
+    const topCities = [...cityMap.values()].sort((a,b)=>b.count-a.count).slice(0,8);
+    const worst = over.slice().sort((a,b)=>this.n(b.diff)-this.n(a.diff) || b.rate-a.rate)[0] || null;
+    const topArea = topAreas[0];
+    const topShipper = topShippers[0];
+    const topCity = topCities[0];
+
+    const comments = [];
+    if (worst) comments.push(`${this.dateLabel(worst.date)}の${worst.area}が最大超過（${worst.diff>0?'+':''}${fmt(worst.diff)}件 / ${pct(worst.rate)}）です。`);
+    if (topArea) comments.push(`超過差分は${topArea.name}が最も大きく、合計${fmt(topArea.diff)}件分を押し上げています。`);
+    if (topCity) comments.push(`市区町村では${this.concentrationLabel(topCity.name, topCity.count, overCount)}。`);
+    if (topShipper) comments.push(`荷主では${this.concentrationLabel(topShipper.name, topShipper.count, overCount)}。`);
+    if (!comments.length) comments.push('対象月に日別キャパ超過はありません。現状は大きな偏りを確認する段階です。');
+
+    const bar = (value, total)=>{
+      const w = total > 0 ? Math.max(4, Math.min(100, value/total*100)) : 0;
+      return `<div class="capx-mini-bar"><span style="width:${w}%"></span></div>`;
+    };
+
+    return `<div class="capx-grid">
+      <div class="capx-card">
+        <div class="capx-section-head">
+          <div>
+            <h3>連動分析（キャパ × エリア × 荷主）</h3>
+            <p class="capx-note2">超過している日だけを対象に、場所と荷主の偏りをまとめて確認します。</p>
+          </div>
+          <div class="capx-cal-summary">
+            <span class="danger">超過差分 ${fmt(overDiff)}件</span>
+            <span>超過件数 ${fmt(overCount)}件</span>
+            <span>超過対象 ${fmt(over.length)}行</span>
+          </div>
+        </div>
+        <div class="capx-kpis" style="grid-template-columns:repeat(3,minmax(160px,1fr));margin-bottom:14px">
+          <div class="capx-kpi over"><span>最大超過</span><b>${worst ? `${worst.diff>0?'+':''}${fmt(worst.diff)}件` : '—'}</b><em>${worst ? `${this.dateLabel(worst.date)} / ${esc(worst.area)}` : '超過なし'}</em></div>
+          <div class="capx-kpi amber"><span>エリア最大要因</span><b>${topCity ? esc(topCity.name) : '—'}</b><em>${topCity ? `${fmt(topCity.count)}件 / ${pct(topCity.count / (overCount||1) * 100)}` : '内訳なし'}</em></div>
+          <div class="capx-kpi good"><span>荷主最大要因</span><b>${topShipper ? esc(topShipper.name) : '—'}</b><em>${topShipper ? `${fmt(topShipper.count)}件 / ${pct(topShipper.count / (overCount||1) * 100)}` : '内訳なし'}</em></div>
+        </div>
+        <div class="capx-action-box">
+          <h5>読み取りコメント</h5>
+          ${comments.map(c=>`<div class="capx-action-item">・${esc(c)}</div>`).join('')}
+        </div>
+      </div>
+      <div class="capx-card">
+        <h3>超過日の上位要因</h3>
+        ${topAreas.length ? `<h5 class="capx-mini-title">地区別 超過差分</h5>${topAreas.map((x,i)=>`<div class="capx-rank-row"><b>${i+1}</b><span>${esc(x.name)}</span><em>+${fmt(x.diff)}件</em>${bar(x.diff, topAreas[0].diff)}</div>`).join('')}` : `<div class="capx-empty">超過地区なし</div>`}
+        ${topCities.length ? `<h5 class="capx-mini-title">市区町村別 件数</h5>${topCities.map((x,i)=>`<div class="capx-rank-row"><b>${i+1}</b><span>${esc(x.name)}</span><em>${fmt(x.count)}件</em>${bar(x.count, topCities[0].count)}</div>`).join('')}` : ''}
+        ${topShippers.length ? `<h5 class="capx-mini-title">荷主別 件数</h5>${topShippers.map((x,i)=>`<div class="capx-rank-row"><b>${i+1}</b><span>${esc(x.name)}</span><em>${fmt(x.count)}件</em>${bar(x.count, topShippers[0].count)}</div>`).join('')}` : ''}
+      </div>
+    </div>`;
+  },
+
+  weekdayHtml(rows, actual) {
+    if (!this.hasValidCapacityGroups()) return this.needCapacityGroupHtml();
+    if (!actual.tickets.length) return `<div class="capx-card capx-empty">商品・住所CSVを読み込んでください。</div>`;
+
+    const names = ['日','月','火','水','木','金','土'];
+    const map = new Map();
+
+    rows.forEach(r=>{
+      const w = this.dow(r.date);
+      if (!map.has(w)) map.set(w, { w, count:0, cap:0, over:0, items:[] });
+      const x = map.get(w);
+      x.count += this.n(r.count);
+      x.cap += this.n(r.cap);
+      if (r.cap > 0 && r.rate >= 100) x.over += 1;
+      x.items.push(r);
+    });
+
+    const list = Array.from({length:7},(_,w)=>{
+      const x = map.get(w) || { w, count:0, cap:0, over:0, items:[] };
+      const j = this.judge(x.count, x.cap);
+      const worst = x.items.slice().sort((a,b)=>b.rate-a.rate)[0];
+      return { ...x, rate:j.rate, status:j.status, cls:j.cls, worst };
+    });
+
+    return `<div class="capx-card">
+      <div class="capx-section-head">
+        <div>
+          <h3>曜日分析</h3>
+          <p class="capx-note2">曜日ごとの偏りを見ます。土日だけ逼迫しているか、平日に寄っているかを確認します。</p>
+        </div>
+      </div>
+      <div class="capx-weekday-grid">
+        ${list.map(x=>`
+          <div class="capx-weekday-card ${esc(x.cls)}">
+            <div class="capx-weekday-top">
+              <b>${names[x.w]}曜日</b>
+              <span class="capacity-status ${esc(x.cls)}">${esc(x.status)}</span>
+            </div>
+            <div class="capx-weekday-main">
+              <strong>${x.cap > 0 ? pct(x.rate) : '-'}</strong>
+              <span>${fmt(x.count)}件 / ${fmt(x.cap)}件</span>
+            </div>
+            <div class="capx-weekday-sub">
+              <span>超過 ${fmt(x.over)}件</span>
+              <span>${x.worst ? `最大 ${esc(x.worst.area)} ${x.worst.cap > 0 ? pct(x.worst.rate) : '-'}` : '最大 —'}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+  },
+
+
+
+  saitamaRegionMap() {
+    return {
+      saitama_saitama: ['さいたま市'],
+      saitama_nanbu: ['川口市','蕨市','戸田市'],
+      saitama_nanseibu: ['朝霞市','志木市','和光市','新座市','富士見市','ふじみ野市','三芳町'],
+      saitama_tobu: ['春日部市','草加市','越谷市','八潮市','三郷市','吉川市','松伏町'],
+      saitama_kenou: ['鴻巣市','上尾市','桶川市','北本市','伊奈町'],
+      saitama_kawagoe_hiki: ['川越市','東松山市','坂戸市','鶴ヶ島市','日高市','毛呂山町','越生町','滑川町','嵐山町','小川町','川島町','吉見町','鳩山町','ときがわ町','東秩父村'],
+      saitama_seibu: ['所沢市','飯能市','狭山市','入間市'],
+      saitama_tone: ['行田市','加須市','羽生市','久喜市','蓮田市','幸手市','白岡市','宮代町','杉戸町'],
+      saitama_hokubu: ['熊谷市','本庄市','深谷市','美里町','神川町','上里町','寄居町'],
+      saitama_chichibu: ['秩父市','横瀬町','皆野町','長瀞町','小鹿野町']
+    };
+  },
+
+  tokyoRegionMap() {
+    return {
+      tokyo_toshin: ['千代田区','中央区','港区'],
+      tokyo_fukutoshin: ['新宿区','文京区','渋谷区','豊島区'],
+      tokyo_joto: ['台東区','墨田区','江東区','荒川区','足立区','葛飾区','江戸川区'],
+      tokyo_jonan: ['品川区','目黒区','大田区','世田谷区'],
+      tokyo_josai: ['中野区','杉並区','練馬区'],
+      tokyo_johoku: ['北区','板橋区']
+    };
+  },
+
+  saitamaWardNames() {
+    return ['西区','北区','大宮区','見沼区','中央区','桜区','浦和区','南区','緑区','岩槻区'];
+  },
+
+  tokyoWardNames() {
+    return ['千代田区','中央区','港区','新宿区','文京区','台東区','墨田区','江東区','品川区','目黒区','大田区','世田谷区','渋谷区','中野区','杉並区','豊島区','北区','荒川区','板橋区','練馬区','足立区','葛飾区','江戸川区'];
+  },
+
+  saitamaMunicipalityNames() {
+    const names = new Set();
+    Object.values(this.saitamaRegionMap()).flat().forEach(x=>names.add(x));
+    this.saitamaWardNames().forEach(w=>names.add('さいたま市' + w));
+    return [...names];
+  },
+
+  tokyoMunicipalityNames() {
+    return [
+      ...this.tokyoWardNames(),
+      '八王子市','立川市','武蔵野市','三鷹市','青梅市','府中市','昭島市','調布市','町田市','小金井市','小平市','日野市','東村山市','国分寺市','国立市','福生市','狛江市','東大和市','清瀬市','東久留米市','武蔵村山市','多摩市','稲城市','羽村市','あきる野市','西東京市','瑞穂町','日の出町','檜原村','奥多摩町'
+    ];
+  },
+
+  normalizeCapacityUnit(value) {
+    const raw = String(value ?? '').normalize('NFKC').replace(/\s+/g,'').trim();
+    if (!raw || raw === '未設定') return '';
+
+    const stripPref = (x) => String(x || '').replace(/^埼玉県/, '').replace(/^東京都/, '');
+    const withPref = (pref, name) => pref + String(name || '').replace(new RegExp('^' + pref), '');
+
+    // 郵便番号だけの場合は、郵便番号マスタから取得した行政単位を1回だけ正規化する。
+    // ※自分自身を無条件に呼ばない。Maximum call stack size exceeded 防止。
+    const zip = this.normalizeZip(raw);
+    if (/^\d{7}$/.test(zip) && raw.replace(/[^0-9]/g,'').length === 7) {
+      const byZip = this.cityFromZip(zip);
+      if (byZip && byZip !== raw) {
+        const z = String(byZip).normalize('NFKC').replace(/\s+/g,'').trim();
+        if (z.includes('埼玉県') || z.includes('東京都')) {
+          const c = this.cityFromAddress(z);
+          return c && c !== '未設定' ? c : z;
+        }
+        value = z;
+      }
+    }
+
+    let v = String(value ?? raw).normalize('NFKC').replace(/\s+/g,'').trim();
+    if (!v || v === '未設定') return '';
+
+    // 県名つきは行政単位まで切る。cityFromAddress が同じ値を返しても再帰しない。
+    if (v.includes('東京都') || v.includes('埼玉県')) {
+      const c = this.cityFromAddress(v);
+      return c && c !== '未設定' ? c : v;
+    }
+
+    // さいたま市の区は、東京都の「北区」などと衝突しやすいため最優先で補完する。
+    if (v.includes('さいたま市')) {
+      const ward = this.saitamaWardNames().find(w => v.includes(w));
+      return '埼玉県さいたま市' + (ward || '');
+    }
+    const saitamaWard = this.saitamaWardNames().find(w => v === w || v.endsWith(w));
+    if (saitamaWard && !v.includes('東京都')) return '埼玉県さいたま市' + saitamaWard;
+
+    // 東京都23区。
+    const tokyoWard = this.tokyoWardNames().find(w => v === w || v.includes(w));
+    if (tokyoWard) return '東京都' + tokyoWard;
+
+    // 埼玉県内市町村。
+    const saitamaMuni = this.saitamaMunicipalityNames().find(m => v === m || v.includes(m));
+    if (saitamaMuni) return withPref('埼玉県', saitamaMuni);
+
+    // 東京都多摩等。
+    const tokyoMuni = this.tokyoMunicipalityNames().find(m => v === m || v.includes(m));
+    if (tokyoMuni) return withPref('東京都', tokyoMuni);
+
+    // エリア分析で対応済みだった住所崩れへの補正。
+    // 例：蕨中央5-、戸田美女木、さいたま大宮区 などを町域ではなく市・区へ丸める。
+    const cleaned = v.replace(/^[0-9〒-]+/, '');
+    const repaired = this.cityFromAddress(cleaned);
+    if (repaired && repaired !== '未設定' && repaired !== cleaned && repaired !== v) {
+      // ここも再帰しない。戻り値を行政単位としてそのまま返す。
+      return repaired;
+    }
+
+    if (/^さいたま/.test(cleaned)) {
+      const ward = this.saitamaWardNames().find(w => cleaned.includes(w));
+      return '埼玉県さいたま市' + (ward || '');
+    }
+    if (/^蕨/.test(cleaned)) return '埼玉県蕨市';
+    if (/^戸田/.test(cleaned)) return '埼玉県戸田市';
+    if (/^川口/.test(cleaned)) return '埼玉県川口市';
+    if (/^朝霞/.test(cleaned)) return '埼玉県朝霞市';
+    if (/^和光/.test(cleaned)) return '埼玉県和光市';
+    if (/^志木/.test(cleaned)) return '埼玉県志木市';
+    if (/^新座/.test(cleaned)) return '埼玉県新座市';
+
+    return v;
+  },
+
+  regionFilterOptions() {
+    return [
+      { key:'saitama_all', label:'埼玉県 全域' },
+      { key:'saitama_saitama', label:'埼玉県 さいたま地域' },
+      { key:'saitama_nanbu', label:'埼玉県 南部地域' },
+      { key:'saitama_nanseibu', label:'埼玉県 南西部地域' },
+      { key:'saitama_tobu', label:'埼玉県 東部地域' },
+      { key:'saitama_kenou', label:'埼玉県 県央地域' },
+      { key:'saitama_kawagoe_hiki', label:'埼玉県 川越比企地域' },
+      { key:'saitama_seibu', label:'埼玉県 西部地域' },
+      { key:'saitama_tone', label:'埼玉県 利根地域' },
+      { key:'saitama_hokubu', label:'埼玉県 北部地域' },
+      { key:'saitama_chichibu', label:'埼玉県 秩父地域' },
+      { key:'tokyo_all', label:'東京都 全域' },
+      { key:'tokyo_23', label:'東京都 23区 全域' },
+      { key:'tokyo_toshin', label:'東京都 都心部' },
+      { key:'tokyo_fukutoshin', label:'東京都 副都心部' },
+      { key:'tokyo_joto', label:'東京都 城東' },
+      { key:'tokyo_jonan', label:'東京都 城南' },
+      { key:'tokyo_josai', label:'東京都 城西' },
+      { key:'tokyo_johoku', label:'東京都 城北' },
+      { key:'tokyo_tama', label:'東京都 多摩' },
+      { key:'all_tokyo_saitama', label:'東京・埼玉 すべて' }
+    ];
+  },
+
+  unitShortName(unit) {
+    const u = this.normalizeCapacityUnit(unit) || String(unit || '');
+    return String(u || '')
+      .replace(/^東京都/, '')
+      .replace(/^埼玉県/, '')
+      .trim() || '未設定';
+  },
+
+  isTokyo23Unit(unit) {
+    const u = this.normalizeCapacityUnit(unit);
+    return /^東京都.+区$/.test(u);
+  },
+
+  unitMatchesRegion(unit, regionKey) {
+    const u = this.normalizeCapacityUnit(unit);
+    if (!u || u === '未設定') return false;
+    if (regionKey === 'all_tokyo_saitama') return u.includes('埼玉県') || u.includes('東京都');
+    if (regionKey === 'saitama_all') return u.includes('埼玉県');
+    if (regionKey === 'tokyo_all') return u.includes('東京都');
+    if (regionKey === 'tokyo_23') return this.isTokyo23Unit(u);
+    if (regionKey === 'tokyo_tama') return u.includes('東京都') && !this.isTokyo23Unit(u);
+
+    const saitamaMap = this.saitamaRegionMap();
+    if (saitamaMap[regionKey]) return u.includes('埼玉県') && saitamaMap[regionKey].some(name => u.includes(name));
+
+    const tokyoMap = this.tokyoRegionMap();
+    if (tokyoMap[regionKey]) return u.includes('東京都') && tokyoMap[regionKey].some(name => u.includes(name));
+
+    return true;
+  },
+
+  availableCapacityUnits(actual) {
+    const map = new Map();
+    (actual?.tickets || []).forEach(t => {
+      const unit = this.normalizeCapacityUnit(this.ticketCity(t));
+      if (!unit || unit === '未設定') return;
+      if (!(unit.includes('埼玉県') || unit.includes('東京都'))) return;
+      const area = this.mappedArea(unit);
+      const old = map.get(unit) || { unit, label:this.unitShortName(unit), area, count:0, shippers:{} };
+      old.count += 1;
+      old.shippers[t.shipper || 'その他'] = (old.shippers[t.shipper || 'その他'] || 0) + 1;
+      map.set(unit, old);
+    });
+    const values = [...map.values()];
+    const hasSaitamaWard = values.some(x => /^埼玉県さいたま市(西区|北区|大宮区|見沼区|中央区|桜区|浦和区|南区|緑区|岩槻区)$/.test(x.unit));
+    return values
+      .filter(x => !(hasSaitamaWard && /^埼玉県さいたま市?$/.test(x.unit)))
+      .sort((a,b)=>{
+        const pa = a.unit.includes('埼玉県') ? 0 : 1;
+        const pb = b.unit.includes('埼玉県') ? 0 : 1;
+        return pa - pb || String(a.unit).localeCompare(String(b.unit), 'ja');
+      });
+  },
+
+  capacityGroupDailyCap(group, dateStr, shipperKey='') {
+    const holidayLike = this.isWeekend(dateStr) || this.dayType(dateStr) === 'holiday';
+    const field = holidayLike ? 'weekend' : 'weekday';
+    const caps = group?.capacity || {};
+    if (shipperKey) return this.n(caps?.[shipperKey]?.[field] ?? 0);
+    return this.activeShipperGroups().reduce((s,g)=>s + this.n(caps?.[g.key]?.[field] ?? 0), 0);
+  },
+
+  capacityGroupsForArea(area) {
+    this.ensureState();
+    return (STATE.capacity.capacityGroups || []).filter(g => String(g.name || '') === String(area || ''));
+  },
+
+  areaGroupCapSum(dateStr, area, shipperKey='') {
+    const groups = this.capacityGroupsForArea(area);
+    if (!groups.length) return 0;
+    return groups.reduce((s,g)=>s + this.capacityGroupDailyCap(g, dateStr, shipperKey), 0);
+  },
+
+  areaUnitBreakdownForRow(row) {
+    const result = new Map();
+    const area = row?.area || '';
+    (this.buildActual().tickets || []).forEach(t => {
+      if (t.area !== area) return;
+      if (row?.date && t.date && t.date !== row.date) return;
+      const unit = this.normalizeCapacityUnit(this.ticketCity(t));
+      const key = unit || '未設定';
+      const x = result.get(key) || { unit:key, label:this.unitShortName(key), count:0, shippers:{} };
+      x.count += 1;
+      x.shippers[t.shipper || 'その他'] = (x.shippers[t.shipper || 'その他'] || 0) + 1;
+      result.set(key, x);
+    });
+    return [...result.values()].sort((a,b)=>b.count-a.count);
+  },
+
+  shipperCapacityHtml(actual) {
+    this.ensureState();
+
+    const tickets = actual.tickets || [];
+    const groups = this.activeShipperGroups();
+    const allUnits = this.availableCapacityUnits(actual);
+    const regionOptions = this.regionFilterOptions();
+    const regionKey = this._capRegionFilter || 'saitama_all';
+    const filteredUnits = allUnits.filter(u => this.unitMatchesRegion(u.unit, regionKey));
+    const savedGroups = STATE.capacity.capacityGroups || [];
+    const ym = actual.ym || this.getYM();
+
+    const groupSummary = groups.map(g=>{
+      const count = tickets.filter(t=>t.shipper === g.label).length;
+      let weekday = 0, weekend = 0;
+      savedGroups.forEach(cg=>{
+        weekday += this.n(cg.capacity?.[g.key]?.weekday);
+        weekend += this.n(cg.capacity?.[g.key]?.weekend);
+      });
+      return { ...g, count, weekday, weekend };
+    });
+
+    const unitCards = filteredUnits.length ? filteredUnits.map(u=>`
+      <label class="capx-unit-card">
+        <input type="checkbox" value="${esc(u.unit)}" data-capx-new-group-unit>
+        <span>
+          <b>${esc(u.label)}</b>
+          <em>${esc(u.area)} / ${fmt(u.count)}件</em>
+        </span>
+      </label>
+    `).join('') : `<div class="capx-empty small">対象エリアの区・市がありません。商品・住所CSVまたは郵便番号データを確認してください。</div>`;
+
+    return `<div class="capx-card">
+      <div class="capx-section-head">
+        <div>
+          <h3>荷主キャパ設定（区分作成）</h3>
+          <p class="capx-note2">埼玉・東京の区／市を複数選択して、現場の配車単位に合わせたキャパ区分を作成します。通常キャパは作成した区分の荷主キャパ合算です。</p>
+        </div>
+        <div class="capx-cal-summary">
+          <span>対象 ${esc(ymLabel(ym))}</span>
+          <span>区・市 ${fmt(allUnits.length)}</span>
+          <span>区分 ${fmt(savedGroups.length)}</span>
+        </div>
+      </div>
+
+      <div class="capx-shipper-summary">
+        ${groupSummary.map(g=>`<div class="capx-mini-card"><span>${esc(g.label)}</span><b>${fmt(g.count)}件</b><em>平日合計 ${fmt(g.weekday)} / 土日合計 ${fmt(g.weekend)}</em></div>`).join('')}
+      </div>
+
+      <div class="capx-capgroup-layout">
+        <div class="capx-capgroup-form">
+          <h4>区分を追加</h4>
+          <label class="capx-form-label">対象エリア
+            <select id="capx-region-filter">
+              ${regionOptions.map(o=>`<option value="${esc(o.key)}" ${o.key===regionKey?'selected':''}>${esc(o.label)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="capx-form-label">区分名
+            <input id="capx-new-group-name" placeholder="例：さいたまA / 大宮・桜">
+          </label>
+          <div class="capx-unit-list">
+            ${unitCards}
+          </div>
+          <div class="capx-group-cap-inputs">
+            ${groups.map(g=>`
+              <div class="capx-group-cap-row">
+                <b>${esc(g.label)}</b>
+                <label>平日<input type="number" min="0" step="1" value="0" data-capx-new-cap="${esc(g.key)}" data-capx-new-cap-field="weekday"></label>
+                <label>土日<input type="number" min="0" step="1" value="0" data-capx-new-cap="${esc(g.key)}" data-capx-new-cap-field="weekend"></label>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-primary" id="capx-add-cap-group" type="button">選択した区・市で区分を追加</button>
+          <div class="capx-note">例：さいたまA＝大宮区・桜区、さいたまB＝西区・北区。秩父方面や東京23区も同じ画面で作成できます。</div>
+        </div>
+
+        <div class="capx-capgroup-list">
+          <h4>作成済み区分</h4>
+          ${savedGroups.length ? savedGroups.map((cg,idx)=>{
+            const unitText = (cg.units || []).map(u=>this.unitShortName(u)).join('・') || '対象なし';
+            const areaText = [...new Set((cg.units || []).map(u=>this.mappedArea(this.normalizeCapacityUnit(u))))].join(' / ') || '未分類';
+            return `<div class="capx-capgroup-card" data-capx-capgroup-id="${esc(cg.id)}">
+              <div class="capx-capgroup-title">
+                <div>
+                  <input value="${esc(cg.name || '')}" data-capx-capgroup-field="name">
+                  <em>${esc(areaText)}</em>
+                </div>
+                <button class="btn btn-danger" type="button" data-capx-capgroup-delete="${esc(cg.id)}">削除</button>
+              </div>
+              <div class="capx-capgroup-units">${esc(unitText)}</div>
+              <div class="capx-group-cap-inputs compact">
+                ${groups.map(g=>`
+                  <div class="capx-group-cap-row">
+                    <b>${esc(g.label)}</b>
+                    <label>平日<input type="number" min="0" step="1" value="${esc(this.n(cg.capacity?.[g.key]?.weekday))}" data-capx-capgroup-cap="${esc(g.key)}" data-capx-cap-field="weekday"></label>
+                    <label>土日<input type="number" min="0" step="1" value="${esc(this.n(cg.capacity?.[g.key]?.weekend))}" data-capx-capgroup-cap="${esc(g.key)}" data-capx-cap-field="weekend"></label>
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+          }).join('') : `<div class="capx-empty small">まだ区分がありません。左側で区・市を選んで作成してください。</div>`}
+        </div>
+      </div>
+
+      <details class="capx-details"><summary>荷主判定ルールを確認・修正する</summary>
+        <p class="capx-note2">荷主名または荷主コードの前方一致で区分します。コードが分かる場合は「コード接頭辞」に入力すると名称ブレより強く判定できます。</p>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>区分名</th><th>名称キーワード（|区切り）</th><th>コード接頭辞（|区切り）</th><th class="r">判定</th></tr></thead><tbody>
+          ${(STATE.capacity.shipperGroups || this.defaultShipperGroups()).map(g=>`<tr data-capx-group-key="${esc(g.key)}">
+            <td><input value="${esc(g.label)}" data-capx-group-field="label" style="width:150px"></td>
+            <td><input value="${esc(g.patterns || '')}" data-capx-group-field="patterns" style="width:320px"></td>
+            <td><input value="${esc(g.codePrefixes || '')}" data-capx-group-field="codePrefixes" style="width:220px"></td>
+            <td class="r"><label class="capx-check"><input type="checkbox" ${g.active !== false ? 'checked' : ''} data-capx-group-field="active">対象</label></td>
+          </tr>`).join('')}
+        </tbody></table></div>
+      </details>
+    </div>`;
+  },
+
+  calendarHtml(rows, actual) {
+    if (!this.hasValidCapacityGroups()) return this.needCapacityGroupHtml();
+    const ym = actual.ym || this.getYM();
+    const days = this.daysInYM(ym);
+    if (!ym || !days) return `<div class="capx-card capx-empty">対象月を選択してください。</div>`;
+    const byDate = new Map();
+    rows.forEach(r=>{
+      const x = byDate.get(r.date) || { date:r.date, count:0, cap:0, diff:0, rows:[], cls:'unset' };
+      x.count += this.n(r.count); x.cap += this.n(r.cap); x.diff += Math.max(0,this.n(r.diff)); x.rows.push(r);
+      const j = this.judge(x.count, x.cap); x.rate = j.rate; x.status = j.status; x.cls = j.cls;
+      byDate.set(r.date, x);
+    });
+    const firstDow = this.dow(this.ymDate(ym,1));
+    const cells = [];
+    for (let i=0;i<firstDow;i++) cells.push(`<div class="capx-day-simple blank"></div>`);
+    for (let d=1; d<=days; d++) {
+      const date = this.ymDate(ym,d);
+      const x = byDate.get(date) || { date, count:0, cap:0, diff:0, cls:'empty', rows:[] };
+      cells.push(`<button type="button" class="capx-day-simple ${this.isWeekend(date)?'weekend':''} ${x.cls}" data-capx-cal-detail="${esc(date)}">
+        <span class="day-no">${d}</span>
+        <strong>${x.count ? fmt(x.count) : '—'}</strong>
+        <em>${x.cap ? `${fmt(x.cap)}件 / ${pct(x.rate||0)}` : 'キャパ未設定'}</em>
+        ${x.diff>0 ? `<i>+${fmt(x.diff)}</i>` : ''}
+      </button>`);
+    }
+    const over = [...byDate.values()].filter(x=>x.diff>0).length;
+    return `<div class="capx-card capx-calendar-card">
+      <div class="capx-cal-head"><div><h3>カレンダー</h3><p class="capx-note2">日別の実績・キャパ・超過をカレンダー形式で確認します。</p></div><div class="capx-cal-summary"><span class="danger">超過日 ${fmt(over)}日</span><span>${esc(ymLabel(ym))}</span></div></div>
+      <div class="capx-calendar-layout"><div class="capx-calendar-simple">${['日','月','火','水','木','金','土'].map(w=>`<div class="capx-week">${w}</div>`).join('')}${cells.join('')}</div><div id="capx-calendar-detail" class="capx-cal-detail"><div class="capx-empty small">日付をクリックしてください</div></div></div>
+    </div>`;
+  },
+
+  calendarDetailHtml(date, rows) {
+    const list = rows.filter(r=>r.date === date);
+    const total = list.reduce((s,r)=>s+this.n(r.count),0);
+    const cap = list.reduce((s,r)=>s+this.n(r.cap),0);
+    const diff = total - cap;
+    return `<div class="capx-cal-detail-inner">
+      <div class="capx-cal-detail-title"><div><b>${esc(this.dateLabel(date))}</b><span>実績 ${fmt(total)}件 / キャパ ${fmt(cap)}件 / 差分 ${diff>0?'+':''}${fmt(diff)}件</span></div></div>
+      <div class="capx-cal-edit">
+        <label>日別補正種別<select data-capx-cal-date="${esc(date)}" data-capx-cal-field="type"><option value="normal" ${this.dayType(date)==='normal'?'selected':''}>通常</option><option value="holiday" ${this.dayType(date)==='holiday'?'selected':''}>休日扱い</option><option value="special" ${this.dayType(date)==='special'?'selected':''}>特殊日</option></select></label>
+        <label>日別補正件数<input type="number" value="${esc(this.dayAdj(date))}" data-capx-cal-date="${esc(date)}" data-capx-cal-field="adjust"></label>
+      </div>
+      <div class="capx-cal-area-list">${list.length ? list.map(r=>`<div class="capx-cal-area-row ${esc(r.cls)}"><span>${esc(r.area)}</span><b>${fmt(r.count)}</b><em>${fmt(r.cap)}</em><strong>${this.n(r.diff)>0?'+':''}${fmt(r.diff)}</strong></div>`).join('') : '<div class="capx-empty small">実績なし</div>'}</div>
+    </div>`;
+  },
+
+  mappingHtml(actual) {
+    const rows = (STATE.capacity.mapping || []).slice().sort((a,b)=>this.n(b.priority)-this.n(a.priority));
+    return `<div class="capx-card"><div class="capx-section-head"><div><h3>地区マッピング</h3><p class="capx-note2">住所・市区町村をどのキャパ地区に割り当てるかを設定します。</p></div><button class="btn" id="capacity-add-map">行追加</button></div>
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>優先</th><th>検索語（|区切り）</th><th>割当地区</th><th></th></tr></thead><tbody>${rows.map((r,i)=>`<tr data-capx-map-index="${i}"><td><input type="number" value="${esc(r.priority)}" data-capx-map-field="priority" style="width:80px"></td><td><input value="${esc(r.pattern)}" data-capx-map-field="pattern" style="width:100%"></td><td><input value="${esc(r.area)}" data-capx-map-field="area" style="width:180px"></td><td><button class="btn btn-danger" data-capx-map-delete="${i}">削除</button></td></tr>`).join('')}</tbody></table></div>
+    </div>`;
+  },
+
+  masterHtml() {
+    this.ensureState();
+    const ym = this.getYM();
+    const groups = this.activeShipperGroups();
+    const savedGroups = STATE.capacity.capacityGroups || [];
+    const areaMap = new Map();
+
+    savedGroups.forEach(cg=>{
+      const areas = [...new Set((cg.units || []).map(u=>this.mappedArea(this.normalizeCapacityUnit(u))))];
+      areas.forEach(area=>{
+        const row = areaMap.get(area) || { area, groups:[], weekday:0, weekend:0, shipper:{} };
+        row.groups.push(cg);
+        groups.forEach(g=>{
+          row.shipper[g.key] = row.shipper[g.key] || { weekday:0, weekend:0 };
+          row.shipper[g.key].weekday += this.n(cg.capacity?.[g.key]?.weekday);
+          row.shipper[g.key].weekend += this.n(cg.capacity?.[g.key]?.weekend);
+          row.weekday += this.n(cg.capacity?.[g.key]?.weekday);
+          row.weekend += this.n(cg.capacity?.[g.key]?.weekend);
+        });
+        areaMap.set(area,row);
+      });
+    });
+
+    const rows = [...areaMap.values()].sort((a,b)=>String(a.area).localeCompare(String(b.area),'ja'));
+
+    return `<div class="capx-card"><div class="capx-section-head"><div><h3>通常キャパ</h3><p class="capx-note2">通常キャパは、荷主キャパ区分の合算で自動計算します。この画面は確認用です。修正は「荷主キャパ」タブで行ってください。</p></div><button class="btn" data-capx-tab="shipperCap">荷主キャパを修正</button></div>
+      ${rows.length ? `<div class="scroll-x"><table class="tbl"><thead><tr><th>地区</th><th>構成区分</th>${groups.map(g=>`<th class="r">${esc(g.label)}</th>`).join('')}<th class="r">平日合計</th><th class="r">土日合計</th><th class="r">月キャパ</th></tr></thead><tbody>${rows.map(r=>{
+        const monthCap = this.monthlyCap(ym, r.area);
+        return `<tr><td><b>${esc(r.area)}</b></td><td>${esc(r.groups.map(g=>g.name).join(' / '))}</td>${groups.map(g=>`<td class="r">${fmt(r.shipper[g.key]?.weekday || 0)} / ${fmt(r.shipper[g.key]?.weekend || 0)}</td>`).join('')}<td class="r"><b>${fmt(r.weekday)}</b></td><td class="r"><b>${fmt(r.weekend)}</b></td><td class="r"><b>${fmt(monthCap)}</b></td></tr>`;
+      }).join('')}</tbody></table></div>` : `<div class="capx-empty">荷主キャパ区分が未作成です。「荷主キャパ」タブで区分を作成してください。</div>`}
+    </div>`;
+  },
+
+  unmatchedHtml(actual) {
+    const rows = [...(actual.unmatched || new Map()).entries()].sort((a,b)=>b[1]-a[1]);
+    return `<div class="capx-card"><h3>未分類</h3><p class="capx-note2">地区マッピングに当たらなかった市区町村です。必要に応じて地区マッピングへ追加してください。</p>
+      ${rows.length ? `<div class="capx-cause-list">${rows.map(([c,n],i)=>`<div class="capx-cause-row"><b>${i+1}</b><span>${esc(c)}</span><em>${fmt(n)}件</em></div>`).join('')}</div>` : '<div class="capx-empty">未分類はありません。</div>'}
+    </div>`;
+  },
+
+  dailyCauseHtml(row) {
+    if (!row) return `<div class="capx-empty">対象データがありません</div>`;
+    const diff = this.n(row.count) - this.n(row.cap);
+    const cities = Object.entries(row.cities || {}).sort((a,b)=>b[1]-a[1]);
+    const shippers = Object.entries(row.shippers || {}).sort((a,b)=>b[1]-a[1]);
+    const topCity = cities[0];
+    const topShipper = shippers[0];
+    const cityShare = topCity ? topCity[1] / (this.n(row.count) || 1) * 100 : 0;
+    const shipperShare = topShipper ? topShipper[1] / (this.n(row.count) || 1) * 100 : 0;
+    const shipperCapRows = shippers.map(([name,n])=>{
+      const cap = this.shipperDailyCap(row.date, row.area, name);
+      const diff = this.n(n) - cap;
+      const j = this.judge(this.n(n), cap);
+      return { name, count:this.n(n), cap, diff, ...j };
+    });
+    const insight = diff > 0
+      ? `${esc(row.area)}で日キャパを${diff > 0 ? '+' : ''}${fmt(diff)}件超過しています。${topCity ? `市区町村は${esc(topCity[0])}が最多（${pct(cityShare)}）です。` : ''}${topShipper ? ` 荷主は${esc(topShipper[0])}が最多（${pct(shipperShare)}）です。` : ''}`
+      : `日キャパ内に収まっています。内訳確認用の表示です。`;
+
+    return `<div class="capx-cause-inner">
+      <div class="capx-cause-title">
+        <h4>${esc(this.dateLabel(row.date))} / ${esc(row.area)}</h4>
+        <p>${row.estimated ? '※月間件数をカレンダー日数で割った推定値です。' : '実日付データをもとにした集計です。'}</p>
+      </div>
+      <div class="capx-city-hint">${insight}</div>
+      <div class="capx-cause-kpis">
+        <div><span>実績</span><b>${fmt(row.count)}件</b></div>
+        <div><span>日キャパ</span><b>${fmt(row.cap)}件</b></div>
+        <div class="${diff > 0 ? 'danger' : 'ok'}"><span>差分</span><b>${diff > 0 ? '+' : ''}${fmt(diff)}件</b></div>
+        <div><span>超過倍率</span><b>${row.cap > 0 ? (this.n(row.count)/this.n(row.cap)).toFixed(1) + '倍' : '-'}</b></div>
+      </div>
+      <h5>市区町村別 原因内訳</h5>
+      <div class="capx-cause-list">
+        ${cities.length ? cities.map(([c,n],i)=>`
+          <div class="capx-cause-row">
+            <b>${i+1}</b>
+            <span>${esc(c)}</span>
+            <em>${fmt(n)}件</em>
+          </div>
+        `).join('') : '<div class="capx-empty">市区町村内訳なし</div>'}
+      </div>
+      <h5>荷主別 原因内訳</h5>
+      <div class="capx-cause-list">
+        ${shipperCapRows.length ? shipperCapRows.map((x,i)=>`
+          <div class="capx-cause-row">
+            <b>${i+1}</b>
+            <span>${esc(x.name)}</span>
+            <em>${fmt(x.count)}件${x.cap>0 ? ` / 枠${fmt(x.cap)}件 / ${x.diff>0?'+':''}${fmt(x.diff)}件` : ' / 判定なし'}</em>
+          </div>
+        `).join('') : '<div class="capx-empty">荷主内訳なし</div>'}
+      </div>
+    </div>`;
+  },
+
+  showDailyCause(idx) {
+    const row = this._lastDailyRows[Number(idx)];
+    const box = document.getElementById('capacity-daily-cause-box');
+    if (!box || !row) return;
+    document.querySelectorAll('[data-capx-daily-row]').forEach(tr=>tr.classList.remove('selected'));
+    const tr = document.querySelector(`[data-capx-daily-row="${Number(idx)}"]`);
+    if (tr) tr.classList.add('selected');
+    box.innerHTML = this.dailyCauseHtml(row);
+  },
+
+  bindCalendarDetailInputs() {
+    document.querySelectorAll('#capx-calendar-detail [data-capx-cal-date]').forEach(inp=>inp.addEventListener('change',()=>{
+      const date = inp.dataset.capxCalDate, field = inp.dataset.capxCalField;
+      STATE.capacity.calendar = STATE.capacity.calendar || {};
+      STATE.capacity.calendar[date] = STATE.capacity.calendar[date] || {};
+      STATE.capacity.calendar[date][field] = inp.type === 'number' ? this.n(inp.value) : inp.value;
+      STORE.save();
+      this.render();
+    }));
+  },
+
+  bind() {
+    const ym = document.getElementById('capacity-ym');
+    if (ym) ym.addEventListener('change', ()=>this.render());
+    const days = document.getElementById('capacity-days');
+    if (days) days.addEventListener('change', ()=>this.render());
+    const base = document.getElementById('capacity-base');
+    if (base) base.addEventListener('change', ()=>this.render());
+
+    document.querySelectorAll('[data-capx-tab]').forEach(btn=>btn.addEventListener('click',()=>{ this._tab=btn.dataset.capxTab; this.render(); }));
+    document.querySelectorAll('[data-capx-detail]').forEach(btn=>btn.addEventListener('click',()=>this.showCities(Number(btn.dataset.capxDetail))));
+    document.querySelectorAll('[data-capx-daily-row]').forEach(row=>row.addEventListener('click',()=>this.showDailyCause(Number(row.dataset.capxDailyRow))));
+    document.querySelectorAll('[data-capx-cal-detail]').forEach(btn=>btn.addEventListener('click',()=>{
+      const box = document.getElementById('capx-calendar-detail');
+      if (!box) return;
+      box.innerHTML = this.calendarDetailHtml(btn.dataset.capxCalDetail, this._lastDailyRows || []);
+      this.bindCalendarDetailInputs();
+    }));
+    document.querySelectorAll('[data-capx-cal-date]').forEach(inp=>inp.addEventListener('change',()=>{
+      const date = inp.dataset.capxCalDate, field = inp.dataset.capxCalField;
+      STATE.capacity.calendar = STATE.capacity.calendar || {};
+      STATE.capacity.calendar[date] = STATE.capacity.calendar[date] || {};
+      STATE.capacity.calendar[date][field] = inp.type === 'number' ? this.n(inp.value) : inp.value;
+      STORE.save();
+      this.render();
+    }));
+    document.querySelectorAll('[data-capx-group-field]').forEach(inp=>inp.addEventListener('change',()=>{
+      const tr = inp.closest('[data-capx-group-key]');
+      const key = tr?.dataset.capxGroupKey;
+      const g = (STATE.capacity.shipperGroups || []).find(x=>x.key === key);
+      if (!g) return;
+      const field = inp.dataset.capxGroupField;
+      g[field] = inp.type === 'checkbox' ? inp.checked : inp.value;
+      STORE.save();
+      this.render();
+    }));
+    const regionFilter = document.getElementById('capx-region-filter');
+    if (regionFilter) regionFilter.addEventListener('change',()=>{
+      this._capRegionFilter = regionFilter.value || 'saitama_all';
+      this.render();
+    });
+
+    const addCapGroup = document.getElementById('capx-add-cap-group');
+    if (addCapGroup) addCapGroup.addEventListener('click',()=>{
+      const name = String(document.getElementById('capx-new-group-name')?.value || '').trim();
+      const units = [...document.querySelectorAll('[data-capx-new-group-unit]:checked')].map(x=>x.value).filter(Boolean);
+      if (!name) { UI.toast('区分名を入力してください','warn'); return; }
+      if (!units.length) { UI.toast('対象の区・市を選択してください','warn'); return; }
+
+      const capacity = {};
+      this.activeShipperGroups().forEach(g=>{
+        capacity[g.key] = { weekday:0, weekend:0 };
+      });
+      document.querySelectorAll('[data-capx-new-cap]').forEach(inp=>{
+        const key = inp.dataset.capxNewCap;
+        const field = inp.dataset.capxNewCapField;
+        capacity[key] = capacity[key] || { weekday:0, weekend:0 };
+        capacity[key][field] = this.n(inp.value);
+      });
+
+      STATE.capacity.capacityGroups = STATE.capacity.capacityGroups || [];
+      STATE.capacity.capacityGroups.push({
+        id: 'cg_' + Date.now() + '_' + Math.random().toString(16).slice(2),
+        name,
+        units,
+        capacity,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      STORE.save();
+      CLOUD.pushCapacity().catch(()=>{});
+      UI.toast('キャパ区分を追加しました');
+      this.render();
+    });
+
+    document.querySelectorAll('[data-capx-capgroup-delete]').forEach(btn=>btn.addEventListener('click',()=>{
+      const id = btn.dataset.capxCapgroupDelete;
+      if (!confirm('このキャパ区分を削除しますか？')) return;
+      STATE.capacity.capacityGroups = (STATE.capacity.capacityGroups || []).filter(g=>g.id !== id);
+      STORE.save();
+      CLOUD.pushCapacity().catch(()=>{});
+      this.render();
+    }));
+
+    document.querySelectorAll('[data-capx-capgroup-field]').forEach(inp=>inp.addEventListener('change',()=>{
+      const card = inp.closest('[data-capx-capgroup-id]');
+      const id = card?.dataset.capxCapgroupId;
+      const cg = (STATE.capacity.capacityGroups || []).find(g=>g.id === id);
+      if (!cg) return;
+      cg[inp.dataset.capxCapgroupField] = inp.value;
+      cg.updatedAt = new Date().toISOString();
+      STORE.save();
+      CLOUD.pushCapacity().catch(()=>{});
+      this.render();
+    }));
+
+    document.querySelectorAll('[data-capx-capgroup-cap]').forEach(inp=>inp.addEventListener('change',()=>{
+      const card = inp.closest('[data-capx-capgroup-id]');
+      const id = card?.dataset.capxCapgroupId;
+      const cg = (STATE.capacity.capacityGroups || []).find(g=>g.id === id);
+      if (!cg) return;
+      const key = inp.dataset.capxCapgroupCap;
+      const field = inp.dataset.capxCapField;
+      cg.capacity = cg.capacity || {};
+      cg.capacity[key] = cg.capacity[key] || { weekday:0, weekend:0 };
+      cg.capacity[key][field] = this.n(inp.value);
+      cg.updatedAt = new Date().toISOString();
+      STORE.save();
+      CLOUD.pushCapacity().catch(()=>{});
+      this.render();
+    }));
+
+  },
+
+  updateMaster(inp) {
+    const tr = inp.closest('[data-area]');
+    const old = tr.dataset.area;
+    const field = inp.dataset.capxMasterField;
+    const row = STATE.capacity.areas[old] || {weekday:0,weekend:0,rows:[]};
+    if (field === 'area') {
+      const name = this.normArea(inp.value);
+      if (name && name !== old) {
+        delete STATE.capacity.areas[old];
+        STATE.capacity.areas[name] = row;
+      }
+    } else {
+      row[field] = this.n(inp.value);
+      STATE.capacity.areas[old] = row;
+    }
+    STORE.save();
+    this.render();
+  },
+
+  showCities(idx) {
+    const row = this._lastRows[idx];
+    const box = document.getElementById('capacity-detail-box');
+    if (!box || !row) return;
+    const cities = Object.entries(row.cities || {}).sort((a,b)=>b[1]-a[1]);
+    box.innerHTML = cities.length ? cities.map(([c,n],i)=>`<div class="capx-city"><b>${i+1}</b><span>${esc(c)}</span><em>${fmt(n)}件</em></div>`).join('') : '<div class="capx-empty">該当なし</div>';
+  },
+
+  saveSettings() {},
+
+  async importCapacityExcel(file) {
+    if (!file) return;
+    await IMPORT.importCapacityExcel(file);
+    this.render();
+  },
+
+  importAreaCsv(files) {
+    if (!files || !files.length) return;
+    if (window.FIELD_PRODUCT_IMPORT2?.handleFiles) FIELD_PRODUCT_IMPORT2.handleFiles(files);
+    else if (window.FIELD_WORKER_IMPORT2?.handleFiles) FIELD_WORKER_IMPORT2.handleFiles(files);
+    UI.toast('CSVを取り込みました。完了後に再集計してください。','info');
+  },
+
+  clearMaster() {
+    if (!confirm('作成済みの荷主キャパ区分を初期化しますか？\n※商品・住所CSV、荷主判定ルール、カレンダー補正は残します。')) return;
+    this.ensureState();
+    STATE.capacity.capacityGroups = [];
+    STATE.capacity.areas = {};
+    STATE.capacity.sourceFile = '';
+    STATE.capacity.rowCount = 0;
+    STORE.save();
+    this.render();
+  },
+
+  populateYMSel() {},
+
+  ensureStyle() {
+    if (document.getElementById('capacity-ui-fixed-style')) return;
+    const st = document.createElement('style');
+    st.id = 'capacity-ui-fixed-style';
+    st.textContent = `
+      .capx{display:grid;gap:14px}.capx-card{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:18px}.capx-control{border-top:3px solid var(--navy)}.capx-headline{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.capx h2{margin:0;font-size:22px;font-weight:900}.capx h3{margin:0 0 12px;font-size:16px;font-weight:900}.capx p{margin:4px 0 0;color:var(--text2);font-size:12px;font-weight:700}.capx-cond{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.capx-cond label{font-size:11px;color:var(--text2);font-weight:800}.capx-cond select,.capx-cond input{display:block;margin-top:4px;min-width:160px}.capx-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.capx-note,.capx-note2{font-size:11px;color:var(--text3);line-height:1.7;margin-top:8px}.capx-kpis{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.capx-kpi{position:relative;background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px 18px;box-shadow:0 10px 22px rgba(15,23,42,.05);overflow:hidden}.capx-kpi:before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:#2563eb}.capx-kpi.green:before{background:#059669}.capx-kpi.over:before{background:#dc2626}.capx-kpi.full:before{background:#f97316}.capx-kpi.good:before{background:#2563eb}.capx-kpi.unset:before{background:#94a3b8}.capx-kpi.amber:before{background:#f97316}.capx-kpi span{display:block;color:var(--text2);font-size:12px;font-weight:900;margin-bottom:6px}.capx-kpi b{font-size:28px;font-weight:900;color:var(--text)}.capx-kpi em{display:block;font-style:normal;color:var(--text2);font-size:12px;font-weight:800;margin-top:4px}.capx-tabs{display:flex;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:16px;padding:12px}.capx-tabs button{border:1px solid var(--border2);background:#fff;border-radius:999px;padding:10px 16px;font-weight:900;cursor:pointer}.capx-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}.capx-grid{display:grid;grid-template-columns:minmax(620px,1.4fr) minmax(320px,.8fr);gap:14px}.capx-link{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer}.capx-risk-over td{background:#fff7f7}.capx-risk-full td{background:#fffaf0}.capx-risk-good td{background:#eff6ff}.capx-risk-unset td{background:#f8fafc}.capx-empty{text-align:center;color:var(--text3);font-weight:800;padding:22px}.capx-calendar{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:8px;background:#f8fafc;padding:10px;border-radius:14px}.capx-week{text-align:center;font-size:12px;font-weight:900;background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px}.capx-week.sun{color:#b91c1c}.capx-week.sat{color:#1d4ed8}.capx-day{min-height:140px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:9px;display:grid;gap:7px}.capx-day.weekend{background:#eff6ff}.capx-day.ok{background:#ecfdf5}.capx-day.good{background:#eff6ff}.capx-day.full{background:#fff7ed}.capx-day.over{background:#fef2f2}.capx-day.unset{background:#f8fafc}.capx-day.blank{background:transparent;border:0}.capx-daytop{display:flex;justify-content:space-between;gap:8px}.capx-daytop b{font-size:18px}.capx-daytop span{font-size:11px;font-weight:800;color:var(--text2)}.capx-city{display:grid;grid-template-columns:32px 1fr 80px;gap:8px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-bottom:7px}.capx-city b{color:#1d4ed8}.capx-city span{font-weight:900}.capx-city em{font-style:normal;text-align:right;font-weight:900}.capacity-status{display:inline-flex;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:900}.capacity-status.ok{background:#dcfce7;color:#166534}.capacity-status.good{background:#dbeafe;color:#1e40af}.capacity-status.full{background:#ffedd5;color:#9a3412}.capacity-status.over{background:#fee2e2;color:#991b1b}.capacity-status.unset{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
+      .capx-calendar-card{padding:18px!important}
+      .capx-cal-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}
+      .capx-cal-summary{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+      .capx-cal-summary span{display:inline-flex;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:900;border:1px solid var(--border)}
+      .capx-cal-summary .danger{background:#fee2e2;color:#991b1b;border-color:#fecaca}.capx-cal-summary .full{background:#fff7ed;color:#9a3412;border-color:#fed7aa}
+      .capx-calendar-layout{display:grid;grid-template-columns:minmax(620px,1.3fr) minmax(320px,.7fr);gap:14px;align-items:start}
+      .capx-calendar-simple{display:grid;grid-template-columns:repeat(7,minmax(88px,1fr));gap:8px;background:#f8fafc;padding:10px;border-radius:16px;border:1px solid var(--border)}
+      .capx-day-simple{min-height:92px;border:1px solid var(--border);border-radius:14px;background:#fff;display:grid;grid-template-rows:auto 1fr auto;gap:3px;padding:10px;text-align:left;cursor:pointer;position:relative;box-shadow:0 8px 18px rgba(15,23,42,.04)}
+      .capx-day-simple:hover{transform:translateY(-1px);box-shadow:0 12px 24px rgba(15,23,42,.08)}
+      .capx-day-simple .day-no{font-size:18px;font-weight:900;color:#0f172a}.capx-day-simple strong{font-size:18px;font-weight:900;align-self:center}.capx-day-simple em{font-size:11px;font-style:normal;font-weight:900;color:#64748b}.capx-day-simple i{position:absolute;right:8px;top:8px;border-radius:999px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-size:10px;font-style:normal;font-weight:900;padding:2px 6px}
+      .capx-day-simple.empty{background:#fff;color:#94a3b8}.capx-day-simple.weekend{background:#f8fafc}.capx-day-simple.ok{background:#eff6ff;border-color:#bfdbfe}.capx-day-simple.full{background:#fff7ed;border-color:#fed7aa}.capx-day-simple.over{background:#fef2f2;border-color:#fecaca}.capx-day-simple.blank{visibility:hidden;box-shadow:none;border:0;background:transparent;cursor:default}
+      .capx-cal-detail{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(15,23,42,.05);min-height:260px;overflow:hidden}
+      .capx-empty.small{padding:28px 18px;font-size:13px}.capx-cal-detail-inner{display:grid;gap:14px;padding:16px}.capx-cal-detail-title{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:10px}.capx-cal-detail-title b{display:block;font-size:18px;font-weight:900}.capx-cal-detail-title span{display:block;font-size:12px;color:var(--text2);font-weight:800;margin-top:3px}
+      .capx-cal-edit{display:grid;gap:10px}.capx-cal-edit label{display:grid;gap:5px;font-size:12px;font-weight:900;color:var(--text2)}.capx-cal-edit select,.capx-cal-edit input{width:100%;min-width:0}
+      .capx-cal-area-list{display:grid;gap:8px}.capx-cal-area-row{display:grid;grid-template-columns:1fr 70px 70px 70px;gap:8px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:9px 10px;background:#fff}.capx-cal-area-row span{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.capx-cal-area-row b,.capx-cal-area-row em,.capx-cal-area-row strong{text-align:right;font-style:normal;font-weight:900}.capx-cal-area-row.over{background:#fff7f7}.capx-cal-area-row.full{background:#fffaf0}
+      @media(max-width:900px){.capx-cal-head{flex-direction:column}.capx-calendar-layout{grid-template-columns:1fr}.capx-calendar-simple{grid-template-columns:repeat(2,minmax(120px,1fr))}.capx-week{display:none}.capx-cal-area-row{grid-template-columns:1fr 60px}.capx-cal-area-row em,.capx-cal-area-row strong{text-align:left}}
+
+      .capx-shipper-summary{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr));gap:12px;margin:14px 0}.capx-mini-card{border:1px solid var(--border);border-radius:14px;padding:14px;background:#f8fafc}.capx-mini-card span{display:block;font-size:12px;font-weight:900;color:var(--text2);margin-bottom:5px}.capx-mini-card b{display:block;font-size:24px;font-weight:900;color:var(--text)}.capx-mini-card em{display:block;font-size:11px;font-style:normal;color:var(--text3);font-weight:800;margin-top:4px}.capx-capgroup-layout{display:grid;grid-template-columns:minmax(420px,.85fr) minmax(480px,1.15fr);gap:14px;align-items:start}.capx-capgroup-form,.capx-capgroup-list{border:1px solid var(--border);border-radius:16px;background:#fff;padding:16px}.capx-capgroup-form h4,.capx-capgroup-list h4{margin:0 0 12px;font-size:15px;font-weight:900}.capx-form-label{display:grid;gap:6px;font-size:12px;font-weight:900;color:var(--text2);margin-bottom:10px}.capx-form-label input,.capx-form-label select{width:100%;min-width:0}.capx-unit-list{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;background:#f8fafc;border:1px solid var(--border);border-radius:14px;padding:12px;max-height:360px;overflow:auto;margin:10px 0 14px}.capx-unit-card{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--border);border-radius:12px;background:#fff;padding:10px;cursor:pointer}.capx-unit-card:hover{border-color:#93c5fd;background:#eff6ff}.capx-unit-card input{margin-top:3px}.capx-unit-card b{display:block;font-weight:900;color:var(--text);font-size:13px}.capx-unit-card em{display:block;font-style:normal;color:var(--text3);font-size:11px;font-weight:800;margin-top:3px}.capx-group-cap-inputs{display:grid;gap:8px;margin:10px 0 14px}.capx-group-cap-inputs.compact{margin:8px 0 0}.capx-group-cap-row{display:grid;grid-template-columns:120px 1fr 1fr;gap:8px;align-items:center}.capx-group-cap-row b{font-size:12px;font-weight:900}.capx-group-cap-row label{display:grid;gap:3px;font-size:11px;font-weight:900;color:var(--text2)}.capx-group-cap-row input{width:100%;min-width:0}.capx-capgroup-card{border:1px solid var(--border);border-radius:14px;padding:12px;margin-bottom:10px;background:#f8fafc}.capx-capgroup-title{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.capx-capgroup-title input{font-weight:900;font-size:14px;min-width:220px}.capx-capgroup-title em{display:block;font-style:normal;font-size:11px;color:var(--text3);font-weight:800;margin-top:4px}.capx-capgroup-units{margin-top:8px;border-radius:10px;background:#fff;border:1px solid var(--border);padding:8px 10px;font-size:12px;font-weight:900;color:var(--text2);line-height:1.7}
+
+      @media(max-width:900px){.capx-headline{flex-direction:column}.capx-kpis{grid-template-columns:repeat(2,1fr)}.capx-grid{grid-template-columns:1fr}.capx-calendar{grid-template-columns:repeat(2,1fr)}.capx-week{display:none}}
+    `;
+    document.head.appendChild(st);
   }
+};
+
+
+/* ════════ §20A データ保管場所対応表ヘルパー ═══════════════════ */
+function storageFiscalYear() {
+  const sel = document.getElementById('storage-fy-select');
+  if (sel && sel.value) return String(sel.value);
+  const plan = document.getElementById('plan-year-sel');
+  if (plan && plan.value) return String(plan.value);
   return STATE.fiscalYear || getDefaultFiscalYear();
 }
 function storageFiscalMonths(fy) { return monthsOfFiscalYear(String(fy)); }
 function storageRowsForFY(fy) {
   const months = storageFiscalMonths(fy);
   return (STATE.datasets || []).filter(d => months.includes(d.ym));
-}
-function storageFiscalYearOptionsHtml(selectedFY) {
-  const selected = String(selectedFY || storageFiscalYear());
-  const years = new Set([selected, getDefaultFiscalYear()]);
-  (STATE.datasets || []).forEach(d => {
-    const y = d?.fiscalYear || (d?.ym ? fiscalYearFromYM(d.ym) : '');
-    if (/^\d{4}$/.test(String(y))) years.add(String(y));
-  });
-  (STATE.workerCsvData || []).forEach(d => d?.ym && years.add(fiscalYearFromYM(d.ym)));
-  (STATE.productAddressData || []).forEach(d => d?.ym && years.add(fiscalYearFromYM(d.ym)));
-  if (STATE.planData && typeof STATE.planData === 'object') {
-    Object.keys(STATE.planData).forEach(y => /^\d{4}$/.test(y) && years.add(y));
-  }
-  return [...years].sort().reverse().map(y => `<option value="${y}" ${String(y)===selected?'selected':''}>${y}年度</option>`).join('');
 }
 function storageIsHistory(ds) { return ds && ds.source === 'history'; }
 function storageAmountK(ds, key) {
@@ -2325,34 +4475,27 @@ function renderMonthlyCheckTable() {
         : storageBadge('12ヶ月 OK', 'ok');
 
   return `
-    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-      <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
         <div>
           <div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div>
           <div style="font-size:11px;color:var(--text3);margin-top:3px">${fy}年度：${fy}年4月 ～ ${parseInt(fy,10)+1}年3月（年度順）</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="font-size:11px;color:var(--text2);font-weight:800">対象年度</span>
-          <select id="monthly-check-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(fy)}</select>
-          ${summary}
-          <span style="font-size:11px;color:var(--text3)">▼</span>
-        </div>
-      </summary>
-      <div style="padding:0 10px 10px">
-        <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
-          ${states.map(s=>`
-            <tr>
-              <td><strong>${ymLabel(s.ym)}</strong></td>
-              <td>${storageBadge(s.csvLabel, s.csvKind)}</td>
-              <td>${storageBadge(s.histLabel, s.histKind)}</td>
-              <td>${storageBadge(s.planLabel, s.planKind)}</td>
-              <td>${storageBadge(s.judge, s.kind)}</td>
-              <td style="min-width:220px;color:var(--text2)">${esc(s.note)}</td>
-            </tr>
-          `).join('')}
-        </tbody></table></div>
+        <div>${summary}</div>
       </div>
-    </details>`;
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
+        ${states.map(s=>`
+          <tr>
+            <td><strong>${ymLabel(s.ym)}</strong></td>
+            <td>${storageBadge(s.csvLabel, s.csvKind)}</td>
+            <td>${storageBadge(s.histLabel, s.histKind)}</td>
+            <td>${storageBadge(s.planLabel, s.planKind)}</td>
+            <td>${storageBadge(s.judge, s.kind)}</td>
+            <td style="min-width:220px;color:var(--text2)">${esc(s.note)}</td>
+          </tr>
+        `).join('')}
+      </tbody></table></div>
+    </div>`;
 }
 
 
@@ -2407,188 +4550,26 @@ function renderDataQualityCheckTable() {
   const rows = storageDataQualityRows(fy);
   const summary = rows.length ? storageBadge(`確認 ${rows.length}件`, 'danger') : storageBadge('異常なし', 'ok');
   return `
-    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-      <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
         <div>
           <div style="font-weight:900;font-size:14px">重複・異常データ確認</div>
           <div style="font-size:11px;color:var(--text3);margin-top:3px">同じ年月＋同じ区分の重複、単位ズレ、年度ズレ、極端に小さい金額を確認</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-          <span style="font-size:11px;color:var(--text2);font-weight:800">対象年度</span>
-          <select id="data-quality-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(fy)}</select>
-          ${summary}<span style="font-size:11px;color:var(--text3)">▼</span>
-        </div>
-      </summary>
-      <div style="padding:0 12px 12px">
-        ${rows.length ? `
-          <div class="scroll-x"><table class="tbl"><thead><tr><th>区分</th><th>月</th><th>データ</th><th>確認内容</th><th>対応</th></tr></thead><tbody>
-            ${rows.map(r=>`<tr>
-              <td>${storageBadge(r.level, r.level === '異常' ? 'danger' : 'warn')}</td>
-              <td><strong>${ymLabel(r.ym)}</strong></td>
-              <td>${esc(r.item)}</td>
-              <td style="min-width:280px;color:var(--text2)">${esc(r.detail)}</td>
-              <td style="min-width:280px;color:var(--text2)">${esc(r.action)}</td>
-            </tr>`).join('')}
-          </tbody></table></div>` : `
-          <div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;font-size:12px">この年度では、同一月・同一区分の重複や単位異常は見つかりません。</div>`}
+        <div>${summary}</div>
       </div>
-    </details>`;
-}
-
-
-function healthProductRecord(ym) {
-  const records = window.FIELD_DATA_ACCESS?.getProductRecords ? FIELD_DATA_ACCESS.getProductRecords() : (STATE.productAddressData || []);
-  return (records || []).find(d => d && d.ym === ym) || null;
-}
-function healthWorkerRecord(ym) {
-  const records = window.FIELD_DATA_ACCESS?.getWorkerRecords ? FIELD_DATA_ACCESS.getWorkerRecords() : (STATE.workerCsvData || []);
-  return (records || []).find(d => d && d.ym === ym) || null;
-}
-function healthProductStats(rec) {
-  const tickets = Array.isArray(rec?.tickets) ? rec.tickets : [];
-  const hasAmount = (t) => {
-    const direct = n(t?.amount || t?.salesAmount || t?.totalAmount || t?.value || t?.price);
-    if (direct > 0) return true;
-    if (t?.works && typeof t.works === 'object') {
-      return Object.values(t.works).some(v => n(v) > 0);
-    }
-    if (Array.isArray(t?.workDetails)) {
-      return t.workDetails.some(d => n(d?.amount || d?.value) > 0);
-    }
-    return false;
-  };
-  const hasAddressUnit = (t) => {
-    return !!String(t?.zip || t?.zipcode || t?.postalCode || t?.pref || t?.city || t?.ward || t?.area || t?.areaUnit || '').trim();
-  };
-  const total = tickets.length || n(rec?.uniqueCount);
-  const amountMissing = tickets.length ? tickets.filter(t => !hasAmount(t)).length : 0;
-  const addressMissing = tickets.length ? tickets.filter(t => !hasAddressUnit(t)).length : Math.max(0, n(rec?.uniqueCount) - n(rec?.zipCount));
-  const amount = tickets.length ? tickets.reduce((sum,t)=>sum + n(t.amount || t.salesAmount || t.totalAmount || t.value || t.price),0) : n(rec?.amount);
-  return { total, amountMissing, addressMissing, amount };
-}
-function healthNormalizeUnit(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  if (window.CAPACITY_UI?.normalizeCapacityUnit) {
-    try { return CAPACITY_UI.normalizeCapacityUnit(raw); } catch(e) {}
-  }
-  return raw.replace(/[\s　]/g,'').replace(/さいたま市(.+区)$/,'さいたま市$1');
-}
-function healthCapacityStats(productRec) {
-  const groups = STATE.capacity?.capacityGroups || [];
-  const validGroups = groups.filter(g => Array.isArray(g.units) && g.units.length);
-  const unitSet = new Set();
-  validGroups.forEach(g => (g.units || []).forEach(u => {
-    const normalized = healthNormalizeUnit(u);
-    if (normalized) unitSet.add(normalized);
-  }));
-  const tickets = Array.isArray(productRec?.tickets) ? productRec.tickets : [];
-  let unmatched = 0;
-  tickets.forEach(t => {
-    const candidates = [t.areaUnit, t.area, t.city && t.ward ? `${t.city}${t.ward}` : '', t.city, t.ward].map(healthNormalizeUnit).filter(Boolean);
-    if (candidates.length && !candidates.some(c => unitSet.has(c))) unmatched += 1;
-  });
-  const hasValid = typeof CAPACITY_UI !== 'undefined' && CAPACITY_UI?.hasValidCapacityGroups
-    ? !!CAPACITY_UI.hasValidCapacityGroups()
-    : validGroups.some(g => Object.values(g.capacity || {}).some(v => n(v?.weekday) > 0 || n(v?.weekend) > 0));
-  return { groupCount: validGroups.length, hasValid, unmatched };
-}
-function dataHealthMonthState(fy, ym) {
-  const monthState = storageMonthState(fy, ym);
-  const worker = healthWorkerRecord(ym);
-  const product = healthProductRecord(ym);
-  const productStats = healthProductStats(product);
-  const capStats = healthCapacityStats(product);
-  const csvOk = monthState.confirmed.length > 0 || monthState.daily.length > 0 || monthState.histRows.length > 0;
-  const planOk = !!storagePlanRows(fy);
-  const workerOk = !!worker;
-  const productOk = !!product;
-  const capOk = capStats.hasValid;
-  const problems = [];
-  if (!csvOk) problems.push('収支未登録');
-  if (!planOk) problems.push('計画未登録');
-  if (!workerOk) problems.push('作業者CSV未登録');
-  if (!productOk) problems.push('商品住所CSV未登録');
-  if (productOk && productStats.amountMissing > 0) problems.push(`金額欠落 ${productStats.amountMissing}件`);
-  if (productOk && productStats.addressMissing > 0) problems.push(`住所/地区欠落 ${productStats.addressMissing}件`);
-  if (!capOk) problems.push('キャパ未設定');
-  if (productOk && capOk && capStats.unmatched > 0) problems.push(`キャパ未分類 ${capStats.unmatched}件`);
-  let judge = 'OK';
-  let kind = 'ok';
-  if (problems.some(x => /未登録|未設定|欠落|未分類/.test(x))) { judge = '確認'; kind = 'warn'; }
-  if (!csvOk || !productOk || !capOk) { judge = '要対応'; kind = 'danger'; }
-  return { ym, csvOk, planOk, workerOk, productOk, capOk, productStats, capStats, problems, judge, kind };
-}
-function renderDataHealthDashboard() {
-  const fy = storageFiscalYear();
-  const months = storageFiscalMonths(fy);
-  const states = months.map(ym => dataHealthMonthState(fy, ym));
-  const csvCount = states.filter(s => s.csvOk).length;
-  const workerCount = states.filter(s => s.workerOk).length;
-  const productCount = states.filter(s => s.productOk).length;
-  const amountMissing = states.reduce((sum,s)=>sum + s.productStats.amountMissing, 0);
-  const addressMissing = states.reduce((sum,s)=>sum + s.productStats.addressMissing, 0);
-  const capUnmatched = states.reduce((sum,s)=>sum + s.capStats.unmatched, 0);
-  const capStats = healthCapacityStats(null);
-  const dangerCount = states.filter(s => s.kind === 'danger').length;
-  const warnCount = states.filter(s => s.kind === 'warn').length;
-  const headerBadge = dangerCount ? storageBadge(`要対応 ${dangerCount}ヶ月`, 'danger') : warnCount ? storageBadge(`確認 ${warnCount}ヶ月`, 'warn') : storageBadge('AI生成前チェック OK', 'ok');
-  const mini = (label, value, sub, kind) => `
-    <div style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:12px 14px;min-width:150px">
-      <div style="font-size:11px;color:var(--text2);font-weight:900;margin-bottom:4px">${esc(label)}</div>
-      <div style="font-size:22px;font-weight:900;color:${kind==='danger'?'#991b1b':kind==='warn'?'#92400e':'var(--text)'}">${esc(value)}</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:2px">${esc(sub)}</div>
+      ${rows.length ? `
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>区分</th><th>月</th><th>データ</th><th>確認内容</th><th>対応</th></tr></thead><tbody>
+          ${rows.map(r=>`<tr>
+            <td>${storageBadge(r.level, r.level === '異常' ? 'danger' : 'warn')}</td>
+            <td><strong>${ymLabel(r.ym)}</strong></td>
+            <td>${esc(r.item)}</td>
+            <td style="min-width:280px;color:var(--text2)">${esc(r.detail)}</td>
+            <td style="min-width:280px;color:var(--text2)">${esc(r.action)}</td>
+          </tr>`).join('')}
+        </tbody></table></div>` : `
+        <div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;font-size:12px">この年度では、同一月・同一区分の重複や単位異常は見つかりません。</div>`}
     </div>`;
-  return `
-    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:16px;background:#f8fafc;overflow:hidden">
-      <summary style="cursor:pointer;padding:14px;list-style:none;background:#f8fafc;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-        <div>
-          <div style="font-weight:900;font-size:15px;color:var(--text)">データ正常性チェック</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:4px">AI会議報告書・キャパ分析に進む前に、月別の登録漏れと欠落を確認します。</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-          <span style="font-size:11px;color:var(--text2);font-weight:800">対象年度</span>
-          <select id="data-health-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(fy)}</select>
-          ${headerBadge}
-          <span style="font-size:11px;color:var(--text3)">▼</span>
-        </div>
-      </summary>
-      <div style="padding:0 14px 14px">
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">
-        ${mini('収支データ', `${csvCount}/12`, 'CSVまたは補完', csvCount===12?'ok':'warn')}
-        ${mini('作業者CSV', `${workerCount}/12`, '現場明細', workerCount===12?'ok':'warn')}
-        ${mini('商品住所CSV', `${productCount}/12`, '商品・住所・金額', productCount===12?'ok':'warn')}
-        ${mini('金額欠落', `${amountMissing}件`, '商品住所CSV内', amountMissing?'danger':'ok')}
-        ${mini('住所/地区欠落', `${addressMissing}件`, '郵便番号・市区町村', addressMissing?'warn':'ok')}
-        ${mini('キャパ区分', `${capStats.groupCount}区分`, capStats.hasValid?'登録済':'未設定', capStats.hasValid?'ok':'danger')}
-      </div>
-      <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-        <summary style="cursor:pointer;padding:11px 12px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fff">
-          <span style="font-size:13px;font-weight:900;color:var(--text)">月別チェック表</span>
-          <span style="font-size:11px;color:var(--text3)">長い表はここで開閉できます ▼</span>
-        </summary>
-        <div style="padding:0 10px 10px">
-          <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支</th><th>作業者</th><th>商品住所</th><th>計画</th><th>キャパ</th><th>金額欠落</th><th>住所/地区欠落</th><th>キャパ未分類</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
-            ${states.map(s=>`
-              <tr>
-                <td><strong>${ymLabel(s.ym)}</strong></td>
-                <td>${storageBadge(s.csvOk?'OK':'未登録', s.csvOk?'ok':'danger')}</td>
-                <td>${storageBadge(s.workerOk?'OK':'未登録', s.workerOk?'ok':'warn')}</td>
-                <td>${storageBadge(s.productOk?'OK':'未登録', s.productOk?'ok':'danger')}</td>
-                <td>${storageBadge(s.planOk?'OK':'未登録', s.planOk?'ok':'warn')}</td>
-                <td>${storageBadge(s.capOk?'OK':'未設定', s.capOk?'ok':'danger')}</td>
-                <td style="text-align:right;font-weight:800">${fmt(s.productStats.amountMissing)}</td>
-                <td style="text-align:right;font-weight:800">${fmt(s.productStats.addressMissing)}</td>
-                <td style="text-align:right;font-weight:800">${fmt(s.capStats.unmatched)}</td>
-                <td>${storageBadge(s.judge, s.kind)}</td>
-                <td style="min-width:260px;color:var(--text2)">${s.problems.length ? esc(s.problems.join(' / ')) : '登録状況に大きな問題はありません'}</td>
-              </tr>`).join('')}
-          </tbody></table></div>
-        </div>
-      </details>
-      ${capUnmatched ? `<div style="margin-top:10px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;border-radius:10px;padding:9px 10px;font-size:12px;line-height:1.6">キャパ未分類が ${fmt(capUnmatched)}件あります。商品・住所CSVに存在する市区町村が、荷主キャパ区分に入っていない可能性があります。</div>` : ''}
-      </div>
-    </details>`;
 }
 
 function renderStorageMapTable() {
@@ -2605,7 +4586,12 @@ function renderStorageMapTable() {
   const productRows = (STATE.productAddressData || []).filter(d => d && storageFiscalMonths(fy).includes(d.ym));
   const warnings = storageWarnings(fy);
 
-  const yearOptions = storageFiscalYearOptionsHtml(fy);
+  const years = new Set([String(fy), getDefaultFiscalYear()]);
+  (STATE.datasets || []).forEach(d => years.add(String(d.fiscalYear || fiscalYearFromYM(d.ym))));
+  if (STATE.planData && typeof STATE.planData === 'object') {
+    Object.keys(STATE.planData).forEach(y => /^\d{4}$/.test(y) && years.add(y));
+  }
+  const yearOptions = [...years].sort().reverse().map(y => `<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('');
 
   const tableRows = [
     ['収支実績CSV', `${fy}年度`, (monthsConfirmed||monthsDaily)?storageBadge('登録済','ok'):storageBadge('未登録','warn'), `確定 ${monthsConfirmed}ヶ月 / 速報 ${monthsDaily}ヶ月`, '円', formatImportedAt(storageLatestAt(csvRows)), 'SKDL0001/0003。速報と確定は両方保持。表示は確定優先。', '月別チェック表から月単位で削除'],
@@ -2616,161 +4602,22 @@ function renderStorageMapTable() {
   ];
 
   return `
-    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-      <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
         <div style="font-weight:900;font-size:14px">データ保管場所 対応表</div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px">
           <span style="color:var(--text2)">対象年度</span>
-          <select id="storage-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${yearOptions}</select>
-          <span style="font-size:11px;color:var(--text3)">▼</span>
+          <select id="storage-fy-select" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${yearOptions}</select>
         </div>
-      </summary>
-      <div style="padding:0 12px 12px">
+      </div>
       ${warnings.length ? `<div style="border:1px solid #fca5a5;background:#fef2f2;color:#991b1b;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px;line-height:1.7"><strong>確認が必要なデータがあります</strong><br>${warnings.map(w=>'・'+esc(w)).join('<br>')}</div>` : `<div style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px">この年度の保管状況に大きな異常は見つかりません。</div>`}
-      <details style="border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-        <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f8fafc">
-          <span style="font-size:13px;font-weight:900;color:var(--text)">保管区分別の登録状況</span>
-          <span style="font-size:11px;color:var(--text3)">開閉できます ▼</span>
-        </summary>
-        <div style="padding:10px 10px 12px">
-          <div class="scroll-x"><table class="tbl"><thead><tr><th>保管区分</th><th>対象</th><th>登録状況</th><th>件数/月数</th><th>元単位</th><th>最終更新</th><th>説明</th><th>操作</th></tr></thead><tbody>
-            ${tableRows.map(r=>`<tr><td><strong>${esc(r[0])}</strong></td><td>${esc(r[1])}</td><td>${r[2]}</td><td>${r[3]}</td><td>${esc(r[4])}</td><td>${esc(r[5])}</td><td style="min-width:260px;color:var(--text2)">${esc(r[6])}</td><td>${r[7]}</td></tr>`).join('')}
-          </tbody></table></div>
-        </div>
-      </details>
-      </div>
-    </details>`;
-}
-
-function renderCloudInventoryCard() {
-  const summary = window.CLOUD?._lastInventory || null;
-  const cloudBody = summary ? CLOUD.renderInventorySummary(summary) : `
-    <div style="border:1px dashed var(--border2);background:#fff;border-radius:12px;padding:12px;font-size:12px;color:var(--text2);line-height:1.7">
-      まだ確認していません。右上の「確認」を押すと、Supabase の manifest.json を読み取り、クラウド保存済みの件数を表示します。
-    </div>`;
-  const checkedAt = summary?.fetchedAt ? new Date(summary.fetchedAt).toLocaleString('ja-JP') : '未確認';
-  const savedAt = summary?.savedAt ? new Date(summary.savedAt).toLocaleString('ja-JP') : '未確認';
-  const statusBadge = summary
-    ? storageBadge('確認済', 'ok')
-    : storageBadge('未確認', 'warn');
-  return `
-    <div style="margin-bottom:10px;border:1px solid var(--border);border-radius:16px;background:#f8fafc;overflow:hidden;box-shadow:0 8px 22px rgba(15,23,42,.06)">
-      <div style="padding:14px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <div style="font-weight:900;font-size:14px">☁ クラウド保存状況確認</div>
-            ${statusBadge}
-          </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">
-            Supabase の manifest.json を基準に、クラウド側へ保存済みのデータ件数を確認します。<br>
-            最終保存：${esc(savedAt)} ／ 確認日時：${esc(checkedAt)}
-          </div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="CLOUD.refreshInventoryPanel()" style="font-size:12px">確認</button>
-          <button class="btn" onclick="CLOUD.syncNow()" style="font-size:12px">今すぐ同期</button>
-        </div>
-      </div>
-      <div style="padding:0 14px 10px">
-        <div id="sync-live-status"></div>
-      </div>
-      <div id="cloud-inventory-body" style="padding:0 14px 14px">
-        ${cloudBody}
-      </div>
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>保管区分</th><th>対象</th><th>登録状況</th><th>件数/月数</th><th>元単位</th><th>最終更新</th><th>説明</th><th>操作</th></tr></thead><tbody>
+        ${tableRows.map(r=>`<tr><td><strong>${esc(r[0])}</strong></td><td>${esc(r[1])}</td><td>${r[2]}</td><td>${r[3]}</td><td>${esc(r[4])}</td><td>${esc(r[5])}</td><td style="min-width:260px;color:var(--text2)">${esc(r[6])}</td><td>${r[7]}</td></tr>`).join('')}
+      </tbody></table></div>
     </div>`;
 }
-
-function renderBackupAndSyncPanel() {
-  const info = STORE.storageInfo();
-  const backups = STORE.listLocalBackups ? STORE.listLocalBackups() : [];
-  const backupRows = backups.length ? backups.map(b => `
-    <tr>
-      <td><strong>${new Date(b.savedAt).toLocaleString('ja-JP')}</strong><br><span style="font-size:10px;color:var(--text3)">${esc(b.reason || '')}</span></td>
-      <td>${((Number(b.bytes)||0)/1024).toFixed(1)} KB</td>
-      <td>収支 ${n(b.datasets)} / 作業者 ${n(b.workers)} / 商品 ${n(b.products)}</td>
-      <td style="white-space:nowrap">
-        <button class="btn" onclick="DATA_STORAGE_TABLE.restoreLocalBackup('${esc(b.id)}')" style="font-size:11px;padding:3px 8px">復元</button>
-        <button class="btn btn-danger" onclick="DATA_STORAGE_TABLE.deleteLocalBackup('${esc(b.id)}')" style="font-size:11px;padding:3px 8px">削除</button>
-      </td>
-    </tr>`).join('') : `
-    <tr><td colspan="4" style="color:var(--text3);font-size:12px;padding:12px">まだローカル世代バックアップはありません。</td></tr>`;
-
-  const capacityKind = info.totalBytes > 4.5 * 1024 * 1024 ? 'danger' : info.totalBytes > 3.5 * 1024 * 1024 ? 'warn' : 'ok';
-  const capacityBadge = storageBadge(`合計 ${info.totalKb} KB`, capacityKind);
-  return `
-    <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:16px;background:#f8fafc;overflow:hidden">
-      <summary style="cursor:pointer;padding:14px;list-style:none;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-        <div>
-          <div style="font-weight:900;font-size:14px">バックアップ・同期状態</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:3px">ローカル容量と世代バックアップを確認</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          ${capacityBadge}
-          <span style="font-size:11px;color:var(--text3)">▼</span>
-        </div>
-      </summary>
-      <div style="padding:12px">
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:12px">
-          <div style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:12px">
-            <div style="font-size:11px;color:var(--text2);font-weight:900">通常データ容量</div>
-            <div style="font-size:22px;font-weight:900;margin-top:2px">${info.kb} KB</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">STORE管理キーのみ集計</div>
-          </div>
-          <div style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:12px">
-            <div style="font-size:11px;color:var(--text2);font-weight:900">世代バックアップ容量</div>
-            <div style="font-size:22px;font-weight:900;margin-top:2px">${info.backupKb} KB</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">最大3世代まで保持</div>
-          </div>
-          <div style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:12px">
-            <div style="font-size:11px;color:var(--text2);font-weight:900">同期方式</div>
-            <div style="font-size:14px;font-weight:900;margin-top:6px">月単位分割＋軽量台帳</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">full_state は軽量化済み</div>
-          </div>
-        </div>
-
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-          <button class="btn btn-primary" onclick="DATA_STORAGE_TABLE.createLocalBackup()" style="font-size:12px">ローカル世代バックアップ作成</button>
-        </div>
-        <div>
-          <div style="font-size:12px;font-weight:900;margin-bottom:6px">ローカル世代バックアップ</div>
-          <div class="scroll-x"><table class="tbl"><thead><tr><th>作成日時</th><th>容量</th><th>内容</th><th>操作</th></tr></thead><tbody>${backupRows}</tbody></table></div>
-          <div style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.7">
-            ※ 世代バックアップはブラウザ内保存です。PC故障・ブラウザ削除には備えられないため、重要時は左下の「書出」も併用してください。<br>
-            ※ 復元はローカル状態を戻します。必要に応じて復元後に「今すぐ同期」を実行してください。
-          </div>
-        </div>
-      </div>
-    </details>`;
-}
-
 window.DATA_STORAGE_TABLE = {
   changeFY(fy){ STATE.fiscalYear = String(fy); renderImport(); },
-
-  createLocalBackup(){
-    const r = STORE.createLocalBackup ? STORE.createLocalBackup('データ管理画面から作成') : { ok:false, error:'バックアップ機能なし' };
-    if (r.ok) UI.toast('ローカル世代バックアップを作成しました');
-    else UI.toast('バックアップ作成に失敗しました: ' + (r.error || '不明'), 'error');
-    renderImport();
-  },
-
-  restoreLocalBackup(id){
-    if (!confirm('この世代バックアップでローカルデータを復元しますか？\n現在のローカル状態は上書きされます。')) return;
-    const r = STORE.restoreLocalBackup ? STORE.restoreLocalBackup(id) : { ok:false, error:'復元機能なし' };
-    if (r.ok) {
-      UI.toast('ローカル世代バックアップを復元しました');
-      NAV.refresh();
-    } else {
-      UI.toast('復元に失敗しました: ' + (r.error || '不明'), 'error');
-    }
-  },
-
-  deleteLocalBackup(id){
-    if (!confirm('この世代バックアップを削除しますか？')) return;
-    const r = STORE.deleteLocalBackup ? STORE.deleteLocalBackup(id) : { ok:false, error:'削除機能なし' };
-    if (r.ok) UI.toast('ローカル世代バックアップを削除しました');
-    else UI.toast('削除に失敗しました: ' + (r.error || '不明'), 'error');
-    renderImport();
-  },
 
   async _syncAfterDelete(label){
     STORE.save();
@@ -2837,41 +4684,28 @@ window.DATA_STORAGE_TABLE = {
   }
 };
 
-window.IMPORT_PAGE_TOGGLE = {
-  setAll(open) {
-    document.querySelectorAll('#view-import details').forEach(el => { el.open = !!open; });
-  }
-};
-
 /* ════════ §20 RENDER — Import ═════════════════════════════════ */
 function renderImport() {
   const listEl = document.getElementById('data-list');
   if (listEl) {
-    const cloudInventoryHtml = renderCloudInventoryCard();
-    const backupSyncHtml = renderBackupAndSyncPanel();
-    const healthHtml = renderDataHealthDashboard();
     const storageHtml = renderStorageMapTable();
     const monthlyHtml = renderMonthlyCheckTable();
     const qualityHtml = renderDataQualityCheckTable();
-    const historyFY = storageFiscalYear();
     const statusMap = {};
-    (STATE.datasets || []).filter(d => String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(historyFY)).forEach(d => {
+    (STATE.datasets || []).forEach(d => {
       const fy = d.fiscalYear || fiscalYearFromYM(d.ym);
-      if (!statusMap[fy]) statusMap[fy] = { confirmed:new Set(), daily:new Set(), history:new Set() };
-      if (d.source === 'history') statusMap[fy].history.add(d.ym);
-      else if (d.type === 'daily') statusMap[fy].daily.add(d.ym);
+      if (!statusMap[fy]) statusMap[fy] = { confirmed:new Set(), daily:new Set() };
+      if (d.type === 'daily') statusMap[fy].daily.add(d.ym);
       else statusMap[fy].confirmed.add(d.ym);
     });
     const statusHtml = Object.keys(statusMap).sort().reverse().map(fy => `
       <div style="padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;font-size:12px">
         <strong>${fy}年度の登録状況</strong>
-        <span style="margin-left:10px;color:var(--text2)">確定 ${statusMap[fy].confirmed.size}ヶ月 / 速報 ${statusMap[fy].daily.size}ヶ月 / 補完 ${statusMap[fy].history.size}ヶ月</span>
+        <span style="margin-left:10px;color:var(--text2)">確定 ${statusMap[fy].confirmed.size}ヶ月 / 速報 ${statusMap[fy].daily.size}ヶ月</span>
       </div>
     `).join('');
 
-    const sorted = [...(STATE.datasets || [])]
-      .filter(d => String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(historyFY))
-      .sort((a,b)=>a.ym.localeCompare(b.ym) || ((a.type||'confirmed')==='confirmed'?-1:1));
+    const sorted = [...(STATE.datasets || [])].sort((a,b)=>a.ym.localeCompare(b.ym) || ((a.type||'confirmed')==='confirmed'?-1:1));
     const detailHtml = sorted.length ? sorted.map(ds=>{
       const fy = ds.fiscalYear || fiscalYearFromYM(ds.ym);
       const sourceLabel = ds.source === 'history' ? '収支補完' : (ds.fileName ? esc(ds.fileName) : 'ファイル名なし');
@@ -2902,28 +4736,20 @@ function renderImport() {
 
     const historyHtml = `
       <details style="margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden">
-        <summary style="cursor:pointer;padding:12px 14px;list-style:none;background:#f8fafc;color:var(--text);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-          <span style="font-weight:900">詳細履歴を表示</span>
-          <span style="display:flex;align-items:center;gap:8px;font-size:12px">
-            <span style="color:var(--text2);font-weight:800">対象年度</span>
-            <select id="import-history-fy-select" onclick="event.stopPropagation()" onchange="DATA_STORAGE_TABLE.changeFY(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${storageFiscalYearOptionsHtml(historyFY)}</select>
-            <span style="font-size:11px;color:var(--text3)">▼</span>
-          </span>
-        </summary>
+        <summary style="cursor:pointer;padding:12px 14px;font-weight:900;background:#f8fafc;color:var(--text)">詳細履歴を表示</summary>
         <div style="padding:10px 12px">
           ${statusHtml || '<div style="padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;font-size:12px;color:var(--text3)">年度別登録状況はまだありません</div>'}
           ${detailHtml}
         </div>
       </details>`;
 
-    listEl.innerHTML = cloudInventoryHtml + backupSyncHtml + healthHtml + storageHtml + monthlyHtml + qualityHtml + historyHtml;
-    UI.updateSyncPanelStatus();
+    listEl.innerHTML = storageHtml + monthlyHtml + qualityHtml + historyHtml;
   }
 
   const storageEl = document.getElementById('storage-info');
   if (storageEl) {
     const info = STORE.storageInfo();
-    storageEl.innerHTML = `使用容量: <strong>${info.totalKb} KB</strong>（通常 ${info.kb} KB / 世代 ${info.backupKb} KB・センター: ${CENTER.name}）`;
+    storageEl.innerHTML = `使用容量: <strong>${info.kb} KB</strong>（センター: ${CENTER.name}）`;
   }
 
   CLOUD.renderForm();
@@ -3001,7 +4827,515 @@ var FIELD_UI = window.FIELD_UI || {
 };
 
 
-/* ════════ §23 REPORT / PAST_LIBRARY（report.jsへ分離） ═════════════════════ */
+function normalizeReportKnowledge(raw) {
+  const base = { policies:{}, references:[] };
+  if (!raw || typeof raw !== 'object') return base;
+  const policies = raw.policies && typeof raw.policies === 'object' ? raw.policies : {};
+  const references = Array.isArray(raw.references) ? raw.references : [];
+  return {
+    policies,
+    references: references.map(r => ({
+      id: r.id || Date.now() + Math.random(),
+      fiscalYear: String(r.fiscalYear || getDefaultFiscalYear()),
+      half: r.half || '上期',
+      ym: r.ym || '',
+      scope: r.scope || (r.ym ? 'month' : 'half'),
+      title: r.title || '無題',
+      category: r.category || 'その他',
+      priority: r.priority || '中',
+      content: r.content || '',
+      savedAt: r.savedAt || new Date().toISOString()
+    }))
+  };
+}
+
+function mergeReportKnowledge(localRaw, cloudRaw) {
+  const local = normalizeReportKnowledge(localRaw);
+  const cloud = normalizeReportKnowledge(cloudRaw);
+  const policies = { ...local.policies };
+  Object.entries(cloud.policies || {}).forEach(([key, val]) => {
+    const old = policies[key];
+    const nt = val && (val.savedAt || val.updatedAt || '');
+    const ot = old && (old.savedAt || old.updatedAt || '');
+    if (!old || String(nt) >= String(ot)) policies[key] = val;
+  });
+  const refMap = new Map();
+  [...(local.references || []), ...(cloud.references || [])].forEach(r => {
+    if (!r) return;
+    const id = String(r.id || `${r.fiscalYear}_${r.half}_${r.ym}_${r.title}`);
+    const old = refMap.get(id);
+    if (!old || String(r.savedAt || '') >= String(old.savedAt || '')) refMap.set(id, r);
+  });
+  return { policies, references:[...refMap.values()].sort((a,b)=>String(b.savedAt||'').localeCompare(String(a.savedAt||''))) };
+}
+
+function reportPolicyKey(fy, half) {
+  return `${String(fy || getDefaultFiscalYear())}_${half || '上期'}`;
+}
+
+function reportHalfFromYM(ym) {
+  const mm = Number(String(ym || '').slice(4,6));
+  return (mm >= 4 && mm <= 9) ? '上期' : '下期';
+}
+
+function reportFYFromYM(ym) {
+  return ym ? fiscalYearFromYM(ym) : getDefaultFiscalYear();
+}
+
+/* ════════ §23 REPORT_UI（スタブ） ═════════════════════════════ */
+const REPORT_UI = {
+  _tab:'policy',
+
+  getFY() {
+    return document.getElementById('report-fy')?.value || dashboardSelectedFiscalYear() || getDefaultFiscalYear();
+  },
+  getHalf() {
+    return document.getElementById('report-half')?.value || '上期';
+  },
+  getYM() {
+    return document.getElementById('report-ym')?.value || dashboardSelectedYM() || latestDS()?.ym || '';
+  },
+  getPolicy() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    return STATE.reportKnowledge.policies[reportPolicyKey(this.getFY(), this.getHalf())] || null;
+  },
+
+  switchTab(tab) {
+    this._tab = tab || 'policy';
+    document.querySelectorAll('.report-tab').forEach(b=>b.classList.toggle('active', b.dataset.reportTab === this._tab));
+    document.querySelectorAll('.report-pane').forEach(p=>p.style.display='none');
+    const pane = document.getElementById('report-pane-' + this._tab);
+    if (pane) pane.style.display = '';
+    this.refreshReferenceList();
+  },
+
+  refresh() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    this.populateSelectors();
+    this.loadPolicy();
+    this.refreshReferenceList();
+    this.refreshGenerateSummary();
+    this.switchTab(this._tab || 'policy');
+  },
+
+  populateSelectors() {
+    const fySel = document.getElementById('report-fy');
+    const ymSel = document.getElementById('report-ym');
+    const halfSel = document.getElementById('report-half');
+    if (!fySel) return;
+
+    const years = [...new Set([...dashboardAvailableFiscalYears(), getDefaultFiscalYear(), ...Object.keys(STATE.reportKnowledge.policies || {}).map(k=>k.slice(0,4))])]
+      .filter(Boolean).sort((a,b)=>Number(b)-Number(a));
+    const oldFY = fySel.value || dashboardSelectedFiscalYear() || getDefaultFiscalYear();
+    fySel.innerHTML = years.map(y=>`<option value="${esc(y)}" ${String(y)===String(oldFY)?'selected':''}>${esc(y)}年度</option>`).join('');
+    if (!fySel.value && years.length) fySel.value = years[0];
+
+    const fym = monthsOfFiscalYear(fySel.value);
+    const validYms = fym.filter(ym => activeDatasetByYM(ym) || (STATE.fieldData || []).some(d=>d.ym===ym) || (STATE.productAddressData || []).some(d=>d.ym===ym));
+    const currentYM = ymSel?.value || dashboardSelectedYM() || validYms.at(-1) || fym[0] || '';
+    if (ymSel) {
+      ymSel.innerHTML = fym.map(ym=>{
+        const has = validYms.includes(ym);
+        return `<option value="${esc(ym)}" ${ym===currentYM?'selected':''}>${esc(ymLabel(ym))}${has?'':'（データなし）'}</option>`;
+      }).join('');
+      if (currentYM) ymSel.value = currentYM;
+    }
+    if (halfSel && ymSel?.value && !halfSel.dataset.manualChanged) halfSel.value = reportHalfFromYM(ymSel.value);
+    if (halfSel) halfSel.onchange = () => { halfSel.dataset.manualChanged = '1'; this.refresh(); };
+  },
+
+  savePolicy() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    const fy = this.getFY();
+    const half = this.getHalf();
+    const key = reportPolicyKey(fy, half);
+    STATE.reportKnowledge.policies[key] = {
+      fiscalYear: fy,
+      half,
+      direction: document.getElementById('report-policy-direction')?.value || '',
+      actions: document.getElementById('report-policy-actions')?.value || '',
+      targets: document.getElementById('report-policy-targets')?.value || '',
+      issues: document.getElementById('report-policy-issues')?.value || '',
+      savedAt: new Date().toISOString()
+    };
+    STORE.save();
+    const msg = document.getElementById('report-policy-msg');
+    if (msg) msg.textContent = `${fy}年度 ${half} 方針を保存しました`;
+    UI.toast('年度・半期方針を保存しました');
+    this.refreshGenerateSummary();
+  },
+
+  loadPolicy() {
+    const p = this.getPolicy();
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    set('report-policy-direction', p?.direction);
+    set('report-policy-actions', p?.actions);
+    set('report-policy-targets', p?.targets);
+    set('report-policy-issues', p?.issues);
+  },
+
+  saveReference() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    const title = document.getElementById('report-ref-title')?.value?.trim();
+    const content = document.getElementById('report-ref-content')?.value?.trim();
+    if (!title && !content) { UI.toast('資料名または内容を入力してください','warn'); return; }
+    const fy = this.getFY();
+    const half = this.getHalf();
+    const scope = document.getElementById('report-ref-scope')?.value || 'month';
+    const ym = scope === 'month' ? this.getYM() : '';
+    STATE.reportKnowledge.references.push({
+      id: Date.now(), fiscalYear: fy, half, ym, scope,
+      title: title || '参考メモ',
+      category: document.getElementById('report-ref-category')?.value || 'その他',
+      priority: document.getElementById('report-ref-priority')?.value || '中',
+      content: content || '',
+      savedAt: new Date().toISOString()
+    });
+    STORE.save();
+    this.clearReferenceForm();
+    this.refreshReferenceList();
+    UI.toast('参考資料メモを保存しました');
+  },
+
+  clearReferenceForm() {
+    ['report-ref-title','report-ref-content'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+    const msg=document.getElementById('report-ref-msg'); if(msg) msg.textContent='';
+  },
+
+  referenceMatches(ref) {
+    const fy = this.getFY();
+    const half = this.getHalf();
+    const ym = this.getYM();
+    if (String(ref.fiscalYear) !== String(fy)) return false;
+    if (ref.scope === 'year') return true;
+    if ((ref.half || half) !== half) return false;
+    if (ref.scope === 'month') return !ref.ym || ref.ym === ym;
+    return true;
+  },
+
+  selectedReferences() {
+    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
+    const direct = (STATE.reportKnowledge.references || []).filter(r=>this.referenceMatches(r));
+    const fy = this.getFY(), half = this.getHalf(), ym = this.getYM();
+    const lib = (STATE.library || []).filter(item => {
+      if (item.fiscalYear && String(item.fiscalYear) !== String(fy)) return false;
+      const cat = String(item.category || '');
+      const monthMatch = !item.month || (ym && item.month === ym.slice(4,6));
+      const isPolicy = cat.includes('方針');
+      const isMeeting = cat.includes('会議') || cat.includes('報告') || cat.includes('資料') || cat.includes('メモ') || cat.includes('スクショ');
+      return monthMatch || isPolicy || isMeeting || !item.month;
+    }).map(item => ({
+      id:'lib_' + item.id,
+      fiscalYear: item.fiscalYear || fy,
+      half,
+      ym: item.month ? `${fy}${item.month}` : '',
+      scope: item.month ? 'month' : 'half',
+      title: item.title || item.fileName || '過去資料',
+      category: item.category || '過去資料',
+      priority: item.category && String(item.category).includes('方針') ? '高' : '中',
+      content: [item.memo, item.content, item.fileName ? `添付ファイル：${item.fileName}` : ''].filter(Boolean).join('\n'),
+      savedAt: item.savedAt || ''
+    }));
+    return [...direct, ...lib].sort((a,b)=>{
+      const rank = {高:3,中:2,低:1};
+      return (rank[b.priority]||0)-(rank[a.priority]||0) || String(b.savedAt||'').localeCompare(String(a.savedAt||''));
+    }).slice(0,20);
+  },
+
+  refreshReferenceList() {
+    const box = document.getElementById('report-reference-list');
+    const sum = document.getElementById('report-generate-summary');
+    const refs = this.selectedReferences();
+    if (box) {
+      box.innerHTML = refs.length ? refs.map(r=>`
+        <div style="border-bottom:1px solid var(--border);padding:8px 0">
+          <div style="font-weight:800;color:var(--text)">${esc(r.title)} <span style="font-size:11px;color:var(--text3)">[${esc(r.category)} / ${esc(r.priority)}]</span></div>
+          <div style="white-space:pre-wrap;color:var(--text2);font-size:12px">${esc((r.content || '').slice(0,500)) || '添付資料のみ。必要に応じて資料内容を確認してください。'}</div>
+        </div>`).join('') : '対象期間に紐づく参考資料はまだありません';
+    }
+    if (sum) this.refreshGenerateSummary();
+  },
+
+  refreshGenerateSummary() {
+    const sum = document.getElementById('report-generate-summary');
+    if (!sum) return;
+    const fy=this.getFY(), half=this.getHalf(), ym=this.getYM();
+    const p=this.getPolicy();
+    const refs=this.selectedReferences();
+    const ds=ym ? activeDatasetByYM(ym) : null;
+    sum.innerHTML = `対象：${esc(fy)}年度 ${esc(half)} / ${esc(ymLabel(ym))}<br>` +
+      `方針：${p ? '登録済' : '未登録'} / 月次収支：${ds ? datasetKindLabel(ds) + 'あり' : 'なし'} / 参考資料：${refs.length}件`;
+  },
+
+  buildDataSummary(ym) {
+    const ds = ym ? activeDatasetByYM(ym) : latestDS();
+    const prev = ds ? prevDS(ds.ym) : null;
+    const lastYear = ds ? sameMonthLastYear(ds.ym) : null;
+    const lines = [];
+    if (ds) {
+      lines.push(`- 営業収益: ${fmtK(ds.totalIncome)}千円`);
+      lines.push(`- 費用合計: ${fmtK(ds.totalExpense)}千円`);
+      lines.push(`- センター利益: ${fmtK(ds.profit)}千円`);
+      lines.push(`- 利益率: ${pct(ds.profitRate)}`);
+      lines.push(`- みなし人件費率: ${pct(ds.pseudoLaborRate)}（目標: ${CONFIG.TARGETS.pseudoLaborRate}%以内）`);
+      if (prev) lines.push(`- 前月比 営業収益: ${ratio(ds.totalIncome, prev.totalIncome)}`);
+      if (lastYear) lines.push(`- 前年同月比 営業収益: ${ratio(ds.totalIncome, lastYear.totalIncome)}`);
+    } else {
+      lines.push('- 月次収支データなし');
+    }
+    const field = (STATE.productAddressData || []).find(r=>r.ym===ym);
+    if (field) {
+      lines.push(`- 商品・住所CSV: 原票${fmt(field.slipCount || field.uniqueSlips || field.tickets?.length || 0)}件 / 明細${fmt(field.detailRows || field.rows || 0)}行`);
+    }
+    return lines.join('\n');
+  },
+
+  generatePrompt() {
+    const out = document.getElementById('report-prompt-output');
+    if (!out) return;
+    const fy = this.getFY();
+    const half = this.getHalf();
+    const ym = this.getYM();
+    const type = document.getElementById('report-type')?.value || 'monthly';
+    const style = document.getElementById('report-style')?.value || 'a4';
+    const tone = document.getElementById('report-tone')?.value || '結論先出し・実務的・数字重視';
+    const policy = this.getPolicy();
+    const refs = this.selectedReferences();
+    const refText = refs.length ? refs.map((r,i)=>`【参考資料${i+1}｜${r.category}｜重要度:${r.priority}】\n${r.title}\n${r.content || '添付資料あり。資料名・メモを参考にしてください。'}`).join('\n\n') : '参考資料なし';
+
+    out.value = `# ${CENTER.name} 会議報告書 作成依頼\n\n` +
+`## 作成条件\n` +
+`- 作成タイプ: ${type}\n- 対象: ${fy}年度 ${half} / ${ymLabel(ym)}\n- 出力形式: ${style}\n- 文章トーン: ${tone}\n\n` +
+`## 年度・半期方針\n` +
+`- 運営方針: ${policy?.direction || '未登録'}\n- 重点施策: ${policy?.actions || '未登録'}\n- 数値目標・管理指標: ${policy?.targets || '未登録'}\n- 前期からの課題・振り返り: ${policy?.issues || '未登録'}\n\n` +
+`## 月次実績データ\n${this.buildDataSummary(ym)}\n\n` +
+`## 参考資料ストック\n${refText}\n\n` +
+`## 作成ルール\n` +
+`- 構成は「結論 → 数字結果 → 進捗評価 → 原因・課題 → 今月実施したこと → 来月以降の打ち手 → まとめ」。\n` +
+`- 推測で書かず、数字・方針・参考資料に基づいて書く。確認できない内容は書かない。\n` +
+`- 文章は管理者会議でそのまま読める社内向けの丁寧な文体にする。\n` +
+`- 重点施策と月次実績のつながりを必ず書く。\n` +
+`- 過剰な経営提案ではなく、現場判断に直結する打ち手に絞る。\n` +
+`- A4 1枚想定で、見出し付きの本文として作成する。`;
+    UI.toast('会議報告書用プロンプトを生成しました');
+  },
+
+  copyPrompt() {
+    const out = document.getElementById('report-prompt-output');
+    if (!out?.value) { UI.toast('先に「AI用プロンプト作成」ボタンを押してください','warn'); return; }
+    navigator.clipboard.writeText(out.value).then(()=>UI.toast('クリップボードにコピーしました'));
+  }
+};
+
+/* ════════ §24 PAST_LIBRARY（ファイル本体はStorage、台帳はfull_state） ══════════════════════════ */
+const PAST_LIBRARY = {
+  _selectedFile: null,
+  _bulkFiles: [],
+
+  handleBulkFiles(files) {
+    this._bulkFiles = Array.from(files || []);
+    const msg = document.getElementById('library-bulk-msg');
+    const prev = document.getElementById('library-bulk-preview');
+    if (msg) msg.textContent = `${this._bulkFiles.length}件選択しました`;
+    if (prev) {
+      prev.style.display = this._bulkFiles.length ? 'block' : 'none';
+      prev.innerHTML = this._bulkFiles.map((f, idx) => `
+        <div style="padding:7px 10px;border-bottom:1px solid var(--border,#d9dee8);font-size:12px">
+          ${idx+1}. ${esc(f.name)} <span style="color:var(--text3)">(${fmtFileSize(f.size)})</span>
+        </div>
+      `).join('');
+    }
+  },
+
+  async saveBulkSelected() {
+    if (!this._bulkFiles.length) { UI.toast('一括登録するファイルを選択してください','warn'); return; }
+
+    const cat = document.getElementById('library-bulk-category')?.value || 'その他';
+    const fy  = document.getElementById('library-bulk-fy')?.value || getDefaultFiscalYear();
+    const mm  = document.getElementById('library-bulk-month')?.value || '';
+    const autoTitle = document.getElementById('library-bulk-auto-title')?.checked !== false;
+
+    let saved = 0;
+    for (const file of this._bulkFiles) {
+      try {
+        const storagePath = CLOUD._libraryFileKey(file.name, fy);
+        await CLOUD.uploadFile(storagePath, file);
+
+        STATE.library.push({
+          id: Date.now() + saved,
+          title: autoTitle ? file.name.replace(/\.[^.]+$/, '') : file.name,
+          category: cat,
+          fiscalYear: fy,
+          month: mm,
+          memo: '',
+          content: '',
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type || '',
+          storagePath,
+          savedAt: new Date().toISOString()
+        });
+        saved++;
+      } catch(e) {
+        UI.toast(`${file.name} のアップロードに失敗: ${e.message}`, 'error');
+      }
+    }
+
+    if (saved) {
+      STORE.save();
+      this.renderList();
+      UI.toast(`${saved}件の過去資料を保存しました`);
+    }
+    this.clearBulk();
+  },
+
+  clearBulk() {
+    this._bulkFiles = [];
+    const input = document.getElementById('library-bulk-file-input');
+    if (input) input.value = '';
+    const msg = document.getElementById('library-bulk-msg');
+    if (msg) msg.textContent = '';
+    const prev = document.getElementById('library-bulk-preview');
+    if (prev) { prev.style.display = 'none'; prev.innerHTML = ''; }
+  },
+
+  handleFile(file) {
+    this._selectedFile = file || null;
+    const st = document.getElementById('library-file-status');
+    if (st) {
+      st.textContent = file
+        ? `選択: ${file.name}（${fmtFileSize(file.size)}） ※本体はStorage、台帳はfull_stateに保存`
+        : '';
+    }
+
+    const title = document.getElementById('library-title');
+    if (file && title && !title.value) title.value = file.name.replace(/\.[^.]+$/, '');
+  },
+
+  async save() {
+    const title = document.getElementById('library-title')?.value;
+    const cat   = document.getElementById('library-category')?.value;
+    const fy    = document.getElementById('library-fy')?.value || getDefaultFiscalYear();
+    const mm    = document.getElementById('library-month')?.value || '';
+    const memo  = document.getElementById('library-memo')?.value;
+    const content = document.getElementById('library-content')?.value;
+
+    if (!title) { UI.toast('資料名を入力してください','warn'); return; }
+
+    let fileMeta = {};
+    if (this._selectedFile) {
+      try {
+        const file = this._selectedFile;
+        const storagePath = CLOUD._libraryFileKey(file.name, fy);
+        await CLOUD.uploadFile(storagePath, file);
+        fileMeta = {
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type || '',
+          storagePath
+        };
+      } catch(e) {
+        UI.toast('ファイル本体のアップロードに失敗しました: ' + e.message, 'error');
+        return;
+      }
+    }
+
+    STATE.library.push({
+      id: Date.now(),
+      title,
+      category: cat,
+      fiscalYear: fy,
+      month: mm,
+      memo,
+      content,
+      ...fileMeta,
+      savedAt: new Date().toISOString()
+    });
+
+    STORE.save();
+    this.renderList();
+    UI.toast('過去資料を保存しました');
+    this.clearForm();
+  },
+
+  clearForm() {
+    ['library-title','library-memo','library-content'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.value='';
+    });
+    this._selectedFile = null;
+    const input = document.getElementById('library-file-input');
+    if (input) input.value = '';
+    const st = document.getElementById('library-file-status');
+    if (st) st.textContent = '';
+  },
+
+  renderList() {
+    const list = document.getElementById('library-list');
+    const filter = document.getElementById('library-filter-category')?.value||'';
+    if (!list) return;
+    const items = STATE.library.filter(i=>!filter||i.category===filter);
+    if (!items.length) {
+      list.innerHTML='<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだ過去資料がありません</div>';
+      return;
+    }
+
+    list.innerHTML = items.map(i=>`
+      <div class="data-item">
+        <span class="badge badge-info">${esc(i.category||'—')}</span>
+        <span style="flex:1">
+          ${esc(i.title)}
+          ${i.fileName ? `<span style="font-size:10px;color:var(--text3);margin-left:6px">📎 ${esc(i.fileName)} / ${fmtFileSize(i.fileSize)}</span>` : ''}
+        </span>
+        <span style="font-size:10px;color:var(--text3)">${(i.savedAt||'').slice(0,10)}</span>
+        ${i.storagePath ? `<button class="btn" onclick="PAST_LIBRARY.openFile(${i.id})" style="font-size:11px;padding:2px 8px">開く</button>` : ''}
+        <button class="btn btn-danger" onclick="PAST_LIBRARY.delete(${i.id})" style="font-size:11px;padding:2px 8px">削除</button>
+      </div>`).join('');
+  },
+
+  async openFile(id) {
+    const item = STATE.library.find(i => i.id === id);
+    if (!item || !item.storagePath) { UI.toast('ファイル本体がありません','warn'); return; }
+
+    const url = await CLOUD.createSignedUrl(item.storagePath);
+    if (!url) { UI.toast('ファイルURLを作成できませんでした','error'); return; }
+    window.open(url, '_blank');
+  },
+
+  async delete(id) {
+    const item = STATE.library.find(i => i.id === id);
+    if (!item) return;
+
+    if (!confirm(`過去資料「${item.title}」を削除しますか？`)) return;
+
+    if (item.storagePath) {
+      await CLOUD.deleteFile(item.storagePath).catch(()=>{});
+    }
+
+    STATE.library=STATE.library.filter(i=>i.id!==id);
+    STORE.save();
+    this.renderList();
+  },
+
+  exportJSON() { STORE.exportJSON(); },
+
+  clearAll() {
+    if(confirm('全過去資料を削除しますか？\n※Storage上のファイル本体も削除を試行します。')){
+      const paths = (STATE.library || []).map(i=>i.storagePath).filter(Boolean);
+      paths.forEach(p => CLOUD.deleteFile(p).catch(()=>{}));
+      STATE.library=[];
+      STORE.save();
+      this.renderList();
+    }
+  },
+};
+
+function fmtFileSize(bytes) {
+  const n = Number(bytes || 0);
+  if (!n) return '0B';
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n/1024).toFixed(1)}KB`;
+  return `${(n/1024/1024).toFixed(1)}MB`;
+}
 
 /* ════════ §25 NAV ══════════════════════════════════════════════ */
 const NAV = {
@@ -3052,6 +5386,7 @@ const NAV = {
       case 'field-area':    if (window.FIELD_AREA_UI?.render) FIELD_AREA_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'report':     REPORT_UI.refresh(); break;
       case 'kamoku':     if (window.KAMOKU_UI?.render) KAMOKU_UI.render(); break;
+      case 'ai_gen':    if (window.AI_GEN_UI?.init) AI_GEN_UI.init(); break;
     }
   },
 };
@@ -3076,43 +5411,8 @@ const UI = {
   updateSaveStatus() {
     const label = document.getElementById('autosave-label');
     const dot   = document.getElementById('autosave-dot');
-    const syncStatus = safeLocalGet('center:lastSyncStatus') || 'idle';
-    const lastSyncAt = safeLocalGet('center:lastSyncAt') || '';
-    const lastSaveAt = safeLocalGet('center:lastLocalSaveAt') || '';
-    const count = STATE.datasets.length;
-    const timeLabel = lastSyncAt
-      ? new Date(lastSyncAt).toLocaleString('ja-JP', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })
-      : (lastSaveAt ? '未同期あり' : '未同期');
-    if (label) {
-      if (syncStatus === 'syncing') label.textContent = `クラウド同期中... (${count}件)`;
-      else if (syncStatus === 'error') label.textContent = `クラウド同期エラー / 最終成功 ${timeLabel}`;
-      else label.textContent = `クラウド同期 ${timeLabel} (${count}件)`;
-    }
-    if (dot) {
-      dot.style.background = syncStatus === 'syncing' ? '#f59e0b' : syncStatus === 'error' ? '#dc2626' : (STATE.datasets.length ? '#16a34a' : '#607d9a');
-      dot.style.boxShadow = syncStatus === 'syncing' ? '0 0 0 4px rgba(245,158,11,.18)' : '';
-    }
-  },
-
-  setSyncStatus(status, message) {
-    safeLocalSet('center:lastSyncStatus', status || 'idle');
-    if (status === 'ok') safeLocalSet('center:lastSyncAt', new Date().toISOString());
-    if (message) safeLocalSet('center:lastSyncMessage', message);
-    this.updateSaveStatus();
-    this.updateSyncPanelStatus();
-  },
-
-  updateSyncPanelStatus() {
-    const el = document.getElementById('sync-live-status');
-    if (!el) return;
-    const status = safeLocalGet('center:lastSyncStatus') || 'idle';
-    const at = safeLocalGet('center:lastSyncAt') || '';
-    const msg = safeLocalGet('center:lastSyncMessage') || '';
-    const label = status === 'syncing' ? '同期中' : status === 'error' ? '同期エラー' : at ? '同期済み' : '未同期';
-    const color = status === 'syncing' ? '#92400e' : status === 'error' ? '#991b1b' : at ? '#166534' : '#475569';
-    const bg = status === 'syncing' ? '#fffbeb' : status === 'error' ? '#fef2f2' : at ? '#f0fdf4' : '#f8fafc';
-    el.style.cssText = `border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:${bg};color:${color};font-size:12px;line-height:1.6`;
-    el.innerHTML = `<strong>${label}</strong>${at ? ` ／ 最終同期 ${esc(new Date(at).toLocaleString('ja-JP'))}` : ''}${msg ? `<br>${esc(msg)}` : ''}`;
+    if (label) label.textContent = `クラウド同期済 (${STATE.datasets.length}件)`;
+    if (dot)   dot.style.background = STATE.datasets.length ? '#4d9fea' : '#607d9a';
   },
 
   updateCloudBadge(status) {
@@ -3153,42 +5453,15 @@ const UI = {
   renderMemo() { renderMemo(); },
 
   // トースト通知
-  toast(msg, type='ok', opt={}) {
-    const stackId = 'toast-stack';
-    let stack = document.getElementById(stackId);
-    if (!stack) {
-      stack = document.createElement('div');
-      stack.id = stackId;
-      stack.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99999;display:flex;flex-direction:column;gap:10px;align-items:flex-end;pointer-events:none';
-      document.body.appendChild(stack);
-    }
-    const palette = {
-      error:['#991b1b','#fef2f2','#fecaca','✕'],
-      warn:['#92400e','#fffbeb','#fcd34d','!'],
-      info:['#1e3a8a','#eff6ff','#bfdbfe','i'],
-      ok:['#14532d','#f0fdf4','#bbf7d0','✓']
-    };
-    const p = palette[type] || palette.ok;
+  toast(msg, type='ok') {
     const el = document.createElement('div');
-    el.style.cssText = `pointer-events:auto;min-width:260px;max-width:420px;border:1px solid ${p[2]};background:${p[1]};color:${p[0]};
-      border-radius:12px;padding:11px 12px;box-shadow:0 12px 32px rgba(15,23,42,.18);font-size:12px;line-height:1.55;
-      font-family:inherit;white-space:normal;animation:fadeIn .16s ease-out`;
-    const title = opt.title || (type==='error'?'エラー':type==='warn'?'確認':type==='info'?'お知らせ':'完了');
-    const detail = opt.detail ? `<div style="margin-top:5px;color:${p[0]};opacity:.86;white-space:pre-wrap">${esc(opt.detail)}</div>` : '';
-    el.innerHTML = `
-      <div style="display:flex;gap:9px;align-items:flex-start">
-        <div style="width:20px;height:20px;border-radius:999px;background:${p[0]};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;flex:0 0 auto">${p[3]}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:900;margin-bottom:2px">${esc(title)}</div>
-          <div style="white-space:pre-wrap">${esc(msg)}</div>
-          ${detail}
-        </div>
-        <button type="button" aria-label="閉じる" style="border:0;background:transparent;color:${p[0]};font-weight:900;cursor:pointer;font-size:15px;line-height:1">×</button>
-      </div>`;
-    el.querySelector('button')?.addEventListener('click', () => el.remove());
-    stack.appendChild(el);
-    const ms = opt.duration || (type==='error' ? 8000 : type==='warn' ? 5500 : 3500);
-    setTimeout(()=>el.remove(), ms);
+    el.style.cssText = `position:fixed;bottom:20px;right:20px;z-index:99999;
+      padding:10px 16px;border-radius:8px;font-size:12px;font-family:inherit;
+      box-shadow:0 4px 12px rgba(0,0,0,.2);max-width:320px;animation:fadeIn .2s;
+      background:${type==='error'?'#dc2626':type==='warn'?'#d97706':'#1a4d7c'};color:#fff`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(()=>el.remove(), type==='error'?5000:3000);
   },
 };
 
@@ -3208,64 +5481,12 @@ const DATA_RESET = {
   },
 };
 const SIMPLE_STORE = {
-  debug() {
-    console.log('STATE', STATE);
-    console.log('STORE managed keys', STORE._p, typeof STORE.managedKeys === 'function' ? STORE.managedKeys() : []);
-    UI.toast('コンソールにSTATEをダンプしました');
-  },
+  debug() { console.log('STATE', STATE); console.log('STORE keys', STORE._p, Object.keys(localStorage).filter(k=>k.startsWith(STORE._p))); UI.toast('コンソールにSTATEをダンプしました'); },
   restoreAll() { STORE.load(); return STATE.datasets.length; },
 };
 const CLOUD_DEBUG = { run() { CLOUD.saveConfig(); } };
 const PUBLISH = { go() { UI.toast('GitHub Pages での公開はHTMLファイルを直接アップロードしてください'); } };
 const EVENTS = { handleFiles(files) { IMPORT.handleFiles(files); } };
-
-function installStoreTelemetry() {
-  if (!window.STORE || STORE.__telemetryInstalled || typeof STORE.save !== 'function') return;
-  STORE.__telemetryInstalled = true;
-  const originalSave = STORE.save.bind(STORE);
-  STORE.save = function(...args) {
-    const result = originalSave(...args);
-    safeLocalSet('center:lastLocalSaveAt', new Date().toISOString());
-    UI.updateSaveStatus();
-    return result;
-  };
-}
-
-function installCloudTelemetry() {
-  if (!window.CLOUD || CLOUD.__telemetryInstalled) return;
-  CLOUD.__telemetryInstalled = true;
-  const targets = [
-    ['pushAll', 'クラウド全体同期'],
-    ['pushMonth', '月次データ同期'],
-    ['syncSmart', 'クラウド同期'],
-    ['syncNow', '手動同期'],
-    ['pull', 'クラウド読込'],
-    ['refreshInventoryPanel', 'クラウド保存状況確認']
-  ];
-  targets.forEach(([name, label]) => {
-    if (typeof CLOUD[name] !== 'function' || CLOUD[name].__wrapped) return;
-    const original = CLOUD[name].bind(CLOUD);
-    const wrapped = async function(...args) {
-      const isInventory = name === 'refreshInventoryPanel';
-      const isPull = name === 'pull';
-      UI.setSyncStatus('syncing', `${label}を実行中...`);
-      try {
-        const result = await original(...args);
-        UI.setSyncStatus('ok', `${label}が完了しました`);
-        if (name === 'syncNow') UI.toast('クラウド同期が完了しました', 'ok', { title:'同期完了' });
-        if (isInventory) UI.toast('クラウド保存状況を確認しました', 'ok', { title:'確認完了' });
-        return result;
-      } catch(e) {
-        const msg = errorMessage(e);
-        UI.setSyncStatus('error', `${label}に失敗しました：${msg}`);
-        if (!isPull) UI.toast(`${label}に失敗しました`, 'error', { title:'クラウドエラー', detail: msg });
-        throw e;
-      }
-    };
-    wrapped.__wrapped = true;
-    CLOUD[name] = wrapped;
-  });
-}
 
 // 計画データ取込（PLAN）
 const PLAN = {
@@ -3423,7 +5644,105 @@ function setupDropZone(zoneId, inputId, handler) {
 }
 
 
-/* ════════ §29-A AUTO_SYNC（sync.jsへ分割） ════════════════ */
+/* ════════ §29-A AUTO SYNC（保存・更新時に自動クラウド同期） ════════
+   運用方針：
+   ・ページを開いた時は CLOUD.pull() でクラウド → ローカルを反映する
+   ・CSV取込・削除・補完・計画更新などで STORE.save() が走ったら、自動でクラウドへ保存する
+   ・自動保存では syncSmart（双方向同期）を使わない。保存のたびに pull すると重くなり、古いクラウド/ローカルとの再マージで復活事故が起きるため。
+   ・自動保存は pushAll（ローカル → クラウド）のみ。削除済みマーカーも full_state/manifest に必ず入る。
+*/
+const AUTO_SYNC = {
+  _timer: null,
+  _installed: false,
+  _suppress: false,
+  _running: false,
+  _pending: false,
+  _lastError: '',
+  delayMs: 1800,
+
+  install() {
+    if (this._installed) return;
+    if (typeof STORE === 'undefined' || !STORE || STORE._autoSyncInstalled) return;
+
+    const originalSave = STORE.save.bind(STORE);
+
+    STORE.save = (...args) => {
+      const result = originalSave(...args);
+
+      // クラウド取得・復元中のローカル保存では、再アップロードを予約しない
+      if (!AUTO_SYNC._suppress) {
+        AUTO_SYNC.queue('STORE.save');
+      }
+
+      return result;
+    };
+
+    STORE._autoSyncInstalled = true;
+    this._installed = true;
+  },
+
+  queue(reason='auto') {
+    if (this._suppress) return;
+    if (typeof CLOUD === 'undefined' || !CLOUD || typeof CLOUD.pushAll !== 'function') return;
+
+    clearTimeout(this._timer);
+    this._timer = setTimeout(() => this.flush(reason), this.delayMs);
+  },
+
+  async flush(reason='auto') {
+    if (this._suppress) return { ok:false, error:'suppress中' };
+    if (this._running) {
+      this._pending = true;
+      return { ok:false, error:'同期中のため再予約' };
+    }
+    if (typeof CLOUD === 'undefined' || !CLOUD || typeof CLOUD.pushAll !== 'function') return { ok:false, error:'CLOUD未設定' };
+
+    this._running = true;
+    this._pending = false;
+    this._lastError = '';
+
+    try {
+      UI.updateCloudBadge && UI.updateCloudBadge('configured');
+      const r = await CLOUD.pushAll();
+      if (r && r.ok) {
+        UI.updateSaveStatus && UI.updateSaveStatus();
+        UI.updateCloudBadge && UI.updateCloudBadge('ok');
+        return r;
+      }
+      this._lastError = r?.error || '自動同期失敗';
+      UI.updateCloudBadge && UI.updateCloudBadge('error');
+      return r || { ok:false, error:this._lastError };
+    } catch(e) {
+      this._lastError = e?.message || String(e);
+      UI.updateCloudBadge && UI.updateCloudBadge('error');
+      return { ok:false, error:this._lastError };
+    } finally {
+      this._running = false;
+      if (this._pending && !this._suppress) {
+        this._pending = false;
+        this.queue('pending');
+      }
+    }
+  },
+
+  withoutSync(fn) {
+    this._suppress = true;
+    try {
+      return fn();
+    } finally {
+      this._suppress = false;
+    }
+  },
+
+  async withoutSyncAsync(fn) {
+    this._suppress = true;
+    try {
+      return await fn();
+    } finally {
+      this._suppress = false;
+    }
+  }
+};
 
 /* ════════ §29 計画データ取込 ══════════════════════════════════ */
 function setupPlanImport() {
@@ -3448,6 +5767,7 @@ function loadExternalScriptOnce(id, src) {
 async function loadScreenModules() {
   await loadExternalScriptOnce('module-shipper', 'shipper.js');
   await loadExternalScriptOnce('module-kamoku', 'kamoku.js');
+  await loadExternalScriptOnce('module-ai-gen', 'ai_gen.js');
 }
 
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
@@ -3457,15 +5777,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ※ loadScreenModules()は削除済み。shipper.jsはcenter.html末尾で読み込んでいる。
 
   // 1. ローカルストレージから読込
-  installStoreTelemetry();
   STORE.load();
   // 削除済みマーカー適用後の状態をローカルへ即保存し、リロード直後の古い補完・計画復活を防ぐ
   STORE.save();
 
   // 1.5 保存・取込・更新時の自動同期を有効化
   AUTO_SYNC.install();
-  installCloudTelemetry();
-  UI.updateSaveStatus();
 
   // 2. センター情報を画面に反映
   document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
@@ -3502,14 +5819,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 9. クラウド設定フォームとバッジを初期化
   CLOUD.renderForm();
-  window.addEventListener('offline', () => {
-    UI.setSyncStatus('error', 'ネットワークがオフラインです。保存はローカルに残りますが、クラウド同期は復旧後に確認してください。');
-    UI.toast('ネットワークがオフラインになりました', 'warn', { title:'接続確認' });
-  });
-  window.addEventListener('online', () => {
-    UI.toast('ネットワークが復旧しました。必要に応じて「今すぐ同期」を押してください', 'info', { title:'接続復旧' });
-    UI.updateSaveStatus();
-  });
 
   // 10. Supabase同期 → 完了後にオーバーレイをフェードアウトして画面表示
   const _lastView = (() => { try { return sessionStorage.getItem('lastView') || 'dashboard'; } catch(e){ return 'dashboard'; } })();
@@ -3522,15 +5831,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => ov.remove(), 420);
   }
 
-  // ローカルキャッシュがあれば即表示してからバックグラウンド同期
-  const _hasLocal = STATE.datasets && STATE.datasets.length > 0;
-  if (_hasLocal) {
-    // キャッシュあり: 先にページを描画してオーバーレイを外す（体感ゼロ秒）
+  // ── オーバーレイを必ず消す共通関数 ──
+  function _showApp(msg) {
     NAV.go(_lastView);
     UI.updateSaveStatus();
     UI.updateTopbar(_lastView);
     _hideOverlay();
-    // バックグラウンドでSupabase同期（画面表示後に静かに更新）
+    if (msg) setTimeout(() => UI.toast(msg), 500);
+  }
+
+  // ── 安全弁: 最大8秒でオーバーレイを強制消去 ──
+  const _safetyTimer = setTimeout(() => {
+    if (document.getElementById('app-loading-overlay')) {
+      console.warn('[BOOT] タイムアウト: オーバーレイを強制消去');
+      _showApp('クラウド接続がタイムアウトしました。ローカルデータで表示します。');
+    }
+  }, 8000);
+
+  const _hasLocal = STATE.datasets && STATE.datasets.length > 0;
+  if (_hasLocal) {
+    // キャッシュあり → 即表示、バックグラウンドで同期
+    clearTimeout(_safetyTimer);
+    _showApp(null);
     AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
       .then(r => {
         if (r && r.ok && r.changed) {
@@ -3542,25 +5864,453 @@ document.addEventListener('DOMContentLoaded', async () => {
       })
       .catch(() => {});
   } else {
-    // キャッシュなし（初回・新PC）: Supabase同期が完了するまでオーバーレイを表示
+    // キャッシュなし → Supabase完了を待つ（最大8秒）
     if (_overlayStatus) _overlayStatus.textContent = 'Supabaseからデータを取得中...';
     AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
       .then(r => {
-        NAV.go(_lastView);
-        UI.updateSaveStatus();
-        UI.updateTopbar(_lastView);
-        _hideOverlay();
-        if (r && r.ok && r.changed) {
-          setTimeout(() => UI.toast('クラウドの最新データを読み込みました'), 500);
-        }
+        clearTimeout(_safetyTimer);
+        _showApp(r && r.ok && r.changed ? 'クラウドの最新データを読み込みました' : null);
       })
       .catch(() => {
-        // 同期失敗でもオーバーレイは外す
-        NAV.go(_lastView);
-        UI.updateSaveStatus();
-        UI.updateTopbar(_lastView);
-        _hideOverlay();
-        UI.toast('クラウド接続に失敗しました（オフライン？）', 'warn');
+        clearTimeout(_safetyTimer);
+        _showApp('クラウド接続に失敗しました。ネット接続を確認してください。');
       });
   }
 });
+
+
+/* =====================================================================
+   現場明細 CSV完全再構築版（field.jsへ分割）
+===================================================================== */
+
+
+  function capacityDailyCauseHtml(row){
+    if (!row) return '<div class="capx-empty">対象データがありません</div>';
+
+    const over = Number(row.count || 0) - Number(row.cap || 0);
+    const cities = Array.isArray(row.cities) ? row.cities : [];
+    const cityHtml = cities.length
+      ? cities.map((c,i)=>`
+          <div class="capx-cause-row">
+            <b>${i+1}</b>
+            <span>${esc(c.city || '')}</span>
+            <em>${fmt(c.count || 0)}件</em>
+          </div>
+        `).join('')
+      : '<div class="capx-empty">市区町村内訳なし</div>';
+
+    return `
+      <div class="capx-cause-box">
+        <div class="capx-cause-head">
+          <div>
+            <h3>${esc(row.date || '')} / ${esc(row.area || '')}</h3>
+            <p>日別超過の原因を、市区町村別の件数で確認します。</p>
+          </div>
+          <button type="button" class="capx-cause-close" id="capx-cause-close">閉じる</button>
+        </div>
+        <div class="capx-cause-kpis">
+          <div><span>実績</span><b>${fmt(row.count || 0)}件</b></div>
+          <div><span>日キャパ</span><b>${fmt(row.cap || 0)}件</b></div>
+          <div class="${over > 0 ? 'danger' : 'ok'}"><span>差分</span><b>${over > 0 ? '+' : ''}${fmt(over)}件</b></div>
+          <div><span>使用率</span><b>${row.cap > 0 ? pct(row.rate || 0) : '-'}</b></div>
+        </div>
+        <div class="capx-cause-list">
+          ${cityHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  function openCapacityDailyCause(key){
+    const parts = String(key || '').split('__');
+    const date = parts[0] || '';
+    const area = parts.slice(1).join('__') || '';
+
+    let rows = [];
+    try {
+      if (window.CAPACITY_UI && typeof CAPACITY_UI.dailyRows === 'function') {
+        rows = CAPACITY_UI.dailyRows();
+      }
+    } catch(e) {}
+
+    if (!Array.isArray(rows) || !rows.length) {
+      rows = window.__CAPACITY_LAST_DAILY_ROWS || [];
+    }
+
+    const row = rows.find(r => String(r.date) === date && String(r.area) === area);
+    let panel = document.getElementById('capx-cause-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'capx-cause-panel';
+      document.body.appendChild(panel);
+    }
+    panel.innerHTML = capacityDailyCauseHtml(row);
+    panel.classList.add('open');
+
+    const close = document.getElementById('capx-cause-close');
+    if (close) close.addEventListener('click', ()=>panel.classList.remove('open'));
+  }
+
+
+(function(){
+  if (window.__CAPACITY_DAILY_CAUSE_BIND__) return;
+  window.__CAPACITY_DAILY_CAUSE_BIND__ = true;
+  document.addEventListener('click', function(e){
+    const btn = e.target && e.target.closest ? e.target.closest('[data-capx-daily-detail]') : null;
+    if (!btn) return;
+    e.preventDefault();
+    if (typeof openCapacityDailyCause === 'function') {
+      openCapacityDailyCause(btn.getAttribute('data-capx-daily-detail'));
+    }
+  });
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-cause-drill-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-cause-drill-style';
+  st.textContent = `
+    .capx-mini-detail{
+      margin-left:8px;
+      border:1px solid #cbd5e1;
+      background:#fff;
+      color:#1d4ed8;
+      border-radius:999px;
+      padding:4px 9px;
+      font-size:11px;
+      font-weight:900;
+      cursor:pointer;
+    }
+    #capx-cause-panel{
+      position:fixed;
+      right:24px;
+      top:84px;
+      width:min(460px, calc(100vw - 48px));
+      max-height:calc(100vh - 120px);
+      overflow:auto;
+      z-index:9999;
+      display:none;
+    }
+    #capx-cause-panel.open{display:block;}
+    .capx-cause-box{
+      background:#fff;
+      border:1px solid #dbe3ee;
+      border-radius:20px;
+      box-shadow:0 24px 60px rgba(15,23,42,.22);
+      overflow:hidden;
+      color:#0f172a;
+      font-family:'Meiryo','Yu Gothic',sans-serif;
+    }
+    .capx-cause-head{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:flex-start;
+      padding:18px 20px;
+      background:#f8fafc;
+      border-bottom:1px solid #e5e7eb;
+    }
+    .capx-cause-head h3{margin:0;font-size:17px;font-weight:950;}
+    .capx-cause-head p{margin:5px 0 0;color:#64748b;font-size:12px;font-weight:850;}
+    .capx-cause-close{
+      border:1px solid #cbd5e1;
+      background:#fff;
+      border-radius:999px;
+      padding:7px 12px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .capx-cause-kpis{
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:8px;
+      padding:14px;
+      background:#fff;
+    }
+    .capx-cause-kpis>div{
+      border:1px solid #e5e7eb;
+      border-radius:14px;
+      padding:10px;
+      background:#f8fafc;
+    }
+    .capx-cause-kpis>div.danger{background:#fef2f2;border-color:#fecaca;}
+    .capx-cause-kpis>div.ok{background:#ecfdf5;border-color:#bbf7d0;}
+    .capx-cause-kpis span{display:block;color:#64748b;font-size:11px;font-weight:900;margin-bottom:5px;}
+    .capx-cause-kpis b{font-size:17px;font-weight:950;}
+    .capx-cause-list{display:grid;gap:8px;padding:14px;}
+    .capx-cause-row{
+      display:grid;
+      grid-template-columns:32px 1fr 72px;
+      gap:8px;
+      align-items:center;
+      border:1px solid #eef2f7;
+      border-radius:12px;
+      padding:9px 10px;
+      background:#fff;
+    }
+    .capx-cause-row b{
+      width:24px;height:24px;border-radius:999px;
+      background:#eaf3ff;color:#1d4ed8;
+      display:flex;align-items:center;justify-content:center;
+      font-size:12px;
+    }
+    .capx-cause-row span{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .capx-cause-row em{text-align:right;font-style:normal;font-weight:950;}
+  `;
+  document.head.appendChild(st);
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-decision-ui-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-decision-ui-style';
+  st.textContent = `
+    .capx-section-head{
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      align-items:flex-start;
+      margin-bottom:12px;
+    }
+    .capx-mini-detail{
+      border:1px solid #cbd5e1;
+      background:#fff;
+      color:#1d4ed8;
+      border-radius:999px;
+      padding:5px 10px;
+      font-size:12px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .capx-weekday-grid{
+      display:grid;
+      grid-template-columns:repeat(7,minmax(150px,1fr));
+      gap:10px;
+    }
+    .capx-weekday-card{
+      border:1px solid #dbe3ee;
+      border-radius:18px;
+      padding:14px;
+      background:#fff;
+      box-shadow:0 8px 18px rgba(15,23,42,.045);
+      display:grid;
+      gap:10px;
+    }
+    .capx-weekday-card.over{background:#fef2f2;border-color:#fecaca;}
+    .capx-weekday-card.full{background:#fff7ed;border-color:#fed7aa;}
+    .capx-weekday-card.good{background:#eff6ff;border-color:#bfdbfe;}
+    .capx-weekday-card.ok{background:#ecfdf5;border-color:#bbf7d0;}
+    .capx-weekday-card.unset{background:#f8fafc;border-color:#cbd5e1;}
+    .capx-weekday-top{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      align-items:center;
+    }
+    .capx-weekday-top b{font-size:15px;font-weight:950;}
+    .capx-weekday-main strong{display:block;font-size:26px;font-weight:950;line-height:1.1;}
+    .capx-weekday-main span{display:block;margin-top:5px;color:#64748b;font-size:12px;font-weight:900;}
+    .capx-weekday-sub{display:grid;gap:4px;color:#475569;font-size:12px;font-weight:850;}
+    .capx-cause-inner{display:grid;gap:14px;}
+    .capx-cause-title h4{margin:0;font-size:17px;font-weight:950;}
+    .capx-cause-title p{margin:5px 0 0;color:#64748b;font-size:12px;font-weight:850;}
+    .capx-cause-kpis{
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:8px;
+    }
+    .capx-cause-kpis>div{
+      border:1px solid #e5e7eb;
+      border-radius:14px;
+      padding:10px;
+      background:#f8fafc;
+    }
+    .capx-cause-kpis>div.danger{background:#fef2f2;border-color:#fecaca;}
+    .capx-cause-kpis>div.ok{background:#ecfdf5;border-color:#bbf7d0;}
+    .capx-cause-kpis span{display:block;color:#64748b;font-size:11px;font-weight:900;margin-bottom:5px;}
+    .capx-cause-kpis b{font-size:17px;font-weight:950;}
+    .capx-cause-inner h5{margin:0;font-size:14px;font-weight:950;}
+    .capx-cause-list{display:grid;gap:8px;}
+    .capx-cause-row{
+      display:grid;
+      grid-template-columns:32px 1fr 72px;
+      gap:8px;
+      align-items:center;
+      border:1px solid #eef2f7;
+      border-radius:12px;
+      padding:9px 10px;
+      background:#fff;
+    }
+    .capx-cause-row b{
+      width:24px;height:24px;border-radius:999px;
+      background:#eaf3ff;color:#1d4ed8;
+      display:flex;align-items:center;justify-content:center;
+      font-size:12px;
+    }
+    .capx-cause-row span{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .capx-cause-row em{text-align:right;font-style:normal;font-weight:950;}
+    @media(max-width:1200px){
+      .capx-weekday-grid{grid-template-columns:repeat(2,minmax(150px,1fr));}
+      .capx-section-head{flex-direction:column;}
+    }
+  `;
+  document.head.appendChild(st);
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-final-decision-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-final-decision-style';
+  st.textContent = `
+    .capacity-status.alert{
+      background:#fed7aa!important;
+      color:#9a3412!important;
+      border:1px solid #fdba74!important;
+    }
+    .capx-risk-alert td{background:#fff7ed!important;}
+    .capx-kpi.alert:before{background:#f97316!important;}
+    .capx-day.alert{background:#fff7ed!important;}
+    .capx-weekday-card.alert{background:#fff7ed!important;border-color:#fdba74!important;}
+    .capx-action-box{
+      border:1px solid #fed7aa;
+      background:#fff7ed;
+      border-radius:16px;
+      padding:12px 14px;
+      display:grid;
+      gap:7px;
+    }
+    .capx-action-box h5{
+      margin:0;
+      font-size:14px;
+      font-weight:950;
+      color:#9a3412;
+    }
+    .capx-action-item{
+      font-size:13px;
+      font-weight:850;
+      color:#7c2d12;
+      line-height:1.5;
+    }
+    .capx-city-hint{
+      border:1px solid #bfdbfe;
+      background:#eff6ff;
+      color:#1e3a8a;
+      border-radius:14px;
+      padding:12px 14px;
+      font-size:13px;
+      font-weight:900;
+      line-height:1.5;
+      margin-bottom:10px;
+    }
+  `;
+  document.head.appendChild(st);
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-final-color-row-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-final-color-row-style';
+  st.textContent = `
+    .capacity-status.collapse{
+      background:#7f1d1d!important;
+      color:#fff!important;
+      border:1px solid #7f1d1d!important;
+    }
+    .capacity-status.over{
+      background:#fee2e2!important;
+      color:#991b1b!important;
+      border:1px solid #fecaca!important;
+    }
+    .capacity-status.full{
+      background:#ffedd5!important;
+      color:#9a3412!important;
+      border:1px solid #fed7aa!important;
+    }
+    .capacity-status.good{
+      background:#dbeafe!important;
+      color:#1e40af!important;
+      border:1px solid #bfdbfe!important;
+    }
+    .capacity-status.ok{
+      background:#dcfce7!important;
+      color:#166534!important;
+      border:1px solid #bbf7d0!important;
+    }
+    .capacity-status.unset{
+      background:#f1f5f9!important;
+      color:#64748b!important;
+      border:1px solid #cbd5e1!important;
+    }
+    .capx-risk-collapse td{background:#fff1f2!important;}
+    .capx-risk-over td{background:#fff7f7!important;}
+    .capx-risk-full td{background:#fffaf0!important;}
+    .capx-risk-good td{background:#eff6ff!important;}
+    .capx-risk-ok td{background:#f0fdf4!important;}
+    .capx-risk-unset td{background:#f8fafc!important;}
+    .capx-click-row{cursor:pointer;}
+    .capx-click-row:hover td{outline:1px solid #bfdbfe;background:#eff6ff!important;}
+    .capx-click-row.selected td{
+      background:#eaf3ff!important;
+      box-shadow:inset 4px 0 0 #2563eb;
+    }
+    .capx-cal-summary{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .capx-cal-summary span{
+      display:inline-flex;
+      border-radius:999px;
+      border:1px solid #cbd5e1;
+      background:#fff;
+      padding:7px 10px;
+      font-size:12px;
+      font-weight:950;
+      color:#334155;
+    }
+    .capx-cal-summary span.danger{background:#fee2e2;color:#991b1b;border-color:#fecaca;}
+    .capx-cal-summary span.full{background:#fff7ed;color:#9a3412;border-color:#fed7aa;}
+    .capx-cal-summary span.good{background:#eff6ff;color:#1e40af;border-color:#bfdbfe;}
+    .capx-cause-kpis>div.danger{background:#fef2f2!important;border-color:#fecaca!important;}
+    .capx-cause-kpis>div.ok{background:#ecfdf5!important;border-color:#bbf7d0!important;}
+  `;
+  document.head.appendChild(st);
+})();
+
+
+(function(){
+  if (document.getElementById('capacity-diff-focus-style')) return;
+  const st = document.createElement('style');
+  st.id = 'capacity-diff-focus-style';
+  st.textContent = `
+    .capx-diff{
+      display:inline-flex;
+      justify-content:flex-end;
+      min-width:54px;
+      font-weight:950;
+      font-size:14px;
+    }
+    .capx-diff.plus{
+      color:#991b1b;
+    }
+    .capx-diff.minus{
+      color:#166534;
+    }
+    .capx-cause-kpis div:nth-child(3){
+      background:#fef2f2;
+      border-color:#fecaca;
+    }
+    .capx-kpi.amber em{
+      line-height:1.35;
+    }
+  `;
+  document.head.appendChild(st);
+})();
