@@ -5,13 +5,11 @@
 <title>経営管理システム</title>
 
 <link rel="stylesheet" href="app.css">
-
-<!-- ★ Supabase接続設定（このファイルに直書き。どのPCでもそのまま動く） -->
 <script>
 window.SUPABASE_CONFIG = {
-  url:    'https://udjibwlgscdkoheceyds.supabase.co',
-  key:    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkamlid2xnc2Nka29oZWNleWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTQ5NjksImV4cCI6MjA5MjQzMDk2OX0.4whX8OuFFvjXYrfsJMIthMlPM7oxzbrqychlMu81G7w',
-  bucket: 'center-data',
+  url:    "https://udjibwlgscdkoheceyds.supabase.co",
+  key:    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkamlid2xnc2Nka29oZWNleWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTQ5NjksImV4cCI6MjA5MjQzMDk2OX0.4whX8OuFFvjXYrfsJMIthMlPM7oxzbrqychlMu81G7w",
+  bucket: "center-data",
 };
 </script>
 
@@ -102,28 +100,17 @@ window.SUPABASE_CONFIG = {
   }
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
-
-<!-- ════ LOADING OVERLAY（Supabase同期完了まで全画面を隠す） ════ -->
-<div id="app-loading-overlay" style="
-  position:fixed;inset:0;z-index:99998;
-  background:#0f2744;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:20px;
-  transition:opacity .4s ease;
-">
-  <div style="color:#fff;font-size:22px;font-weight:700;letter-spacing:.05em">経営管理システム</div>
-  <div id="overlay-center-name" style="color:#7eb3e8;font-size:14px;letter-spacing:.08em"></div>
-  <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
-    <div style="width:18px;height:18px;border:3px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></div>
-    <span id="overlay-status" style="color:rgba(255,255,255,.75);font-size:13px">読み込み中...</span>
+<div id="app-loading-overlay" style="position:fixed;inset:0;z-index:99998;background:#0f2744;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .4s">
+  <div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:.05em">経営管理システム</div>
+  <div id="overlay-center-name" style="color:#7eb3e8;font-size:13px"></div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div style="width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></div>
+    <span style="color:rgba(255,255,255,.7);font-size:13px">読み込み中...</span>
   </div>
 </div>
-<!-- ════ /LOADING OVERLAY ════ -->
-
 <div id="js-error-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:10px 16px;font-size:12px;font-family:monospace;max-height:40vh;overflow-y:auto"></div>
 
 
@@ -171,10 +158,10 @@ window.SUPABASE_CONFIG = {
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1l7 13H1z"/><line x1="8" y1="6" x2="8" y2="10"/><circle cx="8" cy="12" r="0.5" fill="currentColor"/></svg>アラート
     <span id="alert-badge" style="display:none;margin-left:auto;background:#dc2626;color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px">0</span>
   </div>
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="1" width="12" height="14" rx="1"/><line x1="5" y1="5" x2="11" y2="5"/><line x1="5" y1="8" x2="11" y2="8"/><line x1="5" y1="11" x2="9" y2="11"/></svg>メモ・コメント
+  </div>
   <div class="nav-item" data-view="kamoku" onclick="NAV.go(this)">
     <span class="nav-icon">📊</span><span class="nav-label">科目分析</span>
-  </div>
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="1" width="12" height="14" rx="1"/><line x1="5" y1="5" x2="11" y2="5"/><line x1="5" y1="8" x2="11" y2="8"/><line x1="5" y1="11" x2="9" y2="11"/></svg>メモ・コメント
   </div>
   <div class="nav-item" data-view="report" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="1.5" width="12" height="13" rx="1.2"/><line x1="5" y1="5" x2="11" y2="5"/><line x1="5" y1="8" x2="11" y2="8"/><line x1="5" y1="11" x2="9" y2="11"/></svg>会議報告書
@@ -498,38 +485,28 @@ window.SUPABASE_CONFIG = {
       <div id="alerts-container"></div>
     </div>
 
-    <!-- ▼ メモ・コメント -->
-    <div class="view" id="view-memo">
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-header">
-          <span class="card-title">月次メモ・コメント</span>
-          <select id="memo-ym-sel" onchange="UI.renderMemo()" style="font-size:11px;padding:4px 8px"></select>
-        </div>
-        <div class="card-body">
-          <textarea id="memo-textarea"
-            placeholder="この月の特記事項・コメントを入力してください&#10;例：8月は夏需要で傭車費が増加。熊谷エリアの配送件数が前月比+15%"
-            style="width:100%;height:160px;font-size:13px;line-height:1.8;padding:10px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical;color:var(--text)"></textarea>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
-            <span id="memo-saved-at" style="font-size:11px;color:var(--text3)"></span>
-            <button class="btn btn-primary" onclick="MEMO.save()" style="font-size:12px">保存</button>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header"><span class="card-title">メモ一覧（全月）</span></div>
-        <div id="memo-list" style="padding:4px 0"></div>
-      </div>
-    </div>
 
 
-    <!-- ▼ 会議報告書 -->
+        <!-- ▼ 会議報告書 -->
     <div class="view" id="view-report">
-
-      <!-- 設定カード -->
+      <!-- APIキー -->
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
-          <span class="card-title">📝 会議報告書 プロンプト作成</span>
-          <span style="font-size:11px;color:var(--text3)">作成内容を選んで「プロンプト生成」→ ChatGPTに貼り付けて使用</span>
+          <span class="card-title">🔑 ChatGPT APIキー</span>
+          <span style="font-size:11px;color:var(--text3)">このPCにのみ保存。クラウドには送りません。</span>
+        </div>
+        <div class="card-body" style="display:flex;gap:8px;align-items:center;padding:10px 14px">
+          <input id="report-oai-key" type="password" placeholder="sk-..." autocomplete="off"
+            style="flex:1;padding:7px 10px;border-radius:7px;border:1px solid var(--border2);font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)">
+          <button id="report-save-key-btn" class="btn btn-primary" style="font-size:12px;white-space:nowrap">保存</button>
+          <a href="https://platform.openai.com/api-keys" target="_blank" style="font-size:11px;color:#1a6fc4;white-space:nowrap;text-decoration:none">取得↗</a>
+        </div>
+        <div id="report-key-msg" style="font-size:11px;color:#8899aa;padding:0 14px 8px"></div>
+      </div>
+      <!-- 設定 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">📝 会議報告書を生成（Word形式で自動ダウンロード）</span>
         </div>
         <div class="card-body">
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
@@ -546,35 +523,24 @@ window.SUPABASE_CONFIG = {
               <select id="report-fy" onchange="REPORT_UI.refresh()" style="width:100%;font-size:12px;padding:8px 10px"></select>
             </div>
             <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">対象月 / 半期</label>
-              <select id="report-ym" onchange="REPORT_UI.refresh()" style="width:100%;font-size:12px;padding:8px 10px"></select>
+              <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">対象月</label>
+              <select id="report-ym" style="width:100%;font-size:12px;padding:8px 10px"></select>
             </div>
           </div>
-
           <div style="margin-bottom:14px">
-            <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">
-              特記事項・強調したいこと
-              <span style="font-weight:400;color:var(--text3)">（任意）数字・出来事・課題など、AIに必ず含めさせたい内容</span>
-            </label>
-            <textarea id="report-extra" placeholder="例: クレーン業務を4月から本格化し月40件を目標としている。エディオン新潟エリアを継続受注中。K&B時間指定を廃止し不採算エリアを整理した。" style="width:100%;height:90px;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
+            <label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">特記事項・強調したいこと<span style="font-weight:400;color:var(--text3)">（任意）ChatGPTに必ず含めさせたい数字・出来事</span></label>
+            <textarea id="report-extra" rows="3" placeholder="例: クレーン業務4月から本格化し月40件目標。エディオン新潟を継続受注中。K&B時間指定を廃止し不採算エリア整理した。" style="width:100%;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
           </div>
-
-          <div style="display:flex;gap:8px;align-items:center">
-            <button class="btn btn-primary" onclick="REPORT_UI.generatePrompt()" style="font-size:12px">プロンプトを生成</button>
-            <button class="btn" onclick="REPORT_UI.copyPrompt()" style="font-size:12px">📋 コピー</button>
-            <span id="report-msg" style="font-size:11px;color:var(--text2)"></span>
+          <button id="report-gen-btn" style="width:100%;padding:14px;border:none;border-radius:10px;background:linear-gradient(135deg,#1a4d7c,#1a6fc4);color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px">
+            📄　Word報告書を自動生成（ChatGPT + Word）
+          </button>
+          <div id="report-progress" style="display:none;margin-top:14px;background:var(--surface2,#f5f7fa);border-radius:8px;padding:10px 14px">
+            <div id="rpg-1" style="padding:5px 0;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border)">⬜ データを収集</div>
+            <div id="rpg-2" style="padding:5px 0;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border)">⬜ ChatGPTが文章を生成（20〜40秒）</div>
+            <div id="rpg-3" style="padding:5px 0;font-size:12px;color:var(--border)">⬜ Wordライブラリを読み込み</div>
+            <div id="rpg-4" style="padding:5px 0;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border)">⬜ Wordファイルを作成</div>
+            <div id="rpg-5" style="padding:5px 0;font-size:12px;color:var(--text3)">⬜ ダウンロード</div>
           </div>
-        </div>
-      </div>
-
-      <!-- プロンプト出力 -->
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">ChatGPTへ貼り付けるプロンプト</span>
-          <span style="font-size:11px;color:var(--text3)">コピーして ChatGPT に貼り付けてください</span>
-        </div>
-        <div class="card-body">
-          <textarea id="report-prompt-output" placeholder="「プロンプトを生成」を押すとここに出力されます" style="width:100%;height:400px;font-size:12px;line-height:1.65;padding:10px;border:1px solid var(--border2);border-radius:6px;font-family:'Consolas','Meiryo',monospace;resize:vertical;color:var(--text)"></textarea>
         </div>
       </div>
     </div>
@@ -958,7 +924,12 @@ window.SUPABASE_CONFIG = {
 
 
     <!-- ▼ データ取込 -->
-    <div class="view" id="view-import">
+    <!-- ▼ 科目分析 -->
+    <div class="view" id="view-kamoku">
+      <div id="kamoku-root"></div>
+    </div>
+
+        <div class="view" id="view-import">
       <div class="card" id="import-center-card" style="margin-bottom:14px;border:2px solid #60a5fa;background:#eff6ff">
         <div class="card-header" style="border-bottom:1px solid #bfdbfe">
           <span class="card-title" id="import-target-title">取込先センター確認</span>
@@ -1225,12 +1196,6 @@ window.SUPABASE_CONFIG = {
       </div>
     </div>
 
-    <!-- ════ 科目分析ビュー ════ -->
-    <div id="view-kamoku" class="view">
-      <div id="kamoku-root"></div>
-    </div>
-    </div>
-
   </div><!-- /#content -->
 </div><!-- /#main -->
 
@@ -1269,7 +1234,7 @@ window.SUPABASE_CONFIG = {
 
 <script src="app.js"></script>
 <script src="dashboard.js"></script>
-<script src="shipper.js" id="module-shipper"></script>
+<script src="shipper.js"></script>
 <script src="kamoku.js" id="module-kamoku" defer></script>
 <script src="pl.js"></script>
 <script src="trend.js"></script>

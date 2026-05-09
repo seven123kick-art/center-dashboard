@@ -339,8 +339,7 @@ const CONFIG = {
     library:'過去資料', field:'作業者・エリア分析',
     'field-worker':'作業者分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
     capacity:'キャパ分析', import:'データ取込',
-    kamoku:'収支科目 詳細分析',
-    ai_gen:'🤖 AI分析レポート生成',
+    kamoku:'収支科目 詳細分析', report:'会議報告書',
   },
 };
 
@@ -1430,13 +1429,6 @@ const CLOUD = {
     if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
     let changed = 0;
 
-    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
-    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
-
-    // ── 並列ダウンロード: 必要なファイルを洗い出して一斉取得 ──
-    const tasks = []; // { type, key, meta, promise }
-
-    // datasets（月次収支）
     const datasetMetas = Array.isArray(manifest.datasets) ? manifest.datasets : [];
     for (const meta of datasetMetas) {
       if (!meta.ym) continue;
@@ -1444,86 +1436,67 @@ const CLOUD = {
       if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
       const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
       if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
-        tasks.push({ type:'dataset', meta, promise: this._downloadJSON(this._datasetKey(meta.ym, metaType)) });
+        const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
+        if (ds && ds.ym) { upsertDataset(ds); changed++; }
       }
     }
 
-    // workerCsvData（作業者）
+    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
+    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
+
     const workerMetas = Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [];
     for (const meta of workerMetas) {
       if (!meta.ym || deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
       const local = STATE.workerCsvData.find(d => d.ym === meta.ym);
       if (!local || !this._validWorkerMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
-        tasks.push({ type:'worker', meta, promise: this._downloadJSON(this._workerMonthKey(meta.ym)) });
+        const rec = await this._downloadJSON(this._workerMonthKey(meta.ym));
+        if (rec && rec.ym && this._validWorkerMonthRecord(rec, meta)) {
+          STATE.workerCsvData = STATE.workerCsvData.filter(d => d.ym !== rec.ym);
+          STATE.workerCsvData.push(rec);
+          changed++;
+        }
       }
     }
 
-    // productAddressData（商品住所）
     const productMetas = Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [];
     for (const meta of productMetas) {
       if (!meta.ym || deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
       const local = STATE.productAddressData.find(d => d.ym === meta.ym);
       if (!local || !this._validProductMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
-        tasks.push({ type:'product', meta, promise: this._downloadJSON(this._productMonthKey(meta.ym)) });
-      }
-    }
-
-    // capacity / planData / memos / library（単発ファイル）
-    const singleTasks = {};
-    if (manifest.hasCapacity && !STATE.capacity)
-      singleTasks.capacity = this._downloadJSON(this._capacityKey());
-    if (manifest.hasPlanData)
-      singleTasks.plan    = this._downloadJSON(this._planKey());
-    if (manifest.hasMemos)
-      singleTasks.memos   = this._downloadJSON(this._memosKey());
-    if (manifest.hasLibrary)
-      singleTasks.library = this._downloadJSON(this._libraryKey());
-
-    // ── 全ファイルを同時並列で待つ ──
-    const allPromises = [
-      ...tasks.map(t => t.promise),
-      ...Object.values(singleTasks),
-    ];
-    const allResults = await Promise.allSettled(allPromises);
-
-    // tasks の結果を適用
-    const taskResults = allResults.slice(0, tasks.length);
-    for (let i = 0; i < tasks.length; i++) {
-      if (taskResults[i].status !== 'fulfilled') continue;
-      const data = taskResults[i].value;
-      const { type, meta } = tasks[i];
-      if (type === 'dataset') {
-        if (data && data.ym) { upsertDataset(data); changed++; }
-      } else if (type === 'worker') {
-        if (data && data.ym && this._validWorkerMonthRecord(data, meta)) {
-          STATE.workerCsvData = STATE.workerCsvData.filter(d => d.ym !== data.ym);
-          STATE.workerCsvData.push(data);
-          changed++;
-        }
-      } else if (type === 'product') {
-        if (data && data.ym && this._validProductMonthRecord(data, meta)) {
-          STATE.productAddressData = STATE.productAddressData.filter(d => d.ym !== data.ym);
-          STATE.productAddressData.push(data);
+        const rec = await this._downloadJSON(this._productMonthKey(meta.ym));
+        if (rec && rec.ym && this._validProductMonthRecord(rec, meta)) {
+          STATE.productAddressData = STATE.productAddressData.filter(d => d.ym !== rec.ym);
+          STATE.productAddressData.push(rec);
           changed++;
         }
       }
     }
 
-    // 単発ファイルの結果を適用
-    const singleKeys = Object.keys(singleTasks);
-    const singleResults = allResults.slice(tasks.length);
-    for (let i = 0; i < singleKeys.length; i++) {
-      if (singleResults[i].status !== 'fulfilled') continue;
-      const data = singleResults[i].value;
-      const key  = singleKeys[i];
-      if (key === 'capacity' && data) { STATE.capacity = data; changed++; }
-      else if (key === 'plan' && data && typeof data === 'object') {
-        STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, data);
+    if (manifest.hasCapacity && !STATE.capacity) {
+      const cap = await this._downloadJSON(this._capacityKey());
+      if (cap) { STATE.capacity = cap; changed++; }
+    }
+
+    // 旧field/data.jsonは大容量化・個人情報混入防止のため原則使わない。
+    // 既存クラウドからの復元互換は full_state/manifest 側に寄せる。
+
+    if (manifest.hasPlanData) {
+      const cloudPlan = await this._downloadJSON(this._planKey());
+      if (cloudPlan && typeof cloudPlan === 'object') {
+        STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
         applyDeletionTombstonesToState(STATE);
         changed++;
       }
-      else if (key === 'memos' && data && typeof data === 'object') { STATE.memos = data; changed++; }
-      else if (key === 'library' && Array.isArray(data)) { STATE.library = data; changed++; }
+    }
+
+    if (manifest.hasMemos) {
+      const memos = await this._downloadJSON(this._memosKey());
+      if (memos && typeof memos === 'object') { STATE.memos = memos; changed++; }
+    }
+
+    if (manifest.hasLibrary) {
+      const library = await this._downloadJSON(this._libraryKey());
+      if (Array.isArray(library)) { STATE.library = library; changed++; }
     }
 
     applyDeletionTombstonesToState(STATE);
@@ -1564,14 +1537,19 @@ const CLOUD = {
       let changed = false;
       let gotAny = false;
 
-      // full_state と manifest を並列取得して合計待ち時間を短縮
-      const [full, r] = await Promise.all([
-        this.pullFullState(),
-        this.pullManifestAndMissing(),
-      ]);
+      const full = await this.pullFullState();
+      if (full && full.ok) {
+        changed = true;
+        gotAny = true;
+      }
 
-      if (full && full.ok) { changed = true; gotAny = true; }
-      if (r && r.ok) { changed = changed || !!r.changed; gotAny = true; }
+      // full_state が古い場合に備え、必ず manifest / skdl 月別データも確認する。
+      // これにより、別PCで入れた確定CSVが full_state 未反映でも取得できる。
+      const r = await this.pullManifestAndMissing();
+      if (r && r.ok) {
+        changed = changed || !!r.changed;
+        gotAny = true;
+      }
 
       if (gotAny) {
         STORE.save();
@@ -4884,34 +4862,12 @@ function reportFYFromYM(ym) {
 
 /* ════════ §23 REPORT_UI（スタブ） ═════════════════════════════ */
 const REPORT_UI = {
-  _tab:'policy',
+  _OAI_KEY: 'report_oai_key_v1',
 
-  getFY() {
-    return document.getElementById('report-fy')?.value || dashboardSelectedFiscalYear() || getDefaultFiscalYear();
-  },
-  getHalf() {
-    return document.getElementById('report-half')?.value || '上期';
-  },
-  getYM() {
-    return document.getElementById('report-ym')?.value || dashboardSelectedYM() || latestDS()?.ym || '';
-  },
-  getPolicy() {
-    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
-    return STATE.reportKnowledge.policies[reportPolicyKey(this.getFY(), this.getHalf())] || null;
-  },
-
-  switchTab(tab) {
-    this._tab = tab || 'policy';
-    document.querySelectorAll('.report-tab').forEach(b=>b.classList.toggle('active', b.dataset.reportTab === this._tab));
-    document.querySelectorAll('.report-pane').forEach(p=>p.style.display='none');
-    const pane = document.getElementById('report-pane-' + this._tab);
-    if (pane) pane.style.display = '';
-    this.refreshReferenceList();
-  },
-
-  refresh() {
-    this.populateSelectors();
-  },
+  getKey() { try { return localStorage.getItem(this._OAI_KEY)||''; } catch(e){ return ''; } },
+  setKey(k) { try { localStorage.setItem(this._OAI_KEY, k); } catch(e){}},
+  getFY()   { return document.getElementById('report-fy')?.value  || dashboardSelectedFiscalYear() || getDefaultFiscalYear(); },
+  getYM()   { return document.getElementById('report-ym')?.value  || dashboardSelectedYM() || latestDS()?.ym || ''; },
 
   populateSelectors() {
     const fySel = document.getElementById('report-fy');
@@ -4919,7 +4875,7 @@ const REPORT_UI = {
     if (!fySel) return;
     const years = [...new Set([...dashboardAvailableFiscalYears(), getDefaultFiscalYear()])]
       .filter(Boolean).sort((a,b)=>Number(b)-Number(a));
-    const oldFY = fySel.value || dashboardSelectedFiscalYear() || getDefaultFiscalYear();
+    const oldFY = fySel.value || getDefaultFiscalYear();
     fySel.innerHTML = years.map(y=>`<option value="${esc(y)}" ${String(y)===String(oldFY)?'selected':''}>${esc(y)}年度</option>`).join('');
     if (!fySel.value && years.length) fySel.value = years[0];
     const fym = monthsOfFiscalYear(fySel.value);
@@ -4934,204 +4890,249 @@ const REPORT_UI = {
     }
   },
 
-  savePolicy() {
-    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
-    const fy = this.getFY();
-    const half = this.getHalf();
-    const key = reportPolicyKey(fy, half);
-    STATE.reportKnowledge.policies[key] = {
-      fiscalYear: fy,
-      half,
-      direction: document.getElementById('report-policy-direction')?.value || '',
-      actions: document.getElementById('report-policy-actions')?.value || '',
-      targets: document.getElementById('report-policy-targets')?.value || '',
-      issues: document.getElementById('report-policy-issues')?.value || '',
-      savedAt: new Date().toISOString()
-    };
-    STORE.save();
-    const msg = document.getElementById('report-policy-msg');
-    if (msg) msg.textContent = `${fy}年度 ${half} 方針を保存しました`;
-    UI.toast('年度・半期方針を保存しました');
-    this.refreshGenerateSummary();
-  },
-
-  loadPolicy() {
-    const p = this.getPolicy();
-    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
-    set('report-policy-direction', p?.direction);
-    set('report-policy-actions', p?.actions);
-    set('report-policy-targets', p?.targets);
-    set('report-policy-issues', p?.issues);
-  },
-
-  saveReference() {
-    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
-    const title = document.getElementById('report-ref-title')?.value?.trim();
-    const content = document.getElementById('report-ref-content')?.value?.trim();
-    if (!title && !content) { UI.toast('資料名または内容を入力してください','warn'); return; }
-    const fy = this.getFY();
-    const half = this.getHalf();
-    const scope = document.getElementById('report-ref-scope')?.value || 'month';
-    const ym = scope === 'month' ? this.getYM() : '';
-    STATE.reportKnowledge.references.push({
-      id: Date.now(), fiscalYear: fy, half, ym, scope,
-      title: title || '参考メモ',
-      category: document.getElementById('report-ref-category')?.value || 'その他',
-      priority: document.getElementById('report-ref-priority')?.value || '中',
-      content: content || '',
-      savedAt: new Date().toISOString()
-    });
-    STORE.save();
-    this.clearReferenceForm();
-    this.refreshReferenceList();
-    UI.toast('参考資料メモを保存しました');
-  },
-
-  clearReferenceForm() {
-    ['report-ref-title','report-ref-content'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-    const msg=document.getElementById('report-ref-msg'); if(msg) msg.textContent='';
-  },
-
-  referenceMatches(ref) {
-    const fy = this.getFY();
-    const half = this.getHalf();
-    const ym = this.getYM();
-    if (String(ref.fiscalYear) !== String(fy)) return false;
-    if (ref.scope === 'year') return true;
-    if ((ref.half || half) !== half) return false;
-    if (ref.scope === 'month') return !ref.ym || ref.ym === ym;
-    return true;
-  },
-
-  selectedReferences() {
-    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
-    const direct = (STATE.reportKnowledge.references || []).filter(r=>this.referenceMatches(r));
-    const fy = this.getFY(), half = this.getHalf(), ym = this.getYM();
-    const lib = (STATE.library || []).filter(item => {
-      if (item.fiscalYear && String(item.fiscalYear) !== String(fy)) return false;
-      const cat = String(item.category || '');
-      const monthMatch = !item.month || (ym && item.month === ym.slice(4,6));
-      const isPolicy = cat.includes('方針');
-      const isMeeting = cat.includes('会議') || cat.includes('報告') || cat.includes('資料') || cat.includes('メモ') || cat.includes('スクショ');
-      return monthMatch || isPolicy || isMeeting || !item.month;
-    }).map(item => ({
-      id:'lib_' + item.id,
-      fiscalYear: item.fiscalYear || fy,
-      half,
-      ym: item.month ? `${fy}${item.month}` : '',
-      scope: item.month ? 'month' : 'half',
-      title: item.title || item.fileName || '過去資料',
-      category: item.category || '過去資料',
-      priority: item.category && String(item.category).includes('方針') ? '高' : '中',
-      content: [item.memo, item.content, item.fileName ? `添付ファイル：${item.fileName}` : ''].filter(Boolean).join('\n'),
-      savedAt: item.savedAt || ''
-    }));
-    return [...direct, ...lib].sort((a,b)=>{
-      const rank = {高:3,中:2,低:1};
-      return (rank[b.priority]||0)-(rank[a.priority]||0) || String(b.savedAt||'').localeCompare(String(a.savedAt||''));
-    }).slice(0,20);
-  },
-
-  refreshReferenceList() {
-    const box = document.getElementById('report-reference-list');
-    const sum = document.getElementById('report-generate-summary');
-    const refs = this.selectedReferences();
-    if (box) {
-      box.innerHTML = refs.length ? refs.map(r=>`
-        <div style="border-bottom:1px solid var(--border);padding:8px 0">
-          <div style="font-weight:800;color:var(--text)">${esc(r.title)} <span style="font-size:11px;color:var(--text3)">[${esc(r.category)} / ${esc(r.priority)}]</span></div>
-          <div style="white-space:pre-wrap;color:var(--text2);font-size:12px">${esc((r.content || '').slice(0,500)) || '添付資料のみ。必要に応じて資料内容を確認してください。'}</div>
-        </div>`).join('') : '対象期間に紐づく参考資料はまだありません';
+  refresh() {
+    this.populateSelectors();
+    // APIキー表示
+    const keyEl = document.getElementById('report-oai-key');
+    const msg   = document.getElementById('report-key-msg');
+    const k = this.getKey();
+    if (keyEl && !keyEl.value) keyEl.value = k ? '●'.repeat(20) : '';
+    if (msg) msg.textContent = k ? '✅ APIキー設定済み' : '⚠️ APIキーを入力してください';
+    // ボタンにリスナーを接続
+    const saveBtn = document.getElementById('report-save-key-btn');
+    if (saveBtn && !saveBtn._bound) {
+      saveBtn._bound = true;
+      saveBtn.addEventListener('click', () => {
+        const v = document.getElementById('report-oai-key')?.value?.trim();
+        if (v && !v.startsWith('●')) this.setKey(v);
+        const m = document.getElementById('report-key-msg');
+        if (m) m.textContent = this.getKey() ? '✅ 保存しました' : '⚠️ 空です';
+      });
     }
-    if (sum) this.refreshGenerateSummary();
+    const genBtn = document.getElementById('report-gen-btn');
+    if (genBtn && !genBtn._bound) {
+      genBtn._bound = true;
+      genBtn.addEventListener('click', () => REPORT_UI.generate());
+    }
   },
 
-  refreshGenerateSummary() {
-    const sum = document.getElementById('report-generate-summary');
-    if (!sum) return;
-    const fy=this.getFY(), half=this.getHalf(), ym=this.getYM();
-    const p=this.getPolicy();
-    const refs=this.selectedReferences();
-    const ds=ym ? activeDatasetByYM(ym) : null;
-    sum.innerHTML = `対象：${esc(fy)}年度 ${esc(half)} / ${esc(ymLabel(ym))}<br>` +
-      `方針：${p ? '登録済' : '未登録'} / 月次収支：${ds ? datasetKindLabel(ds) + 'あり' : 'なし'} / 参考資料：${refs.length}件`;
+  prog(id, state, text) {
+    const el = document.getElementById(id); if (!el) return;
+    el.style.color = state==='done'?'#16a34a':state==='active'?'#1a6fc4':state==='error'?'#dc2626':'var(--text3)';
+    el.textContent = (state==='done'?'✅':state==='active'?'🔄':state==='error'?'❌':'⬜') + ' ' + text;
   },
 
   buildDataSummary(ym) {
     const ds = ym ? activeDatasetByYM(ym) : latestDS();
     const prev = ds ? prevDS(ds.ym) : null;
-    const lastYear = ds ? sameMonthLastYear(ds.ym) : null;
     const lines = [];
     if (ds) {
-      lines.push(`- 営業収益: ${fmtK(ds.totalIncome)}千円`);
-      lines.push(`- 費用合計: ${fmtK(ds.totalExpense)}千円`);
-      lines.push(`- センター利益: ${fmtK(ds.profit)}千円`);
-      lines.push(`- 利益率: ${pct(ds.profitRate)}`);
-      lines.push(`- みなし人件費率: ${pct(ds.pseudoLaborRate)}（目標: ${CONFIG.TARGETS.pseudoLaborRate}%以内）`);
-      if (prev) lines.push(`- 前月比 営業収益: ${ratio(ds.totalIncome, prev.totalIncome)}`);
-      if (lastYear) lines.push(`- 前年同月比 営業収益: ${ratio(ds.totalIncome, lastYear.totalIncome)}`);
+      lines.push(`営業収益: ${fmtK(ds.totalIncome)}千円`);
+      lines.push(`費用合計: ${fmtK(ds.totalExpense)}千円`);
+      lines.push(`センター利益: ${fmtK(ds.profit)}千円`);
+      lines.push(`利益率: ${pct(ds.profitRate)}`);
+      lines.push(`みなし人件費率: ${pct(ds.pseudoLaborRate)}`);
+      if (prev) lines.push(`前月比 営業収益: ${ratio(ds.totalIncome, prev.totalIncome)}`);
     } else {
-      lines.push('- 月次収支データなし');
-    }
-    const field = (STATE.productAddressData || []).find(r=>r.ym===ym);
-    if (field) {
-      lines.push(`- 商品・住所CSV: 原票${fmt(field.slipCount || field.uniqueSlips || field.tickets?.length || 0)}件 / 明細${fmt(field.detailRows || field.rows || 0)}行`);
+      lines.push('月次収支データなし');
     }
     return lines.join('\n');
   },
 
-  generatePrompt() {
-    const out = document.getElementById('report-prompt-output');
-    if (!out) return;
-    const fy    = this.getFY();
-    const ym    = this.getYM();
-    const type  = document.getElementById('report-type')?.value || 'monthly';
-    const extra = document.getElementById('report-extra')?.value?.trim() || '';
+  buildPrompt(type, fy, ym, extra) {
+    const typeLabel = {monthly:'月次会議報告書', halfReview:'半期振り返り', policy:'半期方針'}[type]||type;
+    const period    = reportHalfFromYM(ym);
+    const prevPeri  = period==='上期'?'下半期':'上半期';
+    const libs = (STATE.library||[]).slice(0,3)
+      .map((item,i)=>`【資料${i+1}】${item.title||item.fileName||''}${item.memo?'\n'+item.memo:''}`).join('\n\n');
 
-    // タイプ別の見出し
-    const typeLabel = { monthly:'月次会議報告書', halfReview:'半期振り返り', policy:'半期方針' }[type] || type;
+    return `${CENTER.name}の${typeLabel}を作成してください。
 
-    // 月次収支データ
-    const dataSummary = this.buildDataSummary(ym);
+【絶対ルール】
+・箇条書き（・や―）は一切使わない
+・全て段落（流れる文章）で書く
+・数字は必ず文中に具体的に入れる（百万円・千円単位）
+・「一方で」「その中で」「これにより」「また」等の接続詞で段落をつなぐ
+・「〜となりました」「〜しています」「〜で進めていく」等の語尾を使う
+・JSONのみ返す（他のテキスト不要）
 
-    // 過去資料から参考情報を取得（ライブラリに登録済みのもの）
-    const libs = (STATE.library || []).slice(0, 5)
-      .map((item, i) => `【資料${i+1}】${item.title||item.fileName||''}${item.memo ? '\n' + item.memo : ''}`)
-      .join('\n\n');
+【文体サンプル（この書き方に寄せること）】
+振り返り例:「下半期は、不採算業務の整理と新規売上の取り込みにより、利益が出る構造へ転換した期間となりました。営業収益は計画170.7百万円に対し実績180.3百万円（+9.6百万円）、粗利益は計画1.0百万円に対し実績12.1百万円（+11.1百万円）と、売上・利益ともに計画を達成しております。一方で、その達成過程については課題も明確です。」
 
-    out.value =
-`${CENTER.name} 会議報告書（${typeLabel}）を作成してください。
+方針例:「■クレーンの進め方\nクレーンは最も利益インパクトが大きく、1件約40,000円に対し傭車では約60％が支払となるため、1件あたり約16,000円の差が出る。月40件の実施で売上は960千円を見込んでいる。まずは240千円程度を確実に取りにいく形で進めていく。」
 
-■ 対象
-- センター: ${CENTER.name}
-- 年度: ${fy}年度
-- 対象月: ${ymLabel(ym)}
+【出力JSON形式】
+\`\`\`json
+{
+  "review": {
+    "p1": "${prevPeri}全体の概況と実績数値の段落（3〜5文）",
+    "p2": "課題・背景・対応経緯の段落（3〜5文）",
+    "p3": "取り組みの成果と構造変化の段落（3〜5文）",
+    "p4": "評価と${period}への接続（2〜3文）"
+  },
+  "policy": {
+    "intro": "${period}方針宣言の段落（2〜3文）",
+    "items": [
+      {"title":"■ 施策タイトル1","p1":"内容・数値根拠（3〜5文）","p2":"実施方法・見通し（2〜4文）"},
+      {"title":"■ 施策タイトル2","p1":"説明段落","p2":"説明段落"},
+      {"title":"■ まとめ","p1":"全体まとめ（2〜3文）","p2":""}
+    ]
+  }
+}
+\`\`\`
 
-■ 月次実績データ
-${dataSummary}
-${libs ? '\n■ 参考資料（過去資料より）\n' + libs : ''}
-${extra ? '\n■ 特記事項・強調したいこと\n' + extra : ''}
-
-■ 作成の指示
-- 箇条書きではなく、段落形式の流れる文章で書く
-- 数字は必ず文中に具体的に入れる（百万円・千円単位）
-- 「一方で」「その中で」「これにより」等の接続詞で段落をつなぐ
-- 構成:「振り返り（概況→課題→成果）」「今後の方針（施策・目標・まとめ）」
-- A4 1枚、管理者会議でそのまま読める文体
-- 推測で書かず、上記データに基づいた内容のみ書く`;
-
-    const msg = document.getElementById('report-msg');
-    if (msg) msg.textContent = '生成しました。コピーしてChatGPTに貼り付けてください。';
-    UI.toast('プロンプトを生成しました');
+【実績データ: ${ymLabel(ym)}】
+${this.buildDataSummary(ym)}
+${libs?'\n【過去資料参考情報】\n'+libs:''}
+${extra?'\n【担当者からの追加情報】\n'+extra:''}`;
   },
 
-  copyPrompt() {
-    const out = document.getElementById('report-prompt-output');
-    if (!out?.value) { UI.toast('先に「プロンプトを生成」ボタンを押してください','warn'); return; }
-    navigator.clipboard.writeText(out.value).then(()=>UI.toast('クリップボードにコピーしました'));
-  }
-};
+  async generate() {
+    const key = this.getKey();
+    if (!key) { alert('ChatGPT APIキーを入力・保存してください。\nhttps://platform.openai.com/api-keys で取得できます。'); return; }
+    const btn  = document.getElementById('report-gen-btn');
+    const prog = document.getElementById('report-progress');
+    if (btn)  { btn.disabled=true; btn.innerHTML='<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></span>　生成中...'; }
+    if (prog) prog.style.display='';
 
+    try {
+      // ① データ収集
+      this.prog('rpg-1','active','データを収集中...');
+      const ym    = this.getYM();
+      const fy    = this.getFY();
+      const type  = document.getElementById('report-type')?.value||'monthly';
+      const extra = document.getElementById('report-extra')?.value?.trim()||'';
+      const prompt = this.buildPrompt(type, fy, ym, extra);
+      this.prog('rpg-1','done','データ収集完了');
+
+      // ② ChatGPT API
+      this.prog('rpg-2','active','ChatGPTが文章を生成中（20〜40秒）...');
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+        body:JSON.stringify({
+          model:'gpt-4o',
+          max_tokens:3000,
+          messages:[
+            {role:'system', content:'あなたは物流センターの経営管理報告書ライターです。指示通りJSONのみ返してください。'},
+            {role:'user', content:prompt}
+          ]
+        })
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(()=>({}));
+        throw new Error(e?.error?.message || 'OpenAI APIエラー HTTP ' + res.status);
+      }
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content || '';
+      const m = text.match(/```json\n?([\s\S]+?)```/) || text.match(/(\{[\s\S]+\})/);
+      if (!m) throw new Error('ChatGPTの返答がJSON形式ではありませんでした:\n'+text.slice(0,200));
+      const rpt = JSON.parse((m[1]||m[0]).trim());
+      this.prog('rpg-2','done','文章生成完了');
+
+      // ③ docx.iife.js を動的読み込み
+      this.prog('rpg-3','active','Wordライブラリを読み込み中...');
+      if (!window.docx) {
+        await new Promise((resolve, reject) => {
+          if (document.getElementById('docx-iife-script')) { resolve(); return; }
+          const s = document.createElement('script');
+          s.id = 'docx-iife-script'; s.src = 'docx.iife.js';
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('docx.iife.js の読み込みに失敗。ファイルがサーバーに存在するか確認してください。'));
+          document.head.appendChild(s);
+        });
+      }
+      this.prog('rpg-3','done','Wordライブラリ読み込み完了');
+
+      // ④ Word生成
+      this.prog('rpg-4','active','Wordファイルを作成中...');
+      const blob = await this._buildDocx(type, fy, ym, rpt);
+      this.prog('rpg-4','done','Wordファイル作成完了');
+
+      // ⑤ ダウンロード
+      this.prog('rpg-5','active','ダウンロード中...');
+      const tag = new Date().toISOString().slice(0,10).replace(/-/g,'');
+      const url2 = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href=url2; a.download=CENTER.name+'_報告書_'+tag+'.docx'; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url2), 3000);
+      this.prog('rpg-5','done','ダウンロード完了 ✨');
+
+    } catch(e) {
+      ['rpg-1','rpg-2','rpg-3','rpg-4','rpg-5'].forEach(id=>{
+        const el=document.getElementById(id);
+        if (el && el.textContent.includes('🔄')) this.prog(id,'error','エラー: '+e.message);
+      });
+      alert('エラーが発生しました:\n\n'+e.message);
+      console.error('[REPORT_WORD]', e);
+    } finally {
+      if (btn) { btn.disabled=false; btn.innerHTML='📄　Word報告書を自動生成（ChatGPT + Word）'; }
+    }
+  },
+
+  async _buildDocx(type, fy, ym, rpt) {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, LevelFormat } = window.docx;
+    const center   = CENTER.name;
+    const dateStr  = new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric'});
+    const period   = reportHalfFromYM(ym) || '上期';
+    const prevPeri = period==='上期'?'下半期':'上半期';
+    const NAVY='1A3E6F', GRAY='333333', BLUE='1A6FC4', LGRAY='666666';
+
+    const sp  = (n=1) => Array.from({length:n},()=>new Paragraph({spacing:{before:0,after:0},children:[new TextRun({text:'',size:10})]}));
+    const hr  = ()    => new Paragraph({border:{bottom:{style:BorderStyle.SINGLE,size:6,color:BLUE,space:1}},spacing:{before:80,after:100},children:[new TextRun({text:'',size:4})]});
+    const h1  = t     => new Paragraph({heading:HeadingLevel.HEADING_1,spacing:{before:440,after:100},children:[new TextRun({text:t,bold:true,size:30,color:NAVY,font:'游明朝'})]});
+    const h2  = t     => new Paragraph({heading:HeadingLevel.HEADING_2,spacing:{before:260,after:80},children:[new TextRun({text:t,bold:true,size:24,color:NAVY,font:'游明朝'})]});
+    const para = t    => t&&t.trim() ? new Paragraph({spacing:{before:100,after:100},indent:{firstLine:440},children:[new TextRun({text:t,size:22,color:GRAY,font:'游明朝'})]}) : null;
+    const kv   = (l,v)=> new Paragraph({spacing:{before:50,after:50},children:[new TextRun({text:l+'　',bold:true,size:21,color:NAVY,font:'游明朝'}),new TextRun({text:v,size:21,color:GRAY,font:'游明朝'})]});
+
+    const ch = [
+      new Paragraph({alignment:AlignmentType.RIGHT,spacing:{after:80},children:[new TextRun({text:dateStr,size:20,color:LGRAY,font:'游明朝'})]}),
+      new Paragraph({alignment:AlignmentType.CENTER,spacing:{after:60},children:[new TextRun({text:center,bold:true,size:28,color:NAVY,font:'游明朝'})]}),
+      new Paragraph({alignment:AlignmentType.CENTER,spacing:{after:60},children:[new TextRun({text:'家電物流事業部 管理者会議',bold:true,size:34,color:NAVY,font:'游明朝'})]}),
+      new Paragraph({alignment:AlignmentType.CENTER,spacing:{after:160},children:[new TextRun({text:prevPeri+'振り返り／'+period+'運営方針',size:22,color:LGRAY,font:'游明朝'})]}),
+      hr(), ...sp(1),
+    ];
+
+    // 振り返り
+    const rv = rpt.review||{};
+    ch.push(h1('【'+prevPeri+' 振り返り】'), hr());
+    const ds = activeDatasetByYM(ym);
+    if (ds) {
+      ch.push(h2('■ 実績サマリー'));
+      ch.push(kv('収入合計', fmtK(ds.totalIncome)+'千円'));
+      ch.push(kv('費用合計', fmtK(ds.totalExpense)+'千円'));
+      ch.push(kv('営業利益', (ds.profit>=0?'+':'-')+fmtK(Math.abs(ds.profit))+'千円'));
+      ch.push(...sp(1));
+    }
+    ['p1','p2','p3','p4'].forEach(k=>{ const p=para(rv[k]); if(p){ch.push(p);ch.push(...sp(1));} });
+
+    // 方針
+    const pl = rpt.policy||{};
+    ch.push(...sp(1), h1('【'+period+' 運営方針】'), hr());
+    const pi=para(pl.intro); if(pi){ch.push(pi);ch.push(...sp(1));}
+    (pl.items||[]).forEach(item=>{
+      if(item.title) ch.push(h2(item.title));
+      ['p1','p2'].forEach(k=>{ const p=para(item[k]); if(p){ch.push(p);ch.push(...sp(1));} });
+    });
+
+    const doc = new Document({
+      styles:{
+        default:{document:{run:{font:'游明朝',size:22,color:GRAY}}},
+        paragraphStyles:[
+          {id:'Heading1',name:'Heading 1',basedOn:'Normal',next:'Normal',quickFormat:true,
+           run:{size:30,bold:true,font:'游明朝',color:NAVY},paragraph:{spacing:{before:440,after:100},outlineLevel:0}},
+          {id:'Heading2',name:'Heading 2',basedOn:'Normal',next:'Normal',quickFormat:true,
+           run:{size:24,bold:true,font:'游明朝',color:NAVY},paragraph:{spacing:{before:260,after:80},outlineLevel:1}},
+        ],
+      },
+      sections:[{
+        properties:{page:{size:{width:11906,height:16838},margin:{top:1440,right:1440,bottom:1440,left:1440}}},
+        children:ch,
+      }],
+    });
+    return Packer.toBlob(doc);
+  },
+};
 /* ════════ §24 PAST_LIBRARY（ファイル本体はStorage、台帳はfull_state） ══════════════════════════ */
 const PAST_LIBRARY = {
   _selectedFile: null,
@@ -5391,7 +5392,6 @@ const NAV = {
       case 'field-area':    if (window.FIELD_AREA_UI?.render) FIELD_AREA_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
       case 'report':     REPORT_UI.refresh(); break;
       case 'kamoku':     if (window.KAMOKU_UI?.render) KAMOKU_UI.render(); break;
-      case 'ai_gen':    if (window.AI_GEN_UI?.init) AI_GEN_UI.init(); break;
     }
   },
 };
@@ -5416,7 +5416,7 @@ const UI = {
   updateSaveStatus() {
     const label = document.getElementById('autosave-label');
     const dot   = document.getElementById('autosave-dot');
-    if (label) label.textContent = `クラウド同期済 (${STATE.datasets.length}件)`;
+    if (label) label.textContent = `ローカル保存済 (${STATE.datasets.length}件)`;
     if (dot)   dot.style.background = STATE.datasets.length ? '#4d9fea' : '#607d9a';
   },
 
@@ -5771,15 +5771,18 @@ function loadExternalScriptOnce(id, src) {
 
 async function loadScreenModules() {
   await loadExternalScriptOnce('module-shipper', 'shipper.js');
-  await loadExternalScriptOnce('module-kamoku', 'kamoku.js');
-  await loadExternalScriptOnce('module-ai-gen', 'ai_gen.js');
 }
 
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
 function setupFieldImportYMControls(){}
 document.addEventListener('DOMContentLoaded', async () => {
-  // 0. 画面別モジュール読込（shipper.jsはHTMLで読込済みのためスキップ）
-  // ※ loadScreenModules()は削除済み。shipper.jsはcenter.html末尾で読み込んでいる。
+  // 0. 画面別モジュール読込（荷主分析など）
+  try {
+    await loadScreenModules();
+  } catch(e) {
+    console.warn(e);
+    UI.toast('一部画面モジュールの読み込みに失敗しました', 'warn');
+  }
 
   // 1. ローカルストレージから読込
   STORE.load();
@@ -5818,46 +5821,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   initFiscalYearSelects();
   setupFieldImportYMControls();
 
-  // 8. オーバーレイにセンター名を表示
-  const _overlayName = document.getElementById('overlay-center-name');
-  if (_overlayName) _overlayName.textContent = CENTER.name;
-
-  // 9. クラウド設定フォームとバッジを初期化
-  CLOUD.renderForm();
-
-  // 10. Supabase同期 → 完了後にオーバーレイをフェードアウトして画面表示
+  // 8. 前回ページを復元（F5対応）
   const _lastView = (() => { try { return sessionStorage.getItem('lastView') || 'dashboard'; } catch(e){ return 'dashboard'; } })();
-  const _overlayStatus = document.getElementById('overlay-status');
 
+  // 安全弁: 最大8秒でオーバーレイを強制消去
   function _hideOverlay() {
     const ov = document.getElementById('app-loading-overlay');
     if (!ov) return;
     ov.style.opacity = '0';
-    setTimeout(() => ov.remove(), 420);
+    setTimeout(() => ov.remove(), 400);
   }
-
-  // ── オーバーレイを必ず消す共通関数 ──
-  function _showApp(msg) {
-    NAV.go(_lastView);
-    UI.updateSaveStatus();
-    UI.updateTopbar(_lastView);
-    _hideOverlay();
-    if (msg) setTimeout(() => UI.toast(msg), 500);
-  }
-
-  // ── 安全弁: 最大8秒でオーバーレイを強制消去 ──
   const _safetyTimer = setTimeout(() => {
-    if (document.getElementById('app-loading-overlay')) {
-      console.warn('[BOOT] タイムアウト: オーバーレイを強制消去');
-      _showApp('クラウド接続がタイムアウトしました。ローカルデータで表示します。');
-    }
+    if (document.getElementById('app-loading-overlay')) _hideOverlay();
   }, 8000);
 
   const _hasLocal = STATE.datasets && STATE.datasets.length > 0;
+
+  // 9. クラウド設定フォームとバッジを初期化
+  CLOUD.renderForm();
+  UI.updateSaveStatus();
+
   if (_hasLocal) {
-    // キャッシュあり → 即表示、バックグラウンドで同期
     clearTimeout(_safetyTimer);
-    _showApp(null);
+    NAV.go(_lastView);
+    UI.updateTopbar(_lastView);
+    _hideOverlay();
+    // バックグラウンドでSupabase同期
     AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
       .then(r => {
         if (r && r.ok && r.changed) {
@@ -5869,16 +5858,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       })
       .catch(() => {});
   } else {
-    // キャッシュなし → Supabase完了を待つ（最大8秒）
-    if (_overlayStatus) _overlayStatus.textContent = 'Supabaseからデータを取得中...';
+    // キャッシュなし: Supabase完了後に表示
     AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
       .then(r => {
         clearTimeout(_safetyTimer);
-        _showApp(r && r.ok && r.changed ? 'クラウドの最新データを読み込みました' : null);
+        NAV.go(_lastView);
+        UI.updateSaveStatus();
+        UI.updateTopbar(_lastView);
+        _hideOverlay();
+        if (r && r.ok && r.changed) setTimeout(() => UI.toast('クラウドデータを読み込みました'), 500);
       })
       .catch(() => {
         clearTimeout(_safetyTimer);
-        _showApp('クラウド接続に失敗しました。ネット接続を確認してください。');
+        NAV.go(_lastView);
+        UI.updateSaveStatus();
+        UI.updateTopbar(_lastView);
+        _hideOverlay();
       });
   }
 });
