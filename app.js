@@ -4910,28 +4910,20 @@ const REPORT_UI = {
   },
 
   refresh() {
-    STATE.reportKnowledge = normalizeReportKnowledge(STATE.reportKnowledge);
     this.populateSelectors();
-    this.loadPolicy();
-    this.refreshReferenceList();
-    this.refreshGenerateSummary();
-    this.switchTab(this._tab || 'policy');
   },
 
   populateSelectors() {
     const fySel = document.getElementById('report-fy');
     const ymSel = document.getElementById('report-ym');
-    const halfSel = document.getElementById('report-half');
     if (!fySel) return;
-
-    const years = [...new Set([...dashboardAvailableFiscalYears(), getDefaultFiscalYear(), ...Object.keys(STATE.reportKnowledge.policies || {}).map(k=>k.slice(0,4))])]
+    const years = [...new Set([...dashboardAvailableFiscalYears(), getDefaultFiscalYear()])]
       .filter(Boolean).sort((a,b)=>Number(b)-Number(a));
     const oldFY = fySel.value || dashboardSelectedFiscalYear() || getDefaultFiscalYear();
     fySel.innerHTML = years.map(y=>`<option value="${esc(y)}" ${String(y)===String(oldFY)?'selected':''}>${esc(y)}年度</option>`).join('');
     if (!fySel.value && years.length) fySel.value = years[0];
-
     const fym = monthsOfFiscalYear(fySel.value);
-    const validYms = fym.filter(ym => activeDatasetByYM(ym) || (STATE.fieldData || []).some(d=>d.ym===ym) || (STATE.productAddressData || []).some(d=>d.ym===ym));
+    const validYms = fym.filter(ym => activeDatasetByYM(ym));
     const currentYM = ymSel?.value || dashboardSelectedYM() || validYms.at(-1) || fym[0] || '';
     if (ymSel) {
       ymSel.innerHTML = fym.map(ym=>{
@@ -4940,8 +4932,6 @@ const REPORT_UI = {
       }).join('');
       if (currentYM) ymSel.value = currentYM;
     }
-    if (halfSel && ymSel?.value && !halfSel.dataset.manualChanged) halfSel.value = reportHalfFromYM(ymSel.value);
-    if (halfSel) halfSel.onchange = () => { halfSel.dataset.manualChanged = '1'; this.refresh(); };
   },
 
   savePolicy() {
@@ -5093,36 +5083,51 @@ const REPORT_UI = {
   generatePrompt() {
     const out = document.getElementById('report-prompt-output');
     if (!out) return;
-    const fy = this.getFY();
-    const half = this.getHalf();
-    const ym = this.getYM();
-    const type = document.getElementById('report-type')?.value || 'monthly';
-    const style = document.getElementById('report-style')?.value || 'a4';
-    const tone = document.getElementById('report-tone')?.value || '結論先出し・実務的・数字重視';
-    const policy = this.getPolicy();
-    const refs = this.selectedReferences();
-    const refText = refs.length ? refs.map((r,i)=>`【参考資料${i+1}｜${r.category}｜重要度:${r.priority}】\n${r.title}\n${r.content || '添付資料あり。資料名・メモを参考にしてください。'}`).join('\n\n') : '参考資料なし';
+    const fy    = this.getFY();
+    const ym    = this.getYM();
+    const type  = document.getElementById('report-type')?.value || 'monthly';
+    const extra = document.getElementById('report-extra')?.value?.trim() || '';
 
-    out.value = `# ${CENTER.name} 会議報告書 作成依頼\n\n` +
-`## 作成条件\n` +
-`- 作成タイプ: ${type}\n- 対象: ${fy}年度 ${half} / ${ymLabel(ym)}\n- 出力形式: ${style}\n- 文章トーン: ${tone}\n\n` +
-`## 年度・半期方針\n` +
-`- 運営方針: ${policy?.direction || '未登録'}\n- 重点施策: ${policy?.actions || '未登録'}\n- 数値目標・管理指標: ${policy?.targets || '未登録'}\n- 前期からの課題・振り返り: ${policy?.issues || '未登録'}\n\n` +
-`## 月次実績データ\n${this.buildDataSummary(ym)}\n\n` +
-`## 参考資料ストック\n${refText}\n\n` +
-`## 作成ルール\n` +
-`- 構成は「結論 → 数字結果 → 進捗評価 → 原因・課題 → 今月実施したこと → 来月以降の打ち手 → まとめ」。\n` +
-`- 推測で書かず、数字・方針・参考資料に基づいて書く。確認できない内容は書かない。\n` +
-`- 文章は管理者会議でそのまま読める社内向けの丁寧な文体にする。\n` +
-`- 重点施策と月次実績のつながりを必ず書く。\n` +
-`- 過剰な経営提案ではなく、現場判断に直結する打ち手に絞る。\n` +
-`- A4 1枚想定で、見出し付きの本文として作成する。`;
-    UI.toast('会議報告書用プロンプトを生成しました');
+    // タイプ別の見出し
+    const typeLabel = { monthly:'月次会議報告書', halfReview:'半期振り返り', policy:'半期方針' }[type] || type;
+
+    // 月次収支データ
+    const dataSummary = this.buildDataSummary(ym);
+
+    // 過去資料から参考情報を取得（ライブラリに登録済みのもの）
+    const libs = (STATE.library || []).slice(0, 5)
+      .map((item, i) => `【資料${i+1}】${item.title||item.fileName||''}${item.memo ? '\n' + item.memo : ''}`)
+      .join('\n\n');
+
+    out.value =
+`${CENTER.name} 会議報告書（${typeLabel}）を作成してください。
+
+■ 対象
+- センター: ${CENTER.name}
+- 年度: ${fy}年度
+- 対象月: ${ymLabel(ym)}
+
+■ 月次実績データ
+${dataSummary}
+${libs ? '\n■ 参考資料（過去資料より）\n' + libs : ''}
+${extra ? '\n■ 特記事項・強調したいこと\n' + extra : ''}
+
+■ 作成の指示
+- 箇条書きではなく、段落形式の流れる文章で書く
+- 数字は必ず文中に具体的に入れる（百万円・千円単位）
+- 「一方で」「その中で」「これにより」等の接続詞で段落をつなぐ
+- 構成:「振り返り（概況→課題→成果）」「今後の方針（施策・目標・まとめ）」
+- A4 1枚、管理者会議でそのまま読める文体
+- 推測で書かず、上記データに基づいた内容のみ書く`;
+
+    const msg = document.getElementById('report-msg');
+    if (msg) msg.textContent = '生成しました。コピーしてChatGPTに貼り付けてください。';
+    UI.toast('プロンプトを生成しました');
   },
 
   copyPrompt() {
     const out = document.getElementById('report-prompt-output');
-    if (!out?.value) { UI.toast('先に「AI用プロンプト作成」ボタンを押してください','warn'); return; }
+    if (!out?.value) { UI.toast('先に「プロンプトを生成」ボタンを押してください','warn'); return; }
     navigator.clipboard.writeText(out.value).then(()=>UI.toast('クリップボードにコピーしました'));
   }
 };
