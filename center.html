@@ -530,15 +530,30 @@ window.SUPABASE_CONFIG = {
             <textarea id="report-extra" rows="3" placeholder="例: クレーン業務4月から本格化し月40件目標。エディオン新潟を継続受注中。K&B時間指定を廃止し不採算エリア整理した。" style="width:100%;font-size:12px;line-height:1.7;padding:8px;border:1px solid var(--border2);border-radius:6px;font-family:inherit;resize:vertical"></textarea>
           </div>
           <button id="report-gen-btn" style="width:100%;padding:14px;border:none;border-radius:10px;background:linear-gradient(135deg,#1a4d7c,#1a6fc4);color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px">
-            📄　Word報告書を自動生成（ChatGPT + Word）
+            ✨　AI下書きを生成する
           </button>
           <div id="report-progress" style="display:none;margin-top:14px;background:var(--surface2,#f5f7fa);border-radius:8px;padding:10px 14px">
             <div id="rpg-1" style="padding:5px 0;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border)">⬜ データを収集</div>
             <div id="rpg-2" style="padding:5px 0;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border)">⬜ ChatGPTが文章を生成（20〜40秒）</div>
-            <div id="rpg-3" style="padding:5px 0;font-size:12px;color:var(--border)">⬜ Wordライブラリを読み込み</div>
-            <div id="rpg-4" style="padding:5px 0;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border)">⬜ Wordファイルを作成</div>
-            <div id="rpg-5" style="padding:5px 0;font-size:12px;color:var(--text3)">⬜ ダウンロード</div>
+            <div id="rpg-3" style="padding:5px 0;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border)">⬜ プレビューを作成</div>
+            <div id="rpg-4" style="padding:5px 0;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border)">⬜ Wordライブラリを読み込み</div>
+            <div id="rpg-5" style="padding:5px 0;font-size:12px;color:var(--text3)">⬜ Wordファイルを作成</div>
           </div>
+        </div>
+      </div>
+
+      <div class="card" id="report-preview-card" style="margin-top:14px;display:none;border-top:3px solid var(--navy)">
+        <div class="card-header">
+          <span class="card-title">生成結果プレビュー・編集</span>
+          <span style="font-size:11px;color:var(--text3)">必要に応じて本文を修正してからWord出力できます。</span>
+        </div>
+        <div class="card-body">
+          <textarea id="report-preview-editor" rows="22" style="width:100%;font-size:13px;line-height:1.8;padding:12px;border:1px solid var(--border2);border-radius:8px;font-family:'Yu Gothic','Meiryo',sans-serif;resize:vertical;background:var(--surface);color:var(--text)"></textarea>
+          <div style="display:flex;gap:10px;margin-top:12px;justify-content:flex-end;flex-wrap:wrap">
+            <button id="report-copy-btn" class="btn" style="font-size:12px">本文コピー</button>
+            <button id="report-word-btn" class="btn btn-primary" style="font-size:12px">Word出力</button>
+          </div>
+          <div id="report-output-msg" style="font-size:11px;color:var(--text3);margin-top:8px"></div>
         </div>
       </div>
     </div>
