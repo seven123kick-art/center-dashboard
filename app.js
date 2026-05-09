@@ -5857,47 +5857,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (document.getElementById('app-loading-overlay')) _hideOverlay();
   }, 8000);
 
-  const _hasLocal = STATE.datasets && STATE.datasets.length > 0;
-
   // 9. クラウド設定フォームとバッジを初期化
   CLOUD.renderForm();
   UI.updateSaveStatus();
 
-  if (_hasLocal) {
-    clearTimeout(_safetyTimer);
-    NAV.go(_lastView);
-    UI.updateTopbar(_lastView);
-    _hideOverlay();
-    // バックグラウンドでSupabase同期
-    AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
-      .then(r => {
-        if (r && r.ok && r.changed) {
-          NAV.refresh();
-          UI.updateTopbar(STATE.view || _lastView);
-          UI.updateSaveStatus();
-          UI.toast('クラウドの最新データを反映しました');
-        }
-      })
-      .catch(() => {});
-  } else {
-    // キャッシュなし: Supabase完了後に表示
-    AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
-      .then(r => {
-        clearTimeout(_safetyTimer);
-        NAV.go(_lastView);
+  // ── 画面を即座に表示（Supabase完了を待たない）──
+  // キャッシュありなし関係なく、まず画面を出す。
+  // Supabaseはバックグラウンドで同期し、完了後にデータを更新する。
+  clearTimeout(_safetyTimer);
+  NAV.go(_lastView);
+  UI.updateTopbar(_lastView);
+  _hideOverlay();
+
+  // ── バックグラウンドでSupabase同期 ──
+  AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
+    .then(r => {
+      if (r && r.ok && r.changed) {
+        NAV.refresh();
+        UI.updateTopbar(STATE.view || _lastView);
         UI.updateSaveStatus();
-        UI.updateTopbar(_lastView);
-        _hideOverlay();
-        if (r && r.ok && r.changed) setTimeout(() => UI.toast('クラウドデータを読み込みました'), 500);
-      })
-      .catch(() => {
-        clearTimeout(_safetyTimer);
-        NAV.go(_lastView);
-        UI.updateSaveStatus();
-        UI.updateTopbar(_lastView);
-        _hideOverlay();
-      });
-  }
+        UI.toast('クラウドの最新データを反映しました');
+      }
+    })
+    .catch(e => {
+      console.warn('[BOOT] Supabase同期失敗:', e?.message || e);
+    });
 });
 
 
