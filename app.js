@@ -1557,7 +1557,7 @@ const CLOUD = {
       // 最新月だけ読むと、月選択で他月が未登録扱いになり、年度推移も壊れて見える。
       const fySet = new Set();
       if (STATE.fiscalYear) fySet.add(String(STATE.fiscalYear));
-      if (latestYm) fySet.add(String(monthToFiscalYear(latestYm)));
+      if (latestYm) fySet.add(String(fiscalYearFromYM(latestYm)));
       if (!fySet.size) fySet.add(String(getDefaultFiscalYear()));
 
       const targetYms = new Set();
