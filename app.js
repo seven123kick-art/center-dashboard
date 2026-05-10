@@ -1532,73 +1532,88 @@ const CLOUD = {
       return { ok:false, error:e.message };
     }
   },
-  async pullInitialForBoot(preferredView='dashboard') {
-    // 起動専用の軽量読込。
-    // 初回表示に必要な「台帳 + 収支月別JSON + 計画/キャパ」だけ先に取得し、
-    // 作業者CSV・商品住所CSV・資料などの重いデータは起動後のバックグラウンド同期へ回す。
+  async pullBootMinimum(preferredView='dashboard') {
+    // 起動専用の最小読込。
+    // 画面表示前は full_state / 作業者CSV / 商品住所CSV / 資料を読まない。
+    // まず manifest と最新月の収支だけ取得し、表示後に不足分だけ軽く補完する。
     try {
       let changed = 0;
-      let gotAny = false;
-
-      const full = await this._downloadJSON(this._fullStateKey());
-      if (full && typeof full === 'object') {
-        this._applyFullState(full);
-        changed++;
-        gotAny = true;
-      }
-
       const manifest = await this._downloadJSON(this._manifestKey());
-      if (!manifest) {
-        if (gotAny) {
-          UI.updateCloudBadge('ok');
-          return { ok:true, changed:!!changed, source:'boot_full_state' };
-        }
-        return await this.pullLegacy();
-      }
-
-      gotAny = true;
+      if (!manifest) return await this.pullLegacy();
+      if (manifest.center && manifest.center !== CENTER.id) return { ok:false, error:`別センター(${manifest.center})のmanifestです` };
       if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
 
       const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
       const sorted = metas.slice().sort((a,b) => String(a.ym).localeCompare(String(b.ym)));
       const latestYm = sorted.length ? sorted[sorted.length - 1].ym : null;
-      let targetYms = [];
-      if (latestYm && typeof monthsOfFiscalYear === 'function') {
-        const fy = monthToFiscalYear(latestYm);
-        targetYms = monthsOfFiscalYear(fy);
-      }
-      if (!targetYms.length && latestYm) targetYms = [latestYm];
+      const latestMeta = latestYm ? sorted.filter(m => m.ym === latestYm) : [];
 
-      const targetMeta = metas.filter(m => targetYms.includes(m.ym));
-      for (const meta of targetMeta) {
+      await Promise.allSettled(latestMeta.map(async meta => {
         const metaType = meta.type || 'confirmed';
-        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
+        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return;
         const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
         if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
           const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
           if (ds && ds.ym) { upsertDataset(ds); changed++; }
         }
-      }
+      }));
 
+      const singleTasks = [];
       if (manifest.hasPlanData) {
-        const cloudPlan = await this._downloadJSON(this._planKey());
-        if (cloudPlan && typeof cloudPlan === 'object') {
-          STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
-          changed++;
-        }
+        singleTasks.push(this._downloadJSON(this._planKey()).then(cloudPlan => {
+          if (cloudPlan && typeof cloudPlan === 'object') {
+            STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
+            changed++;
+          }
+        }));
       }
-
       if (manifest.hasCapacity && !STATE.capacity) {
-        const cap = await this._downloadJSON(this._capacityKey());
-        if (cap) { STATE.capacity = cap; changed++; }
+        singleTasks.push(this._downloadJSON(this._capacityKey()).then(cap => {
+          if (cap) { STATE.capacity = cap; changed++; }
+        }));
       }
+      await Promise.allSettled(singleTasks);
 
       applyDeletionTombstonesToState(STATE);
       sanitizePersonalDataState(STATE);
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
       if (changed) STORE.save();
       UI.updateCloudBadge('ok');
-      return { ok:true, changed:!!changed, source:'boot_manifest_light' };
+      return { ok:true, changed:!!changed, source:'boot_minimum', manifest, latestYm };
+    } catch(e) {
+      UI.updateCloudBadge('error');
+      return { ok:false, error:e.message };
+    }
+  },
+  async pullFiscalSkdlOnly(fy=null) {
+    // 表示後の軽量補完。収支月別JSONだけ取得し、作業者CSV・商品住所CSV・資料は読まない。
+    try {
+      const manifest = await this._downloadJSON(this._manifestKey());
+      if (!manifest) return { ok:false, error:'manifestなし' };
+      if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
+      const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
+      const targetFy = fy || (() => {
+        const sorted = metas.slice().sort((a,b) => String(a.ym).localeCompare(String(b.ym)));
+        const latest = sorted.length ? sorted[sorted.length - 1].ym : null;
+        return latest ? monthToFiscalYear(latest) : getDefaultFiscalYear();
+      })();
+      const yms = typeof monthsOfFiscalYear === 'function' ? monthsOfFiscalYear(targetFy) : [];
+      const targets = yms.length ? metas.filter(m => yms.includes(m.ym)) : metas;
+      let changed = 0;
+      const tasks = targets.map(async meta => {
+        const metaType = meta.type || 'confirmed';
+        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return;
+        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
+        if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
+          const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
+          if (ds && ds.ym) { upsertDataset(ds); changed++; }
+        }
+      });
+      await Promise.allSettled(tasks);
+      applyDeletionTombstonesToState(STATE);
+      if (changed) STORE.save();
+      UI.updateCloudBadge('ok');
+      return { ok:true, changed:!!changed, source:'fiscal_skdl_only' };
     } catch(e) {
       UI.updateCloudBadge('error');
       return { ok:false, error:e.message };
@@ -5943,39 +5958,48 @@ document.addEventListener('DOMContentLoaded', async () => {
     CLOUD.renderForm();
     UI.updateSaveStatus();
 
-    // 10. 起動専用の軽量読込後に初回描画する
-    // full pull を待つと、作業者CSV・商品住所CSV・資料まで取得して起動が重くなるため、
-    // 初回表示に必要な収支・計画・キャパだけを先に取得する。
+    // 10. 起動時は「ローカル優先」。ローカルにデータがある場合、クラウド読込を待たずに表示する。
+    // センター選択直後などローカルが空の時だけ、manifest + 最新月収支 + 計画/キャパの最小読込を待つ。
+    const _hasLocalData = Array.isArray(STATE.datasets) && STATE.datasets.some(d => d && d.ym && d.source !== 'history');
     let pullResult = null;
-    try {
-      pullResult = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullInitialForBoot(_lastView));
-    } catch(e) {
-      console.warn('[BOOT] Supabase軽量読込失敗:', e?.message || e);
-      pullResult = { ok:false, error:e };
+
+    if (_hasLocalData) {
+      clearTimeout(_bootSafetyTimer);
+      _bootRender(_lastView);
+    } else {
+      try {
+        pullResult = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullBootMinimum(_lastView));
+      } catch(e) {
+        console.warn('[BOOT] Supabase最小読込失敗:', e?.message || e);
+        pullResult = { ok:false, error:e };
+      }
+      clearTimeout(_bootSafetyTimer);
+      _bootRender(_lastView);
+
+      if (pullResult && pullResult.ok && pullResult.changed) {
+        setTimeout(() => UI.toast('クラウドの最新月データを反映しました'), 300);
+      } else if (pullResult && pullResult.error) {
+        setTimeout(() => UI.toast('クラウド読込に失敗したため、ローカルデータで起動しました', 'warn'), 300);
+      }
     }
 
-    clearTimeout(_bootSafetyTimer);
-    _bootRender(_lastView);
-
-    if (pullResult && pullResult.ok && pullResult.changed) {
-      setTimeout(() => UI.toast('クラウドの主要データを反映しました'), 300);
-    } else if (pullResult && pullResult.error) {
-      setTimeout(() => UI.toast('クラウド読込に失敗したため、ローカルデータで起動しました', 'warn'), 300);
-    }
-
-    // 重い月別現場データ・商品住所・資料は、画面表示後にバックグラウンドで同期する。
+    // 表示後の軽量補完：収支CSVだけを対象年度分取得する。
+    // 作業者CSV・商品住所CSV・過去資料は起動時に読まない。必要画面または手動同期で取得する。
     setTimeout(() => {
-      AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
+      const fy = (() => {
+        try { return dashboardSelectedFiscalYear ? dashboardSelectedFiscalYear() : getDefaultFiscalYear(); }
+        catch(e) { return getDefaultFiscalYear(); }
+      })();
+      AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullFiscalSkdlOnly(fy))
         .then(r => {
           if (r && r.ok && r.changed) {
             NAV.refresh();
             UI.updateTopbar(STATE.view || _lastView);
             UI.updateSaveStatus();
-            UI.toast('クラウドの追加データを反映しました');
           }
         })
-        .catch(e => console.warn('[BOOT] background pull failed:', e?.message || e));
-    }, 2500);
+        .catch(e => console.warn('[BOOT] fiscal skdl pull failed:', e?.message || e));
+    }, 1200);
   } catch(e) {
     console.error('[BOOT] 起動処理エラー:', e);
     clearTimeout(_bootSafetyTimer);
