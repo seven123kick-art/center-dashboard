@@ -1532,91 +1532,71 @@ const CLOUD = {
       return { ok:false, error:e.message };
     }
   },
-  async pullBootMinimum(preferredView='dashboard') {
+  async pullInitialForBoot(preferredView='dashboard') {
     // 起動専用の最小読込。
-    // 画面表示前は full_state / 作業者CSV / 商品住所CSV / 資料を読まない。
-    // まず manifest と最新月の収支だけ取得し、表示後に不足分だけ軽く補完する。
+    // 重要：ここでは full_state.json を読まない。
+    // full_state は肥大化しやすく、起動遅延・古いデータ上書き・二重読込感の原因になるため、
+    // 起動時は manifest + 対象年度の収支月別JSON + 計画/キャパだけに限定する。
     try {
       let changed = 0;
+
       const manifest = await this._downloadJSON(this._manifestKey());
-      if (!manifest) return await this.pullLegacy();
-      if (manifest.center && manifest.center !== CENTER.id) return { ok:false, error:`別センター(${manifest.center})のmanifestです` };
+      if (!manifest) {
+        UI.updateCloudBadge('warn');
+        return { ok:false, changed:false, error:'manifestなし', source:'boot_manifest_light' };
+      }
+
       if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
 
       const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
       const sorted = metas.slice().sort((a,b) => String(a.ym).localeCompare(String(b.ym)));
       const latestYm = sorted.length ? sorted[sorted.length - 1].ym : null;
-      const latestMeta = latestYm ? sorted.filter(m => m.ym === latestYm) : [];
 
-      await Promise.allSettled(latestMeta.map(async meta => {
+      let targetFiscalYear = null;
+      try {
+        const dsFy = typeof dashboardSelectedFiscalYear === 'function' ? Number(dashboardSelectedFiscalYear()) : null;
+        if (Number.isFinite(dsFy)) targetFiscalYear = dsFy;
+      } catch(e) {}
+      if (!targetFiscalYear && latestYm) targetFiscalYear = monthToFiscalYear(latestYm);
+
+      let targetYms = [];
+      if (targetFiscalYear && typeof monthsOfFiscalYear === 'function') targetYms = monthsOfFiscalYear(targetFiscalYear);
+      if (!targetYms.length && latestYm) targetYms = [latestYm];
+
+      const targetMeta = metas.filter(m => targetYms.includes(m.ym));
+      for (const meta of targetMeta) {
         const metaType = meta.type || 'confirmed';
-        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return;
+        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
         const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
         if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
           const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
           if (ds && ds.ym) { upsertDataset(ds); changed++; }
         }
-      }));
+      }
 
-      const singleTasks = [];
       if (manifest.hasPlanData) {
-        singleTasks.push(this._downloadJSON(this._planKey()).then(cloudPlan => {
-          if (cloudPlan && typeof cloudPlan === 'object') {
-            STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
-            changed++;
-          }
-        }));
+        const cloudPlan = await this._downloadJSON(this._planKey());
+        if (cloudPlan && typeof cloudPlan === 'object') {
+          const before = JSON.stringify(STATE.planData || {});
+          STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
+          if (JSON.stringify(STATE.planData || {}) !== before) changed++;
+        }
       }
+
       if (manifest.hasCapacity && !STATE.capacity) {
-        singleTasks.push(this._downloadJSON(this._capacityKey()).then(cap => {
-          if (cap) { STATE.capacity = cap; changed++; }
-        }));
+        const cap = await this._downloadJSON(this._capacityKey());
+        if (cap) { STATE.capacity = cap; changed++; }
       }
-      await Promise.allSettled(singleTasks);
 
       applyDeletionTombstonesToState(STATE);
       sanitizePersonalDataState(STATE);
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
       if (changed) STORE.save();
       UI.updateCloudBadge('ok');
-      return { ok:true, changed:!!changed, source:'boot_minimum', manifest, latestYm };
+      return { ok:true, changed:!!changed, source:'boot_manifest_light' };
     } catch(e) {
       UI.updateCloudBadge('error');
-      return { ok:false, error:e.message };
-    }
-  },
-  async pullFiscalSkdlOnly(fy=null) {
-    // 表示後の軽量補完。収支月別JSONだけ取得し、作業者CSV・商品住所CSV・資料は読まない。
-    try {
-      const manifest = await this._downloadJSON(this._manifestKey());
-      if (!manifest) return { ok:false, error:'manifestなし' };
-      if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
-      const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
-      const targetFy = fy || (() => {
-        const sorted = metas.slice().sort((a,b) => String(a.ym).localeCompare(String(b.ym)));
-        const latest = sorted.length ? sorted[sorted.length - 1].ym : null;
-        return latest ? monthToFiscalYear(latest) : getDefaultFiscalYear();
-      })();
-      const yms = typeof monthsOfFiscalYear === 'function' ? monthsOfFiscalYear(targetFy) : [];
-      const targets = yms.length ? metas.filter(m => yms.includes(m.ym)) : metas;
-      let changed = 0;
-      const tasks = targets.map(async meta => {
-        const metaType = meta.type || 'confirmed';
-        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return;
-        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
-        if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
-          const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
-          if (ds && ds.ym) { upsertDataset(ds); changed++; }
-        }
-      });
-      await Promise.allSettled(tasks);
-      applyDeletionTombstonesToState(STATE);
-      if (changed) STORE.save();
-      UI.updateCloudBadge('ok');
-      return { ok:true, changed:!!changed, source:'fiscal_skdl_only' };
-    } catch(e) {
-      UI.updateCloudBadge('error');
-      return { ok:false, error:e.message };
+      return { ok:false, changed:false, error:e.message, source:'boot_manifest_light' };
     }
   },
   async pull() {
@@ -5958,48 +5938,47 @@ document.addEventListener('DOMContentLoaded', async () => {
     CLOUD.renderForm();
     UI.updateSaveStatus();
 
-    // 10. 起動時は「ローカル優先」。ローカルにデータがある場合、クラウド読込を待たずに表示する。
-    // センター選択直後などローカルが空の時だけ、manifest + 最新月収支 + 計画/キャパの最小読込を待つ。
-    const _hasLocalData = Array.isArray(STATE.datasets) && STATE.datasets.some(d => d && d.ym && d.source !== 'history');
+    // 10. 初期表示の考え方
+    // ローカルに収支データがある場合は即表示する。
+    // ローカルが空の場合だけ、manifest + 対象年度の収支/計画/キャパを待ってから表示する。
+    // 起動直後の CLOUD.pull() 全取得は行わない（重い・二重読込感・古い full_state 上書きの原因）。
+    const hasLocalDashboardData = Array.isArray(STATE.datasets) && STATE.datasets.some(d => d && d.ym && d.source !== 'history');
     let pullResult = null;
 
-    if (_hasLocalData) {
+    if (hasLocalDashboardData) {
       clearTimeout(_bootSafetyTimer);
       _bootRender(_lastView);
+
+      // 表示後に軽量差分だけ確認する。changed の時だけ現在画面を1回更新する。
+      setTimeout(() => {
+        AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullInitialForBoot(_lastView))
+          .then(r => {
+            if (r && r.ok && r.changed) {
+              NAV.refresh();
+              UI.updateTopbar(STATE.view || _lastView);
+              UI.updateSaveStatus();
+              UI.toast('クラウドの主要データを反映しました');
+            }
+          })
+          .catch(e => console.warn('[BOOT] light background pull failed:', e?.message || e));
+      }, 1200);
     } else {
       try {
-        pullResult = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullBootMinimum(_lastView));
+        pullResult = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullInitialForBoot(_lastView));
       } catch(e) {
-        console.warn('[BOOT] Supabase最小読込失敗:', e?.message || e);
+        console.warn('[BOOT] Supabase軽量読込失敗:', e?.message || e);
         pullResult = { ok:false, error:e };
       }
+
       clearTimeout(_bootSafetyTimer);
       _bootRender(_lastView);
 
       if (pullResult && pullResult.ok && pullResult.changed) {
-        setTimeout(() => UI.toast('クラウドの最新月データを反映しました'), 300);
+        setTimeout(() => UI.toast('クラウドの主要データを反映しました'), 300);
       } else if (pullResult && pullResult.error) {
         setTimeout(() => UI.toast('クラウド読込に失敗したため、ローカルデータで起動しました', 'warn'), 300);
       }
     }
-
-    // 表示後の軽量補完：収支CSVだけを対象年度分取得する。
-    // 作業者CSV・商品住所CSV・過去資料は起動時に読まない。必要画面または手動同期で取得する。
-    setTimeout(() => {
-      const fy = (() => {
-        try { return dashboardSelectedFiscalYear ? dashboardSelectedFiscalYear() : getDefaultFiscalYear(); }
-        catch(e) { return getDefaultFiscalYear(); }
-      })();
-      AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullFiscalSkdlOnly(fy))
-        .then(r => {
-          if (r && r.ok && r.changed) {
-            NAV.refresh();
-            UI.updateTopbar(STATE.view || _lastView);
-            UI.updateSaveStatus();
-          }
-        })
-        .catch(e => console.warn('[BOOT] fiscal skdl pull failed:', e?.message || e));
-    }, 1200);
   } catch(e) {
     console.error('[BOOT] 起動処理エラー:', e);
     clearTimeout(_bootSafetyTimer);
