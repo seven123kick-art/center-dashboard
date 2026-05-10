@@ -1532,6 +1532,78 @@ const CLOUD = {
       return { ok:false, error:e.message };
     }
   },
+  async pullInitialForBoot(preferredView='dashboard') {
+    // 起動専用の軽量読込。
+    // 初回表示に必要な「台帳 + 収支月別JSON + 計画/キャパ」だけ先に取得し、
+    // 作業者CSV・商品住所CSV・資料などの重いデータは起動後のバックグラウンド同期へ回す。
+    try {
+      let changed = 0;
+      let gotAny = false;
+
+      const full = await this._downloadJSON(this._fullStateKey());
+      if (full && typeof full === 'object') {
+        this._applyFullState(full);
+        changed++;
+        gotAny = true;
+      }
+
+      const manifest = await this._downloadJSON(this._manifestKey());
+      if (!manifest) {
+        if (gotAny) {
+          UI.updateCloudBadge('ok');
+          return { ok:true, changed:!!changed, source:'boot_full_state' };
+        }
+        return await this.pullLegacy();
+      }
+
+      gotAny = true;
+      if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
+
+      const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
+      const sorted = metas.slice().sort((a,b) => String(a.ym).localeCompare(String(b.ym)));
+      const latestYm = sorted.length ? sorted[sorted.length - 1].ym : null;
+      let targetYms = [];
+      if (latestYm && typeof monthsOfFiscalYear === 'function') {
+        const fy = monthToFiscalYear(latestYm);
+        targetYms = monthsOfFiscalYear(fy);
+      }
+      if (!targetYms.length && latestYm) targetYms = [latestYm];
+
+      const targetMeta = metas.filter(m => targetYms.includes(m.ym));
+      for (const meta of targetMeta) {
+        const metaType = meta.type || 'confirmed';
+        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
+        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
+        if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
+          const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
+          if (ds && ds.ym) { upsertDataset(ds); changed++; }
+        }
+      }
+
+      if (manifest.hasPlanData) {
+        const cloudPlan = await this._downloadJSON(this._planKey());
+        if (cloudPlan && typeof cloudPlan === 'object') {
+          STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
+          changed++;
+        }
+      }
+
+      if (manifest.hasCapacity && !STATE.capacity) {
+        const cap = await this._downloadJSON(this._capacityKey());
+        if (cap) { STATE.capacity = cap; changed++; }
+      }
+
+      applyDeletionTombstonesToState(STATE);
+      sanitizePersonalDataState(STATE);
+      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+      if (changed) STORE.save();
+      UI.updateCloudBadge('ok');
+      return { ok:true, changed:!!changed, source:'boot_manifest_light' };
+    } catch(e) {
+      UI.updateCloudBadge('error');
+      return { ok:false, error:e.message };
+    }
+  },
   async pull() {
     try {
       let changed = false;
@@ -5871,13 +5943,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     CLOUD.renderForm();
     UI.updateSaveStatus();
 
-    // 10. クラウド読込完了後に初回描画する
-    // センター選択直後にローカルが空の場合、先に描画すると「データなし」画面になるため、ここでは待つ。
+    // 10. 起動専用の軽量読込後に初回描画する
+    // full pull を待つと、作業者CSV・商品住所CSV・資料まで取得して起動が重くなるため、
+    // 初回表示に必要な収支・計画・キャパだけを先に取得する。
     let pullResult = null;
     try {
-      pullResult = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull());
+      pullResult = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullInitialForBoot(_lastView));
     } catch(e) {
-      console.warn('[BOOT] Supabase同期失敗:', e?.message || e);
+      console.warn('[BOOT] Supabase軽量読込失敗:', e?.message || e);
       pullResult = { ok:false, error:e };
     }
 
@@ -5885,10 +5958,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     _bootRender(_lastView);
 
     if (pullResult && pullResult.ok && pullResult.changed) {
-      setTimeout(() => UI.toast('クラウドの最新データを反映しました'), 300);
+      setTimeout(() => UI.toast('クラウドの主要データを反映しました'), 300);
     } else if (pullResult && pullResult.error) {
       setTimeout(() => UI.toast('クラウド読込に失敗したため、ローカルデータで起動しました', 'warn'), 300);
     }
+
+    // 重い月別現場データ・商品住所・資料は、画面表示後にバックグラウンドで同期する。
+    setTimeout(() => {
+      AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
+        .then(r => {
+          if (r && r.ok && r.changed) {
+            NAV.refresh();
+            UI.updateTopbar(STATE.view || _lastView);
+            UI.updateSaveStatus();
+            UI.toast('クラウドの追加データを反映しました');
+          }
+        })
+        .catch(e => console.warn('[BOOT] background pull failed:', e?.message || e));
+    }, 2500);
   } catch(e) {
     console.error('[BOOT] 起動処理エラー:', e);
     clearTimeout(_bootSafetyTimer);
