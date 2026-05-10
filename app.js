@@ -5875,11 +5875,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const runBackgroundPull = () => {
     AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
       .then(r => {
-        if (r && r.ok && r.changed) {
+        if (r && r.ok) {
+          // 初期表示高速化により、最初の描画はローカル読込直後に走る。
+          // その後クラウド反映が changed=false 扱いでも、STATE が最新化されているケースがあるため、
+          // 起動時pull完了後は現在表示中ビューを必ず1回だけ再描画する。
           NAV.refresh();
           UI.updateTopbar(STATE.view || _lastView);
           UI.updateSaveStatus();
-          UI.toast('クラウドの最新データを反映しました');
+          if (r.changed) UI.toast('クラウドの最新データを反映しました');
         }
       })
       .catch(e => {
