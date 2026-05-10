@@ -5776,115 +5776,128 @@ async function loadScreenModules() {
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
 function setupFieldImportYMControls(){}
 document.addEventListener('DOMContentLoaded', async () => {
-  // 起動停止防止: どこかで初期化が止まっても最大8秒でローディング画面を解除する
-  const _bootSafetyTimer = setTimeout(() => {
-    try {
-      const ov = document.getElementById('app-loading-overlay');
-      if (ov) {
-        ov.style.opacity = '0';
-        setTimeout(() => ov.remove(), 420);
-      }
-      const banner = document.getElementById('js-error-banner');
-      if (banner && !banner.textContent) {
-        banner.style.display = 'block';
-        banner.textContent = '起動処理が長くなったため、ローディング画面を解除しました。画面が空白の場合はコンソールエラーを確認してください。';
-        setTimeout(() => { banner.style.display = 'none'; }, 6000);
-      }
-    } catch(e) {}
-  }, 8000);
-  // 0. 画面別モジュール読込（荷主分析など）
-  try {
-    await loadScreenModules();
-  } catch(e) {
-    console.warn(e);
-    UI.toast('一部画面モジュールの読み込みに失敗しました', 'warn');
-  }
+  let _bootRendered = false;
 
-  // 1. ローカルストレージから読込
-  STORE.load();
-  // 削除済みマーカー適用後の状態をローカルへ即保存し、リロード直後の古い補完・計画復活を防ぐ
-  STORE.save();
-
-  // 1.5 保存・取込・更新時の自動同期を有効化
-  AUTO_SYNC.install();
-
-  // 2. センター情報を画面に反映
-  document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
-  document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent=CENTER.name+'データ取込');
-
-  // 3. ドロップゾーン設定
-  setupDropZone('upload-zone', 'file-input', f=>IMPORT.handleFiles(f));
-  setupDropZone('field-upload-zone', 'field-file-input', f=>{
-    if (window.FIELD_WORKER_IMPORT2 && FIELD_WORKER_IMPORT2.handleFiles) FIELD_WORKER_IMPORT2.handleFiles(f);
-    else IMPORT.handleFiles(f);
-  });
-  setupDropZone('field-upload-zone2', 'field-file-input2', f=>{
-    if (window.FIELD_PRODUCT_IMPORT2 && FIELD_PRODUCT_IMPORT2.handleFiles) FIELD_PRODUCT_IMPORT2.handleFiles(f);
-    else IMPORT.handleFiles(f);
-  });
-
-  // 4. ファイル復元用
-  const loadInput = document.getElementById('session-load-input');
-  if (loadInput) loadInput.onchange = () => { STORE.restoreJSON(loadInput.files[0]); loadInput.value=''; };
-
-  // 5. キャパ月選択
-  CAPACITY_UI.populateYMSel();
-
-  // 6. 計画取込
-  setupPlanImport();
-
-  // 7. 年度Select全初期化・年度変更ガード
-  initFiscalYearSelects();
-  setupFieldImportYMControls();
-
-  // 8. 前回ページを復元（F5対応）
-  const _lastView = (() => {
-    try {
-      const v = sessionStorage.getItem('lastView') || 'dashboard';
-      return document.getElementById('view-' + v) ? v : 'dashboard';
-    } catch(e){ return 'dashboard'; }
-  })();
-
-  // 安全弁: 最大8秒でオーバーレイを強制消去
   function _hideOverlay() {
-    clearTimeout(_bootSafetyTimer);
     const ov = document.getElementById('app-loading-overlay');
     if (!ov) return;
     ov.style.opacity = '0';
     setTimeout(() => ov.remove(), 400);
   }
-  const _safetyTimer = setTimeout(() => {
-    if (document.getElementById('app-loading-overlay')) _hideOverlay();
-  }, 8000);
 
-  // 9. クラウド設定フォームとバッジを初期化
-  CLOUD.renderForm();
-  UI.updateSaveStatus();
-
-  // ── 起動時はデータ読込完了まで画面へ入れない ──
-  // 先にNAV.goすると、ローカル/クラウド反映前の空データでダッシュボードが描画され、
-  // その後の再描画で「2回読み込んだように見える」ため、初回描画はここでは行わない。
-  const enterApp = (view) => {
-    clearTimeout(_safetyTimer);
-    NAV.go(view || 'dashboard');
-    UI.updateTopbar(STATE.view || view || 'dashboard');
+  function _bootRender(view) {
+    if (_bootRendered) return;
+    _bootRendered = true;
+    NAV.go(view);
+    UI.updateTopbar(view);
     UI.updateSaveStatus();
     _hideOverlay();
-  };
+  }
+
+  // 起動停止防止：クラウド読込を待つが、異常時はローカルデータで起動する
+  const _bootSafetyTimer = setTimeout(() => {
+    try {
+      const v = (() => {
+        try {
+          const last = sessionStorage.getItem('lastView') || 'dashboard';
+          return document.getElementById('view-' + last) ? last : 'dashboard';
+        } catch(e){ return 'dashboard'; }
+      })();
+      _bootRender(v);
+      const banner = document.getElementById('js-error-banner');
+      if (banner) {
+        banner.style.display = 'block';
+        banner.textContent = 'クラウド読込に時間がかかっているため、ローカルデータで起動しました。';
+        setTimeout(() => { banner.style.display = 'none'; }, 6000);
+      }
+    } catch(e) {}
+  }, 15000);
 
   try {
-    // 起動時はクラウド → ローカル反映を待ってから、1回だけ画面を描画する。
-    // これにより「センター選択 → 空白 → 時間差で再描画」の違和感を防ぐ。
-    const r = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull());
-    enterApp(_lastView);
-    if (r && r.ok && r.changed) {
+    // 0. 画面別モジュール読込（荷主分析など）
+    try {
+      await loadScreenModules();
+    } catch(e) {
+      console.warn(e);
+      UI.toast('一部画面モジュールの読み込みに失敗しました', 'warn');
+    }
+
+    // 1. ローカルストレージから読込
+    STORE.load();
+    // 削除済みマーカー適用後の状態をローカルへ即保存し、リロード直後の古い補完・計画復活を防ぐ
+    STORE.save();
+
+    // 1.5 保存・取込・更新時の自動同期を有効化
+    AUTO_SYNC.install();
+
+    // 2. センター情報を画面に反映
+    document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
+    document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent=CENTER.name+'データ取込');
+
+    // 3. ドロップゾーン設定
+    setupDropZone('upload-zone', 'file-input', f=>IMPORT.handleFiles(f));
+    setupDropZone('field-upload-zone', 'field-file-input', f=>{
+      if (window.FIELD_WORKER_IMPORT2 && FIELD_WORKER_IMPORT2.handleFiles) FIELD_WORKER_IMPORT2.handleFiles(f);
+      else IMPORT.handleFiles(f);
+    });
+    setupDropZone('field-upload-zone2', 'field-file-input2', f=>{
+      if (window.FIELD_PRODUCT_IMPORT2 && FIELD_PRODUCT_IMPORT2.handleFiles) FIELD_PRODUCT_IMPORT2.handleFiles(f);
+      else IMPORT.handleFiles(f);
+    });
+
+    // 4. ファイル復元用
+    const loadInput = document.getElementById('session-load-input');
+    if (loadInput) loadInput.onchange = () => { STORE.restoreJSON(loadInput.files[0]); loadInput.value=''; };
+
+    // 5. キャパ月選択
+    CAPACITY_UI.populateYMSel();
+
+    // 6. 計画取込
+    setupPlanImport();
+
+    // 7. 年度Select全初期化・年度変更ガード
+    initFiscalYearSelects();
+    setupFieldImportYMControls();
+
+    // 8. 前回ページを復元（F5対応）
+    const _lastView = (() => {
+      try {
+        const v = sessionStorage.getItem('lastView') || 'dashboard';
+        return document.getElementById('view-' + v) ? v : 'dashboard';
+      } catch(e){ return 'dashboard'; }
+    })();
+
+    // 9. クラウド設定フォームとバッジを初期化
+    CLOUD.renderForm();
+    UI.updateSaveStatus();
+
+    // 10. クラウド読込完了後に初回描画する
+    // センター選択直後にローカルが空の場合、先に描画すると「データなし」画面になるため、ここでは待つ。
+    let pullResult = null;
+    try {
+      pullResult = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull());
+    } catch(e) {
+      console.warn('[BOOT] Supabase同期失敗:', e?.message || e);
+      pullResult = { ok:false, error:e };
+    }
+
+    clearTimeout(_bootSafetyTimer);
+    _bootRender(_lastView);
+
+    if (pullResult && pullResult.ok && pullResult.changed) {
       setTimeout(() => UI.toast('クラウドの最新データを反映しました'), 300);
+    } else if (pullResult && pullResult.error) {
+      setTimeout(() => UI.toast('クラウド読込に失敗したため、ローカルデータで起動しました', 'warn'), 300);
     }
   } catch(e) {
-    console.warn('[BOOT] Supabase同期失敗:', e?.message || e);
-    // ネットワーク失敗時でもローカルデータで起動できるようにする。
-    enterApp(_lastView);
-    setTimeout(() => UI.toast('クラウド同期に失敗しました。ローカルデータで表示します。', 'warn'), 300);
+    console.error('[BOOT] 起動処理エラー:', e);
+    clearTimeout(_bootSafetyTimer);
+    try {
+      _bootRender('dashboard');
+      UI.toast('起動処理でエラーが発生しました', 'error');
+    } catch(_) {
+      _hideOverlay();
+    }
   }
 });
 
