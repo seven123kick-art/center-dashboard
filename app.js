@@ -5861,39 +5861,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   CLOUD.renderForm();
   UI.updateSaveStatus();
 
-  // ── 画面を即座に表示（Supabase完了を待たない）──
-  // キャッシュありなし関係なく、まず画面を出す。
-  // Supabaseはバックグラウンドで同期し、完了後にデータを更新する。
-  clearTimeout(_safetyTimer);
-  NAV.go(_lastView);
-  UI.updateTopbar(_lastView);
-  _hideOverlay();
-
-  // ── バックグラウンドでSupabase同期 ──
-  // 初期描画直後にネットワーク同期を走らせると、画面表示と描画処理を取り合って重く見える。
-  // まず画面操作できる状態を優先し、同期は少し遅らせて実行する。
-  const runBackgroundPull = () => {
-    AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull())
-      .then(r => {
-        if (r && r.ok) {
-          // 初期表示高速化により、最初の描画はローカル読込直後に走る。
-          // その後クラウド反映が changed=false 扱いでも、STATE が最新化されているケースがあるため、
-          // 起動時pull完了後は現在表示中ビューを必ず1回だけ再描画する。
-          NAV.refresh();
-          UI.updateTopbar(STATE.view || _lastView);
-          UI.updateSaveStatus();
-          if (r.changed) UI.toast('クラウドの最新データを反映しました');
-        }
-      })
-      .catch(e => {
-        console.warn('[BOOT] Supabase同期失敗:', e?.message || e);
-      });
+  // ── 起動時はデータ読込完了まで画面へ入れない ──
+  // 先にNAV.goすると、ローカル/クラウド反映前の空データでダッシュボードが描画され、
+  // その後の再描画で「2回読み込んだように見える」ため、初回描画はここでは行わない。
+  const enterApp = (view) => {
+    clearTimeout(_safetyTimer);
+    NAV.go(view || 'dashboard');
+    UI.updateTopbar(STATE.view || view || 'dashboard');
+    UI.updateSaveStatus();
+    _hideOverlay();
   };
 
-  if ('requestIdleCallback' in window) {
-    window.requestIdleCallback(runBackgroundPull, { timeout: 2500 });
-  } else {
-    setTimeout(runBackgroundPull, 1200);
+  try {
+    // 起動時はクラウド → ローカル反映を待ってから、1回だけ画面を描画する。
+    // これにより「センター選択 → 空白 → 時間差で再描画」の違和感を防ぐ。
+    const r = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pull());
+    enterApp(_lastView);
+    if (r && r.ok && r.changed) {
+      setTimeout(() => UI.toast('クラウドの最新データを反映しました'), 300);
+    }
+  } catch(e) {
+    console.warn('[BOOT] Supabase同期失敗:', e?.message || e);
+    // ネットワーク失敗時でもローカルデータで起動できるようにする。
+    enterApp(_lastView);
+    setTimeout(() => UI.toast('クラウド同期に失敗しました。ローカルデータで表示します。', 'warn'), 300);
   }
 });
 
