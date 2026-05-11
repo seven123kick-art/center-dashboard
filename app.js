@@ -1505,6 +1505,66 @@ const CLOUD = {
     UI.updateCloudBadge('ok');
     return { ok:true, changed };
   },
+  async pullFieldDataForFiscalYear(fy) {
+    // 現場分析用の遅延読込。
+    // 起動時には作業者CSV・商品住所CSVを読まず、現場分析画面を開いた時だけ対象年度分を取得する。
+    try {
+      const fiscalYear = String(fy || STATE.fiscalYear || getDefaultFiscalYear());
+      const months = (typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(fiscalYear) : [];
+      const monthSet = new Set(months);
+      const manifest = await this._downloadJSON(this._manifestKey());
+      if (!manifest) return { ok:false, error:'manifestなし' };
+      if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
+
+      if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
+      if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
+
+      let changed = 0;
+
+      const workerMetas = (Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [])
+        .filter(meta => meta && meta.ym && monthSet.has(meta.ym));
+      for (const meta of workerMetas) {
+        if (deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+        const local = STATE.workerCsvData.find(d => d && d.ym === meta.ym);
+        const localAt = String(local?.importedAt || local?.updatedAt || local?.savedAt || '');
+        const cloudAt = String(meta.importedAt || meta.updatedAt || meta.savedAt || '');
+        if (!local || !this._validWorkerMonthRecord(local, meta) || cloudAt > localAt) {
+          const rec = await this._downloadJSON(this._workerMonthKey(meta.ym));
+          if (rec && rec.ym && this._validWorkerMonthRecord(rec, meta)) {
+            STATE.workerCsvData = STATE.workerCsvData.filter(d => d && d.ym !== rec.ym);
+            STATE.workerCsvData.push(rec);
+            changed++;
+          }
+        }
+      }
+
+      const productMetas = (Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [])
+        .filter(meta => meta && meta.ym && monthSet.has(meta.ym));
+      for (const meta of productMetas) {
+        if (deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+        const local = STATE.productAddressData.find(d => d && d.ym === meta.ym);
+        const localAt = String(local?.importedAt || local?.updatedAt || local?.savedAt || '');
+        const cloudAt = String(meta.importedAt || meta.updatedAt || meta.savedAt || '');
+        if (!local || !this._validProductMonthRecord(local, meta) || cloudAt > localAt) {
+          const rec = await this._downloadJSON(this._productMonthKey(meta.ym));
+          if (rec && rec.ym && this._validProductMonthRecord(rec, meta)) {
+            STATE.productAddressData = STATE.productAddressData.filter(d => d && d.ym !== rec.ym);
+            STATE.productAddressData.push(rec);
+            changed++;
+          }
+        }
+      }
+
+      applyDeletionTombstonesToState(STATE);
+      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+      if (changed) STORE.save();
+      UI.updateCloudBadge('ok');
+      return { ok:true, changed, source:'field_lazy', fiscalYear, workerMonths:workerMetas.length, productMonths:productMetas.length };
+    } catch(e) {
+      UI.updateCloudBadge('error');
+      return { ok:false, error:e.message };
+    }
+  },
   async pullLegacy() {
     const j = await this._downloadJSON(this._legacyKey());
     if (!j) return { ok:false, error:'旧形式データなし' };
@@ -5415,6 +5475,81 @@ function fmtFileSize(bytes) {
   return `${(n/1024/1024).toFixed(1)}MB`;
 }
 
+/* 現場分析データの遅延読込
+   起動時は現場CSVを読まず、現場分析画面を開いた時だけ対象年度分を取得する。 */
+const FIELD_CLOUD_LOAD = { promises:{}, done:{} };
+function currentFieldFiscalYearForLoad() {
+  const sel = document.getElementById('field-common-fy-select')?.value;
+  if (sel) return String(sel);
+  if (STATE.fiscalYear) return String(STATE.fiscalYear);
+  const yms = [];
+  if (STATE.selYM) yms.push(STATE.selYM);
+  const ds = selectedDashboardDS?.() || latestRealDS?.() || latestDS?.();
+  if (ds?.ym) yms.push(ds.ym);
+  const fieldYms = [
+    ...(Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData.map(d=>d?.ym) : []),
+    ...(Array.isArray(STATE.productAddressData) ? STATE.productAddressData.map(d=>d?.ym) : [])
+  ].filter(Boolean).sort();
+  if (fieldYms.length) yms.push(fieldYms[fieldYms.length - 1]);
+  const ym = yms.find(Boolean);
+  return String(ym ? fiscalYearFromYM(ym) : getDefaultFiscalYear());
+}
+function renderFieldCloudNotice(view, text='現場分析データをクラウドから読み込み中...') {
+  const viewEl = document.getElementById('view-' + view);
+  if (!viewEl) return;
+  let box = viewEl.querySelector('#field-cloud-lazy-loader');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'field-cloud-lazy-loader';
+    box.className = 'card';
+    box.style.cssText = 'margin-bottom:14px;border-left:4px solid #2563eb';
+    viewEl.insertBefore(box, viewEl.firstChild);
+  }
+  box.innerHTML = `<div class="card-body" style="display:flex;align-items:center;gap:10px;color:var(--text2);font-weight:800"><span class="spinner" style="width:16px;height:16px;border:2px solid #cbd5e1;border-top-color:#2563eb;border-radius:50%;display:inline-block;animation:spin 1s linear infinite"></span>${esc(text)}</div>`;
+}
+function removeFieldCloudNotice(view) {
+  document.getElementById('view-' + view)?.querySelector('#field-cloud-lazy-loader')?.remove();
+}
+function renderFieldViewAfterCloud(view, renderFn) {
+  const fy = currentFieldFiscalYearForLoad();
+  const key = `${CENTER.id}:${fy}`;
+  const localMonths = new Set([
+    ...(Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData.map(d=>d?.ym) : []),
+    ...(Array.isArray(STATE.productAddressData) ? STATE.productAddressData.map(d=>d?.ym) : [])
+  ].filter(Boolean));
+  const fyMonths = new Set((typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(fy) : []);
+  const hasLocalForFY = [...localMonths].some(ym => fyMonths.has(ym));
+
+  if (!CLOUD.pullFieldDataForFiscalYear || FIELD_CLOUD_LOAD.done[key]) {
+    renderFn();
+    return;
+  }
+
+  // ローカルに対象年度の現場データがある場合は先に表示し、裏で差分だけ取得する。
+  // ローカルが空の場合は、空表示を出さないように読み込み表示を挟む。
+  if (hasLocalForFY) renderFn();
+  else renderFieldCloudNotice(view);
+
+  if (!FIELD_CLOUD_LOAD.promises[key]) {
+    FIELD_CLOUD_LOAD.promises[key] = AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullFieldDataForFiscalYear(fy))
+      .then(r => {
+        FIELD_CLOUD_LOAD.done[key] = true;
+        return r;
+      })
+      .catch(e => ({ ok:false, error:e?.message || String(e) }))
+      .finally(() => { delete FIELD_CLOUD_LOAD.promises[key]; });
+  }
+
+  FIELD_CLOUD_LOAD.promises[key].then(r => {
+    if (STATE.view !== view) return;
+    removeFieldCloudNotice(view);
+    if (r && !r.ok) UI.toast('現場分析データの取得に失敗しました: ' + (r.error || '不明'), 'warn');
+    renderFn();
+    UI.updateTopbar(view);
+    UI.updateSaveStatus();
+  });
+}
+
 /* ════════ §25 NAV ══════════════════════════════════════════════ */
 const NAV = {
   // メイン画面切替（同期なし、再描画のみ）
@@ -5457,11 +5592,21 @@ const NAV = {
       case 'capacity':   CAPACITY_UI.render(); CAPACITY_UI.populateYMSel(); break;
       case 'import':     renderImport();       break;
       case 'library':    PAST_LIBRARY.renderList(); break;
-      case 'field':      FIELD_UI.renderDataList(); FIELD_UI.updatePeriodBadge(); break;
-      case 'field-worker':  if (window.FIELD_WORKER_UI?.render) FIELD_WORKER_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
-      case 'field-content': if (window.FIELD_CONTENT_UI?.render) FIELD_CONTENT_UI.render(); else if (window.FIELD_TASK_UI?.render) FIELD_TASK_UI.render(); else if (window.FIELD_CSV_REBUILD?.renderContent) FIELD_CSV_REBUILD.renderContent(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
-      case 'field-product': if (window.FIELD_PRODUCT_UI?.render) FIELD_PRODUCT_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
-      case 'field-area':    if (window.FIELD_AREA_UI?.render) FIELD_AREA_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); break;
+      case 'field':
+        renderFieldViewAfterCloud(view, () => { FIELD_UI.renderDataList(); FIELD_UI.updatePeriodBadge(); });
+        break;
+      case 'field-worker':
+        renderFieldViewAfterCloud(view, () => { if (window.FIELD_WORKER_UI?.render) FIELD_WORKER_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); });
+        break;
+      case 'field-content':
+        renderFieldViewAfterCloud(view, () => { if (window.FIELD_CONTENT_UI?.render) FIELD_CONTENT_UI.render(); else if (window.FIELD_TASK_UI?.render) FIELD_TASK_UI.render(); else if (window.FIELD_CSV_REBUILD?.renderContent) FIELD_CSV_REBUILD.renderContent(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); });
+        break;
+      case 'field-product':
+        renderFieldViewAfterCloud(view, () => { if (window.FIELD_PRODUCT_UI?.render) FIELD_PRODUCT_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); });
+        break;
+      case 'field-area':
+        renderFieldViewAfterCloud(view, () => { if (window.FIELD_AREA_UI?.render) FIELD_AREA_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); });
+        break;
       case 'report':     REPORT_UI.refresh(); break;
       case 'kamoku':     if (window.KAMOKU_UI?.render) KAMOKU_UI.render(); break;
     }
