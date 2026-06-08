@@ -4,9 +4,14 @@
 <meta charset="UTF-8">
 <title>経営管理システム</title>
 
-<link rel="stylesheet" href="assets/css/app.css">
-<script src="config/config.local.js"></script>
-
+<link rel="stylesheet" href="app.css">
+<script>
+window.SUPABASE_CONFIG = {
+  url:    "https://udjibwlgscdkoheceyds.supabase.co",
+  key:    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkamlid2xnc2Nka29oZWNleWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTQ5NjksImV4cCI6MjA5MjQzMDk2OX0.4whX8OuFFvjXYrfsJMIthMlPM7oxzbrqychlMu81G7w",
+  bucket: "center-data",
+};
+</script>
 
 <style>
 /* ===== PL 見やすさ改善 ===== */
@@ -934,31 +939,26 @@
           <div style="margin-top:4px"><span id="import-target-note">ページは共通ですが、保存キー・クラウドパス・IndexedDBはセンターIDで分離します。</span></div>
         </div>
       </div>
-      <details class="card" style="margin-bottom:14px">
-        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span class="card-title">📦 CSV一括取込</span>
-            <span class="badge badge-info">複数CSVまとめて選択</span>
-          </div>
-          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
-        </summary>
-        <div class="card-body" style="font-size:12px;line-height:1.8;color:var(--text2)">
-          収支CSV / 作業者CSV / 商品・住所CSVをまとめて選択できます。<br>
-          例：202604_SKDL_kitasaitama.csv、202604_WORKER_kitasaitama.csv、202604_PRODUCT_kitasaitama.csv<br>
-          <span style="color:#92400e">年月・CSV種別が判定できないファイルはスキップします。</span>
-          <div class="upload-zone no-print" style="margin-top:10px;padding:18px;border-radius:8px;border:2px dashed var(--border2);background:#f8fafc;text-align:center;cursor:pointer"
-               onclick="document.getElementById('bulk-csv-file-input').click()"
-               ondragover="event.preventDefault();this.classList.add('drag')"
-               ondragleave="this.classList.remove('drag')"
-               ondrop="this.classList.remove('drag');event.preventDefault();BULK_IMPORT.handleFiles(event.dataTransfer.files)">
-            <input type="file" id="bulk-csv-file-input" accept=".csv" multiple style="display:none" onchange="BULK_IMPORT.handleFiles(this.files);this.value=''">
-            <div style="font-size:24px;color:#94a3b8;margin-bottom:6px">⬆</div>
-            <div style="font-size:13px;font-weight:900;color:var(--text)">CSVをまとめて選択またはドロップ</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px">収支CSV / 作業者CSV / 商品・住所CSVを自動判定</div>
-          </div>
-          <div id="bulk-import-msg"></div>
+      <div class="card" style="margin-bottom:14px;border:2px solid #93c5fd">
+        <div class="card-header">
+          <span class="card-title">📦 CSV一括取込</span>
+          <button class="btn" onclick="document.getElementById('csv-bulk-file-input').click()" style="font-size:12px">複数CSVまとめて選択</button>
         </div>
-      </details>
+        <div class="card-body">
+          <div style="font-size:12px;color:var(--text2);line-height:1.8;margin-bottom:10px">
+            収支CSV / 作業者CSV / 商品・住所CSVをまとめて選択できます。<br>
+            例：<strong>202604_SKDL_kitasaitama.csv</strong>、<strong>202604_WORKER_kitasaitama.csv</strong>、<strong>202604_PRODUCT_kitasaitama.csv</strong><br>
+            <span style="color:#b45309">年月・CSV種別が判定できないファイルはスキップします。</span>
+          </div>
+          <div class="upload-zone no-print" id="csv-bulk-zone" style="padding:28px">
+            <input type="file" id="csv-bulk-file-input" accept=".csv" multiple style="display:none">
+            <div style="font-size:28px;color:#94a3b8;margin-bottom:8px">⬆</div>
+            <div style="font-size:14px;font-weight:800">CSVをまとめて選択またはドロップ</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:5px">SKDL / WORKER / PRODUCT を自動判定</div>
+          </div>
+          <div id="csv-bulk-msg" style="margin-top:8px"></div>
+        </div>
+      </div>
 
       <div class="card" style="margin-bottom:14px">
         <div class="card-body">
@@ -1252,24 +1252,21 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
 
-<script src="src/app.js" defer></script>
-<script src="src/core/store.js" defer></script>
-<script src="src/core/cloud.js" defer></script>
-<script src="src/core/auto_sync.js" defer></script>
-<script src="src/modules/dashboard.js" defer></script>
-<script src="src/modules/shipper.js" id="module-shipper" defer></script>
-<script src="src/modules/kamoku.js" id="module-kamoku" defer></script>
-<script src="src/modules/pl.js" defer></script>
-<script src="src/modules/trend.js" defer></script>
+<script src="app.js" defer></script>
+<script src="dashboard.js" defer></script>
+<script src="shipper.js" id="module-shipper" defer></script>
+<script src="kamoku.js" id="module-kamoku" defer></script>
+<script src="pl.js" defer></script>
+<script src="trend.js" defer></script>
 
-<script src="src/field/field_core.js" defer></script>
-<script src="src/field/field_worker.js" defer></script>
-<script src="src/field/field_content.js" defer></script>
-<script src="src/field/field_task.js" defer></script>
-<script src="src/field/field_product.js" defer></script>
+<script src="field_core.js" defer></script>
+<script src="field_worker.js" defer></script>
+<script src="field_content.js" defer></script>
+<script src="field_task.js" defer></script>
+<script src="field_product.js" defer></script>
 
-<script src="assets/data/jp_zip_loader.js" defer></script>
+<script src="jp_zip_loader.js" defer></script>
 
-<script src="src/field/field_area.js" defer></script>
+<script src="field_area.js" defer></script>
 </body>
 </html>
