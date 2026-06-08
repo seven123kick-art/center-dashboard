@@ -441,25 +441,31 @@
 
   function selectorHtml(ym){
     const yms = allYMs();
-    const years = fiscalYears(yms);
-    const fy = fiscalFromYM(ym) || selectedFY || years[0] || '';
-    const months = monthsForFY(yms, fy);
+    const years = window.PERIOD_UI?.fiscalYears ? PERIOD_UI.fiscalYears('field') : fiscalYears(yms);
+    if (!years.length) years.push(String(new Date().getFullYear()));
+    const fy = fiscalFromYM(ym) || selectedFY || window.STATE?.fiscalYear || years[0] || '';
+    const safeFY = years.includes(String(fy)) ? String(fy) : years[0];
+    const months = (typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(safeFY) : monthsForFY(yms, safeFY);
 
     return `
-      <div class="fa3-selector">
+      <div class="fa3-selector" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
         <div>
-          <strong>表示対象</strong>
-          <span>年度順：4月 → 翌年3月 ／ 年度・月を共通管理</span>
+          <strong style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</strong>
+          <span style="display:block;font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 ／ 年度・月を共通管理</span>
         </div>
-        <div class="fa3-selector-controls">
-          <label>対象年度
-            <select id="fa3-fy-select">
-              ${years.map(y=>`<option value="${esc(y)}" ${String(y)===String(fy)?'selected':''}>${esc(y)}年度</option>`).join('')}
+        <div class="fa3-selector-controls" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
+            <select id="fa3-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:120px">
+              ${years.map(y=>`<option value="${esc(y)}" ${String(y)===String(safeFY)?'selected':''}>${esc(y)}年度</option>`).join('')}
             </select>
           </label>
-          <label>対象月
-            <select id="fa3-ym-select">
-              ${months.map(m=>`<option value="${esc(m)}" ${String(m)===String(ym)?'selected':''}>${esc(ymText(m))}</option>`).join('')}
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
+            <select id="fa3-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
+              ${months.map(m=>{
+                const has = yms.includes(m);
+                const label = ymText(m) + (has ? '（現場明細あり）' : '（未登録）');
+                return `<option value="${esc(m)}" ${String(m)===String(ym)?'selected':''} ${has?'':'disabled'}>${esc(label)}</option>`;
+              }).join('')}
             </select>
           </label>
         </div>
@@ -884,6 +890,7 @@
       fySel.__fa3Bound = true;
       fySel.addEventListener('change', ()=>{
         selectedFY = fySel.value;
+        if (window.STATE) STATE.fiscalYear = selectedFY;
         const months = monthsForFY(allYMs(), selectedFY);
         selectedYMState = months[months.length - 1] || '';
         const commonFy = document.getElementById('field-common-fy-select');
@@ -903,7 +910,7 @@
         if (commonFy) commonFy.value = selectedFY;
         const commonYm = document.getElementById('field-common-month-select');
         if (commonYm) commonYm.value = selectedYMState;
-        if (window.STATE) STATE.selYM = selectedYMState;
+        if (window.STATE) { STATE.selYM = selectedYMState; STATE.fiscalYear = selectedFY; }
         setTimeout(render, 0);
       });
     }

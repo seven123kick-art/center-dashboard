@@ -907,52 +907,65 @@ IMPORT.deleteFieldData = function(ym) {
     if (!box) {
       box = document.createElement('div');
       box.id = 'field-common-selector-box';
-      box.className = 'card';
       box.style.cssText = 'margin-bottom:14px';
-      box.innerHTML = `
-        <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-          <div><div style="font-size:15px;font-weight:900">表示対象</div><div style="font-size:12px;color:var(--text3);margin-top:4px">年度順：4月 → 翌年3月 / 年度・月を共通管理</div></div>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <label style="font-size:12px;font-weight:800">対象年度</label><select id="field-common-fy-select" style="font-size:13px;font-weight:800;min-width:120px"></select>
-            <label style="font-size:12px;font-weight:800">対象月</label><select id="field-common-month-select" style="font-size:13px;font-weight:800;min-width:190px"></select>
-          </div>
-        </div>`;
       view.insertBefore(box, view.firstChild);
     } else if (box.parentElement !== view) {
       view.insertBefore(box, view.firstChild);
     }
+
+    const fieldYms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : fieldAllYms();
+    const years = (window.PERIOD_UI?.fiscalYears ? PERIOD_UI.fiscalYears('field') : [...new Set(fieldYms.map(ym=>fiscalFromYM2(ym)))]).sort((a,b)=>Number(b)-Number(a));
+    if (!years.length) years.push(String(getDefaultFiscalYear()));
+    const preferredFY = String(STATE.fiscalYear || fiscalFromYM2(STATE.selYM || fieldYms.at(-1) || `${new Date().getFullYear()}04`));
+    const fy = years.includes(preferredFY) ? preferredFY : years[0];
+    const currentYM = STATE.selYM && monthsOfFiscalYear(fy).includes(STATE.selYM) ? STATE.selYM : '';
+    const latestInFY = monthsOfFiscalYear(fy).filter(ym => fieldYms.includes(ym)).at(-1) || '';
+    const selectedYM = currentYM || latestInFY || ymFromFiscalMonth(fy, '04');
+
+    const monthOptions = monthsOfFiscalYear(fy).map(ym => {
+      const hasData = fieldYms.includes(ym);
+      const label = ymText(ym) + (hasData ? '（現場明細あり）' : '（未登録）');
+      return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${hasData?'':'disabled'}>${label}</option>`;
+    }).join('');
+
+    box.innerHTML = `
+      <div class="period-selector-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
+        <div>
+          <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
+          <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / 年度・月を共通管理</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
+            <select id="field-common-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:120px">
+              ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
+            </select>
+          </label>
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
+            <select id="field-common-month-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
+              ${monthOptions || '<option value="">データなし</option>'}
+            </select>
+          </label>
+        </div>
+      </div>`;
+
     const fySel = document.getElementById('field-common-fy-select');
     const mSel = document.getElementById('field-common-month-select');
-    if (!fySel || !mSel) return;
-    const fieldYms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : fieldAllYms();
-    const yset = new Set(fieldYms.map(ym=>fiscalFromYM2(ym)));
-    if (!yset.size) yset.add(getDefaultFiscalYear());
-    const years = [...yset].sort((a,b)=>Number(b)-Number(a));
-    const latestField = fieldYms.length ? fieldYms[fieldYms.length - 1] : '';
-    const baseYM = (STATE.selYM && fieldYms.includes(STATE.selYM)) ? STATE.selYM : (latestField || `${new Date().getFullYear()}04`);
-    const keepFY = fySel.value || fiscalFromYM2(baseYM);
-    fySel.innerHTML = years.map(y=>`<option value="${y}">${y}年度</option>`).join('');
-    fySel.value = years.includes(keepFY) ? keepFY : years[0];
-    function fillMonths(){
-      const fy = fySel.value;
-      const current = mSel.value || STATE.selYM;
-      mSel.innerHTML = MONTHS.map(mm => {
-        const ym = ymFromFiscalMonth(fy, mm);
-        const hasData = fieldYms.includes(ym);
-        const label = ymText(ym) + (hasData ? '' : '（未登録）');
-        return `<option value="${ym}" ${hasData ? '' : 'disabled'}>${label}</option>`;
-      }).join('');
-      if ([...mSel.options].some(o=>o.value===current)) mSel.value = current;
-      else {
-        const latest = [...mSel.options].reverse().find(o => !o.disabled && fieldYms.includes(o.value));
-        mSel.value = latest ? latest.value : ymFromFiscalMonth(fy, '04');
+    if (fySel) fySel.onchange = () => {
+      STATE.fiscalYear = String(fySel.value);
+      const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => fieldYms.includes(ym));
+      STATE.selYM = list.at(-1) || null;
+      refreshFieldAll(false);
+    };
+    if (mSel) mSel.onchange = () => {
+      if (mSel.value) {
+        STATE.selYM = mSel.value;
+        STATE.fiscalYear = fiscalFromYM2(mSel.value);
       }
-      STATE.fiscalYear = fy;
-      STATE.selYM = mSel.value;
-    }
-    fySel.onchange = () => { fillMonths(); refreshFieldAll(false); };
-    mSel.onchange = () => { STATE.selYM = mSel.value; refreshFieldAll(false); };
-    fillMonths();
+      refreshFieldAll(false);
+    };
+
+    STATE.fiscalYear = fy;
+    if (selectedYM && fieldYms.includes(selectedYM)) STATE.selYM = selectedYM;
   }
 
   function productRecord(ym){ return (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).find(d=>d.ym===ym); }

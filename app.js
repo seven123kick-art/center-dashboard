@@ -1977,131 +1977,143 @@ function selectedFieldDataInSelectedFiscalYear() {
   return list.find(d => d.ym === ym) || (list.length ? list[list.length - 1] : null);
 }
 
+
+/* 共通：年度・月プルダウン表示ルール
+   - 年度は全画面で同じ候補を使う（収支/現場/計画/キャパ/現在年度）
+   - 月は年度順（4月→翌年3月）で12ヶ月を必ず表示
+   - 未登録月は「（未登録）」と表示し、月単位画面では選択不可にする
+   - 年度変更時は、その年度で登録済みの最新月へ寄せる
+*/
+const PERIOD_UI = {
+  fiscalYears(kind='all') {
+    const set = new Set();
+    if (STATE.fiscalYear) set.add(String(STATE.fiscalYear));
+    set.add(String(getDefaultFiscalYear()));
+
+    const addYM = ym => { if (ym) set.add(String(fiscalYearFromYM(ym))); };
+    (activeRealCsvDatasets?.() || []).forEach(d => addYM(d?.ym));
+    (activeDatasets?.() || []).forEach(d => addYM(d?.ym));
+    (STATE.workerCsvData || []).forEach(d => addYM(d?.ym));
+    (STATE.productAddressData || []).forEach(d => addYM(d?.ym));
+    Object.keys(STATE.planData || {}).forEach(fy => /^\d{4}$/.test(String(fy)) && set.add(String(fy)));
+    Object.keys(STATE.capacityRegionsByFY || {}).forEach(fy => /^\d{4}$/.test(String(fy)) && set.add(String(fy)));
+    Object.keys(STATE.capacityCalendarsByFY || {}).forEach(fy => /^\d{4}$/.test(String(fy)) && set.add(String(fy)));
+
+    return [...set].sort((a,b)=>parseInt(b,10)-parseInt(a,10));
+  },
+  hasData(ym, kind='revenue') {
+    if (!ym) return false;
+    if (kind === 'revenue') return !!activeRealCsvDatasetByYM(ym);
+    if (kind === 'field') {
+      return (STATE.workerCsvData || []).some(d => d?.ym === ym) || (STATE.productAddressData || []).some(d => d?.ym === ym);
+    }
+    return !!activeDatasetByYM(ym);
+  },
+  monthLabel(ym, kind='revenue') {
+    const base = ymLabel(ym);
+    if (kind === 'field') return `${base}${this.hasData(ym, kind) ? '（現場明細あり）' : '（未登録）'}`;
+    const ds = kind === 'revenue' ? activeRealCsvDatasetByYM(ym) : activeDatasetByYM(ym);
+    return ds ? `${base}（${datasetKindLabel(ds)}）` : `${base}（未登録）`;
+  },
+  latestYMInFY(fy, kind='revenue') {
+    const months = monthsOfFiscalYear(fy);
+    const list = months.filter(ym => this.hasData(ym, kind));
+    return list.length ? list[list.length - 1] : null;
+  },
+  render(container, opt={}) {
+    if (!container) return;
+    const kind = opt.kind || 'revenue';
+    const useMonth = opt.useMonth !== false;
+    const viewKey = opt.viewKey || 'common';
+    const title = opt.title || '表示対象';
+    const subtitle = opt.subtitle || (useMonth ? '年度順：4月 → 翌年3月 / 年度・月を共通管理' : '年度順：4月 → 翌年3月 / 年度内推移を表示');
+    const years = this.fiscalYears(kind);
+    const fy = String(STATE.fiscalYear || dashboardSelectedFiscalYear() || years[0] || getDefaultFiscalYear());
+    const safeFY = years.includes(fy) ? fy : (years[0] || fy);
+    const selectedYM = STATE.selYM && monthsOfFiscalYear(safeFY).includes(STATE.selYM) ? STATE.selYM : (this.latestYMInFY(safeFY, kind) || '');
+    const months = monthsOfFiscalYear(safeFY);
+    const fyId = `${viewKey}-fy-select`;
+    const ymId = `${viewKey}-ym-select`;
+    const monthHtml = months.map(ym => {
+      const has = this.hasData(ym, kind);
+      const selected = ym === selectedYM ? 'selected' : '';
+      const disabled = has ? '' : 'disabled';
+      return `<option value="${esc(ym)}" ${selected} ${disabled}>${esc(this.monthLabel(ym, kind))}</option>`;
+    }).join('');
+
+    container.className = container.className || 'period-selector-wrap';
+    container.innerHTML = `
+      <div class="period-selector-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
+        <div>
+          <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">${esc(title)}</div>
+          <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">${esc(subtitle)}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
+            <select id="${fyId}" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:120px">
+              ${years.map(y=>`<option value="${esc(y)}" ${String(y)===String(safeFY)?'selected':''}>${esc(y)}年度</option>`).join('')}
+            </select>
+          </label>
+          ${useMonth ? `<label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
+            <select id="${ymId}" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
+              ${monthHtml || '<option value="">データなし</option>'}
+            </select>
+          </label>` : ''}
+        </div>
+      </div>`;
+
+    const fySel = document.getElementById(fyId);
+    const ymSel = document.getElementById(ymId);
+    if (fySel) fySel.onchange = () => {
+      STATE.fiscalYear = String(fySel.value);
+      STATE.selYM = this.latestYMInFY(STATE.fiscalYear, kind) || null;
+      if (typeof opt.onChange === 'function') opt.onChange({ fiscalYear: STATE.fiscalYear, ym: STATE.selYM, changed: 'fy' });
+    };
+    if (ymSel) ymSel.onchange = () => {
+      if (ymSel.value) STATE.selYM = ymSel.value;
+      STATE.fiscalYear = fiscalYearFromYM(STATE.selYM);
+      if (typeof opt.onChange === 'function') opt.onChange({ fiscalYear: STATE.fiscalYear, ym: STATE.selYM, changed: 'ym' });
+    };
+  }
+};
+window.PERIOD_UI = PERIOD_UI;
+
 function renderCommonPeriodSelector(viewKey, opt={}) {
   const view = document.getElementById('view-' + viewKey);
-  if (!view) return;
-
-  // 年度推移・年度指標系は「対象年度」だけに統一する。
-  // 月を選んでも年度内の先月まで表示されるように見える誤解を防ぐため。
+  if (!view || !window.PERIOD_UI) return;
   const yearOnlyViews = new Set(['trend','indicators','annual']);
   const useMonth = opt.useMonth !== false && !yearOnlyViews.has(viewKey);
-  const boxId = `${viewKey}-period-selector`;
-  let box = document.getElementById(boxId);
+  const kind = opt.kind || (viewKey === 'field' ? 'field' : 'all');
+  let box = document.getElementById(`${viewKey}-period-selector`);
   if (!box) {
     box = document.createElement('div');
-    box.id = boxId;
+    box.id = `${viewKey}-period-selector`;
     view.prepend(box);
   }
-
-  const years = dashboardAvailableFiscalYears();
-  const fy = dashboardSelectedFiscalYear();
-  const months = monthsOfFiscalYear(fy);
-  const selectedYM = dashboardSelectedYM();
-
-  const monthOptions = months.map(ym => {
-    const ds = activeDatasetByYM(ym);
-    const fds = (STATE.fieldData || []).find(d => d.ym === ym);
-    const hasData = viewKey === 'field' ? !!fds : !!ds;
-    const label = viewKey === 'field'
-      ? (fds ? `${ymLabel(ym)}（現場明細あり）` : `${ymLabel(ym)}（未登録）`)
-      : (ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`);
-    return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${hasData?'':'disabled'}>${label}</option>`;
-  }).join('');
-
-  box.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
-      <div>
-        <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
-        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / ${useMonth?'年度・月を共通管理':'年度内推移を表示'}</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
-          <select id="${viewKey}-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
-            ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
-          </select>
-        </label>
-        ${useMonth ? `
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
-          <select id="${viewKey}-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:190px">
-            ${monthOptions || '<option value="">データなし</option>'}
-          </select>
-        </label>` : ''}
-      </div>
-    </div>`;
-
-  const fySel = document.getElementById(`${viewKey}-fy-select`);
-  const ymSel = document.getElementById(`${viewKey}-ym-select`);
-
-  if (fySel) fySel.onchange = () => {
-    STATE.fiscalYear = fySel.value;
-    const monthsInFY = monthsOfFiscalYear(STATE.fiscalYear);
-    const list = viewKey === 'field'
-      ? monthsInFY.filter(ym => (STATE.fieldData || []).some(d => d.ym === ym))
-      : monthsInFY.filter(ym => activeDatasetByYM(ym));
-    STATE.selYM = list.length ? list[list.length - 1] : null;
-    NAV.refresh();
-  };
-
-  if (ymSel) ymSel.onchange = () => {
-    if (ymSel.value) STATE.selYM = ymSel.value;
-    NAV.refresh();
-  };
+  PERIOD_UI.render(box, {
+    viewKey,
+    kind,
+    useMonth,
+    subtitle: useMonth ? '年度順：4月 → 翌年3月 / 年度・月を共通管理' : '年度順：4月 → 翌年3月 / 年度内推移を表示',
+    onChange: () => NAV.refresh()
+  });
 }
 function renderDashboardSelector() {
   const area = document.getElementById('kpi-area');
-  if (!area || !area.parentNode) return;
-
+  if (!area || !area.parentNode || !window.PERIOD_UI) return;
   let box = document.getElementById('dashboard-period-selector');
   if (!box) {
     box = document.createElement('div');
     box.id = 'dashboard-period-selector';
     area.parentNode.insertBefore(box, area);
   }
-
-  const years = dashboardAvailableFiscalYears();
-  const fy = dashboardSelectedFiscalYear();
-  const months = monthsOfFiscalYear(fy);
-  const selectedYM = dashboardSelectedYM();
-  const monthOptions = months.map(ym => {
-    const ds = activeRealCsvDatasetByYM(ym);
-    const label = ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`;
-    return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${ds?'':'disabled'}>${label}</option>`;
-  }).join('');
-
-  box.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
-      <div>
-        <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
-        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / ダッシュボードのみ切替</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
-          <select id="dashboard-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
-            ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
-          </select>
-        </label>
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
-          <select id="dashboard-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:190px">
-            ${monthOptions || '<option value="">データなし</option>'}
-          </select>
-        </label>
-      </div>
-    </div>`;
-
-  const fySel = document.getElementById('dashboard-fy-select');
-  const ymSel = document.getElementById('dashboard-ym-select');
-  if (fySel) fySel.onchange = () => {
-    STATE.fiscalYear = fySel.value;
-    const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => activeRealCsvDatasetByYM(ym));
-    STATE.selYM = list.length ? list[list.length - 1] : null;
-    renderDashboard();
-    UI.updateTopbar('dashboard');
-  };
-  if (ymSel) ymSel.onchange = () => {
-    if (ymSel.value) STATE.selYM = ymSel.value;
-    renderDashboard();
-    UI.updateTopbar('dashboard');
-  };
+  PERIOD_UI.render(box, {
+    viewKey: 'dashboard',
+    kind: 'revenue',
+    useMonth: true,
+    subtitle: '年度順：4月 → 翌年3月 / ダッシュボードのみ切替',
+    onChange: () => { renderDashboard(); UI.updateTopbar('dashboard'); }
+  });
 }
 
 function latestDS() {

@@ -14,61 +14,23 @@
 function renderPLPeriodSelector() {
   const tbody = document.getElementById('pl-tbody');
   if (!tbody) return;
-
   const tableCard = tbody.closest('.card') || tbody.closest('section') || tbody.parentElement?.parentElement;
   if (!tableCard || !tableCard.parentNode) return;
-
   let box = document.getElementById('pl-period-selector');
   if (!box) {
     box = document.createElement('div');
     box.id = 'pl-period-selector';
     tableCard.parentNode.insertBefore(box, tableCard);
   }
-
-  const years = dashboardAvailableFiscalYears();
-  const fy = dashboardSelectedFiscalYear();
-  const months = monthsOfFiscalYear(fy);
-  const selectedYM = dashboardSelectedYM();
-  const monthOptions = months.map(ym => {
-    const ds = activeDatasetByYM(ym);
-    const label = ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`;
-    return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${ds?'':'disabled'}>${label}</option>`;
-  }).join('');
-
-  box.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
-      <div>
-        <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
-        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / 月次収支表を切替</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
-          <select id="pl-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
-            ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
-          </select>
-        </label>
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
-          <select id="pl-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:190px">
-            ${monthOptions || '<option value="">データなし</option>'}
-          </select>
-        </label>
-      </div>
-    </div>`;
-
-  const fySel = document.getElementById('pl-fy-select');
-  const ymSel = document.getElementById('pl-ym-select');
-  if (fySel) fySel.onchange = () => {
-    STATE.fiscalYear = fySel.value;
-    const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => activeDatasetByYM(ym));
-    STATE.selYM = list.length ? list[list.length - 1] : null;
-    renderPL();
-    UI.updateTopbar('pl');
-  };
-  if (ymSel) ymSel.onchange = () => {
-    if (ymSel.value) STATE.selYM = ymSel.value;
-    renderPL();
-    UI.updateTopbar('pl');
-  };
+  if (window.PERIOD_UI?.render) {
+    PERIOD_UI.render(box, {
+      viewKey: 'pl',
+      kind: 'all',
+      useMonth: true,
+      subtitle: '年度順：4月 → 翌年3月 / 月次収支表を切替',
+      onChange: () => { renderPL(); UI.updateTopbar('pl'); }
+    });
+  }
 }
 
 /* ════════ §13 RENDER — P&L ════════════════════════════════════ */

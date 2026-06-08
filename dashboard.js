@@ -15,58 +15,21 @@
 function renderDashboardSelector() {
   const area = document.getElementById('kpi-area');
   if (!area || !area.parentNode) return;
-
   let box = document.getElementById('dashboard-period-selector');
   if (!box) {
     box = document.createElement('div');
     box.id = 'dashboard-period-selector';
     area.parentNode.insertBefore(box, area);
   }
-
-  const years = dashboardAvailableFiscalYears();
-  const fy = dashboardSelectedFiscalYear();
-  const months = monthsOfFiscalYear(fy);
-  const selectedYM = dashboardSelectedYM();
-  const monthOptions = months.map(ym => {
-    const ds = activeDatasetByYM(ym);
-    const label = ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`;
-    return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${ds?'':'disabled'}>${label}</option>`;
-  }).join('');
-
-  box.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
-      <div>
-        <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
-        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / ダッシュボードのみ切替</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
-          <select id="dashboard-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
-            ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
-          </select>
-        </label>
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
-          <select id="dashboard-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:190px">
-            ${monthOptions || '<option value="">データなし</option>'}
-          </select>
-        </label>
-      </div>
-    </div>`;
-
-  const fySel = document.getElementById('dashboard-fy-select');
-  const ymSel = document.getElementById('dashboard-ym-select');
-  if (fySel) fySel.onchange = () => {
-    STATE.fiscalYear = fySel.value;
-    const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => activeDatasetByYM(ym));
-    STATE.selYM = list.length ? list[list.length - 1] : null;
-    renderDashboard();
-    UI.updateTopbar('dashboard');
-  };
-  if (ymSel) ymSel.onchange = () => {
-    if (ymSel.value) STATE.selYM = ymSel.value;
-    renderDashboard();
-    UI.updateTopbar('dashboard');
-  };
+  if (window.PERIOD_UI?.render) {
+    PERIOD_UI.render(box, {
+      viewKey: 'dashboard',
+      kind: 'revenue',
+      useMonth: true,
+      subtitle: '年度順：4月 → 翌年3月 / ダッシュボードのみ切替',
+      onChange: () => { renderDashboard(); UI.updateTopbar('dashboard'); }
+    });
+  }
 }
 
 window.renderDashboard = function renderDashboard() {
