@@ -546,13 +546,66 @@ window.applyDeletionTombstonesToState = applyDeletionTombstonesToState;
 const STORE = {
   _p: `mgmt5_${CENTER.id}_`,
 
-  _s(k, v) { try { localStorage.setItem(this._p+k, JSON.stringify(v)); } catch(e){} },
+  _s(k, v) { try { localStorage.setItem(this._p+k, JSON.stringify(v)); return true; } catch(e){ console.warn('[STORE] localStorage save failed', k, e); return false; } },
   _g(k)    { try { const v=localStorage.getItem(this._p+k); return v?JSON.parse(v):null; } catch(e){ return null; } },
+  _rm(k) { try { localStorage.removeItem(this._p+k); } catch(e){} },
+  _fieldIndexKey(kind) { return `field_${kind}_index`; },
+  _fieldMonthKey(kind, ym) { return `field_${kind}_${ym}`; },
+  _fieldMeta(kind, rec) {
+    if (!rec || !rec.ym) return null;
+    const base = {
+      ym: rec.ym,
+      source: rec.source || (kind === 'worker' ? 'worker_csv' : 'product_address_csv'),
+      importedAt: rec.importedAt || rec.updatedAt || rec.savedAt || null
+    };
+    if (kind === 'worker') {
+      base.rowCount = rec.rowCount || 0;
+      base.workerCount = rec.workerCount || 0;
+    } else {
+      base.uniqueCount = rec.uniqueCount || (Array.isArray(rec.tickets) ? rec.tickets.length : 0);
+      base.detailRows = rec.detailRows || 0;
+      base.amount = rec.amount || 0;
+    }
+    return base;
+  },
+  _loadFieldSplit(kind, legacyKey) {
+    const index = this._g(this._fieldIndexKey(kind));
+    const out = [];
+    if (Array.isArray(index) && index.length) {
+      index.forEach(meta => {
+        const ym = meta && meta.ym;
+        if (!ym) return;
+        const rec = this._g(this._fieldMonthKey(kind, ym));
+        if (rec && rec.ym) out.push(rec);
+      });
+      if (out.length) return out.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+    }
+    const legacy = this._g(legacyKey);
+    return Array.isArray(legacy) ? legacy : [];
+  },
+  _saveFieldSplit(kind, records) {
+    const list = Array.isArray(records) ? records.filter(r => r && r.ym) : [];
+    const index = [];
+    const seen = new Set();
+    list.forEach(rec => {
+      if (!rec || !rec.ym || seen.has(rec.ym)) return;
+      seen.add(rec.ym);
+      const ok = this._s(this._fieldMonthKey(kind, rec.ym), rec);
+      if (ok) {
+        const meta = this._fieldMeta(kind, rec);
+        if (meta) index.push(meta);
+      }
+    });
+    const okIndex = this._s(this._fieldIndexKey(kind), index.sort((a,b)=>String(a.ym).localeCompare(String(b.ym))));
+    // 大容量CSV本体は月別キーへ保存する。旧一括キーは容量超過・復元失敗の原因になるため、軽量メタだけ残す。
+    this._s(kind === 'worker' ? 'workerCsvData' : 'productAddressData', index);
+    return okIndex;
+  },
 
   load() {
     STATE.datasets  = this._g('datasets')  || [];
-    STATE.workerCsvData = this._g('workerCsvData') || [];
-    STATE.productAddressData = this._g('productAddressData') || [];
+    STATE.workerCsvData = this._loadFieldSplit('worker', 'workerCsvData');
+    STATE.productAddressData = this._loadFieldSplit('product', 'productAddressData');
     STATE.fieldData = this._g('fieldData') || [];
     STATE.areaData  = this._g('areaData')  || [];
     STATE.capacity  = this._g('capacity')  || null;
@@ -568,8 +621,8 @@ const STORE = {
   save() {
     sanitizePersonalDataState(STATE);
     this._s('datasets',  STATE.datasets);
-    this._s('workerCsvData', STATE.workerCsvData || []);
-    this._s('productAddressData', STATE.productAddressData || []);
+    this._saveFieldSplit('worker', STATE.workerCsvData || []);
+    this._saveFieldSplit('product', STATE.productAddressData || []);
     this._s('fieldData', STATE.fieldData);
     this._s('areaData',  STATE.areaData);
     this._s('capacity',  STATE.capacity);

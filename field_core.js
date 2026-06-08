@@ -224,8 +224,6 @@ IMPORT.deleteFieldData = function(ym) {
   const originalStoreSave = STORE.save.bind(STORE);
   STORE.load = function(){
     originalStoreLoad();
-    STATE.workerCsvData = this._g('workerCsvData') || [];
-    STATE.productAddressData = this._g('productAddressData') || [];
     ensureState();
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
@@ -234,9 +232,9 @@ IMPORT.deleteFieldData = function(ym) {
     ensureState();
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
+    // 現場明細CSVは app.js の STORE.save 側で月単位分割保存する。
+    // ここで一括保存すると北埼玉の大容量CSVでlocalStorage容量超過になり、センター切替後に0件化する。
     originalStoreSave();
-    this._s('workerCsvData', STATE.workerCsvData);
-    this._s('productAddressData', STATE.productAddressData);
   };
 
   // クラウド同期は app.js の CLOUD 側で月単位分割保存する。
