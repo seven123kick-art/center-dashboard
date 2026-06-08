@@ -590,15 +590,16 @@ const STORE = {
     list.forEach(rec => {
       if (!rec || !rec.ym || seen.has(rec.ym)) return;
       seen.add(rec.ym);
-      const ok = this._s(this._fieldMonthKey(kind, rec.ym), rec);
-      if (ok) {
-        const meta = this._fieldMeta(kind, rec);
-        if (meta) index.push(meta);
-      }
+      const meta = this._fieldMeta(kind, rec);
+      if (meta) index.push(meta);
     });
-    const okIndex = this._s(this._fieldIndexKey(kind), index.sort((a,b)=>String(a.ym).localeCompare(String(b.ym))));
-    // 大容量CSV本体は月別キーへ保存する。旧一括キーは容量超過・復元失敗の原因になるため、軽量メタだけ残す。
-    this._s(kind === 'worker' ? 'workerCsvData' : 'productAddressData', index);
+    const sortedIndex = index.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+
+    // 完成形方針：現場明細CSV本体はSupabase DBを正本にする。
+    // localStorageへ大容量CSVを保存すると、ブラウザ容量超過でセンター切替後に0件化するため、
+    // ローカルには軽量な月別インデックスだけを残す。
+    const okIndex = this._s(this._fieldIndexKey(kind), sortedIndex);
+    this._s(kind === 'worker' ? 'workerCsvData' : 'productAddressData', sortedIndex);
     return okIndex;
   },
 
@@ -671,10 +672,14 @@ const STORE = {
   },
 
   storageInfo() {
+    // localStorage全探索は行わず、現在のSTORE管理キーだけを見る。
+    // データ本体はSupabase DB正本のため、ここはキャッシュ/設定容量の目安として扱う。
+    const keys = [
+      'datasets','field_worker_index','field_product_index','workerCsvData','productAddressData',
+      'fieldData','areaData','capacity','planData','memos','library','reportKnowledge','deleted'
+    ];
     let size = 0;
-    for (const k of Object.keys(localStorage)) {
-      if (k.startsWith(this._p)) size += (localStorage.getItem(k)||'').length * 2;
-    }
+    keys.forEach(k => { try { size += (localStorage.getItem(this._p + k) || '').length * 2; } catch(e){} });
     return { bytes: size, kb: (size/1024).toFixed(1) };
   },
 };
@@ -1203,8 +1208,18 @@ const CLOUD = {
   _busy: false,
 
   _cfg() {
-    try { const s = localStorage.getItem(this._LSKEY); if (s) return JSON.parse(s); } catch(e) {}
-    return { url: CONFIG.SUPABASE_URL, key: CONFIG.SUPABASE_KEY, bucket: CONFIG.SUPABASE_BUCKET };
+    const def = { url: CONFIG.SUPABASE_URL, key: CONFIG.SUPABASE_KEY, bucket: CONFIG.SUPABASE_BUCKET };
+    try {
+      const s = localStorage.getItem(this._LSKEY);
+      if (s) {
+        const saved = JSON.parse(s);
+        // プロジェクト移行後に古いURLがlocalStorageへ残ると、旧Supabaseへ接続してしまう。
+        // center.html/config.local.js のURLを正とし、URLが違う保存済み設定は無視する。
+        if (def.url && saved.url && saved.url !== def.url) return def;
+        return { ...def, ...saved };
+      }
+    } catch(e) {}
+    return def;
   },
   _saveCfg(url, key, bucket) { try { localStorage.setItem(this._LSKEY, JSON.stringify({ url, key, bucket })); } catch(e) {} this._sb = null; },
   async _client() {
@@ -1219,6 +1234,76 @@ const CLOUD = {
     } catch(e) { return null; }
   },
   _bucket() { return this._cfg().bucket || CONFIG.SUPABASE_BUCKET; },
+  _clientId() {
+    try {
+      let id = localStorage.getItem('mgmt5_client_id');
+      if (!id) {
+        id = 'client_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        localStorage.setItem('mgmt5_client_id', id);
+      }
+      return id;
+    } catch(e) {
+      return 'client_' + Date.now();
+    }
+  },
+  _dbStateKey(key) {
+    return `storage:${String(key || '').replace(/^\/+/, '')}`;
+  },
+  _dbChunkKey(stateKey, idx) {
+    return `${stateKey}::chunk::${String(idx).padStart(4,'0')}`;
+  },
+  async _dbUpsertState(stateKey, payload) {
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
+    const row = {
+      center_key: CENTER.id,
+      state_key: stateKey,
+      payload,
+      client_id: this._clientId(),
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await sb
+      .from('center_realtime_state')
+      .upsert(row, { onConflict:'center_key,state_key' });
+    if (error) throw error;
+    return { ok:true };
+  },
+  async _dbGetState(stateKey) {
+    const sb = await this._client();
+    if (!sb) return null;
+    const { data, error } = await sb
+      .from('center_realtime_state')
+      .select('payload,updated_at')
+      .eq('center_key', CENTER.id)
+      .eq('state_key', stateKey)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data.payload;
+  },
+  async _dbDeleteStates(stateKeys) {
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
+    const keys = (Array.isArray(stateKeys) ? stateKeys : [stateKeys]).filter(Boolean);
+    if (!keys.length) return { ok:true };
+    const { error } = await sb
+      .from('center_realtime_state')
+      .delete()
+      .eq('center_key', CENTER.id)
+      .in('state_key', keys);
+    if (error) return { ok:false, error:error.message };
+    return { ok:true };
+  },
+  async _dbDeletePrefix(prefix) {
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
+    const { error } = await sb
+      .from('center_realtime_state')
+      .delete()
+      .eq('center_key', CENTER.id)
+      .like('state_key', `${prefix}%`);
+    if (error) return { ok:false, error:error.message };
+    return { ok:true };
+  },
   _manifestKey() { return `${CENTER.id}/manifest.json`; },
   _datasetKey(ym, type='confirmed') { return `${CENTER.id}/skdl/${ym}_${type || 'confirmed'}.json`; },
   _capacityKey() { return `${CENTER.id}/capacity/master.json`; },
@@ -1337,53 +1422,67 @@ const CLOUD = {
     return { ok:true };
   },
   async _uploadJSON(key, value) {
+    // 正本は Supabase DB(center_realtime_state)。Storage bucketは元ファイル/添付用途に限定する。
+    // key は従来のStorageパスをそのまま state_key 化するため、既存呼び出し側は変更しない。
     value = sanitizedCloneForExport(value);
+    const stateKey = this._dbStateKey(key);
     const json = JSON.stringify(value);
-    const blob = new Blob([json], { type:'application/json' });
 
-    try {
-      await this._uploadBlob(key, blob, 'application/json');
-      return { ok:true, chunked:false };
-    } catch(error) {
-      if (!this._isSizeError(error)) throw error;
+    // jsonb 1行へ巨大CSVを入れない。大きいものはDB上で分割保存する。
+    // pointer行 + chunk行構成にすることで、商品住所CSVが増えてもlocalStorage/単一payloadの上限に依存しない。
+    const chunkThreshold = 280 * 1024;
+    if (json.length <= chunkThreshold) {
+      // 以前に分割保存されていた可能性があるため、旧chunkを掃除してから本体を保存する。
+      await this._dbDeletePrefix(this._dbChunkKey(stateKey, 0).replace(/0000$/, ''));
+      await this._dbUpsertState(stateKey, value);
+      return { ok:true, db:true, chunked:false };
     }
 
-    // Supabase bucketのobject size上限を超える場合は、小さいテキスト片に分割して保存する。
-    // 元のkeyには「分割台帳」だけを置くため、既存の downloadJSON 呼び出しはそのまま使える。
-    const chunkSize = 24 * 1024;
+    const chunkSize = 240 * 1024;
     const chunks = [];
     for (let i=0; i<json.length; i += chunkSize) chunks.push(json.slice(i, i + chunkSize));
 
+    await this._dbDeletePrefix(this._dbChunkKey(stateKey, 0).replace(/0000$/, ''));
     for (let i=0; i<chunks.length; i++) {
-      await this._uploadBlob(this._chunkKey(key, i), new Blob([chunks[i]], { type:'text/plain' }), 'text/plain');
+      await this._dbUpsertState(this._dbChunkKey(stateKey, i), { text: chunks[i] });
     }
 
     const pointer = {
-      __chunked: true,
+      __db_chunked: true,
       version: 1,
       center: CENTER.id,
       key,
+      stateKey,
       chunks: chunks.length,
       chunkSize,
       savedAt: new Date().toISOString(),
       bytes: json.length
     };
-    await this._uploadBlob(key, new Blob([JSON.stringify(pointer)], { type:'application/json' }), 'application/json');
-    return { ok:true, chunked:true, chunks:chunks.length };
+    await this._dbUpsertState(stateKey, pointer);
+    return { ok:true, db:true, chunked:true, chunks:chunks.length };
   },
   async _downloadJSON(key) {
-    const sb = await this._client();
-    if (!sb) return null;
-    const { data, error } = await sb.storage.from(this._bucket()).download(key);
-    if (error) return null;
-    const text = await data.text();
-    const first = JSON.parse(text);
+    const stateKey = this._dbStateKey(key);
+    const first = await this._dbGetState(stateKey);
+    if (!first) return null;
+
+    if (first && first.__db_chunked && Number(first.chunks) > 0) {
+      let joined = '';
+      for (let i=0; i<Number(first.chunks); i++) {
+        const part = await this._dbGetState(this._dbChunkKey(stateKey, i));
+        if (!part || typeof part.text !== 'string') throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
+        joined += part.text;
+      }
+      return JSON.parse(joined);
+    }
+
+    // 旧Storage分割ポインタがDBに入っていた場合の互換
     if (first && first.__chunked && Number(first.chunks) > 0) {
       let joined = '';
       for (let i=0; i<Number(first.chunks); i++) {
-        const part = await sb.storage.from(this._bucket()).download(this._chunkKey(key, i));
-        if (part.error || !part.data) throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
-        joined += await part.data.text();
+        const part = await this._dbGetState(this._dbChunkKey(stateKey, i));
+        if (!part || typeof part.text !== 'string') throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
+        joined += part.text;
       }
       return JSON.parse(joined);
     }
@@ -1400,11 +1499,19 @@ const CLOUD = {
     return { ok:true, key };
   },
   async deleteFile(key) {
-    const sb = await this._client();
-    if (!sb || !key) return { ok:false, error:'Supabase未設定またはキーなし' };
-    const { error } = await sb.storage.from(this._bucket()).remove([key]);
-    if (error) return { ok:false, error:error.message };
-    return { ok:true };
+    if (!key) return { ok:false, error:'キーなし' };
+
+    // JSON系データはDB保存。state本体と分割chunkを削除する。
+    const stateKey = this._dbStateKey(key);
+    await this._dbDeletePrefix(this._dbChunkKey(stateKey, 0).replace(/0000$/, ''));
+    const dbResult = await this._dbDeleteStates([stateKey]);
+
+    // 添付ファイルなどStorageに置くものは従来通り削除も試す。失敗してもDB削除済ならOK扱い。
+    try {
+      const sb = await this._client();
+      if (sb) await sb.storage.from(this._bucket()).remove([key]);
+    } catch(e) {}
+    return dbResult && dbResult.ok ? { ok:true } : dbResult;
   },
   async createSignedUrl(key) {
     const sb = await this._client();
@@ -1627,19 +1734,30 @@ const CLOUD = {
     }
   },
   async pullLegacy() {
-    const j = await this._downloadJSON(this._legacyKey());
+    // 旧DB一括保存(center_realtime_state/shared_bundle)からの復元互換。
+    // 以前の構成ではStorageではなくこの1行に一部データが入っていたため、移行元として読む。
+    let j = null;
+    try {
+      const shared = await this._dbGetState('shared_bundle');
+      if (shared) j = shared.state || shared.bundle || shared.data || shared;
+    } catch(e) {}
+    if (!j) j = await this._downloadJSON(this._legacyKey());
     if (!j) return { ok:false, error:'旧形式データなし' };
     if (j.datasets)  STATE.datasets  = j.datasets;
+    if (j.workerCsvData) STATE.workerCsvData = j.workerCsvData;
+    if (j.productAddressData) STATE.productAddressData = j.productAddressData;
     if (j.fieldData) STATE.fieldData = j.fieldData;
+    if (j.areaData) STATE.areaData = j.areaData;
     if (j.capacity)  STATE.capacity  = j.capacity;
     if (j.planData)  STATE.planData  = normalizePlanData(j.planData);
     if (j.memos)     STATE.memos     = j.memos;
     if (j.library)   STATE.library   = j.library;
+    if (j.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(j.reportKnowledge);
     if (j.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, j.deleted);
     applyDeletionTombstonesToState(STATE);
     STORE.save();
     UI.updateCloudBadge('ok');
-    return { ok:true };
+    return { ok:true, source:'legacy_shared_bundle' };
   },
   async pullFullState() {
     try {
