@@ -68,15 +68,21 @@ var CLOUD = window.CLOUD = {
   async _dbGetState(stateKey) {
     const sb = await this._client();
     if (!sb) return null;
+
+    // maybeSingle() は重複行やPostgREST側の状態によって読込全体を落とすことがある。
+    // DBを正本にするため、同じ center_key/state_key が複数あっても最新1件を採用する。
     const { data, error } = await sb
       .from('center_realtime_state')
       .select('payload,updated_at')
       .eq('center_key', CENTER.id)
       .eq('state_key', stateKey)
-      .maybeSingle();
+      .order('updated_at', { ascending:false })
+      .limit(1);
+
     if (error) throw error;
-    if (!data) return null;
-    return data.payload;
+    const row = Array.isArray(data) && data.length ? data[0] : null;
+    if (!row) return null;
+    return row.payload;
   },
   async loadState(centerKey = CENTER.id) {
     // DevTools確認用。CLOUD.loadState('toda') / CLOUD.loadState('kitasaitama') でDB上の保存行を確認できる。
@@ -218,7 +224,15 @@ var CLOUD = window.CLOUD = {
     return manifest;
   },
   async _loadManifestOrBuildFromDb() {
-    let manifest = await this._downloadJSON(this._manifestKey());
+    // manifestは補助台帳。ここが500/破損/重複で読めなくても、
+    // center_realtime_state の月別キーから台帳を再構成して起動を継続する。
+    let manifest = null;
+    try {
+      manifest = await this._downloadJSON(this._manifestKey());
+    } catch(e) {
+      console.warn('[CLOUD] manifest read skipped:', e?.message || e);
+      manifest = null;
+    }
 
     // manifestだけに頼らず、DB本体の月別キーから台帳を再構成する。
     // 商品住所CSVは分割chunkが多くなりやすく、全prefix取得ではskdl行が漏れることがあるため、
