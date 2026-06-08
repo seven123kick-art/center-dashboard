@@ -4211,23 +4211,22 @@ const BULK_IMPORT = window.BULK_IMPORT = {
     }
     return '';
   },
+
   _classify(name, sample) {
-    const n = String(name || '').toLowerCase();
+    const fileName = String(name || '');
     const t = String(sample || '');
 
     // 収支CSVはファイル名判定を最優先する。
-    // SKDLの本文には「商品」等の文字が含まれることがあり、商品住所CSVへ誤分類されるため。
-    if (/skdl0001/i.test(name) || /日報|速報/.test(name)) return { kind:'pl', type:'daily' };
-    if (/skdl0003/i.test(name) || /確定/.test(name)) return { kind:'pl', type:'confirmed' };
-    if (/skdl/i.test(name)) return { kind:'pl', type:'confirmed' };
+    // SKDL本文には「商品」などの文字が含まれるため、本文判定より先にSKDLを確定させる。
+    if (/skdl0001/i.test(fileName) || /日報|速報/.test(fileName)) return { kind:'pl', type:'daily' };
+    if (/skdl0003/i.test(fileName) || /確定/.test(fileName)) return { kind:'pl', type:'confirmed' };
+    if (/skdl/i.test(fileName)) return { kind:'pl', type:'confirmed' };
 
-    if (/作業者|作業員|worker|driver/i.test(name) || /作業者|作業員|担当者|配送担当/.test(t)) return { kind:'worker' };
-    if (/商品|住所|product|address/i.test(name) || /エスライン原票番号|お届け先郵便番号|郵便番号|商品名|商品/.test(t)) return { kind:'product' };
+    if (/作業者|作業員|worker|driver/i.test(fileName) || /作業者|作業員|担当者|配送担当/.test(t)) return { kind:'worker' };
+    if (/商品|住所|product|address/i.test(fileName) || /エスライン原票番号|お届け先郵便番号|郵便番号|商品名|商品/.test(t)) return { kind:'product' };
     return { kind:'unknown' };
   },
-  _setImportType(type) {
-    document.querySelectorAll('input[name="manual-import-type"]').forEach(r => { r.checked = (r.value === type); });
-  },
+
   _msg(text, type='info') {
     const el = document.getElementById('bulk-import-msg');
     if (!el) return;
@@ -4235,20 +4234,80 @@ const BULK_IMPORT = window.BULK_IMPORT = {
     const bg = type === 'error' ? '#fee2e2' : type === 'ok' ? '#dcfce7' : type === 'warn' ? '#fef3c7' : '#f8fafc';
     el.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:${bg};color:${color};font-weight:700;white-space:pre-wrap">${esc(text)}</div>`;
   },
+
+  async _importPLGroup(g) {
+    const type = g.type || 'confirmed';
+    const ym = g.ym;
+    const mm = ym.slice(4,6);
+    const monthCol = CONFIG.PLAN_MONTH_COLS[mm] ?? null;
+    let imported = 0;
+
+    for (const f of g.files) {
+      const text = await CSV.read(f);
+      const rows = CSV.parseSKDL(text, monthCol);
+      if (!rows) throw new Error(`${f.name}: SKDLの科目/金額を読み取れません`);
+
+      const ds = processDataset(ym, type, rows);
+      ds.source = 'csv';
+      ds.fileName = f.name;
+      ds.fiscalYear = fiscalYearFromYM(ym);
+      ds.unit = '円';
+      ds.importedAt = new Date().toISOString();
+      ds.replacedAt = new Date().toISOString();
+
+      if (typeof clearDataDeleted === 'function') clearDataDeleted('datasets', dataDeleteKey(ym, type));
+      STATE.datasets = (STATE.datasets || []).filter(d => !(d.ym === ym && (d.type || 'confirmed') === type && d.source !== 'history'));
+      upsertDataset(ds);
+      imported++;
+    }
+
+    if (!imported) throw new Error(`${ymLabel(ym)}の収支CSVを1件も取り込めませんでした`);
+
+    STORE.save();
+
+    if (AUTO_SYNC?._timer) {
+      clearTimeout(AUTO_SYNC._timer);
+      AUTO_SYNC._timer = null;
+    }
+
+    if (CLOUD?.pushMonth) {
+      const r = await CLOUD.pushMonth(ym);
+      if (!r || !r.ok) throw new Error(r?.error || 'クラウド保存に失敗しました');
+    } else if (CLOUD?.pushAll) {
+      const r = await CLOUD.pushAll();
+      if (!r || !r.ok) throw new Error(r?.error || 'クラウド保存に失敗しました');
+    }
+
+    return imported;
+  },
+
   async handleFiles(files) {
     const arr = Array.from(files || []).filter(f => /\.csv$/i.test(f.name));
-    if (!arr.length) { this._msg('CSVファイルがありません', 'warn'); return; }
-    this._msg(`${arr.length}件のCSVを確認中です…`);
+    if (!arr.length) {
+      this._msg('CSVファイルがありません', 'warn');
+      return;
+    }
+
+    this._msg(`${arr.length}件のCSVを確認中です…\n完了表示が出るまでセンター切替しないでください。`);
 
     const groups = new Map();
     const skipped = [];
+
     for (const f of arr) {
       let sample = '';
       try { sample = (await f.text()).slice(0, 4000); } catch(e) {}
       const ym = this._ymFromName(f.name);
       const c = this._classify(f.name, sample);
-      if (!ym) { skipped.push(`${f.name}：年月をファイル名から判定できません`); continue; }
-      if (c.kind === 'unknown') { skipped.push(`${f.name}：CSV種別を判定できません`); continue; }
+
+      if (!ym) {
+        skipped.push(`${f.name}：年月をファイル名から判定できません`);
+        continue;
+      }
+      if (c.kind === 'unknown') {
+        skipped.push(`${f.name}：CSV種別を判定できません`);
+        continue;
+      }
+
       const key = `${c.kind}:${c.type || ''}:${ym}`;
       if (!groups.has(key)) groups.set(key, { kind:c.kind, type:c.type || '', ym, files:[] });
       groups.get(key).files.push(f);
@@ -4256,32 +4315,58 @@ const BULK_IMPORT = window.BULK_IMPORT = {
 
     let done = 0;
     const logs = [];
+    const importedRevenueYms = [];
+
     for (const g of groups.values()) {
       try {
         if (g.kind === 'pl') {
-          this._setImportType(g.type || 'confirmed');
-          await IMPORT.processCSV(g.files, g.ym, { replace:true });
+          const count = await this._importPLGroup(g);
+          done += count;
+          importedRevenueYms.push(g.ym);
+          logs.push(`OK ${ymLabel(g.ym)} pl/${g.type || 'confirmed'}：${count}件 / クラウド保存済`);
         } else if (g.kind === 'worker') {
           if (!window.FIELD_WORKER_IMPORT2?.handleFilesForYM) throw new Error('作業者CSV一括取込処理が未読込です');
           await FIELD_WORKER_IMPORT2.handleFilesForYM(g.files, g.ym);
+          done += g.files.length;
+          logs.push(`OK ${ymLabel(g.ym)} worker：${g.files.length}件 / クラウド保存済`);
         } else if (g.kind === 'product') {
           if (!window.FIELD_PRODUCT_IMPORT2?.handleFilesForYM) throw new Error('商品住所CSV一括取込処理が未読込です');
           await FIELD_PRODUCT_IMPORT2.handleFilesForYM(g.files, g.ym);
+          done += g.files.length;
+          logs.push(`OK ${ymLabel(g.ym)} product：${g.files.length}件 / クラウド保存済`);
         }
-        done += g.files.length;
-        logs.push(`OK ${ymLabel(g.ym)} ${g.kind}${g.type ? '/' + g.type : ''}：${g.files.length}件`);
       } catch(e) {
-        logs.push(`NG ${ymLabel(g.ym)} ${g.kind}：${e.message}`);
+        logs.push(`NG ${ymLabel(g.ym)} ${g.kind}${g.type ? '/' + g.type : ''}：${e.message}`);
       }
+
+      this._msg([`一括取込処理中：${done}件完了`, ...logs].join('\n'), 'info');
     }
+
+    if (importedRevenueYms.length) {
+      importedRevenueYms.sort();
+      const latest = importedRevenueYms[importedRevenueYms.length - 1];
+      STATE.fiscalYear = fiscalYearFromYM(latest);
+      STATE.selYM = latest;
+    }
+
+    STORE.save();
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+
     NAV.refresh();
     renderImport();
-    const summary = [`一括取込完了：${done}件`, ...logs, ...(skipped.length ? ['','判定できずスキップ：', ...skipped] : [])].join('\n');
-    this._msg(summary, skipped.length ? 'warn' : 'ok');
+    UI.updateTopbar(STATE.view || 'import');
+    UI.updateSaveStatus();
+
+    const summary = [
+      `一括取込完了：${done}件`,
+      ...logs,
+      ...(skipped.length ? ['', '判定できずスキップ：', ...skipped] : [])
+    ].join('\n');
+
+    const hasNg = logs.some(x => x.startsWith('NG'));
+    this._msg(summary, hasNg ? 'error' : (skipped.length ? 'warn' : 'ok'));
   }
 };
-
 function renderImport() {
   const listEl = document.getElementById('data-list');
   if (listEl) {
