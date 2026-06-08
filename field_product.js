@@ -65,42 +65,11 @@
     return !!(v && v.classList.contains('active'));
   }
 
-  function localJSON(key){
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      if (!/^[\[{]/.test(raw.trim())) return null;
-      return JSON.parse(raw);
-    } catch(e) { return null; }
-  }
-
   function normalizeRecordTickets(x){
     if (!x || typeof x !== 'object') return [];
     if (Array.isArray(x.tickets)) return x.tickets.filter(Boolean);
     if (x.tickets && typeof x.tickets === 'object') return Object.values(x.tickets).filter(Boolean);
     return [];
-  }
-
-  function localStorageRecords(){
-    const out = [];
-    try {
-      for (let i=0; i<localStorage.length; i++) {
-        const key = localStorage.key(i) || '';
-        // センター別データ混入防止：現在のセンター用 localStorage キーだけ参照する
-        // 例：mgmt5_kitasaitama_productAddressData は北埼玉だけ、mgmt5_toda_productAddressData は戸田だけ
-        if (typeof STORE !== 'undefined' && STORE._p && !key.startsWith(STORE._p)) continue;
-        if (!/(^|_)productAddressData$|(^|_)workerCsvData$|(^|_)full_state$/.test(key)) continue;
-        const raw = localStorage.getItem(key);
-        if (!raw || !/^[\[{]/.test(String(raw).trim())) continue;
-        const val = JSON.parse(raw);
-        if (Array.isArray(val)) out.push({ key, value: val });
-        else if (val && typeof val === 'object') {
-          if (Array.isArray(val.productAddressData)) out.push({ key:key + '.productAddressData', value: val.productAddressData });
-          if (Array.isArray(val.workerCsvData)) out.push({ key:key + '.workerCsvData', value: val.workerCsvData });
-        }
-      }
-    } catch(e) {}
-    return out;
   }
 
   function collectRecords(){
@@ -143,11 +112,7 @@
     arr(st.workerCsvData).forEach((x,i)=>pushWorker(x, `STATE.workerCsvData.${i}`));
     arr(st.fieldData).forEach((x,i)=>{ pushProduct(x, `STATE.fieldData.${i}`); pushWorker(x, `STATE.fieldData.${i}`); });
 
-    // STATEが未初期化・別描画で空に見える場合の保険。保存済みの安全化済みデータだけ拾う。
-    localStorageRecords().forEach(pack=>{
-      if (/workerCsvData/.test(pack.key)) arr(pack.value).forEach((x,i)=>pushWorker(x, `${pack.key}.${i}`));
-      else arr(pack.value).forEach((x,i)=>pushProduct(x, `${pack.key}.${i}`));
-    });
+    // localStorageの直接探索は行わない。センター別・年度別の読込はFIELD_DATA_ACCESS/STATE/CLOUDに統一する。
 
     return out;
   }
