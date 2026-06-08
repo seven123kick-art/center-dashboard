@@ -136,7 +136,7 @@ var CLOUD = window.CLOUD = {
       .select('state_key,updated_at,payload')
       .eq('center_key', CENTER.id)
       .order('state_key', { ascending:true })
-      .limit(2000);
+      .limit(10000);
     if (prefix) q = q.like('state_key', `${prefix}%`);
     const { data, error } = await q;
     if (error) return { ok:false, error:error.message, details:error };
@@ -218,15 +218,36 @@ var CLOUD = window.CLOUD = {
   },
   async _loadManifestOrBuildFromDb() {
     let manifest = await this._downloadJSON(this._manifestKey());
-    const listed = await this._dbListStates(`storage:${CENTER.id}/`);
-    if (listed && listed.ok) {
-      const derived = this._metaFromDbRows(listed.rows);
+
+    // manifestだけに頼らず、DB本体の月別キーから台帳を再構成する。
+    // 商品住所CSVは分割chunkが多くなりやすく、全prefix取得ではskdl行が漏れることがあるため、
+    // 種類別prefixを個別に確認する。
+    const prefixes = [
+      `storage:${CENTER.id}/skdl/`,
+      `storage:${CENTER.id}/field/worker/`,
+      `storage:${CENTER.id}/field/product/`,
+      `storage:${CENTER.id}/plan/`,
+      `storage:${CENTER.id}/capacity/`,
+      `storage:${CENTER.id}/memos/`,
+      `storage:${CENTER.id}/library/`
+    ];
+
+    const rows = [];
+    for (const prefix of prefixes) {
+      try {
+        const listed = await this._dbListStates(prefix);
+        if (listed && listed.ok && Array.isArray(listed.rows)) rows.push(...listed.rows);
+      } catch(e) {}
+    }
+
+    if (rows.length) {
+      const derived = this._metaFromDbRows(rows);
       if (!manifest || typeof manifest !== 'object') manifest = derived;
       else {
         const mergeBy = (a = [], b = [], keyFn) => {
           const map = new Map();
-          a.forEach(x => map.set(keyFn(x), x));
-          b.forEach(x => { if (!map.has(keyFn(x))) map.set(keyFn(x), x); });
+          a.forEach(x => { if (x) map.set(keyFn(x), x); });
+          b.forEach(x => { if (x) map.set(keyFn(x), { ...(map.get(keyFn(x)) || {}), ...x }); });
           return [...map.values()];
         };
         manifest.datasets = mergeBy(manifest.datasets || [], derived.datasets || [], x => `${x.ym}_${x.type || 'confirmed'}`);
@@ -236,8 +257,8 @@ var CLOUD = window.CLOUD = {
         manifest.hasCapacity = !!(manifest.hasCapacity || derived.hasCapacity);
         manifest.hasMemos = !!(manifest.hasMemos || derived.hasMemos);
         manifest.hasLibrary = !!(manifest.hasLibrary || derived.hasLibrary);
+        manifest.deleted = mergeDeletedStates(manifest.deleted || {}, derived.deleted || {});
       }
-      // manifestが無い/古い場合でも次回以降のために軽く再作成する。失敗しても読込は続行。
       try { await this._uploadJSON(this._manifestKey(), manifest); } catch(e) {}
     }
     return manifest;
@@ -266,7 +287,7 @@ var CLOUD = window.CLOUD = {
     const workerCsv = Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData : [];
     const productCsv = Array.isArray(STATE.productAddressData) ? STATE.productAddressData : [];
     return {
-      version: 31,
+      version: 33,
       center: CENTER.id,
       savedAt: new Date().toISOString(),
       datasets: STATE.datasets.filter(d => d.source !== 'history').map(d => ({
