@@ -74,8 +74,35 @@ var CLOUD = window.CLOUD = {
       .eq('center_key', CENTER.id)
       .eq('state_key', stateKey)
       .maybeSingle();
-    if (error || !data) return null;
+    if (error) throw error;
+    if (!data) return null;
     return data.payload;
+  },
+  async loadState(centerKey = CENTER.id) {
+    // DevTools確認用。CLOUD.loadState('toda') / CLOUD.loadState('kitasaitama') でDB上の保存行を確認できる。
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定またはクライアント作成失敗' };
+    const { data, error } = await sb
+      .from('center_realtime_state')
+      .select('center_key,state_key,updated_at,payload')
+      .eq('center_key', centerKey)
+      .order('updated_at', { ascending:false })
+      .limit(50);
+    if (error) return { ok:false, error:error.message, details:error };
+    return { ok:true, centerKey, count:Array.isArray(data) ? data.length : 0, rows:data || [] };
+  },
+  async testDb(centerKey = CENTER.id) {
+    // 画面の保存経路監査・DevTools用の軽量接続テスト。
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定またはクライアント作成失敗' };
+    const { data, error } = await sb
+      .from('center_realtime_state')
+      .select('center_key,state_key,updated_at')
+      .eq('center_key', centerKey)
+      .order('updated_at', { ascending:false })
+      .limit(20);
+    if (error) return { ok:false, error:error.message, details:error };
+    return { ok:true, centerKey, count:Array.isArray(data) ? data.length : 0, rows:data || [] };
   },
   async _dbDeleteStates(stateKeys) {
     const sb = await this._client();
@@ -644,8 +671,11 @@ var CLOUD = window.CLOUD = {
       const manifest = await this._downloadJSON(this._manifestKey());
       if (!manifest) {
         // manifest が無い古い環境だけ互換取得へ逃がす。
-        // 通常運用ではここに入らない。
-        return await this.pullLegacy();
+        // 旧形式も無いセンター（例：まだ未取込の戸田など）は「クラウド失敗」ではなく「クラウドにデータなし」として扱う。
+        const legacy = await this.pullLegacy();
+        if (legacy && legacy.ok) return legacy;
+        UI.updateCloudBadge('ok');
+        return { ok:true, changed:false, source:'no_cloud_data', noData:true, note:legacy?.error || 'クラウドに対象センターのデータがありません' };
       }
 
       if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
@@ -731,7 +761,10 @@ var CLOUD = window.CLOUD = {
         return { ok:true, changed, source:'full_state+manifest' };
       }
 
-      return await this.pullLegacy();
+      const legacy = await this.pullLegacy();
+      if (legacy && legacy.ok) return legacy;
+      UI.updateCloudBadge('ok');
+      return { ok:true, changed:false, source:'no_cloud_data', noData:true, note:legacy?.error || 'クラウドに対象センターのデータがありません' };
     }
     catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
   },
