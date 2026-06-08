@@ -822,9 +822,24 @@ IMPORT.deleteFieldData = function(ym) {
     upsertByYm('workerCsvData', { ym, source:'worker_csv', importedAt:new Date().toISOString(), ...combined });
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     STORE.save();
-    if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
+    let cloudMsg = '';
+    try {
+      if (AUTO_SYNC?._timer) { clearTimeout(AUTO_SYNC._timer); AUTO_SYNC._timer = null; }
+      if (CLOUD?.pushMonth) {
+        const r = await CLOUD.pushMonth(ym);
+        if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
+        cloudMsg = ' / クラウド保存済';
+      } else if (CLOUD?.pushAll) {
+        const r = await CLOUD.pushAll();
+        if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
+        cloudMsg = ' / クラウド保存済';
+      }
+    } catch(e) {
+      cloudMsg = ' / クラウド保存未確認';
+      msg(`作業者CSVはローカル保存済みですが、クラウド保存に失敗しました：${e.message}`, 'warn');
+    }
     refreshFieldAll();
-    msg(`${ymText(ym)} 作業者別CSVを入替完了：配送${combined.rowCount.toLocaleString()}件 / 作業者${combined.workerCount.toLocaleString()}名 / 金額${Math.round(combined.includedAmount/1000).toLocaleString()}千円（除外${Math.round(combined.excludedAmount/1000).toLocaleString()}千円）`);
+    msg(`${ymText(ym)} 作業者別CSVを入替完了：配送${combined.rowCount.toLocaleString()}件 / 作業者${combined.workerCount.toLocaleString()}名 / 金額${Math.round(combined.includedAmount/1000).toLocaleString()}千円（除外${Math.round(combined.excludedAmount/1000).toLocaleString()}千円）${cloudMsg}`);
   }
 
   async function importProduct(files){
@@ -873,9 +888,24 @@ IMPORT.deleteFieldData = function(ym) {
     upsertByYm('productAddressData', record);
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     STORE.save();
-    if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
+    let cloudMsg = '';
+    try {
+      if (AUTO_SYNC?._timer) { clearTimeout(AUTO_SYNC._timer); AUTO_SYNC._timer = null; }
+      if (CLOUD?.pushMonth) {
+        const r = await CLOUD.pushMonth(ym);
+        if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
+        cloudMsg = ' / クラウド保存済';
+      } else if (CLOUD?.pushAll) {
+        const r = await CLOUD.pushAll();
+        if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
+        cloudMsg = ' / クラウド保存済';
+      }
+    } catch(e) {
+      cloudMsg = ' / クラウド保存未確認';
+      msg(`商品・住所CSVはローカル保存済みですが、クラウド保存に失敗しました：${e.message}`, 'warn');
+    }
     refreshFieldAll();
-    msg(`${ymText(ym)} 商品・住所CSVを入替完了：原票${record.uniqueCount.toLocaleString()}件 / 明細${record.detailRows.toLocaleString()}行 / 重複除外${record.duplicateExcluded.toLocaleString()}行`);
+    msg(`${ymText(ym)} 商品・住所CSVを入替完了：原票${record.uniqueCount.toLocaleString()}件 / 明細${record.detailRows.toLocaleString()}行 / 重複除外${record.duplicateExcluded.toLocaleString()}行${cloudMsg}`);
   }
 
   window.FIELD_WORKER_IMPORT2 = {
