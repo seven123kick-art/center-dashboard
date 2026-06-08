@@ -4195,48 +4195,7 @@ window.DATA_STORAGE_TABLE = {
 /* ════════ §20 RENDER — Import ═════════════════════════════════ */
 
 
-/* ════════ §20.5 LEGACY_MIGRATION / BULK_IMPORT ════════════════════ */
-const LEGACY_MIGRATION = window.LEGACY_MIGRATION = {
-  async run() {
-    const msg = document.getElementById('legacy-migration-msg');
-    const setMsg = (text, type='info') => {
-      if (!msg) return;
-      const color = type === 'error' ? '#991b1b' : type === 'ok' ? '#065f46' : '#334155';
-      const bg = type === 'error' ? '#fee2e2' : type === 'ok' ? '#dcfce7' : '#eff6ff';
-      msg.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:${bg};color:${color};font-weight:700">${esc(text)}</div>`;
-    };
-    try {
-      setMsg('旧形式データを確認中です…');
-      if (!CLOUD || !CLOUD.migrateLegacySharedBundle) throw new Error('移行処理が読み込まれていません');
-      const r = await CLOUD.migrateLegacySharedBundle();
-      if (!r || !r.ok) {
-        setMsg(r?.error || '移行対象データがありません', 'error');
-        UI.toast(r?.error || '移行対象データがありません', 'warn');
-        return;
-      }
-      setMsg(`移行完了：収支 ${r.datasets || 0}ヶ月 / 作業者 ${r.workers || 0}ヶ月 / 商品住所 ${r.products || 0}ヶ月`, 'ok');
-      NAV.refresh();
-      renderImport();
-      UI.toast('旧形式データを新形式へ移行しました');
-    } catch(e) {
-      setMsg('移行エラー：' + e.message, 'error');
-      UI.toast('移行エラー：' + e.message, 'error');
-    }
-  },
-  async check() {
-    const msg = document.getElementById('legacy-migration-msg');
-    try {
-      const r = await CLOUD.loadState(CENTER.id);
-      const rows = r?.rows || [];
-      const hasLegacy = rows.some(x => x && x.state_key === 'shared_bundle');
-      const newCount = rows.filter(x => String(x?.state_key || '').startsWith('storage:')).length;
-      if (msg) msg.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#f8fafc;color:#334155;font-weight:700">旧形式：${hasLegacy ? 'あり' : 'なし'} / 新形式データ：${newCount}件</div>`;
-    } catch(e) {
-      if (msg) msg.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#fee2e2;color:#991b1b;font-weight:700">確認エラー：${esc(e.message)}</div>`;
-    }
-  }
-};
-
+/* ════════ §20.5 BULK_IMPORT ════════════════════ */
 const BULK_IMPORT = window.BULK_IMPORT = {
   _ymFromName(name) {
     const s = String(name || '');
