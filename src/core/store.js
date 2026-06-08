@@ -106,6 +106,8 @@ var STORE = window.STORE = {
     STATE.library   = this._g('library')   || [];
     STATE.reportKnowledge = normalizeReportKnowledge(this._g('reportKnowledge') || STATE.reportKnowledge);
     STATE.deleted = normalizeDeletedState(this._g('deleted') || STATE.deleted);
+    const savedFY = this._g('fiscalYear');
+    if (savedFY) STATE.fiscalYear = String(savedFY);
     sanitizePersonalDataState(STATE);
     applyDeletionTombstonesToState(STATE);
   },
@@ -127,6 +129,7 @@ var STORE = window.STORE = {
     this._s('library',   STATE.library);
     this._s('reportKnowledge', STATE.reportKnowledge);
     this._s('deleted', STATE.deleted);
+    if (STATE.fiscalYear) this._s('fiscalYear', STATE.fiscalYear);
   },
 
   exportJSON() {
@@ -170,7 +173,7 @@ var STORE = window.STORE = {
   storageInfo() {
     const keys = [
       'dataset_index','field_worker_index','field_product_index',
-      'capacity','planData','memos','library','reportKnowledge','deleted'
+      'capacity','planData','memos','library','reportKnowledge','deleted','fiscalYear'
     ];
     let size = 0;
     keys.forEach(k => { try { size += (localStorage.getItem(this._p + k) || '').length * 2; } catch(e){} });

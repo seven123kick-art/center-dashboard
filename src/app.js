@@ -4340,9 +4340,14 @@ const BULK_IMPORT = window.BULK_IMPORT = {
 
     // 一括取込中は月別 pushMonth を止め、全ファイル処理後に pushAll() を1回だけ実行する。
     // これにより CLOUD._busy の競合で一部月だけDB未保存になる事故を防ぐ。
+    // また AUTO_SYNC のタイマー発火による pushAll 競合も抑制する。
     const originalPushMonth = CLOUD?.pushMonth ? CLOUD.pushMonth.bind(CLOUD) : null;
     if (CLOUD && originalPushMonth) {
       CLOUD.pushMonth = async () => ({ ok:true, bulkSuppressed:true });
+    }
+    if (typeof AUTO_SYNC !== 'undefined' && AUTO_SYNC) {
+      AUTO_SYNC._suppress = true;
+      if (AUTO_SYNC._timer) { clearTimeout(AUTO_SYNC._timer); AUTO_SYNC._timer = null; }
     }
 
     try {
@@ -4413,6 +4418,10 @@ const BULK_IMPORT = window.BULK_IMPORT = {
       cloudSummary = '\nクラウド一括保存: OK';
     } catch(e) {
       cloudSummary = `\nクラウド一括保存: NG（${e.message}）\nセンター切替後にデータが消える可能性があります。保存経路監査を実行してください。`;
+    } finally {
+      if (typeof AUTO_SYNC !== 'undefined' && AUTO_SYNC) {
+        AUTO_SYNC._suppress = false;
+      }
     }
 
     NAV.refresh();
