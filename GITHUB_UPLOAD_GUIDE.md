@@ -1,23 +1,16 @@
 # GitHub投入手順
 
-1. GitHub上で旧ファイルを削除します。
-   - 旧 `app.js`
-   - 旧 `app.css`
-   - 旧 `dashboard.js`, `pl.js`, `trend.js`, `shipper.js`, `kamoku.js`
-   - 旧 `field_*.js`
-   - 旧 `jp_zip_loader.js`
-   - 旧 `zip_parts/`
-   - 旧 `core/` がある場合
+1. 既存リポジトリ内の旧JS/CSSファイルを削除します。
+2. このZIPの中身をリポジトリ直下へ展開します。
+3. `center.html` が `config/config.local.js` を読み込みます。
+4. GitHub Pagesで公開後、以下を確認します。
 
-2. このZIPを展開し、中身をリポジトリのルートへアップロードします。
+- `index.html` からセンター選択できる
+- `center.html?c=kitasaitama` が開く
+- `center.html?c=toda` が開く
+- ダッシュボード、データ管理、現場分析、エリア分析、会議報告書が開く
 
-3. GitHub Pages反映後、以下を確認します。
-   - `center.html?c=kitasaitama`
-   - `center.html?c=toda`
-   - ダッシュボード
-   - データ取込
-   - 現場分析
-   - エリア分析
-   - 会議報告書
+## 注意
 
-4. もし画面が真っ白になる場合は、DevTools Consoleで404になっているファイルパスを確認してください。
+`service_role` や `sb_secret` は絶対に入れないでください。
+フロントで使うのは Supabase の publishable key / anon public key のみです。
