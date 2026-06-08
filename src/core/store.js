@@ -60,11 +60,13 @@ var STORE = window.STORE = {
   },
 
   load() {
-    STATE.datasets  = this._g('datasets')  || [];
-    STATE.workerCsvData = this._loadFieldSplit('worker', 'workerCsvData');
-    STATE.productAddressData = this._loadFieldSplit('product', 'productAddressData');
-    STATE.fieldData = this._g('fieldData') || [];
-    STATE.areaData  = this._g('areaData')  || [];
+    // 完成形方針：CSV本体はSupabase DBを正本にする。
+    // localStorageから巨大データを復元しない。画面表示に必要な本体はCLOUD.pull/loadで取得する。
+    STATE.datasets  = [];
+    STATE.workerCsvData = [];
+    STATE.productAddressData = [];
+    STATE.fieldData = [];
+    STATE.areaData  = [];
     STATE.capacity  = this._g('capacity')  || null;
     STATE.planData  = normalizePlanData(this._g('planData'));
     STATE.memos     = this._g('memos')     || {};
@@ -77,11 +79,29 @@ var STORE = window.STORE = {
 
   save() {
     sanitizePersonalDataState(STATE);
-    this._s('datasets',  STATE.datasets);
+    // 大容量データはlocalStorageへ保存しない。
+    // 旧版で残った巨大キーは、容量超過とセンター切替時の0件化を防ぐため削除する。
+    this._rm('datasets');
+    this._rm('workerCsvData');
+    this._rm('productAddressData');
+    this._rm('fieldData');
+    this._rm('areaData');
+    this._rm('dataset_index');
+
+    const datasetIndex = (STATE.datasets || [])
+      .filter(d => d && d.ym && d.source !== 'history')
+      .map(d => ({
+        ym: d.ym,
+        type: d.type || 'confirmed',
+        fiscalYear: d.fiscalYear || (typeof fiscalYearFromYM === 'function' ? fiscalYearFromYM(d.ym) : null),
+        importedAt: d.importedAt || d.updatedAt || null,
+        totalIncome: d.totalIncome || 0,
+        totalExpense: d.totalExpense || 0,
+        profit: d.profit || 0
+      }));
+    this._s('dataset_index', datasetIndex);
     this._saveFieldSplit('worker', STATE.workerCsvData || []);
     this._saveFieldSplit('product', STATE.productAddressData || []);
-    this._s('fieldData', STATE.fieldData);
-    this._s('areaData',  STATE.areaData);
     this._s('capacity',  STATE.capacity);
     this._s('planData',  STATE.planData);
     this._s('memos',     STATE.memos);
@@ -131,8 +151,8 @@ var STORE = window.STORE = {
     // localStorage全探索は行わず、現在のSTORE管理キーだけを見る。
     // データ本体はSupabase DB正本のため、ここはキャッシュ/設定容量の目安として扱う。
     const keys = [
-      'datasets','field_worker_index','field_product_index','workerCsvData','productAddressData',
-      'fieldData','areaData','capacity','planData','memos','library','reportKnowledge','deleted'
+      'dataset_index','field_worker_index','field_product_index',
+      'capacity','planData','memos','library','reportKnowledge','deleted'
     ];
     let size = 0;
     keys.forEach(k => { try { size += (localStorage.getItem(this._p + k) || '').length * 2; } catch(e){} });
