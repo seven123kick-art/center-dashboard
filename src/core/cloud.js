@@ -530,31 +530,97 @@ var CLOUD = window.CLOUD = {
       return { ok:false, error:e.message };
     }
   },
-  async pullLegacy() {
+  _extractLegacyBundle(shared) {
+    if (!shared || typeof shared !== 'object') return null;
+    const candidates = [shared.state, shared.bundle, shared.data, shared.payload, shared];
+    for (const c of candidates) {
+      if (!c || typeof c !== 'object') continue;
+      if (Array.isArray(c.datasets) || Array.isArray(c.workerCsvData) || Array.isArray(c.productAddressData) || c.planData || c.capacity) return c;
+    }
+    return null;
+  },
+  _applyLegacyBundle(j) {
+    if (!j || typeof j !== 'object') return false;
+    let applied = false;
+    if (Array.isArray(j.datasets)) { STATE.datasets = j.datasets; applied = true; }
+    if (Array.isArray(j.workerCsvData)) { STATE.workerCsvData = j.workerCsvData; applied = true; }
+    if (Array.isArray(j.productAddressData)) { STATE.productAddressData = j.productAddressData; applied = true; }
+    if (Array.isArray(j.fieldData)) { STATE.fieldData = j.fieldData; applied = true; }
+    if (Array.isArray(j.areaData)) { STATE.areaData = j.areaData; applied = true; }
+    if ('capacity' in j) { STATE.capacity = j.capacity || null; applied = true; }
+    if (j.planData) { STATE.planData = normalizePlanData(j.planData); applied = true; }
+    if (j.memos && typeof j.memos === 'object') { STATE.memos = j.memos; applied = true; }
+    if (Array.isArray(j.library)) { STATE.library = j.library; applied = true; }
+    if (j.reportKnowledge) { STATE.reportKnowledge = normalizeReportKnowledge(j.reportKnowledge); applied = true; }
+    if (j.deleted) { STATE.deleted = mergeDeletedStates(STATE.deleted, j.deleted); applied = true; }
+    applyDeletionTombstonesToState(STATE);
+    sanitizePersonalDataState(STATE);
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+    return applied;
+  },
+  async migrateLegacySharedBundle() {
+    // 旧DB一括保存(center_realtime_state/shared_bundle)を、現在の月別・種類別キーへ展開する。
+    // Storageは使わず、center_realtime_state の state_key=storage:... 形式へ保存する。
+    const shared = await this._dbGetState('shared_bundle');
+    const j = this._extractLegacyBundle(shared);
+    if (!j) return { ok:false, error:'shared_bundleに移行可能なデータがありません' };
+
+    this._applyLegacyBundle(j);
+
+    let datasets = 0, workers = 0, products = 0;
+    for (const ds of (STATE.datasets || []).filter(d => d && d.ym && d.source !== 'history')) {
+      await this._uploadJSON(this._datasetKey(ds.ym, ds.type || 'confirmed'), ds);
+      datasets++;
+    }
+    for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) {
+      await this._uploadJSON(this._workerMonthKey(w.ym), w);
+      workers++;
+    }
+    for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) {
+      await this._uploadJSON(this._productMonthKey(pr.ym), pr);
+      products++;
+    }
+    if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
+    if (STATE.planData && Object.keys(STATE.planData).length) await this._uploadJSON(this._planKey(), STATE.planData);
+    if (STATE.memos && Object.keys(STATE.memos).length) await this._uploadJSON(this._memosKey(), STATE.memos);
+    if (STATE.library && STATE.library.length) await this._uploadJSON(this._libraryKey(), STATE.library);
+    await this._uploadJSON(this._manifestKey(), this._makeManifest());
+    await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+    STORE.save();
+    UI.updateCloudBadge('ok');
+    return { ok:true, migrated:true, source:'legacy_shared_bundle_migrated', datasets, workers, products };
+  },
+  async pullLegacy(options={}) {
     // 旧DB一括保存(center_realtime_state/shared_bundle)からの復元互換。
-    // 以前の構成ではStorageではなくこの1行に一部データが入っていたため、移行元として読む。
+    // manifest が無い古い環境では、ここから復元し、必要に応じて新形式へ自動移行する。
+    const migrate = options.migrate !== false;
     let j = null;
     try {
       const shared = await this._dbGetState('shared_bundle');
-      if (shared) j = shared.state || shared.bundle || shared.data || shared;
+      j = this._extractLegacyBundle(shared);
     } catch(e) {}
     if (!j) j = await this._downloadJSON(this._legacyKey());
     if (!j) return { ok:false, error:'旧形式データなし' };
-    if (j.datasets)  STATE.datasets  = j.datasets;
-    if (j.workerCsvData) STATE.workerCsvData = j.workerCsvData;
-    if (j.productAddressData) STATE.productAddressData = j.productAddressData;
-    if (j.fieldData) STATE.fieldData = j.fieldData;
-    if (j.areaData) STATE.areaData = j.areaData;
-    if (j.capacity)  STATE.capacity  = j.capacity;
-    if (j.planData)  STATE.planData  = normalizePlanData(j.planData);
-    if (j.memos)     STATE.memos     = j.memos;
-    if (j.library)   STATE.library   = j.library;
-    if (j.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(j.reportKnowledge);
-    if (j.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, j.deleted);
-    applyDeletionTombstonesToState(STATE);
+
+    const applied = this._applyLegacyBundle(j);
+    if (!applied) return { ok:false, error:'旧形式データに適用可能な内容がありません' };
+
     STORE.save();
+
+    let migrated = false;
+    let migrationError = null;
+    if (migrate) {
+      try {
+        const r = await this.migrateLegacySharedBundle();
+        migrated = !!(r && r.ok);
+        migrationError = r && !r.ok ? r.error : null;
+      } catch(e) {
+        migrationError = e.message;
+      }
+    }
+
     UI.updateCloudBadge('ok');
-    return { ok:true, source:'legacy_shared_bundle' };
+    return { ok:true, changed:true, source:'legacy_shared_bundle', migrated, migrationError };
   },
   async pullFullState() {
     try {
