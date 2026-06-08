@@ -4011,6 +4011,119 @@ function renderStorageMapTable() {
       </tbody></table></div>
     </div>`;
 }
+
+function renderStorageRouteAuditPanel() {
+  const fy = storageFiscalYear();
+  const years = new Set([String(fy), getDefaultFiscalYear()]);
+  (STATE.datasets || []).forEach(d => d && d.ym && years.add(String(d.fiscalYear || fiscalYearFromYM(d.ym))));
+  (STATE.workerCsvData || []).forEach(d => d && d.ym && years.add(String(fiscalYearFromYM(d.ym))));
+  (STATE.productAddressData || []).forEach(d => d && d.ym && years.add(String(fiscalYearFromYM(d.ym))));
+  if (STATE.planData && typeof STATE.planData === 'object') Object.keys(STATE.planData).forEach(y => /^\d{4}$/.test(y) && years.add(y));
+  const yearOptions = [...years].sort().reverse().map(y => `<option value="${esc(y)}" ${String(y)===String(fy)?'selected':''}>${esc(y)}年度</option>`).join('');
+  return `
+    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <div>
+          <div style="font-weight:900;font-size:14px">保存経路監査</div>
+          <div style="font-size:11px;color:var(--text3);line-height:1.6">取込後のSTATE・DB保存・再読込状態を年度単位で確認します。北埼玉/戸田とも同じ基準で判定します。</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="storage-audit-fy-select" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${yearOptions}</select>
+          <button class="btn" onclick="DATA_STORAGE_AUDIT.run()" style="font-size:12px;padding:5px 10px">保存経路を確認</button>
+          <button class="btn" onclick="DATA_STORAGE_AUDIT.loadField()" style="font-size:12px;padding:5px 10px">現場データを再読込</button>
+        </div>
+      </div>
+      <div id="storage-audit-result" style="font-size:12px;color:var(--text2)">未確認です。必要に応じて「保存経路を確認」を押してください。</div>
+    </div>`;
+}
+
+window.DATA_STORAGE_AUDIT = {
+  _fy() {
+    return String(document.getElementById('storage-audit-fy-select')?.value || storageFiscalYear() || getDefaultFiscalYear());
+  },
+  _label(ok, textOk='あり', textNg='なし') {
+    return storageBadge(ok ? textOk : textNg, ok ? 'ok' : 'danger');
+  },
+  _warn(text) { return storageBadge(text, 'warn'); },
+  _localDataset(ym) { return (STATE.datasets || []).some(d => d && d.ym === ym && d.source !== 'history'); },
+  _localWorker(ym) { return (STATE.workerCsvData || []).some(d => d && d.ym === ym && !deletedAt('workerMonths', ym) && !deletedAt('fieldMonths', ym)); },
+  _localProduct(ym) { return (STATE.productAddressData || []).some(d => d && d.ym === ym && !deletedAt('productMonths', ym) && !deletedAt('fieldMonths', ym)); },
+  async _dbExists(key) {
+    try {
+      if (!CLOUD || !CLOUD._dbGetState || !CLOUD._dbStateKey) return false;
+      const v = await CLOUD._dbGetState(CLOUD._dbStateKey(key));
+      return !!v;
+    } catch(e) { return false; }
+  },
+  _judge(local, db, manifest) {
+    if (local && db) return { text:'OK', kind:'ok', note:'画面表示・DB保存とも確認' };
+    if (!local && db) return { text:'未読込', kind:'warn', note:'DBにはあります。画面再読込または現場データ再読込で復元可能' };
+    if (local && !db) return { text:'未保存', kind:'danger', note:'画面にはありますがDB保存が確認できません。今すぐ同期が必要' };
+    if (manifest && !db) return { text:'台帳不整合', kind:'danger', note:'manifestにありますがDB本体がありません' };
+    return { text:'未登録', kind:'warn', note:'この月のデータは未登録' };
+  },
+  async run() {
+    const fy = this._fy();
+    const el = document.getElementById('storage-audit-result');
+    if (!el) return;
+    el.innerHTML = '確認中...';
+    try {
+      const months = storageFiscalMonths(fy);
+      const manifest = await CLOUD._downloadJSON(CLOUD._manifestKey()).catch(e => null);
+      const mDatasets = new Set((manifest?.datasets || []).map(m => m && m.ym).filter(Boolean));
+      const mWorkers = new Set((manifest?.workerCsvData || []).map(m => m && m.ym).filter(Boolean));
+      const mProducts = new Set((manifest?.productAddressData || []).map(m => m && m.ym).filter(Boolean));
+      const rows = [];
+      for (const ym of months) {
+        const localFin = this._localDataset(ym);
+        const localW = this._localWorker(ym);
+        const localP = this._localProduct(ym);
+        const dbFin = await this._dbExists(CLOUD._datasetKey(ym, 'confirmed')) || await this._dbExists(CLOUD._datasetKey(ym, 'daily'));
+        const dbW = await this._dbExists(CLOUD._workerMonthKey(ym));
+        const dbP = await this._dbExists(CLOUD._productMonthKey(ym));
+        const jFin = this._judge(localFin, dbFin, mDatasets.has(ym));
+        const jW = this._judge(localW, dbW, mWorkers.has(ym));
+        const jP = this._judge(localP, dbP, mProducts.has(ym));
+        const worst = [jFin,jW,jP].find(j => j.kind === 'danger') || [jFin,jW,jP].find(j => j.kind === 'warn') || jFin;
+        rows.push({ ym, localFin, dbFin, localW, dbW, localP, dbP, jFin, jW, jP, worst });
+      }
+      const danger = rows.filter(r => r.worst.kind === 'danger').length;
+      const warn = rows.filter(r => r.worst.kind === 'warn').length;
+      const summary = danger ? storageBadge(`要対応 ${danger}ヶ月`, 'danger') : warn ? storageBadge(`確認 ${warn}ヶ月`, 'warn') : storageBadge('異常なし', 'ok');
+      el.innerHTML = `
+        <div style="margin:8px 0 10px">${summary}<span style="margin-left:8px;color:var(--text3)">center_key: ${esc(CENTER.id)} / ${esc(fy)}年度</span></div>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>作業者CSV</th><th>商品住所CSV</th><th>判定</th><th>メモ</th></tr></thead><tbody>
+          ${rows.map(r => `<tr>
+            <td><strong>${esc(ymLabel(r.ym))}</strong></td>
+            <td>画面 ${this._label(r.localFin).replace(/登録済|あり/g,'あり')} / DB ${this._label(r.dbFin).replace(/登録済|あり/g,'あり')}</td>
+            <td>画面 ${this._label(r.localW).replace(/登録済|あり/g,'あり')} / DB ${this._label(r.dbW).replace(/登録済|あり/g,'あり')}</td>
+            <td>画面 ${this._label(r.localP).replace(/登録済|あり/g,'あり')} / DB ${this._label(r.dbP).replace(/登録済|あり/g,'あり')}</td>
+            <td>${storageBadge(r.worst.text, r.worst.kind)}</td>
+            <td style="min-width:260px;color:var(--text2)">${esc(r.worst.note)}</td>
+          </tr>`).join('')}
+        </tbody></table></div>`;
+    } catch(e) {
+      el.innerHTML = `<div class="msg msg-danger">保存経路監査に失敗しました: ${esc(e.message || e)}</div>`;
+    }
+  },
+  async loadField() {
+    const fy = this._fy();
+    const el = document.getElementById('storage-audit-result');
+    if (el) el.innerHTML = `${esc(fy)}年度の現場データをDBから再読込中...`;
+    const r = await CLOUD.pullFieldDataForFiscalYear(fy);
+    if (r && r.ok) {
+      STORE.save();
+      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+      UI.toast(`${fy}年度の現場データを再読込しました`);
+      renderImport();
+      setTimeout(() => DATA_STORAGE_AUDIT.run(), 50);
+    } else {
+      UI.toast('現場データ再読込失敗: ' + (r?.error || '不明'), 'error');
+      if (el) el.innerHTML = `<div class="msg msg-danger">現場データ再読込失敗: ${esc(r?.error || '不明')}</div>`;
+    }
+  }
+};
+
 window.DATA_STORAGE_TABLE = {
   changeFY(fy){ STATE.fiscalYear = String(fy); renderImport(); },
 
@@ -4138,7 +4251,8 @@ function renderImport() {
         </div>
       </details>`;
 
-    listEl.innerHTML = storageHtml + monthlyHtml + qualityHtml + historyHtml;
+    const auditHtml = renderStorageRouteAuditPanel();
+    listEl.innerHTML = storageHtml + auditHtml + monthlyHtml + qualityHtml + historyHtml;
   }
 
   const storageEl = document.getElementById('storage-info');
