@@ -4807,9 +4807,59 @@ window.DATA_STORAGE_TABLE = {
 };
 
 /* ════════ §20 RENDER — Import ═════════════════════════════════ */
+
+
+/* データ管理画面用：現場明細CSVのクラウド遅延読込
+   起動時は軽くするため現場CSV本体を読まないが、データ管理画面では
+   「未登録」と誤表示しないよう、対象年度を開いた時点で一度だけ確認する。 */
+const IMPORT_FIELD_CLOUD_LOAD = { promises:{}, done:{}, loading:{} };
+function importFieldFYMonths(fy) {
+  return new Set((typeof storageFiscalMonths === 'function') ? storageFiscalMonths(fy) : monthsOfFiscalYear(fy));
+}
+function importHasLocalFieldDataForFY(fy) {
+  const months = importFieldFYMonths(fy);
+  return [
+    ...(Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData : []),
+    ...(Array.isArray(STATE.productAddressData) ? STATE.productAddressData : [])
+  ].some(d => d && d.ym && months.has(d.ym));
+}
+function importFieldCloudStatusHtml(fy) {
+  const key = `${CENTER.id}:${fy}`;
+  if (IMPORT_FIELD_CLOUD_LOAD.loading[key]) {
+    return `<div style="border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:12px;font-weight:800">現場明細データをクラウド確認中です。完了後にこの画面を自動更新します。</div>`;
+  }
+  return '';
+}
+function ensureImportFieldCloudData(fy) {
+  const fiscalYear = String(fy || storageFiscalYear());
+  const key = `${CENTER.id}:${fiscalYear}`;
+  if (!CLOUD?.pullFieldDataForFiscalYear) return;
+  if (IMPORT_FIELD_CLOUD_LOAD.done[key] || IMPORT_FIELD_CLOUD_LOAD.promises[key]) return;
+
+  IMPORT_FIELD_CLOUD_LOAD.loading[key] = true;
+  IMPORT_FIELD_CLOUD_LOAD.promises[key] = AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullFieldDataForFiscalYear(fiscalYear))
+    .then(r => {
+      IMPORT_FIELD_CLOUD_LOAD.done[key] = true;
+      if (r && !r.ok) UI.toast('現場明細データのクラウド確認に失敗しました: ' + (r.error || '不明'), 'warn');
+      return r;
+    })
+    .catch(e => {
+      UI.toast('現場明細データのクラウド確認に失敗しました: ' + (e?.message || String(e)), 'warn');
+      return { ok:false, error:e?.message || String(e) };
+    })
+    .finally(() => {
+      delete IMPORT_FIELD_CLOUD_LOAD.loading[key];
+      delete IMPORT_FIELD_CLOUD_LOAD.promises[key];
+      if (STATE.view === 'import') renderImport();
+    });
+}
+
 function renderImport() {
   const listEl = document.getElementById('data-list');
+  const importFY = storageFiscalYear();
+  ensureImportFieldCloudData(importFY);
   if (listEl) {
+    const fieldCloudNoticeHtml = importFieldCloudStatusHtml(importFY);
     const storageHtml = renderStorageMapTable();
     const monthlyHtml = renderMonthlyCheckTable();
     const qualityHtml = renderDataQualityCheckTable();
@@ -4865,7 +4915,7 @@ function renderImport() {
         </div>
       </details>`;
 
-    listEl.innerHTML = storageHtml + monthlyHtml + qualityHtml + historyHtml;
+    listEl.innerHTML = fieldCloudNoticeHtml + storageHtml + monthlyHtml + qualityHtml + historyHtml;
   }
 
   const storageEl = document.getElementById('storage-info');
