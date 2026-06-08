@@ -4235,6 +4235,18 @@ const BULK_IMPORT = window.BULK_IMPORT = {
     el.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:${bg};color:${color};font-weight:700;white-space:pre-wrap">${esc(text)}</div>`;
   },
 
+  async _verifyCloudSaved(kind, ym, type='confirmed') {
+    if (!CLOUD || !CLOUD._downloadJSON) return true;
+    let key = '';
+    if (kind === 'pl') key = CLOUD._datasetKey(ym, type || 'confirmed');
+    else if (kind === 'worker') key = CLOUD._workerMonthKey(ym);
+    else if (kind === 'product') key = CLOUD._productMonthKey(ym);
+    if (!key) return true;
+    const rec = await CLOUD._downloadJSON(key);
+    if (!rec || !rec.ym) throw new Error('クラウド保存後の再読込確認に失敗しました');
+    return true;
+  },
+
   async _importPLGroup(g) {
     const type = g.type || 'confirmed';
     const ym = g.ym;
@@ -4278,6 +4290,7 @@ const BULK_IMPORT = window.BULK_IMPORT = {
       if (!r || !r.ok) throw new Error(r?.error || 'クラウド保存に失敗しました');
     }
 
+    await this._verifyCloudSaved('pl', ym, type);
     return imported;
   },
 
@@ -4327,11 +4340,13 @@ const BULK_IMPORT = window.BULK_IMPORT = {
         } else if (g.kind === 'worker') {
           if (!window.FIELD_WORKER_IMPORT2?.handleFilesForYM) throw new Error('作業者CSV一括取込処理が未読込です');
           await FIELD_WORKER_IMPORT2.handleFilesForYM(g.files, g.ym);
+          await this._verifyCloudSaved('worker', g.ym);
           done += g.files.length;
           logs.push(`OK ${ymLabel(g.ym)} worker：${g.files.length}件 / クラウド保存済`);
         } else if (g.kind === 'product') {
           if (!window.FIELD_PRODUCT_IMPORT2?.handleFilesForYM) throw new Error('商品住所CSV一括取込処理が未読込です');
           await FIELD_PRODUCT_IMPORT2.handleFilesForYM(g.files, g.ym);
+          await this._verifyCloudSaved('product', g.ym);
           done += g.files.length;
           logs.push(`OK ${ymLabel(g.ym)} product：${g.files.length}件 / クラウド保存済`);
         }
