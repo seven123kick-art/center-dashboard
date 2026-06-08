@@ -934,6 +934,7 @@
           <div style="margin-top:4px"><span id="import-target-note">ページは共通ですが、保存キー・クラウドパス・IndexedDBはセンターIDで分離します。</span></div>
         </div>
       </div>
+
       <details class="card" style="margin-bottom:14px">
         <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
           <div style="display:flex;align-items:center;gap:8px">
@@ -943,7 +944,7 @@
           <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
         </summary>
         <div class="card-body" style="font-size:12px;line-height:1.8;color:var(--text2)">
-          収支CSV / 作業者CSV / 商品・住所CSVをまとめて選択できます。<br>
+          収支CSV・作業者CSV・商品住所CSVをまとめて選択できます。<br>
           例：202604_SKDL_kitasaitama.csv、202604_WORKER_kitasaitama.csv、202604_PRODUCT_kitasaitama.csv<br>
           <span style="color:#92400e">年月・CSV種別が判定できないファイルはスキップします。</span>
           <div class="upload-zone no-print" style="margin-top:10px;padding:18px;border-radius:8px;border:2px dashed var(--border2);background:#f8fafc;text-align:center;cursor:pointer"
@@ -954,12 +955,11 @@
             <input type="file" id="bulk-csv-file-input" accept=".csv" multiple style="display:none" onchange="BULK_IMPORT.handleFiles(this.files);this.value=''">
             <div style="font-size:24px;color:#94a3b8;margin-bottom:6px">⬆</div>
             <div style="font-size:13px;font-weight:900;color:var(--text)">CSVをまとめて選択またはドロップ</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px">収支CSV / 作業者CSV / 商品・住所CSVを自動判定</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px">SKDL / WORKER / PRODUCT を自動判定</div>
           </div>
           <div id="bulk-import-msg"></div>
         </div>
       </details>
-
       <div class="card" style="margin-bottom:14px">
         <div class="card-body">
           <div class="upload-zone no-print" id="upload-zone">
