@@ -4214,11 +4214,15 @@ const BULK_IMPORT = window.BULK_IMPORT = {
   _classify(name, sample) {
     const n = String(name || '').toLowerCase();
     const t = String(sample || '');
+
+    // 収支CSVはファイル名判定を最優先する。
+    // SKDLの本文には「商品」等の文字が含まれることがあり、商品住所CSVへ誤分類されるため。
     if (/skdl0001/i.test(name) || /日報|速報/.test(name)) return { kind:'pl', type:'daily' };
     if (/skdl0003/i.test(name) || /確定/.test(name)) return { kind:'pl', type:'confirmed' };
-    if (/商品|住所|product|address/i.test(name) || /エスライン原票番号|お届け先郵便番号|郵便番号|商品名|商品/.test(t)) return { kind:'product' };
-    if (/作業者|作業員|worker|driver/i.test(name) || /作業者|作業員|担当者|配送担当/.test(t)) return { kind:'worker' };
     if (/skdl/i.test(name)) return { kind:'pl', type:'confirmed' };
+
+    if (/作業者|作業員|worker|driver/i.test(name) || /作業者|作業員|担当者|配送担当/.test(t)) return { kind:'worker' };
+    if (/商品|住所|product|address/i.test(name) || /エスライン原票番号|お届け先郵便番号|郵便番号|商品名|商品/.test(t)) return { kind:'product' };
     return { kind:'unknown' };
   },
   _setImportType(type) {
