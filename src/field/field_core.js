@@ -94,6 +94,10 @@ IMPORT.deleteFieldData = function(ym) {
   const MONTHS = ['04','05','06','07','08','09','10','11','12','01','02','03'];
 
   function safeArray(v){ return Array.isArray(v) ? v : []; }
+  function nfmt(v){
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) ? n.toLocaleString() : '0';
+  }
   function yen(v){
     const s = String(v ?? '').replace(/,/g,'').replace(/[円¥\s　]/g,'').replace(/[^0-9.\-]/g,'');
     if (!s || s === '-' || s === '.') return 0;
@@ -1191,8 +1195,8 @@ IMPORT.deleteFieldData = function(ym) {
         <div>
           <div style="font-weight:900;font-size:14px;margin-bottom:6px">${ymText(ym)}</div>
           <div style="font-size:12px;line-height:1.7;color:var(--text2)">
-            ${p ? `✅ 商品・住所CSV 原票${p.uniqueCount.toLocaleString()}件 / 明細${p.detailRows.toLocaleString()}行 / 重複除外${p.duplicateExcluded.toLocaleString()}行` : '⬜ 商品・住所CSV 未登録'}<br>
-            ${w ? `✅ 作業者別CSV ${w.rowCount.toLocaleString()}行 / 作業者${w.workerCount.toLocaleString()}名` : '⬜ 作業者別CSV 未登録'}
+            ${p ? `✅ 商品・住所CSV 原票${nfmt(p.uniqueCount)}件 / 明細${nfmt(p.detailRows)}行 / 重複除外${nfmt(p.duplicateExcluded)}行` : '⬜ 商品・住所CSV 未登録'}<br>
+            ${w ? `✅ 作業者別CSV ${nfmt(w.rowCount)}行 / 作業者${nfmt(w.workerCount)}名` : '⬜ 作業者別CSV 未登録'}
           </div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end;align-items:center;white-space:nowrap">
@@ -1219,8 +1223,8 @@ IMPORT.deleteFieldData = function(ym) {
         if (p || w) {
           note = [
             note,
-            w ? `作業者 ${Number(w.rowCount||0).toLocaleString()}行 / ${Number(w.workerCount||0).toLocaleString()}名` : '',
-            p ? `商品住所 原票${Number(p.uniqueCount||0).toLocaleString()}件 / 明細${Number(p.detailRows||0).toLocaleString()}行 / 重複除外${Number(p.duplicateExcluded||0).toLocaleString()}行` : ''
+            w ? `作業者 ${nfmt(w.rowCount)}行 / ${nfmt(w.workerCount)}名` : '',
+            p ? `商品住所 原票${nfmt(p.uniqueCount)}件 / 明細${nfmt(p.detailRows)}行 / 重複除外${nfmt(p.duplicateExcluded)}行` : ''
           ].filter(Boolean).join(' / ');
         }
         const hasConfirmed = safeArray(STATE.datasets).some(d => d && d.ym === ym && d.source !== 'history' && (d.type || 'confirmed') === 'confirmed');
