@@ -838,7 +838,16 @@ const IMPORT = {
     }
     if (imported > 0) {
       STORE.save();
-      CLOUD.pushMonth(ym).catch(()=>{}); // 取込月だけ自動同期
+      // 単体取込では従来通り取込月だけ同期する。
+      // 一括取込では opt.awaitCloud === false を指定し、ループ後に pushAll() を1回だけ実行する。
+      if (opt.awaitCloud === true) {
+        if (CLOUD?.pushMonth) {
+          const r = await CLOUD.pushMonth(ym);
+          if (!r || !r.ok) throw new Error(r?.error || 'クラウド保存に失敗しました');
+        }
+      } else if (opt.awaitCloud !== false) {
+        CLOUD.pushMonth(ym).catch(()=>{}); // 取込月だけ自動同期
+      }
       NAV.refresh();
       UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`);
       UI.updateSaveStatus();
@@ -4227,6 +4236,12 @@ const BULK_IMPORT = window.BULK_IMPORT = {
     return { kind:'unknown' };
   },
 
+  _setImportType(type='confirmed') {
+    const value = type === 'daily' ? 'daily' : 'confirmed';
+    const radio = document.querySelector(`input[name="manual-import-type"][value="${value}"]`);
+    if (radio) radio.checked = true;
+  },
+
   _msg(text, type='info') {
     const el = document.getElementById('bulk-import-msg');
     if (!el) return;
@@ -4277,20 +4292,13 @@ const BULK_IMPORT = window.BULK_IMPORT = {
 
     STORE.save();
 
+    // 一括取込では月ごとの pushMonth を行わない。
+    // _busy 競合を避けるため、handleFiles の全ループ完了後に pushAll() を1回だけ実行する。
     if (AUTO_SYNC?._timer) {
       clearTimeout(AUTO_SYNC._timer);
       AUTO_SYNC._timer = null;
     }
 
-    if (CLOUD?.pushMonth) {
-      const r = await CLOUD.pushMonth(ym);
-      if (!r || !r.ok) throw new Error(r?.error || 'クラウド保存に失敗しました');
-    } else if (CLOUD?.pushAll) {
-      const r = await CLOUD.pushAll();
-      if (!r || !r.ok) throw new Error(r?.error || 'クラウド保存に失敗しました');
-    }
-
-    await this._verifyCloudSaved('pl', ym, type);
     return imported;
   },
 
@@ -4330,31 +4338,49 @@ const BULK_IMPORT = window.BULK_IMPORT = {
     const logs = [];
     const importedRevenueYms = [];
 
-    for (const g of groups.values()) {
-      try {
-        if (g.kind === 'pl') {
-          const count = await this._importPLGroup(g);
-          done += count;
-          importedRevenueYms.push(g.ym);
-          logs.push(`OK ${ymLabel(g.ym)} pl/${g.type || 'confirmed'}：${count}件 / クラウド保存済`);
-        } else if (g.kind === 'worker') {
-          if (!window.FIELD_WORKER_IMPORT2?.handleFilesForYM) throw new Error('作業者CSV一括取込処理が未読込です');
-          await FIELD_WORKER_IMPORT2.handleFilesForYM(g.files, g.ym);
-          await this._verifyCloudSaved('worker', g.ym);
-          done += g.files.length;
-          logs.push(`OK ${ymLabel(g.ym)} worker：${g.files.length}件 / クラウド保存済`);
-        } else if (g.kind === 'product') {
-          if (!window.FIELD_PRODUCT_IMPORT2?.handleFilesForYM) throw new Error('商品住所CSV一括取込処理が未読込です');
-          await FIELD_PRODUCT_IMPORT2.handleFilesForYM(g.files, g.ym);
-          await this._verifyCloudSaved('product', g.ym);
-          done += g.files.length;
-          logs.push(`OK ${ymLabel(g.ym)} product：${g.files.length}件 / クラウド保存済`);
-        }
-      } catch(e) {
-        logs.push(`NG ${ymLabel(g.ym)} ${g.kind}${g.type ? '/' + g.type : ''}：${e.message}`);
-      }
+    // 一括取込中は月別 pushMonth を止め、全ファイル処理後に pushAll() を1回だけ実行する。
+    // これにより CLOUD._busy の競合で一部月だけDB未保存になる事故を防ぐ。
+    const originalPushMonth = CLOUD?.pushMonth ? CLOUD.pushMonth.bind(CLOUD) : null;
+    if (CLOUD && originalPushMonth) {
+      CLOUD.pushMonth = async () => ({ ok:true, bulkSuppressed:true });
+    }
 
-      this._msg([`一括取込処理中：${done}件完了`, ...logs].join('\n'), 'info');
+    try {
+      for (const g of groups.values()) {
+        try {
+          if (g.kind === 'pl') {
+            this._setImportType?.(g.type || 'confirmed');
+            let count = 0;
+            if (IMPORT?.processCSV) {
+              const before = (STATE.datasets || []).filter(d => d && d.ym === g.ym && (d.type || 'confirmed') === (g.type || 'confirmed') && d.source !== 'history').length;
+              await IMPORT.processCSV(g.files, g.ym, { replace:true, awaitCloud:false });
+              const after = (STATE.datasets || []).filter(d => d && d.ym === g.ym && (d.type || 'confirmed') === (g.type || 'confirmed') && d.source !== 'history').length;
+              count = Math.max(g.files.length, after - before, 1);
+            } else {
+              count = await this._importPLGroup(g);
+            }
+            done += count;
+            importedRevenueYms.push(g.ym);
+            logs.push(`OK ${ymLabel(g.ym)} pl/${g.type || 'confirmed'}：${count}件`);
+          } else if (g.kind === 'worker') {
+            if (!window.FIELD_WORKER_IMPORT2?.handleFilesForYM) throw new Error('作業者CSV一括取込処理が未読込です');
+            await FIELD_WORKER_IMPORT2.handleFilesForYM(g.files, g.ym);
+            done += g.files.length;
+            logs.push(`OK ${ymLabel(g.ym)} worker：${g.files.length}件`);
+          } else if (g.kind === 'product') {
+            if (!window.FIELD_PRODUCT_IMPORT2?.handleFilesForYM) throw new Error('商品住所CSV一括取込処理が未読込です');
+            await FIELD_PRODUCT_IMPORT2.handleFilesForYM(g.files, g.ym);
+            done += g.files.length;
+            logs.push(`OK ${ymLabel(g.ym)} product：${g.files.length}件`);
+          }
+        } catch(e) {
+          logs.push(`NG ${ymLabel(g.ym)} ${g.kind}${g.type ? '/' + g.type : ''}：${e.message}`);
+        }
+
+        this._msg([`一括取込処理中：${done}件完了`, ...logs].join('\n'), 'info');
+      }
+    } finally {
+      if (CLOUD && originalPushMonth) CLOUD.pushMonth = originalPushMonth;
     }
 
     if (importedRevenueYms.length) {
@@ -4365,7 +4391,29 @@ const BULK_IMPORT = window.BULK_IMPORT = {
     }
 
     STORE.save();
+    if (AUTO_SYNC?._timer) {
+      clearTimeout(AUTO_SYNC._timer);
+      AUTO_SYNC._timer = null;
+    }
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+
+    let cloudSummary = '';
+    try {
+      this._msg([`一括取込完了：${done}件`, ...logs, '', 'クラウドへ一括保存中…'].join('\n'), 'info');
+      if (!CLOUD?.pushAll) throw new Error('CLOUD.pushAll が未読込です');
+      const r = await CLOUD.pushAll();
+      if (!r || !r.ok) throw new Error(r?.error || 'クラウド一括保存に失敗しました');
+
+      // 保存後にDBから再取得できるかを確認する。確認失敗時はOK扱いにしない。
+      for (const g of groups.values()) {
+        if (g.kind === 'pl') await this._verifyCloudSaved('pl', g.ym, g.type || 'confirmed');
+        else if (g.kind === 'worker') await this._verifyCloudSaved('worker', g.ym);
+        else if (g.kind === 'product') await this._verifyCloudSaved('product', g.ym);
+      }
+      cloudSummary = '\nクラウド一括保存: OK';
+    } catch(e) {
+      cloudSummary = `\nクラウド一括保存: NG（${e.message}）\nセンター切替後にデータが消える可能性があります。保存経路監査を実行してください。`;
+    }
 
     NAV.refresh();
     renderImport();
@@ -4376,9 +4424,9 @@ const BULK_IMPORT = window.BULK_IMPORT = {
       `一括取込完了：${done}件`,
       ...logs,
       ...(skipped.length ? ['', '判定できずスキップ：', ...skipped] : [])
-    ].join('\n');
+    ].join('\n') + cloudSummary;
 
-    const hasNg = logs.some(x => x.startsWith('NG'));
+    const hasNg = logs.some(x => x.startsWith('NG')) || cloudSummary.includes('NG');
     this._msg(summary, hasNg ? 'error' : (skipped.length ? 'warn' : 'ok'));
   }
 };
