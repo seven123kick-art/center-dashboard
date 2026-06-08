@@ -5529,10 +5529,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       UI.toast('一部画面モジュールの読み込みに失敗しました', 'warn');
     }
 
-    // 1. ローカルストレージから読込
+    // 1. localStorageから軽量設定だけ読込。CSV本体はDBから復元する。
     STORE.load();
-    // 削除済みマーカー適用後の状態をローカルへ即保存し、リロード直後の古い補完・計画復活を防ぐ
-    STORE.save();
 
     // 1.5 保存・取込・更新時の自動同期を有効化
     AUTO_SYNC.install();
