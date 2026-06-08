@@ -128,12 +128,13 @@ var CLOUD = window.CLOUD = {
     if (error) return { ok:false, error:error.message };
     return { ok:true };
   },
-  async _dbListStates(prefix = '') {
+  async _dbListStates(prefix = '', options = {}) {
     const sb = await this._client();
     if (!sb) return { ok:false, error:'Supabase未設定' };
+    const withPayload = !!options.withPayload;
     let q = sb
       .from('center_realtime_state')
-      .select('state_key,updated_at,payload')
+      .select(withPayload ? 'state_key,updated_at,payload' : 'state_key,updated_at')
       .eq('center_key', CENTER.id)
       .order('state_key', { ascending:true })
       .limit(10000);
@@ -235,7 +236,10 @@ var CLOUD = window.CLOUD = {
     const rows = [];
     for (const prefix of prefixes) {
       try {
-        const listed = await this._dbListStates(prefix);
+        // 起動・センター切替時は payload を読まない。
+        // 商品住所CSVの分割chunkが多い状態で payload まで一覧取得すると、PostgRESTが500を返すことがある。
+        // ここでは state_key/updated_at だけで台帳を再構成し、実データは必要な月だけ _downloadJSON で取得する。
+        const listed = await this._dbListStates(prefix, { withPayload:false });
         if (listed && listed.ok && Array.isArray(listed.rows)) rows.push(...listed.rows);
       } catch(e) {}
     }
@@ -259,7 +263,7 @@ var CLOUD = window.CLOUD = {
         manifest.hasLibrary = !!(manifest.hasLibrary || derived.hasLibrary);
         manifest.deleted = mergeDeletedStates(manifest.deleted || {}, derived.deleted || {});
       }
-      try { await this._uploadJSON(this._manifestKey(), manifest); } catch(e) {}
+      // 起動・読込時にはmanifestを書き戻さない。保存時のpushAll/pushMonthで更新する。
     }
     return manifest;
   },
