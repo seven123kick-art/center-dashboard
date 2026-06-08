@@ -94,6 +94,10 @@ IMPORT.deleteFieldData = function(ym) {
   const MONTHS = ['04','05','06','07','08','09','10','11','12','01','02','03'];
 
   function safeArray(v){ return Array.isArray(v) ? v : []; }
+  function nfmt(v){
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) ? n.toLocaleString() : '0';
+  }
   function yen(v){
     const s = String(v ?? '').replace(/,/g,'').replace(/[円¥\s　]/g,'').replace(/[^0-9.\-]/g,'');
     if (!s || s === '-' || s === '.') return 0;
@@ -224,8 +228,6 @@ IMPORT.deleteFieldData = function(ym) {
   const originalStoreSave = STORE.save.bind(STORE);
   STORE.load = function(){
     originalStoreLoad();
-    STATE.workerCsvData = this._g('workerCsvData') || [];
-    STATE.productAddressData = this._g('productAddressData') || [];
     ensureState();
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
@@ -234,9 +236,9 @@ IMPORT.deleteFieldData = function(ym) {
     ensureState();
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
+    // 現場明細CSVは app.js の STORE.save 側で月単位分割保存する。
+    // ここで一括保存すると北埼玉の大容量CSVでlocalStorage容量超過になり、センター切替後に0件化する。
     originalStoreSave();
-    this._s('workerCsvData', STATE.workerCsvData);
-    this._s('productAddressData', STATE.productAddressData);
   };
 
   // クラウド同期は app.js の CLOUD 側で月単位分割保存する。
@@ -709,9 +711,9 @@ IMPORT.deleteFieldData = function(ym) {
     STATE[listName].sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
   }
 
-  async function importWorker(files, forcedYM){
+  async function importWorker(files){
     ensureState(); setupYmSelects();
-    const ym = forcedYM || selectedWorkerYM();
+    const ym = selectedWorkerYM();
     let combined = {
       rowCount:0,
       lineRowCount:0,
@@ -822,14 +824,29 @@ IMPORT.deleteFieldData = function(ym) {
     upsertByYm('workerCsvData', { ym, source:'worker_csv', importedAt:new Date().toISOString(), ...combined });
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     STORE.save();
-    if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
+    let cloudMsg = '';
+    try {
+      if (AUTO_SYNC?._timer) { clearTimeout(AUTO_SYNC._timer); AUTO_SYNC._timer = null; }
+      if (CLOUD?.pushMonth) {
+        const r = await CLOUD.pushMonth(ym);
+        if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
+        cloudMsg = ' / クラウド保存済';
+      } else if (CLOUD?.pushAll) {
+        const r = await CLOUD.pushAll();
+        if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
+        cloudMsg = ' / クラウド保存済';
+      }
+    } catch(e) {
+      cloudMsg = ' / クラウド保存未確認';
+      msg(`作業者CSVはローカル保存済みですが、クラウド保存に失敗しました：${e.message}`, 'warn');
+    }
     refreshFieldAll();
-    msg(`${ymText(ym)} 作業者別CSVを入替完了：配送${combined.rowCount.toLocaleString()}件 / 作業者${combined.workerCount.toLocaleString()}名 / 金額${Math.round(combined.includedAmount/1000).toLocaleString()}千円（除外${Math.round(combined.excludedAmount/1000).toLocaleString()}千円）`);
+    msg(`${ymText(ym)} 作業者別CSVを入替完了：配送${combined.rowCount.toLocaleString()}件 / 作業者${combined.workerCount.toLocaleString()}名 / 金額${Math.round(combined.includedAmount/1000).toLocaleString()}千円（除外${Math.round(combined.excludedAmount/1000).toLocaleString()}千円）${cloudMsg}`);
   }
 
-  async function importProduct(files, forcedYM){
+  async function importProduct(files){
     ensureState(); setupYmSelects();
-    const ym = forcedYM || selectedProductYM();
+    const ym = selectedProductYM();
     let allTickets = [];
     let rawRows = 0, detailRows = 0, filesUsed = [];
     for (const file of Array.from(files || [])) {
@@ -873,19 +890,58 @@ IMPORT.deleteFieldData = function(ym) {
     upsertByYm('productAddressData', record);
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     STORE.save();
-    if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
+    let cloudMsg = '';
+    try {
+      if (AUTO_SYNC?._timer) { clearTimeout(AUTO_SYNC._timer); AUTO_SYNC._timer = null; }
+      if (CLOUD?.pushMonth) {
+        const r = await CLOUD.pushMonth(ym);
+        if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
+        cloudMsg = ' / クラウド保存済';
+      } else if (CLOUD?.pushAll) {
+        const r = await CLOUD.pushAll();
+        if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
+        cloudMsg = ' / クラウド保存済';
+      }
+    } catch(e) {
+      cloudMsg = ' / クラウド保存未確認';
+      msg(`商品・住所CSVはローカル保存済みですが、クラウド保存に失敗しました：${e.message}`, 'warn');
+    }
     refreshFieldAll();
-    msg(`${ymText(ym)} 商品・住所CSVを入替完了：原票${record.uniqueCount.toLocaleString()}件 / 明細${record.detailRows.toLocaleString()}行 / 重複除外${record.duplicateExcluded.toLocaleString()}行`);
+    msg(`${ymText(ym)} 商品・住所CSVを入替完了：原票${record.uniqueCount.toLocaleString()}件 / 明細${record.detailRows.toLocaleString()}行 / 重複除外${record.duplicateExcluded.toLocaleString()}行${cloudMsg}`);
+  }
+
+  async function importWorkerForYM(files, ym){
+    setupYmSelects();
+    const fySel = document.getElementById('field-worker-fy-select');
+    const mmSel = document.getElementById('field-worker-month-select');
+    const y = String(ym || '').replace(/[^0-9]/g,'').slice(0,6);
+    if (y.length === 6 && fySel && mmSel) {
+      fySel.value = fiscalFromYM2(y);
+      mmSel.value = String(y).slice(4,6);
+    }
+    return importWorker(files);
+  }
+
+  async function importProductForYM(files, ym){
+    setupYmSelects();
+    const fySel = document.getElementById('field-product-fy-select');
+    const mmSel = document.getElementById('field-product-month-select');
+    const y = String(ym || '').replace(/[^0-9]/g,'').slice(0,6);
+    if (y.length === 6 && fySel && mmSel) {
+      fySel.value = fiscalFromYM2(y);
+      mmSel.value = String(y).slice(4,6);
+    }
+    return importProduct(files);
   }
 
   window.FIELD_WORKER_IMPORT2 = {
     handleFiles(files){ importWorker(files).catch(e => msg('作業者CSV取込エラー：' + e.message, 'error')); },
-    async handleFilesForYM(files, ym){ await importWorker(files, ym); },
+    handleFilesForYM(files, ym){ return importWorkerForYM(files, ym); },
     handleDrop(e){ e.preventDefault(); importWorker(e.dataTransfer.files).catch(err => msg('作業者CSV取込エラー：' + err.message, 'error')); }
   };
   window.FIELD_PRODUCT_IMPORT2 = {
     handleFiles(files){ importProduct(files).catch(e => msg('商品・住所CSV取込エラー：' + e.message, 'error')); },
-    async handleFilesForYM(files, ym){ await importProduct(files, ym); },
+    handleFilesForYM(files, ym){ return importProductForYM(files, ym); },
     handleDrop(e){ e.preventDefault(); importProduct(e.dataTransfer.files).catch(err => msg('商品・住所CSV取込エラー：' + err.message, 'error')); }
   };
 
@@ -909,52 +965,65 @@ IMPORT.deleteFieldData = function(ym) {
     if (!box) {
       box = document.createElement('div');
       box.id = 'field-common-selector-box';
-      box.className = 'card';
       box.style.cssText = 'margin-bottom:14px';
-      box.innerHTML = `
-        <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-          <div><div style="font-size:15px;font-weight:900">表示対象</div><div style="font-size:12px;color:var(--text3);margin-top:4px">年度順：4月 → 翌年3月 / 年度・月を共通管理</div></div>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <label style="font-size:12px;font-weight:800">対象年度</label><select id="field-common-fy-select" style="font-size:13px;font-weight:800;min-width:120px"></select>
-            <label style="font-size:12px;font-weight:800">対象月</label><select id="field-common-month-select" style="font-size:13px;font-weight:800;min-width:190px"></select>
-          </div>
-        </div>`;
       view.insertBefore(box, view.firstChild);
     } else if (box.parentElement !== view) {
       view.insertBefore(box, view.firstChild);
     }
+
+    const fieldYms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : fieldAllYms();
+    const years = (window.PERIOD_UI?.fiscalYears ? PERIOD_UI.fiscalYears('field') : [...new Set(fieldYms.map(ym=>fiscalFromYM2(ym)))]).sort((a,b)=>Number(b)-Number(a));
+    if (!years.length) years.push(String(getDefaultFiscalYear()));
+    const preferredFY = String(STATE.fiscalYear || fiscalFromYM2(STATE.selYM || fieldYms.at(-1) || `${new Date().getFullYear()}04`));
+    const fy = years.includes(preferredFY) ? preferredFY : years[0];
+    const currentYM = STATE.selYM && monthsOfFiscalYear(fy).includes(STATE.selYM) ? STATE.selYM : '';
+    const latestInFY = monthsOfFiscalYear(fy).filter(ym => fieldYms.includes(ym)).at(-1) || '';
+    const selectedYM = currentYM || latestInFY || ymFromFiscalMonth(fy, '04');
+
+    const monthOptions = monthsOfFiscalYear(fy).map(ym => {
+      const hasData = fieldYms.includes(ym);
+      const label = ymText(ym) + (hasData ? '（現場明細あり）' : '（未登録）');
+      return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${hasData?'':'disabled'}>${label}</option>`;
+    }).join('');
+
+    box.innerHTML = `
+      <div class="period-selector-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
+        <div>
+          <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
+          <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / 年度・月を共通管理</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
+            <select id="field-common-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:120px">
+              ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
+            </select>
+          </label>
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
+            <select id="field-common-month-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
+              ${monthOptions || '<option value="">データなし</option>'}
+            </select>
+          </label>
+        </div>
+      </div>`;
+
     const fySel = document.getElementById('field-common-fy-select');
     const mSel = document.getElementById('field-common-month-select');
-    if (!fySel || !mSel) return;
-    const fieldYms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : fieldAllYms();
-    const yset = new Set(fieldYms.map(ym=>fiscalFromYM2(ym)));
-    if (!yset.size) yset.add(getDefaultFiscalYear());
-    const years = [...yset].sort((a,b)=>Number(b)-Number(a));
-    const latestField = fieldYms.length ? fieldYms[fieldYms.length - 1] : '';
-    const baseYM = (STATE.selYM && fieldYms.includes(STATE.selYM)) ? STATE.selYM : (latestField || `${new Date().getFullYear()}04`);
-    const keepFY = fySel.value || fiscalFromYM2(baseYM);
-    fySel.innerHTML = years.map(y=>`<option value="${y}">${y}年度</option>`).join('');
-    fySel.value = years.includes(keepFY) ? keepFY : years[0];
-    function fillMonths(){
-      const fy = fySel.value;
-      const current = mSel.value || STATE.selYM;
-      mSel.innerHTML = MONTHS.map(mm => {
-        const ym = ymFromFiscalMonth(fy, mm);
-        const hasData = fieldYms.includes(ym);
-        const label = ymText(ym) + (hasData ? '' : '（未登録）');
-        return `<option value="${ym}" ${hasData ? '' : 'disabled'}>${label}</option>`;
-      }).join('');
-      if ([...mSel.options].some(o=>o.value===current)) mSel.value = current;
-      else {
-        const latest = [...mSel.options].reverse().find(o => !o.disabled && fieldYms.includes(o.value));
-        mSel.value = latest ? latest.value : ymFromFiscalMonth(fy, '04');
+    if (fySel) fySel.onchange = () => {
+      STATE.fiscalYear = String(fySel.value);
+      const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => fieldYms.includes(ym));
+      STATE.selYM = list.at(-1) || null;
+      refreshFieldAll(false);
+    };
+    if (mSel) mSel.onchange = () => {
+      if (mSel.value) {
+        STATE.selYM = mSel.value;
+        STATE.fiscalYear = fiscalFromYM2(mSel.value);
       }
-      STATE.fiscalYear = fy;
-      STATE.selYM = mSel.value;
-    }
-    fySel.onchange = () => { fillMonths(); refreshFieldAll(false); };
-    mSel.onchange = () => { STATE.selYM = mSel.value; refreshFieldAll(false); };
-    fillMonths();
+      refreshFieldAll(false);
+    };
+
+    STATE.fiscalYear = fy;
+    if (selectedYM && fieldYms.includes(selectedYM)) STATE.selYM = selectedYM;
   }
 
   function productRecord(ym){ return (window.FIELD_DATA_ACCESS?.getProductRecords() || safeArray(STATE.productAddressData)).find(d=>d.ym===ym); }
@@ -1152,8 +1221,8 @@ IMPORT.deleteFieldData = function(ym) {
         <div>
           <div style="font-weight:900;font-size:14px;margin-bottom:6px">${ymText(ym)}</div>
           <div style="font-size:12px;line-height:1.7;color:var(--text2)">
-            ${p ? `✅ 商品・住所CSV 原票${p.uniqueCount.toLocaleString()}件 / 明細${p.detailRows.toLocaleString()}行 / 重複除外${p.duplicateExcluded.toLocaleString()}行` : '⬜ 商品・住所CSV 未登録'}<br>
-            ${w ? `✅ 作業者別CSV ${w.rowCount.toLocaleString()}行 / 作業者${w.workerCount.toLocaleString()}名` : '⬜ 作業者別CSV 未登録'}
+            ${p ? `✅ 商品・住所CSV 原票${nfmt(p.uniqueCount)}件 / 明細${nfmt(p.detailRows)}行 / 重複除外${nfmt(p.duplicateExcluded)}行` : '⬜ 商品・住所CSV 未登録'}<br>
+            ${w ? `✅ 作業者別CSV ${nfmt(w.rowCount)}行 / 作業者${nfmt(w.workerCount)}名` : '⬜ 作業者別CSV 未登録'}
           </div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end;align-items:center;white-space:nowrap">
@@ -1180,8 +1249,8 @@ IMPORT.deleteFieldData = function(ym) {
         if (p || w) {
           note = [
             note,
-            w ? `作業者 ${Number(w.rowCount||0).toLocaleString()}行 / ${Number(w.workerCount||0).toLocaleString()}名` : '',
-            p ? `商品住所 原票${Number(p.uniqueCount||0).toLocaleString()}件 / 明細${Number(p.detailRows||0).toLocaleString()}行 / 重複除外${Number(p.duplicateExcluded||0).toLocaleString()}行` : ''
+            w ? `作業者 ${nfmt(w.rowCount)}行 / ${nfmt(w.workerCount)}名` : '',
+            p ? `商品住所 原票${nfmt(p.uniqueCount)}件 / 明細${nfmt(p.detailRows)}行 / 重複除外${nfmt(p.duplicateExcluded)}行` : ''
           ].filter(Boolean).join(' / ');
         }
         const hasConfirmed = safeArray(STATE.datasets).some(d => d && d.ym === ym && d.source !== 'history' && (d.type || 'confirmed') === 'confirmed');

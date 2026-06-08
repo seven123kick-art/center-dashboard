@@ -353,6 +353,8 @@ const CENTER = (() => {
 /* ════════ §3 STATE（ランタイム状態） ═══════════════════════════ */
 const STATE = {
   datasets:  [],    // [{ym,type,rows,totalIncome,totalExpense,profit,...}]
+  workerCsvData: [], // 現場明細CSV（作業者CSV）月単位データ
+  productAddressData: [], // 現場明細CSV（商品住所CSV）月単位データ
   fieldData: [],    // [{ym,areas:{name:{count,shippers:{}}}}]
   areaData:  [],    // 旧データ互換用（現在は旧帳票関連では使用しない）
   capacity:  null,  // {areas:{name:{max}},updatedAt}
@@ -540,83 +542,7 @@ window.markDataDeleted = markDataDeleted;
 window.clearDataDeleted = clearDataDeleted;
 window.applyDeletionTombstonesToState = applyDeletionTombstonesToState;
 
-/* ════════ §4 STORE（localStorage、センター別） ════════════════ */
-const STORE = {
-  _p: `mgmt5_${CENTER.id}_`,
-
-  _s(k, v) { try { localStorage.setItem(this._p+k, JSON.stringify(v)); } catch(e){} },
-  _g(k)    { try { const v=localStorage.getItem(this._p+k); return v?JSON.parse(v):null; } catch(e){ return null; } },
-
-  load() {
-    STATE.datasets  = this._g('datasets')  || [];
-    STATE.fieldData = this._g('fieldData') || [];
-    STATE.areaData  = this._g('areaData')  || [];
-    STATE.capacity  = this._g('capacity')  || null;
-    STATE.planData  = normalizePlanData(this._g('planData'));
-    STATE.memos     = this._g('memos')     || {};
-    STATE.library   = this._g('library')   || [];
-    STATE.reportKnowledge = normalizeReportKnowledge(this._g('reportKnowledge') || STATE.reportKnowledge);
-    STATE.deleted = normalizeDeletedState(this._g('deleted') || STATE.deleted);
-    sanitizePersonalDataState(STATE);
-    applyDeletionTombstonesToState(STATE);
-  },
-
-  save() {
-    sanitizePersonalDataState(STATE);
-    this._s('datasets',  STATE.datasets);
-    this._s('fieldData', STATE.fieldData);
-    this._s('areaData',  STATE.areaData);
-    this._s('capacity',  STATE.capacity);
-    this._s('planData',  STATE.planData);
-    this._s('memos',     STATE.memos);
-    this._s('library',   STATE.library);
-    this._s('reportKnowledge', STATE.reportKnowledge);
-    this._s('deleted', STATE.deleted);
-  },
-
-  exportJSON() {
-    sanitizePersonalDataState(STATE);
-    const blob = new Blob([JSON.stringify({
-      center:CENTER.id, exportedAt:new Date().toISOString(),
-      datasets:STATE.datasets, fieldData:STATE.fieldData, areaData:STATE.areaData,
-      capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos, library:STATE.library, reportKnowledge:STATE.reportKnowledge, deleted:STATE.deleted,
-    },null,2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${CENTER.id}_backup_${dt()}.json`;
-    a.click();
-  },
-
-  async restoreJSON(file) {
-    try {
-      const d = JSON.parse(await file.text());
-      if (d.center && d.center !== CENTER.id &&
-          !confirm(`別センター(${d.center})のデータです。読み込みますか？`)) return;
-      if (d.datasets)  STATE.datasets  = d.datasets;
-      if (d.fieldData) STATE.fieldData = d.fieldData;
-      if (d.areaData)  STATE.areaData  = d.areaData;
-      if (d.capacity)  STATE.capacity  = d.capacity;
-      if (d.planData) STATE.planData = normalizePlanData(d.planData);
-      if (d.memos)     STATE.memos     = d.memos;
-      if (d.library)   STATE.library   = d.library;
-      if (d.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(d.reportKnowledge);
-      if (d.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, d.deleted);
-      sanitizePersonalDataState(STATE);
-      applyDeletionTombstonesToState(STATE);
-      this.save();
-      NAV.refresh();
-      UI.toast('バックアップを復元しました');
-    } catch(e) { UI.toast('読込エラー: '+e.message, 'error'); }
-  },
-
-  storageInfo() {
-    let size = 0;
-    for (const k of Object.keys(localStorage)) {
-      if (k.startsWith(this._p)) size += (localStorage.getItem(k)||'').length * 2;
-    }
-    return { bytes: size, kb: (size/1024).toFixed(1) };
-  },
-};
+/* ════════ §4 STORE は core/store.js へ分離 ════════ */
 
 /* ════════ §5 CSV ════════════════════════════════════════════════ */
 const CSV = {
@@ -845,103 +771,6 @@ function upsertDataset(ds) {
   });
 }
 
-
-
-/* ════════ §7-B CSV一括取込（命名済みCSV対応） ════════════════════════ */
-const CSV_BULK_IMPORT = {
-  ymFromName(name) {
-    const n = String(name || '').normalize('NFKC');
-    let m = n.match(/(20\d{2})[-_\/年 .]?(0?[1-9]|1[0-2])(?:月)?/);
-    if (!m) return '';
-    return `${m[1]}${String(m[2]).padStart(2, '0')}`;
-  },
-  kindFromName(name) {
-    const n = String(name || '').normalize('NFKC').toUpperCase();
-    if (/SKDL|収支|実績|確定|日報/.test(n)) return 'skdl';
-    if (/PRODUCT|商品|住所|エリア|AREA/.test(n)) return 'product';
-    if (/WORKER|作業者|作業員|DRIVER/.test(n)) return 'worker';
-    return '';
-  },
-  typeFromName(name) {
-    const n = String(name || '').normalize('NFKC').toUpperCase();
-    if (/SKDL0001|日報|速報|DAILY/.test(n)) return 'daily';
-    return 'confirmed';
-  },
-  async importSkdl(file, ym) {
-    const mm = ym.slice(4,6);
-    const monthCol = CONFIG.PLAN_MONTH_COLS[mm] ?? null;
-    const text = await CSV.read(file);
-    const rows = CSV.parseSKDL(text, monthCol);
-    if (!rows) throw new Error('SKDLのデータ行が見つかりません');
-    const type = this.typeFromName(file.name);
-    const ds = processDataset(ym, type, rows);
-    ds.source = 'csv';
-    ds.fileName = file.name;
-    ds.fiscalYear = fiscalYearFromYM(ym);
-    ds.unit = '円';
-    ds.replacedAt = new Date().toISOString();
-    STATE.datasets = (STATE.datasets || []).filter(d => !(d && d.ym === ym && (d.type || 'confirmed') === type && d.source !== 'history'));
-    upsertDataset(ds);
-    if (typeof clearDataDeleted === 'function') clearDataDeleted(type === 'daily' ? 'csvDailyMonths' : 'csvMonths', ym);
-    return { kind:'skdl', ym, type, name:file.name };
-  },
-  async handleFiles(files) {
-    const list = Array.from(files || []).filter(f => f && /\.csv$/i.test(f.name));
-    const msg = document.getElementById('csv-bulk-msg');
-    if (!list.length) { UI.toast('CSVファイルを選択してください', 'warn'); return; }
-    let ok = 0, skipped = 0;
-    const errors = [];
-    const groups = new Map();
-
-    for (const f of list) {
-      const ym = this.ymFromName(f.name);
-      const kind = this.kindFromName(f.name);
-      if (!ym || !kind) { skipped++; errors.push(`${f.name}: 年月または種別を判定できません`); continue; }
-      const key = `${kind}:${ym}`;
-      if (!groups.has(key)) groups.set(key, { kind, ym, files: [] });
-      groups.get(key).files.push(f);
-    }
-
-    if (msg) msg.textContent = `取込中... ${list.length}件`;
-
-    for (const g of groups.values()) {
-      try {
-        if (g.kind === 'skdl') {
-          for (const f of g.files) { await this.importSkdl(f, g.ym); ok++; }
-          if (CLOUD?.pushMonth) CLOUD.pushMonth(g.ym).catch(()=>{});
-        } else if (g.kind === 'product') {
-          if (window.FIELD_PRODUCT_IMPORT2?.handleFilesForYM) {
-            await window.FIELD_PRODUCT_IMPORT2.handleFilesForYM(g.files, g.ym);
-            ok += g.files.length;
-          } else {
-            throw new Error('商品・住所CSV取込モジュールが未読込です');
-          }
-        } else if (g.kind === 'worker') {
-          if (window.FIELD_WORKER_IMPORT2?.handleFilesForYM) {
-            await window.FIELD_WORKER_IMPORT2.handleFilesForYM(g.files, g.ym);
-            ok += g.files.length;
-          } else {
-            throw new Error('作業者CSV取込モジュールが未読込です');
-          }
-        }
-      } catch(e) {
-        errors.push(`${g.ym} ${g.kind}: ${e.message || e}`);
-      }
-    }
-
-    if (ok > 0) {
-      STORE.save();
-      if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
-      NAV.refresh();
-      UI.updateTopbar(STATE.view || 'import');
-      UI.updateSaveStatus();
-    }
-    const summary = `一括取込完了：成功${ok}件 / スキップ${skipped}件 / エラー${errors.length}件`;
-    if (msg) msg.innerHTML = `<div style="font-size:12px;color:${errors.length ? 'var(--red)' : 'var(--green)'}">${esc(summary)}</div>` + (errors.length ? `<pre style="white-space:pre-wrap;font-size:11px;color:var(--red);margin-top:6px">${esc(errors.slice(0,20).join('\n'))}</pre>` : '');
-    UI.toast(summary, errors.length ? 'warn' : 'ok');
-  }
-};
-
 /* ════════ §7 IMPORT ════════════════════════════════════════════ */
 const IMPORT = {
   _pending: [],
@@ -1009,9 +838,20 @@ const IMPORT = {
     }
     if (imported > 0) {
       STORE.save();
-      CLOUD.pushMonth(ym).catch(()=>{}); // 取込月だけ自動同期
+      let cloudResult = null;
+      if (opt.awaitCloud) {
+        cloudResult = await CLOUD.pushMonth(ym);
+        if (!cloudResult || !cloudResult.ok) {
+          throw new Error(`収支CSVは画面上へ取り込みましたが、クラウド保存に失敗しました：${cloudResult?.error || '同期失敗'}`);
+        }
+      } else {
+        CLOUD.pushMonth(ym).catch(e=>{
+          console.warn('[IMPORT] cloud save failed', ym, e);
+          UI.toast(`${ymLabel(ym)}のクラウド保存に失敗しました。保存経路監査を確認してください`, 'warn');
+        }); // 取込月だけ自動同期
+      }
       NAV.refresh();
-      UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`);
+      UI.toast(`${imported}件取込完了（${ymLabel(ym)}）${opt.awaitCloud ? ' / クラウド保存済' : ''}`);
       UI.updateSaveStatus();
     }
   },
@@ -1156,7 +996,7 @@ ${ds.fileName || 'ファイル名なし'}
 
   clearAll() {
     if (!confirm('全データを削除します。よろしいですか？')) return;
-    STATE.datasets = []; STATE.fieldData = []; STATE.capacity = null;
+    STATE.datasets = []; STATE.workerCsvData = []; STATE.productAddressData = []; STATE.fieldData = []; STATE.capacity = null;
     STORE.save();
     NAV.refresh();
     UI.toast('全データを削除しました');
@@ -1232,660 +1072,7 @@ const MODAL = {
   },
 };
 
-/* ════════ §9 CLOUD（Supabase — 取込時のみ自動実行） ═══════════ */
-const CLOUD = {
-  _sb: null,
-  _LSKEY: 'mgmt5_cloud_cfg',
-  _busy: false,
-
-  _cfg() {
-    try { const s = localStorage.getItem(this._LSKEY); if (s) return JSON.parse(s); } catch(e) {}
-    return { url: CONFIG.SUPABASE_URL, key: CONFIG.SUPABASE_KEY, bucket: CONFIG.SUPABASE_BUCKET };
-  },
-  _saveCfg(url, key, bucket) { try { localStorage.setItem(this._LSKEY, JSON.stringify({ url, key, bucket })); } catch(e) {} this._sb = null; },
-  async _client() {
-    if (this._sb) return this._sb;
-    try {
-      await ASSETS.supabase();
-      if (!window.supabase) return null;
-      const cfg = this._cfg();
-      if (!cfg.url || !cfg.key) return null;
-      this._sb = window.supabase.createClient(cfg.url, cfg.key);
-      return this._sb;
-    } catch(e) { return null; }
-  },
-  _bucket() { return this._cfg().bucket || CONFIG.SUPABASE_BUCKET; },
-  _manifestKey() { return `${CENTER.id}/manifest.json`; },
-  _datasetKey(ym, type='confirmed') { return `${CENTER.id}/skdl/${ym}_${type || 'confirmed'}.json`; },
-  _capacityKey() { return `${CENTER.id}/capacity/master.json`; },
-  _fieldKey() { return `${CENTER.id}/field/data.json`; },
-  _workerMonthKey(ym) { return `${CENTER.id}/field/worker/${ym}.json`; },
-  _productMonthKey(ym) { return `${CENTER.id}/field/product/${ym}.json`; },
-  _fullStateKey() { return `${CENTER.id}/full_state.json`; },
-  _planKey() { return `${CENTER.id}/plan/data.json`; },
-  _memosKey() { return `${CENTER.id}/memos/data.json`; },
-  _libraryKey() { return `${CENTER.id}/library/data.json`; },
-  _libraryFileKey(fileName, fy='unknown') {
-    // Supabase Storage の key はURLパスとして扱われるため、表示名と保存名を分離する。
-    // 日本語・括弧・空白などは使わず、英数字だけの保存名にする。元のファイル名は fileName として台帳に残す。
-    const extRaw = String(fileName || '').split('.').pop() || 'bin';
-    const ext = String(extRaw).toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
-    const uid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const safeFy = String(fy || 'unknown').replace(/[^0-9a-zA-Z_-]/g, '_');
-    return `${CENTER.id}/library_files/${safeFy}/${uid}.${ext}`;
-  },
-  _legacyKey() { return `${CENTER.id}/data_v5.json`; },
-  _makeManifest() {
-    const workerCsv = Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData : [];
-    const productCsv = Array.isArray(STATE.productAddressData) ? STATE.productAddressData : [];
-    return {
-      version: 31,
-      center: CENTER.id,
-      savedAt: new Date().toISOString(),
-      datasets: STATE.datasets.filter(d => d.source !== 'history').map(d => ({
-        ym:d.ym,
-        type:d.type || 'confirmed',
-        source:d.source || 'csv',
-        importedAt:d.importedAt || null,
-        totalIncome:d.totalIncome || 0,
-        totalExpense:d.totalExpense || 0,
-        profit:d.profit || 0
-      })),
-      workerCsvData: workerCsv.map(d => ({
-        ym:d.ym,
-        source:d.source || 'worker_csv',
-        importedAt:d.importedAt || d.updatedAt || d.savedAt || null,
-        rowCount:d.rowCount || 0,
-        workerCount:d.workerCount || 0
-      })),
-      productAddressData: productCsv.map(d => ({
-        ym:d.ym,
-        source:d.source || 'product_address_csv',
-        importedAt:d.importedAt || d.updatedAt || d.savedAt || null,
-        uniqueCount:d.uniqueCount || 0,
-        detailRows:d.detailRows || 0,
-        rawRows:d.rawRows || 0,
-        amount:d.amount || 0
-      })),
-      hasCapacity: !!STATE.capacity,
-      hasFieldData: !!(STATE.fieldData && STATE.fieldData.length),
-      hasPlanData: !!(STATE.planData && Object.keys(STATE.planData).length),
-      planDataUpdatedAt: latestPlanUpdatedAt(),
-      hasMemos: !!(STATE.memos && Object.keys(STATE.memos).length),
-      hasLibrary: !!(STATE.library && STATE.library.length),
-      hasReportKnowledge: !!(STATE.reportKnowledge && ((STATE.reportKnowledge.references||[]).length || Object.keys(STATE.reportKnowledge.policies||{}).length)),
-      deleted: STATE.deleted || {},
-    };
-  },
-  _makeFullState() {
-    // full_state は起動・復元用の軽量台帳だけにする。
-    // CSV本体（収支・作業者・商品住所）は月単位JSONへ分割保存し、ここへ入れない。
-    // ここへ大きい配列を入れると Supabase Storage の object size 上限で同期失敗する。
-    sanitizePersonalDataState(STATE);
-    return {
-      version: 31,
-      center: CENTER.id,
-      savedAt: new Date().toISOString(),
-      fiscalYear: STATE.fiscalYear || null,
-      capacity: STATE.capacity || null,
-      planData: STATE.planData || {},
-      memos: STATE.memos || {},
-      library: STATE.library || [],
-      reportKnowledge: STATE.reportKnowledge || { policies:{}, references:[] },
-      deleted: STATE.deleted || {},
-    };
-  },
-
-  _applyFullState(full) {
-    if (!full || typeof full !== 'object') return false;
-    if (full.center && full.center !== CENTER.id) return false;
-    if (Array.isArray(full.datasets)) STATE.datasets = full.datasets;
-    if (Array.isArray(full.fieldData)) STATE.fieldData = full.fieldData;
-    if (Array.isArray(full.areaData)) STATE.areaData = full.areaData;
-    if ('capacity' in full) STATE.capacity = full.capacity || null;
-    if (full.planData) STATE.planData = normalizePlanData(full.planData);
-    if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
-    if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
-    if (Array.isArray(full.library)) STATE.library = full.library;
-    if (full.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(full.reportKnowledge);
-    STATE.deleted = mergeDeletedStates(STATE.deleted, full.deleted || {});
-    sanitizePersonalDataState(STATE);
-    applyDeletionTombstonesToState(STATE);
-    if (typeof AUTO_SYNC !== 'undefined') {
-      AUTO_SYNC.withoutSync(() => STORE.save());
-    } else {
-      STORE.save();
-    }
-    return true;
-  },
-  _isSizeError(error) {
-    const msg = String(error?.message || error || '').toLowerCase();
-    return msg.includes('maximum allowed size') || msg.includes('payload too large') || msg.includes('413') || (msg.includes('object') && msg.includes('size'));
-  },
-  _chunkKey(key, idx) {
-    return `${key}.chunks/${String(idx).padStart(4,'0')}.part`;
-  },
-  async _uploadBlob(key, blob, contentType='application/octet-stream') {
-    const sb = await this._client();
-    if (!sb) return { ok:false, error:'Supabase未設定' };
-    const { error } = await sb.storage.from(this._bucket()).upload(key, blob, { upsert:true, contentType });
-    if (error) throw error;
-    return { ok:true };
-  },
-  async _uploadJSON(key, value) {
-    value = sanitizedCloneForExport(value);
-    const json = JSON.stringify(value);
-    const blob = new Blob([json], { type:'application/json' });
-
-    try {
-      await this._uploadBlob(key, blob, 'application/json');
-      return { ok:true, chunked:false };
-    } catch(error) {
-      if (!this._isSizeError(error)) throw error;
-    }
-
-    // Supabase bucketのobject size上限を超える場合は、小さいテキスト片に分割して保存する。
-    // 元のkeyには「分割台帳」だけを置くため、既存の downloadJSON 呼び出しはそのまま使える。
-    const chunkSize = 24 * 1024;
-    const chunks = [];
-    for (let i=0; i<json.length; i += chunkSize) chunks.push(json.slice(i, i + chunkSize));
-
-    for (let i=0; i<chunks.length; i++) {
-      await this._uploadBlob(this._chunkKey(key, i), new Blob([chunks[i]], { type:'text/plain' }), 'text/plain');
-    }
-
-    const pointer = {
-      __chunked: true,
-      version: 1,
-      center: CENTER.id,
-      key,
-      chunks: chunks.length,
-      chunkSize,
-      savedAt: new Date().toISOString(),
-      bytes: json.length
-    };
-    await this._uploadBlob(key, new Blob([JSON.stringify(pointer)], { type:'application/json' }), 'application/json');
-    return { ok:true, chunked:true, chunks:chunks.length };
-  },
-  async _downloadJSON(key) {
-    const sb = await this._client();
-    if (!sb) return null;
-    const { data, error } = await sb.storage.from(this._bucket()).download(key);
-    if (error) return null;
-    const text = await data.text();
-    const first = JSON.parse(text);
-    if (first && first.__chunked && Number(first.chunks) > 0) {
-      let joined = '';
-      for (let i=0; i<Number(first.chunks); i++) {
-        const part = await sb.storage.from(this._bucket()).download(this._chunkKey(key, i));
-        if (part.error || !part.data) throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
-        joined += await part.data.text();
-      }
-      return JSON.parse(joined);
-    }
-    return first;
-  },
-  async uploadFile(key, file) {
-    const sb = await this._client();
-    if (!sb) return { ok:false, error:'Supabase未設定' };
-    const { error } = await sb.storage.from(this._bucket()).upload(key, file, {
-      upsert:true,
-      contentType: file.type || 'application/octet-stream'
-    });
-    if (error) throw error;
-    return { ok:true, key };
-  },
-  async deleteFile(key) {
-    const sb = await this._client();
-    if (!sb || !key) return { ok:false, error:'Supabase未設定またはキーなし' };
-    const { error } = await sb.storage.from(this._bucket()).remove([key]);
-    if (error) return { ok:false, error:error.message };
-    return { ok:true };
-  },
-  async createSignedUrl(key) {
-    const sb = await this._client();
-    if (!sb || !key) return null;
-    const { data, error } = await sb.storage.from(this._bucket()).createSignedUrl(key, 60 * 10);
-    if (error) return null;
-    return data?.signedUrl || null;
-  },
-  async pushMonth(ym) {
-    if (!ym) return { ok:false, error:'対象月なし' };
-    if (this._busy) return { ok:false, error:'同期処理中' };
-    this._busy = true;
-    try {
-      const targets = STATE.datasets.filter(d => d.ym === ym && d.source !== 'history');
-      const workers = (STATE.workerCsvData || []).filter(d => d && d.ym === ym);
-      const products = (STATE.productAddressData || []).filter(d => d && d.ym === ym);
-      if (!targets.length && !workers.length && !products.length) return { ok:false, error:'対象月データなし' };
-      for (const ds of targets) await this._uploadJSON(this._datasetKey(ym, ds.type || 'confirmed'), ds);
-      for (const w of workers) await this._uploadJSON(this._workerMonthKey(ym), w);
-      for (const pr of products) await this._uploadJSON(this._productMonthKey(ym), pr);
-      await this._uploadJSON(this._manifestKey(), this._makeManifest());
-      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
-      UI.updateCloudBadge('ok');
-      return { ok:true };
-    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
-    finally { this._busy = false; }
-  },
-  async pushCapacity() {
-    if (!STATE.capacity) return { ok:false, error:'キャパデータなし' };
-    if (this._busy) return { ok:false, error:'同期処理中' };
-    this._busy = true;
-    try {
-      await this._uploadJSON(this._capacityKey(), STATE.capacity);
-      await this._uploadJSON(this._manifestKey(), this._makeManifest());
-      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
-      UI.updateCloudBadge('ok');
-      return { ok:true };
-    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
-    finally { this._busy = false; }
-  },
-  async pushAll() {
-    if (this._busy) return { ok:false, error:'同期処理中' };
-    this._busy = true;
-    try {
-      for (const ds of STATE.datasets.filter(d => d.source !== 'history')) await this._uploadJSON(this._datasetKey(ds.ym, ds.type || 'confirmed'), ds);
-      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
-      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
-      if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
-      await this._uploadJSON(this._planKey(), STATE.planData || {});
-      if (STATE.memos && Object.keys(STATE.memos).length) await this._uploadJSON(this._memosKey(), STATE.memos);
-      if (STATE.library && STATE.library.length) await this._uploadJSON(this._libraryKey(), STATE.library);
-      // 旧形式data_v5.json / 旧field/data.json は大きいデータ・個人情報混入リスクがあるため削除する。
-      try {
-        const sb = await this._client();
-        if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]);
-      } catch(e) {}
-      await this._uploadJSON(this._manifestKey(), this._makeManifest());
-      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
-      UI.updateCloudBadge('ok');
-      return { ok:true };
-    } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
-    finally { this._busy = false; }
-  },
-  async push() { return this.pushAll(); },
-  _validWorkerMonthRecord(rec, meta={}) {
-    if (!rec || typeof rec !== 'object' || !rec.ym) return false;
-    const hasRows = Number(rec.rowCount || rec.lineRowCount || 0) > 0;
-    const hasWorkers = rec.workers && typeof rec.workers === 'object' && Object.keys(rec.workers).length > 0;
-    const metaRows = Number(meta.rowCount || meta.lineRowCount || 0);
-    if (metaRows && !hasRows && !hasWorkers) return false;
-    return hasRows || hasWorkers;
-  },
-  _validProductMonthRecord(rec, meta={}) {
-    if (!rec || typeof rec !== 'object' || !rec.ym) return false;
-    if (!Array.isArray(rec.tickets) || !rec.tickets.length) return false;
-    const metaUnique = Number(meta.uniqueCount || 0);
-    if (metaUnique && rec.tickets.length < Math.max(1, Math.floor(metaUnique * 0.5))) return false;
-    return true;
-  },
-  async pullManifestAndMissing() {
-    const manifest = await this._downloadJSON(this._manifestKey());
-    if (!manifest) return { ok:false, error:'manifestなし' };
-    if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
-    let changed = 0;
-
-    const datasetMetas = Array.isArray(manifest.datasets) ? manifest.datasets : [];
-    for (const meta of datasetMetas) {
-      if (!meta.ym) continue;
-      const metaType = meta.type || 'confirmed';
-      if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
-      const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
-      if (!local || String(meta.importedAt||'') > String(local.importedAt||'')) {
-        const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
-        if (ds && ds.ym) { upsertDataset(ds); changed++; }
-      }
-    }
-
-    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
-    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
-
-    const workerMetas = Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [];
-    for (const meta of workerMetas) {
-      if (!meta.ym || deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
-      const local = STATE.workerCsvData.find(d => d.ym === meta.ym);
-      if (!local || !this._validWorkerMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
-        const rec = await this._downloadJSON(this._workerMonthKey(meta.ym));
-        if (rec && rec.ym && this._validWorkerMonthRecord(rec, meta)) {
-          STATE.workerCsvData = STATE.workerCsvData.filter(d => d.ym !== rec.ym);
-          STATE.workerCsvData.push(rec);
-          changed++;
-        }
-      }
-    }
-
-    const productMetas = Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [];
-    for (const meta of productMetas) {
-      if (!meta.ym || deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
-      const local = STATE.productAddressData.find(d => d.ym === meta.ym);
-      if (!local || !this._validProductMonthRecord(local, meta) || String(meta.importedAt||'') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
-        const rec = await this._downloadJSON(this._productMonthKey(meta.ym));
-        if (rec && rec.ym && this._validProductMonthRecord(rec, meta)) {
-          STATE.productAddressData = STATE.productAddressData.filter(d => d.ym !== rec.ym);
-          STATE.productAddressData.push(rec);
-          changed++;
-        }
-      }
-    }
-
-    if (manifest.hasCapacity && !STATE.capacity) {
-      const cap = await this._downloadJSON(this._capacityKey());
-      if (cap) { STATE.capacity = cap; changed++; }
-    }
-
-    // 旧field/data.jsonは大容量化・個人情報混入防止のため原則使わない。
-    // 既存クラウドからの復元互換は full_state/manifest 側に寄せる。
-
-    if (manifest.hasPlanData) {
-      const cloudPlan = await this._downloadJSON(this._planKey());
-      if (cloudPlan && typeof cloudPlan === 'object') {
-        STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
-        applyDeletionTombstonesToState(STATE);
-        changed++;
-      }
-    }
-
-    if (manifest.hasMemos) {
-      const memos = await this._downloadJSON(this._memosKey());
-      if (memos && typeof memos === 'object') { STATE.memos = memos; changed++; }
-    }
-
-    if (manifest.hasLibrary) {
-      const library = await this._downloadJSON(this._libraryKey());
-      if (Array.isArray(library)) { STATE.library = library; changed++; }
-    }
-
-    applyDeletionTombstonesToState(STATE);
-    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-    if (changed) STORE.save();
-    UI.updateCloudBadge('ok');
-    return { ok:true, changed };
-  },
-  async pullFieldDataForFiscalYear(fy) {
-    // 現場分析用の遅延読込。
-    // 起動時には作業者CSV・商品住所CSVを読まず、現場分析画面を開いた時だけ対象年度分を取得する。
-    try {
-      const fiscalYear = String(fy || STATE.fiscalYear || getDefaultFiscalYear());
-      const months = (typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(fiscalYear) : [];
-      const monthSet = new Set(months);
-      const manifest = await this._downloadJSON(this._manifestKey());
-      if (!manifest) return { ok:false, error:'manifestなし' };
-      if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
-
-      if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
-      if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
-
-      let changed = 0;
-
-      const workerMetas = (Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [])
-        .filter(meta => meta && meta.ym && monthSet.has(meta.ym));
-      for (const meta of workerMetas) {
-        if (deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
-        const local = STATE.workerCsvData.find(d => d && d.ym === meta.ym);
-        const localAt = String(local?.importedAt || local?.updatedAt || local?.savedAt || '');
-        const cloudAt = String(meta.importedAt || meta.updatedAt || meta.savedAt || '');
-        if (!local || !this._validWorkerMonthRecord(local, meta) || cloudAt > localAt) {
-          const rec = await this._downloadJSON(this._workerMonthKey(meta.ym));
-          if (rec && rec.ym && this._validWorkerMonthRecord(rec, meta)) {
-            STATE.workerCsvData = STATE.workerCsvData.filter(d => d && d.ym !== rec.ym);
-            STATE.workerCsvData.push(rec);
-            changed++;
-          }
-        }
-      }
-
-      const productMetas = (Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [])
-        .filter(meta => meta && meta.ym && monthSet.has(meta.ym));
-      for (const meta of productMetas) {
-        if (deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
-        const local = STATE.productAddressData.find(d => d && d.ym === meta.ym);
-        const localAt = String(local?.importedAt || local?.updatedAt || local?.savedAt || '');
-        const cloudAt = String(meta.importedAt || meta.updatedAt || meta.savedAt || '');
-        if (!local || !this._validProductMonthRecord(local, meta) || cloudAt > localAt) {
-          const rec = await this._downloadJSON(this._productMonthKey(meta.ym));
-          if (rec && rec.ym && this._validProductMonthRecord(rec, meta)) {
-            STATE.productAddressData = STATE.productAddressData.filter(d => d && d.ym !== rec.ym);
-            STATE.productAddressData.push(rec);
-            changed++;
-          }
-        }
-      }
-
-      applyDeletionTombstonesToState(STATE);
-      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-      if (changed) STORE.save();
-      UI.updateCloudBadge('ok');
-      return { ok:true, changed, source:'field_lazy', fiscalYear, workerMonths:workerMetas.length, productMonths:productMetas.length };
-    } catch(e) {
-      UI.updateCloudBadge('error');
-      return { ok:false, error:e.message };
-    }
-  },
-  async pullLegacy() {
-    const j = await this._downloadJSON(this._legacyKey());
-    if (!j) return { ok:false, error:'旧形式データなし' };
-    if (j.datasets)  STATE.datasets  = j.datasets;
-    if (j.fieldData) STATE.fieldData = j.fieldData;
-    if (j.capacity)  STATE.capacity  = j.capacity;
-    if (j.planData)  STATE.planData  = normalizePlanData(j.planData);
-    if (j.memos)     STATE.memos     = j.memos;
-    if (j.library)   STATE.library   = j.library;
-    if (j.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, j.deleted);
-    applyDeletionTombstonesToState(STATE);
-    STORE.save();
-    UI.updateCloudBadge('ok');
-    return { ok:true };
-  },
-  async pullFullState() {
-    try {
-      const full = await this._downloadJSON(this._fullStateKey());
-      if (!full) return { ok:false, error:'full_stateなし' };
-      const ok = this._applyFullState(full);
-      if (!ok) return { ok:false, error:'full_state適用失敗' };
-      UI.updateCloudBadge('ok');
-      return { ok:true, changed:true, source:'full_state' };
-    } catch(e) {
-      return { ok:false, error:e.message };
-    }
-  },
-  async pullInitialForBoot(preferredView='dashboard') {
-    // 起動専用の軽量読込。
-    // 重要：full_state.json と現場明細・商品住所・資料は起動時に読まない。
-    // ダッシュボードで必要な「選択年度の収支月別JSON + 計画 + キャパ」だけを取得する。
-    try {
-      let changed = 0;
-
-      const manifest = await this._downloadJSON(this._manifestKey());
-      if (!manifest) {
-        // manifest が無い古い環境だけ互換取得へ逃がす。
-        // 通常運用ではここに入らない。
-        return await this.pullLegacy();
-      }
-
-      if (manifest.deleted) STATE.deleted = mergeDeletedStates(STATE.deleted, manifest.deleted);
-
-      const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
-      const localLatest = latestRealDS && latestRealDS();
-      const sorted = metas.slice().sort((a,b) => String(a.ym).localeCompare(String(b.ym)));
-      const latestYm = sorted.length ? sorted[sorted.length - 1].ym : (localLatest && localLatest.ym ? localLatest.ym : null);
-
-      // 起動時に必要なのは「表示年度の12ヶ月」。
-      // 最新月だけ読むと、月選択で他月が未登録扱いになり、年度推移も壊れて見える。
-      const fySet = new Set();
-      if (STATE.fiscalYear) fySet.add(String(STATE.fiscalYear));
-      if (latestYm) fySet.add(String(fiscalYearFromYM(latestYm)));
-      if (!fySet.size) fySet.add(String(getDefaultFiscalYear()));
-
-      const targetYms = new Set();
-      for (const fy of fySet) {
-        if (typeof monthsOfFiscalYear === 'function') {
-          monthsOfFiscalYear(fy).forEach(ym => targetYms.add(ym));
-        }
-      }
-
-      const targetMetas = metas.filter(m => targetYms.has(m.ym));
-      const jobs = targetMetas.map(async (meta) => {
-        const metaType = meta.type || 'confirmed';
-        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return 0;
-        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
-        if (local && String(meta.importedAt||'') <= String(local.importedAt||'')) return 0;
-        const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
-        if (ds && ds.ym) { upsertDataset(ds); return 1; }
-        return 0;
-      });
-      const results = await Promise.allSettled(jobs);
-      for (const r of results) if (r.status === 'fulfilled') changed += Number(r.value || 0);
-
-      if (manifest.hasPlanData) {
-        const cloudPlan = await this._downloadJSON(this._planKey());
-        if (cloudPlan && typeof cloudPlan === 'object') {
-          STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
-          changed++;
-        }
-      }
-
-      if (manifest.hasCapacity && !STATE.capacity) {
-        const cap = await this._downloadJSON(this._capacityKey());
-        if (cap) { STATE.capacity = cap; changed++; }
-      }
-
-      applyDeletionTombstonesToState(STATE);
-      sanitizePersonalDataState(STATE);
-      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-      if (changed) STORE.save();
-      UI.updateCloudBadge('ok');
-      return { ok:true, changed:!!changed, source:'boot_fiscal_year_skdl_only' };
-    } catch(e) {
-      UI.updateCloudBadge('error');
-      return { ok:false, error:e.message };
-    }
-  },
-  async pull() {
-    try {
-      let changed = false;
-      let gotAny = false;
-
-      const full = await this.pullFullState();
-      if (full && full.ok) {
-        changed = true;
-        gotAny = true;
-      }
-
-      // full_state が古い場合に備え、必ず manifest / skdl 月別データも確認する。
-      // これにより、別PCで入れた確定CSVが full_state 未反映でも取得できる。
-      const r = await this.pullManifestAndMissing();
-      if (r && r.ok) {
-        changed = changed || !!r.changed;
-        gotAny = true;
-      }
-
-      if (gotAny) {
-        STORE.save();
-        UI.updateCloudBadge('ok');
-        return { ok:true, changed, source:'full_state+manifest' };
-      }
-
-      return await this.pullLegacy();
-    }
-    catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
-  },
-  async syncSmart() {
-    if (this._busy) return { ok:false, error:'同期処理中' };
-    this._busy = true;
-    try {
-      const cloudFull = await this._downloadJSON(this._fullStateKey());
-      const localFull = this._makeFullState();
-
-      // 先に full_state をマージ
-      const mergedBase = cloudFull && typeof cloudFull === 'object'
-        ? mergeFullState(localFull, cloudFull)
-        : localFull;
-
-      // 削除済みマーカーを先に統合し、削除を優先してから適用する
-      mergedBase.deleted = mergeDeletedStates(localFull.deleted || {}, cloudFull?.deleted || {});
-      applyDeletionTombstonesToState(mergedBase);
-      this._applyFullState(mergedBase);
-      this._busy = false;
-      const manifestResult = await this.pullManifestAndMissing();
-      this._busy = true;
-
-      // manifest取得後の最新STATEを full_state として再保存
-      const finalFull = this._makeFullState();
-      await this._uploadJSON(this._fullStateKey(), finalFull);
-
-      await this._uploadJSON(this._planKey(), STATE.planData || {});
-      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
-      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
-      if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
-      try { const sb = await this._client(); if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]); } catch(e) {}
-      await this._uploadJSON(this._manifestKey(), this._makeManifest());
-
-      UI.updateCloudBadge('ok');
-      return { ok:true, changed:true, source:'smart+manifest', manifestChanged: !!(manifestResult && manifestResult.changed) };
-    } catch(e) {
-      UI.updateCloudBadge('error');
-      return { ok:false, error:e.message };
-    } finally {
-      this._busy = false;
-    }
-  },
-  async purgePersonalData() {
-    // ローカル状態をサニタイズし、Supabase上のfull_state/field/data/manifestを安全データで上書きする。
-    // 旧形式data_v5.jsonは削除する。
-    try {
-      sanitizePersonalDataState(STATE);
-      STORE.save();
-      const sb = await this._client();
-      if (!sb) return { ok:false, error:'Supabase未設定' };
-      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
-      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
-      await this._uploadJSON(this._manifestKey(), this._makeManifest());
-      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
-      try { await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]); } catch(e) {}
-      UI.updateCloudBadge('ok');
-      return { ok:true };
-    } catch(e) {
-      UI.updateCloudBadge('error');
-      return { ok:false, error:e.message };
-    }
-  },
-
-  async saveConfig() {
-    const urlEl=document.getElementById('sb-url'), keyEl=document.getElementById('sb-key'), bucketEl=document.getElementById('sb-bucket'), msgEl=document.getElementById('cloud-test-msg');
-    const url=urlEl?.value?.trim()||CONFIG.SUPABASE_URL;
-    const key=keyEl?.value?.trim()||CONFIG.SUPABASE_KEY;
-    const bucket=bucketEl?.value?.trim()||CONFIG.SUPABASE_BUCKET;
-    const finalKey = key.includes('...') ? this._cfg().key : key;
-    this._saveCfg(url, finalKey, bucket);
-    if (msgEl) msgEl.textContent='接続テスト中...';
-    const r=await this.pushAll();
-    if (msgEl) msgEl.textContent = r.ok ? '✅ 接続OK・同期完了' : '❌ '+(r.error||'接続失敗');
-    UI.toast(r.ok ? '☁ クラウド接続OK・同期しました' : 'エラー: '+(r.error||''), r.ok?'ok':'error');
-  },
-  async syncNow() {
-    const msgEl=document.getElementById('cloud-test-msg');
-    if (msgEl) msgEl.textContent='クラウドと双方向同期中...';
-    UI.toast('クラウドと双方向同期中...');
-    const r = await this.syncSmart();
-    if (msgEl) msgEl.textContent = r.ok ? '✅ 双方向同期完了' : '❌ '+(r.error||'同期失敗');
-    if (r.ok) {
-      NAV.refresh();
-      UI.updateTopbar(STATE.view || 'dashboard');
-      UI.toast('クラウドと双方向同期しました');
-    } else {
-      UI.toast('同期失敗: '+(r.error||'不明'), 'error');
-    }
-  },
-  renderForm() {
-    const cfg=this._cfg();
-    const urlEl=document.getElementById('sb-url'), keyEl=document.getElementById('sb-key'), bucketEl=document.getElementById('sb-bucket');
-    if (urlEl) { urlEl.value=cfg.url||''; urlEl.readOnly=false; }
-    if (keyEl) { keyEl.value=cfg.key ? cfg.key.slice(0,40)+'...' : ''; keyEl.readOnly=false; }
-    if (bucketEl) { bucketEl.value=cfg.bucket||CONFIG.SUPABASE_BUCKET; }
-    UI.updateCloudBadge(cfg.url && cfg.key ? 'configured' : 'none');
-  }
-};
+/* ════════ §9 CLOUD は core/cloud.js へ分離 ════════ */
 
 /* ════════ §10 フォーマットヘルパー ════════════════════════════ */
 function fmt(v,d=0) {
@@ -2074,131 +1261,143 @@ function selectedFieldDataInSelectedFiscalYear() {
   return list.find(d => d.ym === ym) || (list.length ? list[list.length - 1] : null);
 }
 
+
+/* 共通：年度・月プルダウン表示ルール
+   - 年度は全画面で同じ候補を使う（収支/現場/計画/キャパ/現在年度）
+   - 月は年度順（4月→翌年3月）で12ヶ月を必ず表示
+   - 未登録月は「（未登録）」と表示し、月単位画面では選択不可にする
+   - 年度変更時は、その年度で登録済みの最新月へ寄せる
+*/
+const PERIOD_UI = {
+  fiscalYears(kind='all') {
+    const set = new Set();
+    if (STATE.fiscalYear) set.add(String(STATE.fiscalYear));
+    set.add(String(getDefaultFiscalYear()));
+
+    const addYM = ym => { if (ym) set.add(String(fiscalYearFromYM(ym))); };
+    (activeRealCsvDatasets?.() || []).forEach(d => addYM(d?.ym));
+    (activeDatasets?.() || []).forEach(d => addYM(d?.ym));
+    (STATE.workerCsvData || []).forEach(d => addYM(d?.ym));
+    (STATE.productAddressData || []).forEach(d => addYM(d?.ym));
+    Object.keys(STATE.planData || {}).forEach(fy => /^\d{4}$/.test(String(fy)) && set.add(String(fy)));
+    Object.keys(STATE.capacityRegionsByFY || {}).forEach(fy => /^\d{4}$/.test(String(fy)) && set.add(String(fy)));
+    Object.keys(STATE.capacityCalendarsByFY || {}).forEach(fy => /^\d{4}$/.test(String(fy)) && set.add(String(fy)));
+
+    return [...set].sort((a,b)=>parseInt(b,10)-parseInt(a,10));
+  },
+  hasData(ym, kind='revenue') {
+    if (!ym) return false;
+    if (kind === 'revenue') return !!activeRealCsvDatasetByYM(ym);
+    if (kind === 'field') {
+      return (STATE.workerCsvData || []).some(d => d?.ym === ym) || (STATE.productAddressData || []).some(d => d?.ym === ym);
+    }
+    return !!activeDatasetByYM(ym);
+  },
+  monthLabel(ym, kind='revenue') {
+    const base = ymLabel(ym);
+    if (kind === 'field') return `${base}${this.hasData(ym, kind) ? '（現場明細あり）' : '（未登録）'}`;
+    const ds = kind === 'revenue' ? activeRealCsvDatasetByYM(ym) : activeDatasetByYM(ym);
+    return ds ? `${base}（${datasetKindLabel(ds)}）` : `${base}（未登録）`;
+  },
+  latestYMInFY(fy, kind='revenue') {
+    const months = monthsOfFiscalYear(fy);
+    const list = months.filter(ym => this.hasData(ym, kind));
+    return list.length ? list[list.length - 1] : null;
+  },
+  render(container, opt={}) {
+    if (!container) return;
+    const kind = opt.kind || 'revenue';
+    const useMonth = opt.useMonth !== false;
+    const viewKey = opt.viewKey || 'common';
+    const title = opt.title || '表示対象';
+    const subtitle = opt.subtitle || (useMonth ? '年度順：4月 → 翌年3月 / 年度・月を共通管理' : '年度順：4月 → 翌年3月 / 年度内推移を表示');
+    const years = this.fiscalYears(kind);
+    const fy = String(STATE.fiscalYear || dashboardSelectedFiscalYear() || years[0] || getDefaultFiscalYear());
+    const safeFY = years.includes(fy) ? fy : (years[0] || fy);
+    const selectedYM = STATE.selYM && monthsOfFiscalYear(safeFY).includes(STATE.selYM) ? STATE.selYM : (this.latestYMInFY(safeFY, kind) || '');
+    const months = monthsOfFiscalYear(safeFY);
+    const fyId = `${viewKey}-fy-select`;
+    const ymId = `${viewKey}-ym-select`;
+    const monthHtml = months.map(ym => {
+      const has = this.hasData(ym, kind);
+      const selected = ym === selectedYM ? 'selected' : '';
+      const disabled = has ? '' : 'disabled';
+      return `<option value="${esc(ym)}" ${selected} ${disabled}>${esc(this.monthLabel(ym, kind))}</option>`;
+    }).join('');
+
+    container.className = container.className || 'period-selector-wrap';
+    container.innerHTML = `
+      <div class="period-selector-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
+        <div>
+          <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">${esc(title)}</div>
+          <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">${esc(subtitle)}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
+            <select id="${fyId}" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:120px">
+              ${years.map(y=>`<option value="${esc(y)}" ${String(y)===String(safeFY)?'selected':''}>${esc(y)}年度</option>`).join('')}
+            </select>
+          </label>
+          ${useMonth ? `<label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
+            <select id="${ymId}" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
+              ${monthHtml || '<option value="">データなし</option>'}
+            </select>
+          </label>` : ''}
+        </div>
+      </div>`;
+
+    const fySel = document.getElementById(fyId);
+    const ymSel = document.getElementById(ymId);
+    if (fySel) fySel.onchange = () => {
+      STATE.fiscalYear = String(fySel.value);
+      STATE.selYM = this.latestYMInFY(STATE.fiscalYear, kind) || null;
+      if (typeof opt.onChange === 'function') opt.onChange({ fiscalYear: STATE.fiscalYear, ym: STATE.selYM, changed: 'fy' });
+    };
+    if (ymSel) ymSel.onchange = () => {
+      if (ymSel.value) STATE.selYM = ymSel.value;
+      STATE.fiscalYear = fiscalYearFromYM(STATE.selYM);
+      if (typeof opt.onChange === 'function') opt.onChange({ fiscalYear: STATE.fiscalYear, ym: STATE.selYM, changed: 'ym' });
+    };
+  }
+};
+window.PERIOD_UI = PERIOD_UI;
+
 function renderCommonPeriodSelector(viewKey, opt={}) {
   const view = document.getElementById('view-' + viewKey);
-  if (!view) return;
-
-  // 年度推移・年度指標系は「対象年度」だけに統一する。
-  // 月を選んでも年度内の先月まで表示されるように見える誤解を防ぐため。
+  if (!view || !window.PERIOD_UI) return;
   const yearOnlyViews = new Set(['trend','indicators','annual']);
   const useMonth = opt.useMonth !== false && !yearOnlyViews.has(viewKey);
-  const boxId = `${viewKey}-period-selector`;
-  let box = document.getElementById(boxId);
+  const kind = opt.kind || (viewKey === 'field' ? 'field' : 'all');
+  let box = document.getElementById(`${viewKey}-period-selector`);
   if (!box) {
     box = document.createElement('div');
-    box.id = boxId;
+    box.id = `${viewKey}-period-selector`;
     view.prepend(box);
   }
-
-  const years = dashboardAvailableFiscalYears();
-  const fy = dashboardSelectedFiscalYear();
-  const months = monthsOfFiscalYear(fy);
-  const selectedYM = dashboardSelectedYM();
-
-  const monthOptions = months.map(ym => {
-    const ds = activeDatasetByYM(ym);
-    const fds = (STATE.fieldData || []).find(d => d.ym === ym);
-    const hasData = viewKey === 'field' ? !!fds : !!ds;
-    const label = viewKey === 'field'
-      ? (fds ? `${ymLabel(ym)}（現場明細あり）` : `${ymLabel(ym)}（未登録）`)
-      : (ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`);
-    return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${hasData?'':'disabled'}>${label}</option>`;
-  }).join('');
-
-  box.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
-      <div>
-        <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
-        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / ${useMonth?'年度・月を共通管理':'年度内推移を表示'}</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
-          <select id="${viewKey}-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
-            ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
-          </select>
-        </label>
-        ${useMonth ? `
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
-          <select id="${viewKey}-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:190px">
-            ${monthOptions || '<option value="">データなし</option>'}
-          </select>
-        </label>` : ''}
-      </div>
-    </div>`;
-
-  const fySel = document.getElementById(`${viewKey}-fy-select`);
-  const ymSel = document.getElementById(`${viewKey}-ym-select`);
-
-  if (fySel) fySel.onchange = () => {
-    STATE.fiscalYear = fySel.value;
-    const monthsInFY = monthsOfFiscalYear(STATE.fiscalYear);
-    const list = viewKey === 'field'
-      ? monthsInFY.filter(ym => (STATE.fieldData || []).some(d => d.ym === ym))
-      : monthsInFY.filter(ym => activeDatasetByYM(ym));
-    STATE.selYM = list.length ? list[list.length - 1] : null;
-    NAV.refresh();
-  };
-
-  if (ymSel) ymSel.onchange = () => {
-    if (ymSel.value) STATE.selYM = ymSel.value;
-    NAV.refresh();
-  };
+  PERIOD_UI.render(box, {
+    viewKey,
+    kind,
+    useMonth,
+    subtitle: useMonth ? '年度順：4月 → 翌年3月 / 年度・月を共通管理' : '年度順：4月 → 翌年3月 / 年度内推移を表示',
+    onChange: () => NAV.refresh()
+  });
 }
 function renderDashboardSelector() {
   const area = document.getElementById('kpi-area');
-  if (!area || !area.parentNode) return;
-
+  if (!area || !area.parentNode || !window.PERIOD_UI) return;
   let box = document.getElementById('dashboard-period-selector');
   if (!box) {
     box = document.createElement('div');
     box.id = 'dashboard-period-selector';
     area.parentNode.insertBefore(box, area);
   }
-
-  const years = dashboardAvailableFiscalYears();
-  const fy = dashboardSelectedFiscalYear();
-  const months = monthsOfFiscalYear(fy);
-  const selectedYM = dashboardSelectedYM();
-  const monthOptions = months.map(ym => {
-    const ds = activeRealCsvDatasetByYM(ym);
-    const label = ds ? `${ymLabel(ym)}（${datasetKindLabel(ds)}）` : `${ymLabel(ym)}（未登録）`;
-    return `<option value="${ym}" ${ym===selectedYM?'selected':''} ${ds?'':'disabled'}>${label}</option>`;
-  }).join('');
-
-  box.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
-      <div>
-        <div style="font-weight:900;color:var(--text,#1f2d3d);font-size:14px">表示対象</div>
-        <div style="font-size:12px;color:var(--text3,#8090a3);margin-top:3px">年度順：4月 → 翌年3月 / ダッシュボードのみ切替</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象年度
-          <select id="dashboard-fy-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800">
-            ${years.map(y=>`<option value="${y}" ${String(y)===String(fy)?'selected':''}>${y}年度</option>`).join('')}
-          </select>
-        </label>
-        <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
-          <select id="dashboard-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:190px">
-            ${monthOptions || '<option value="">データなし</option>'}
-          </select>
-        </label>
-      </div>
-    </div>`;
-
-  const fySel = document.getElementById('dashboard-fy-select');
-  const ymSel = document.getElementById('dashboard-ym-select');
-  if (fySel) fySel.onchange = () => {
-    STATE.fiscalYear = fySel.value;
-    const list = monthsOfFiscalYear(STATE.fiscalYear).filter(ym => activeRealCsvDatasetByYM(ym));
-    STATE.selYM = list.length ? list[list.length - 1] : null;
-    renderDashboard();
-    UI.updateTopbar('dashboard');
-  };
-  if (ymSel) ymSel.onchange = () => {
-    if (ymSel.value) STATE.selYM = ymSel.value;
-    renderDashboard();
-    UI.updateTopbar('dashboard');
-  };
+  PERIOD_UI.render(box, {
+    viewKey: 'dashboard',
+    kind: 'revenue',
+    useMonth: true,
+    subtitle: '年度順：4月 → 翌年3月 / ダッシュボードのみ切替',
+    onChange: () => { renderDashboard(); UI.updateTopbar('dashboard'); }
+  });
 }
 
 function latestDS() {
@@ -4823,6 +4022,119 @@ function renderStorageMapTable() {
       </tbody></table></div>
     </div>`;
 }
+
+function renderStorageRouteAuditPanel() {
+  const fy = storageFiscalYear();
+  const years = new Set([String(fy), getDefaultFiscalYear()]);
+  (STATE.datasets || []).forEach(d => d && d.ym && years.add(String(d.fiscalYear || fiscalYearFromYM(d.ym))));
+  (STATE.workerCsvData || []).forEach(d => d && d.ym && years.add(String(fiscalYearFromYM(d.ym))));
+  (STATE.productAddressData || []).forEach(d => d && d.ym && years.add(String(fiscalYearFromYM(d.ym))));
+  if (STATE.planData && typeof STATE.planData === 'object') Object.keys(STATE.planData).forEach(y => /^\d{4}$/.test(y) && years.add(y));
+  const yearOptions = [...years].sort().reverse().map(y => `<option value="${esc(y)}" ${String(y)===String(fy)?'selected':''}>${esc(y)}年度</option>`).join('');
+  return `
+    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <div>
+          <div style="font-weight:900;font-size:14px">保存経路監査</div>
+          <div style="font-size:11px;color:var(--text3);line-height:1.6">取込後のSTATE・DB保存・再読込状態を年度単位で確認します。北埼玉/戸田とも同じ基準で判定します。</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="storage-audit-fy-select" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:8px">${yearOptions}</select>
+          <button class="btn" onclick="DATA_STORAGE_AUDIT.run()" style="font-size:12px;padding:5px 10px">保存経路を確認</button>
+          <button class="btn" onclick="DATA_STORAGE_AUDIT.loadField()" style="font-size:12px;padding:5px 10px">現場データを再読込</button>
+        </div>
+      </div>
+      <div id="storage-audit-result" style="font-size:12px;color:var(--text2)">未確認です。必要に応じて「保存経路を確認」を押してください。</div>
+    </div>`;
+}
+
+window.DATA_STORAGE_AUDIT = {
+  _fy() {
+    return String(document.getElementById('storage-audit-fy-select')?.value || storageFiscalYear() || getDefaultFiscalYear());
+  },
+  _label(ok, textOk='あり', textNg='なし') {
+    return storageBadge(ok ? textOk : textNg, ok ? 'ok' : 'danger');
+  },
+  _warn(text) { return storageBadge(text, 'warn'); },
+  _localDataset(ym) { return (STATE.datasets || []).some(d => d && d.ym === ym && d.source !== 'history'); },
+  _localWorker(ym) { return (STATE.workerCsvData || []).some(d => d && d.ym === ym && !deletedAt('workerMonths', ym) && !deletedAt('fieldMonths', ym)); },
+  _localProduct(ym) { return (STATE.productAddressData || []).some(d => d && d.ym === ym && !deletedAt('productMonths', ym) && !deletedAt('fieldMonths', ym)); },
+  async _dbExists(key) {
+    try {
+      if (!CLOUD || !CLOUD._dbGetState || !CLOUD._dbStateKey) return false;
+      const v = await CLOUD._dbGetState(CLOUD._dbStateKey(key));
+      return !!v;
+    } catch(e) { return false; }
+  },
+  _judge(local, db, manifest) {
+    if (local && db) return { text:'OK', kind:'ok', note:'画面表示・DB保存とも確認' };
+    if (!local && db) return { text:'未読込', kind:'warn', note:'DBにはあります。画面再読込または現場データ再読込で復元可能' };
+    if (local && !db) return { text:'未保存', kind:'danger', note:'画面にはありますがDB保存が確認できません。今すぐ同期が必要' };
+    if (manifest && !db) return { text:'台帳不整合', kind:'danger', note:'manifestにありますがDB本体がありません' };
+    return { text:'未登録', kind:'warn', note:'この月のデータは未登録' };
+  },
+  async run() {
+    const fy = this._fy();
+    const el = document.getElementById('storage-audit-result');
+    if (!el) return;
+    el.innerHTML = '確認中...';
+    try {
+      const months = storageFiscalMonths(fy);
+      const manifest = await CLOUD._downloadJSON(CLOUD._manifestKey()).catch(e => null);
+      const mDatasets = new Set((manifest?.datasets || []).map(m => m && m.ym).filter(Boolean));
+      const mWorkers = new Set((manifest?.workerCsvData || []).map(m => m && m.ym).filter(Boolean));
+      const mProducts = new Set((manifest?.productAddressData || []).map(m => m && m.ym).filter(Boolean));
+      const rows = [];
+      for (const ym of months) {
+        const localFin = this._localDataset(ym);
+        const localW = this._localWorker(ym);
+        const localP = this._localProduct(ym);
+        const dbFin = await this._dbExists(CLOUD._datasetKey(ym, 'confirmed')) || await this._dbExists(CLOUD._datasetKey(ym, 'daily'));
+        const dbW = await this._dbExists(CLOUD._workerMonthKey(ym));
+        const dbP = await this._dbExists(CLOUD._productMonthKey(ym));
+        const jFin = this._judge(localFin, dbFin, mDatasets.has(ym));
+        const jW = this._judge(localW, dbW, mWorkers.has(ym));
+        const jP = this._judge(localP, dbP, mProducts.has(ym));
+        const worst = [jFin,jW,jP].find(j => j.kind === 'danger') || [jFin,jW,jP].find(j => j.kind === 'warn') || jFin;
+        rows.push({ ym, localFin, dbFin, localW, dbW, localP, dbP, jFin, jW, jP, worst });
+      }
+      const danger = rows.filter(r => r.worst.kind === 'danger').length;
+      const warn = rows.filter(r => r.worst.kind === 'warn').length;
+      const summary = danger ? storageBadge(`要対応 ${danger}ヶ月`, 'danger') : warn ? storageBadge(`確認 ${warn}ヶ月`, 'warn') : storageBadge('異常なし', 'ok');
+      el.innerHTML = `
+        <div style="margin:8px 0 10px">${summary}<span style="margin-left:8px;color:var(--text3)">center_key: ${esc(CENTER.id)} / ${esc(fy)}年度</span></div>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>作業者CSV</th><th>商品住所CSV</th><th>判定</th><th>メモ</th></tr></thead><tbody>
+          ${rows.map(r => `<tr>
+            <td><strong>${esc(ymLabel(r.ym))}</strong></td>
+            <td>画面 ${this._label(r.localFin).replace(/登録済|あり/g,'あり')} / DB ${this._label(r.dbFin).replace(/登録済|あり/g,'あり')}</td>
+            <td>画面 ${this._label(r.localW).replace(/登録済|あり/g,'あり')} / DB ${this._label(r.dbW).replace(/登録済|あり/g,'あり')}</td>
+            <td>画面 ${this._label(r.localP).replace(/登録済|あり/g,'あり')} / DB ${this._label(r.dbP).replace(/登録済|あり/g,'あり')}</td>
+            <td>${storageBadge(r.worst.text, r.worst.kind)}</td>
+            <td style="min-width:260px;color:var(--text2)">${esc(r.worst.note)}</td>
+          </tr>`).join('')}
+        </tbody></table></div>`;
+    } catch(e) {
+      el.innerHTML = `<div class="msg msg-danger">保存経路監査に失敗しました: ${esc(e.message || e)}</div>`;
+    }
+  },
+  async loadField() {
+    const fy = this._fy();
+    const el = document.getElementById('storage-audit-result');
+    if (el) el.innerHTML = `${esc(fy)}年度の現場データをDBから再読込中...`;
+    const r = await CLOUD.pullFieldDataForFiscalYear(fy);
+    if (r && r.ok) {
+      STORE.save();
+      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+      UI.toast(`${fy}年度の現場データを再読込しました`);
+      renderImport();
+      setTimeout(() => DATA_STORAGE_AUDIT.run(), 50);
+    } else {
+      UI.toast('現場データ再読込失敗: ' + (r?.error || '不明'), 'error');
+      if (el) el.innerHTML = `<div class="msg msg-danger">現場データ再読込失敗: ${esc(r?.error || '不明')}</div>`;
+    }
+  }
+};
+
 window.DATA_STORAGE_TABLE = {
   changeFY(fy){ STATE.fiscalYear = String(fy); renderImport(); },
 
@@ -4892,6 +4204,103 @@ window.DATA_STORAGE_TABLE = {
 };
 
 /* ════════ §20 RENDER — Import ═════════════════════════════════ */
+
+/* ════════ CSV一括取込（年月・種別をファイル名から自動判定） ════════ */
+const BULK_IMPORT = {
+  _ymFromName(name) {
+    const base = String(name || '');
+    const patterns = [
+      /(20\d{2})[-_\.\s年]*(0?[1-9]|1[0-2])(?:月)?/,
+      /(20\d{2})(0[1-9]|1[0-2])/,
+    ];
+    for (const re of patterns) {
+      const m = base.match(re);
+      if (!m) continue;
+      const mm = String(m[2]).padStart(2, '0');
+      if (Number(mm) >= 1 && Number(mm) <= 12) return `${m[1]}${mm}`;
+    }
+    return '';
+  },
+
+  _classify(name, sample) {
+    const fileName = String(name || '');
+    const n = fileName.toLowerCase();
+    const t = String(sample || '');
+
+    // 重要：SKDLは本文に「商品」等の語が含まれることがあるため、商品住所CSVより先に判定する。
+    if (/skdl0001/i.test(fileName) || /日報|速報/.test(fileName)) return { kind:'pl', type:'daily' };
+    if (/skdl0003/i.test(fileName) || /確定/.test(fileName)) return { kind:'pl', type:'confirmed' };
+    if (/skdl/i.test(fileName)) return { kind:'pl', type:'confirmed' };
+
+    if (/worker|作業者|作業員|driver/i.test(fileName) || /作業者|作業員|担当者|配送担当/.test(t)) return { kind:'worker' };
+    if (/product|address|商品|住所|エリア|物量/i.test(fileName) || /エスライン原票番号|お届け先郵便番号|郵便番号|商品名|列原票番号|列商品/.test(t)) return { kind:'product' };
+    return { kind:'unknown' };
+  },
+
+  _setImportType(type) {
+    document.querySelectorAll('input[name="manual-import-type"]').forEach(r => { r.checked = (r.value === type); });
+  },
+
+  _msg(text, type='info') {
+    const el = document.getElementById('bulk-import-msg');
+    if (!el) return;
+    const color = type === 'error' ? '#991b1b' : type === 'ok' ? '#065f46' : type === 'warn' ? '#92400e' : '#334155';
+    const bg = type === 'error' ? '#fee2e2' : type === 'ok' ? '#dcfce7' : type === 'warn' ? '#fef3c7' : '#f8fafc';
+    el.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:${bg};color:${color};font-weight:700;white-space:pre-wrap">${esc(text)}</div>`;
+  },
+
+  async handleFiles(files) {
+    const arr = Array.from(files || []).filter(f => /\.csv$/i.test(f.name));
+    if (!arr.length) { this._msg('CSVファイルがありません', 'warn'); return; }
+    this._msg(`${arr.length}件のCSVを確認中です…`);
+
+    const groups = new Map();
+    const skipped = [];
+
+    for (const f of arr) {
+      let sample = '';
+      try { sample = (await f.text()).slice(0, 5000); } catch(e) {}
+      const ym = this._ymFromName(f.name);
+      const c = this._classify(f.name, sample);
+      if (!ym) { skipped.push(`${f.name}：年月をファイル名から判定できません`); continue; }
+      if (c.kind === 'unknown') { skipped.push(`${f.name}：CSV種別を判定できません`); continue; }
+      const key = `${c.kind}:${c.type || ''}:${ym}`;
+      if (!groups.has(key)) groups.set(key, { kind:c.kind, type:c.type || '', ym, files:[] });
+      groups.get(key).files.push(f);
+    }
+
+    let done = 0;
+    const logs = [];
+
+    for (const g of groups.values()) {
+      try {
+        if (g.kind === 'pl') {
+          this._setImportType(g.type || 'confirmed');
+          await IMPORT.processCSV(g.files, g.ym, { replace:true, awaitCloud:true });
+        } else if (g.kind === 'worker') {
+          if (!window.FIELD_WORKER_IMPORT2?.handleFilesForYM) throw new Error('作業者CSV一括取込処理が未読込です');
+          await FIELD_WORKER_IMPORT2.handleFilesForYM(g.files, g.ym);
+        } else if (g.kind === 'product') {
+          if (!window.FIELD_PRODUCT_IMPORT2?.handleFilesForYM) throw new Error('商品住所CSV一括取込処理が未読込です');
+          await FIELD_PRODUCT_IMPORT2.handleFilesForYM(g.files, g.ym);
+        }
+        done += g.files.length;
+        logs.push(`OK ${ymLabel(g.ym)} ${g.kind}${g.type ? '/' + g.type : ''}：${g.files.length}件`);
+      } catch(e) {
+        logs.push(`NG ${ymLabel(g.ym)} ${g.kind}：${e.message}`);
+      }
+    }
+
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+    STORE.save();
+    NAV.refresh();
+    renderImport();
+    const summary = [`一括取込完了：${done}件`, ...logs, ...(skipped.length ? ['', '判定できずスキップ：', ...skipped] : [])].join('\n');
+    this._msg(summary, skipped.length || logs.some(x=>x.startsWith('NG ')) ? 'warn' : 'ok');
+  }
+};
+window.BULK_IMPORT = BULK_IMPORT;
+
 function renderImport() {
   const listEl = document.getElementById('data-list');
   if (listEl) {
@@ -4950,7 +4359,8 @@ function renderImport() {
         </div>
       </details>`;
 
-    listEl.innerHTML = storageHtml + monthlyHtml + qualityHtml + historyHtml;
+    const auditHtml = renderStorageRouteAuditPanel();
+    listEl.innerHTML = storageHtml + auditHtml + monthlyHtml + qualityHtml + historyHtml;
   }
 
   const storageEl = document.getElementById('storage-info');
@@ -5265,9 +4675,9 @@ ${extra?'\n【担当者からの追加情報】\n'+extra:''}`;
         await new Promise((resolve, reject) => {
           if (document.getElementById('docx-iife-script')) { resolve(); return; }
           const s = document.createElement('script');
-          s.id = 'docx-iife-script'; s.src = 'docx.iife.js';
+          s.id = 'docx-iife-script'; s.src = 'assets/libs/docx.iife.js';
           s.onload = resolve;
-          s.onerror = () => reject(new Error('docx.iife.js の読み込みに失敗。ファイルがサーバーに存在するか確認してください。'));
+          s.onerror = () => reject(new Error('assets/libs/docx.iife.js の読み込みに失敗。ファイルがサーバーに存在するか確認してください。'));
           document.head.appendChild(s);
         });
       }
@@ -5963,105 +5373,7 @@ function setupDropZone(zoneId, inputId, handler) {
 }
 
 
-/* ════════ §29-A AUTO SYNC（保存・更新時に自動クラウド同期） ════════
-   運用方針：
-   ・ページを開いた時は CLOUD.pull() でクラウド → ローカルを反映する
-   ・CSV取込・削除・補完・計画更新などで STORE.save() が走ったら、自動でクラウドへ保存する
-   ・自動保存では syncSmart（双方向同期）を使わない。保存のたびに pull すると重くなり、古いクラウド/ローカルとの再マージで復活事故が起きるため。
-   ・自動保存は pushAll（ローカル → クラウド）のみ。削除済みマーカーも full_state/manifest に必ず入る。
-*/
-const AUTO_SYNC = {
-  _timer: null,
-  _installed: false,
-  _suppress: false,
-  _running: false,
-  _pending: false,
-  _lastError: '',
-  delayMs: 1800,
-
-  install() {
-    if (this._installed) return;
-    if (typeof STORE === 'undefined' || !STORE || STORE._autoSyncInstalled) return;
-
-    const originalSave = STORE.save.bind(STORE);
-
-    STORE.save = (...args) => {
-      const result = originalSave(...args);
-
-      // クラウド取得・復元中のローカル保存では、再アップロードを予約しない
-      if (!AUTO_SYNC._suppress) {
-        AUTO_SYNC.queue('STORE.save');
-      }
-
-      return result;
-    };
-
-    STORE._autoSyncInstalled = true;
-    this._installed = true;
-  },
-
-  queue(reason='auto') {
-    if (this._suppress) return;
-    if (typeof CLOUD === 'undefined' || !CLOUD || typeof CLOUD.pushAll !== 'function') return;
-
-    clearTimeout(this._timer);
-    this._timer = setTimeout(() => this.flush(reason), this.delayMs);
-  },
-
-  async flush(reason='auto') {
-    if (this._suppress) return { ok:false, error:'suppress中' };
-    if (this._running) {
-      this._pending = true;
-      return { ok:false, error:'同期中のため再予約' };
-    }
-    if (typeof CLOUD === 'undefined' || !CLOUD || typeof CLOUD.pushAll !== 'function') return { ok:false, error:'CLOUD未設定' };
-
-    this._running = true;
-    this._pending = false;
-    this._lastError = '';
-
-    try {
-      UI.updateCloudBadge && UI.updateCloudBadge('configured');
-      const r = await CLOUD.pushAll();
-      if (r && r.ok) {
-        UI.updateSaveStatus && UI.updateSaveStatus();
-        UI.updateCloudBadge && UI.updateCloudBadge('ok');
-        return r;
-      }
-      this._lastError = r?.error || '自動同期失敗';
-      UI.updateCloudBadge && UI.updateCloudBadge('error');
-      return r || { ok:false, error:this._lastError };
-    } catch(e) {
-      this._lastError = e?.message || String(e);
-      UI.updateCloudBadge && UI.updateCloudBadge('error');
-      return { ok:false, error:this._lastError };
-    } finally {
-      this._running = false;
-      if (this._pending && !this._suppress) {
-        this._pending = false;
-        this.queue('pending');
-      }
-    }
-  },
-
-  withoutSync(fn) {
-    this._suppress = true;
-    try {
-      return fn();
-    } finally {
-      this._suppress = false;
-    }
-  },
-
-  async withoutSyncAsync(fn) {
-    this._suppress = true;
-    try {
-      return await fn();
-    } finally {
-      this._suppress = false;
-    }
-  }
-};
+/* ════════ §29-A AUTO SYNC は core/auto_sync.js へ分離 ════════ */
 
 /* ════════ §29 計画データ取込 ══════════════════════════════════ */
 function setupPlanImport() {
@@ -6084,7 +5396,7 @@ function loadExternalScriptOnce(id, src) {
 }
 
 async function loadScreenModules() {
-  await loadExternalScriptOnce('module-shipper', 'shipper.js');
+  await loadExternalScriptOnce('module-shipper', 'src/modules/shipper.js');
 }
 
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
@@ -6149,7 +5461,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent=CENTER.name+'データ取込');
 
     // 3. ドロップゾーン設定
-    setupDropZone('csv-bulk-zone', 'csv-bulk-file-input', f=>CSV_BULK_IMPORT.handleFiles(f));
     setupDropZone('upload-zone', 'file-input', f=>IMPORT.handleFiles(f));
     setupDropZone('field-upload-zone', 'field-file-input', f=>{
       if (window.FIELD_WORKER_IMPORT2 && FIELD_WORKER_IMPORT2.handleFiles) FIELD_WORKER_IMPORT2.handleFiles(f);
