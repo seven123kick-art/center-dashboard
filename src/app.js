@@ -4193,6 +4193,132 @@ window.DATA_STORAGE_TABLE = {
 };
 
 /* ════════ §20 RENDER — Import ═════════════════════════════════ */
+
+
+/* ════════ §20.5 LEGACY_MIGRATION / BULK_IMPORT ════════════════════ */
+const LEGACY_MIGRATION = window.LEGACY_MIGRATION = {
+  async run() {
+    const msg = document.getElementById('legacy-migration-msg');
+    const setMsg = (text, type='info') => {
+      if (!msg) return;
+      const color = type === 'error' ? '#991b1b' : type === 'ok' ? '#065f46' : '#334155';
+      const bg = type === 'error' ? '#fee2e2' : type === 'ok' ? '#dcfce7' : '#eff6ff';
+      msg.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:${bg};color:${color};font-weight:700">${esc(text)}</div>`;
+    };
+    try {
+      setMsg('旧形式データを確認中です…');
+      if (!CLOUD || !CLOUD.migrateLegacySharedBundle) throw new Error('移行処理が読み込まれていません');
+      const r = await CLOUD.migrateLegacySharedBundle();
+      if (!r || !r.ok) {
+        setMsg(r?.error || '移行対象データがありません', 'error');
+        UI.toast(r?.error || '移行対象データがありません', 'warn');
+        return;
+      }
+      setMsg(`移行完了：収支 ${r.datasets || 0}ヶ月 / 作業者 ${r.workers || 0}ヶ月 / 商品住所 ${r.products || 0}ヶ月`, 'ok');
+      NAV.refresh();
+      renderImport();
+      UI.toast('旧形式データを新形式へ移行しました');
+    } catch(e) {
+      setMsg('移行エラー：' + e.message, 'error');
+      UI.toast('移行エラー：' + e.message, 'error');
+    }
+  },
+  async check() {
+    const msg = document.getElementById('legacy-migration-msg');
+    try {
+      const r = await CLOUD.loadState(CENTER.id);
+      const rows = r?.rows || [];
+      const hasLegacy = rows.some(x => x && x.state_key === 'shared_bundle');
+      const newCount = rows.filter(x => String(x?.state_key || '').startsWith('storage:')).length;
+      if (msg) msg.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#f8fafc;color:#334155;font-weight:700">旧形式：${hasLegacy ? 'あり' : 'なし'} / 新形式データ：${newCount}件</div>`;
+    } catch(e) {
+      if (msg) msg.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#fee2e2;color:#991b1b;font-weight:700">確認エラー：${esc(e.message)}</div>`;
+    }
+  }
+};
+
+const BULK_IMPORT = window.BULK_IMPORT = {
+  _ymFromName(name) {
+    const s = String(name || '');
+    let m = s.match(/(20\d{2})[\-_\.\/年\s]*([01]?\d)月?/);
+    if (m) {
+      const mm = String(Number(m[2])).padStart(2,'0');
+      if (Number(mm) >= 1 && Number(mm) <= 12) return `${m[1]}${mm}`;
+    }
+    m = s.match(/(20\d{2})([01]\d)/);
+    if (m) {
+      const mm = m[2];
+      if (Number(mm) >= 1 && Number(mm) <= 12) return `${m[1]}${mm}`;
+    }
+    return '';
+  },
+  _classify(name, sample) {
+    const n = String(name || '').toLowerCase();
+    const t = String(sample || '');
+    if (/skdl0001/i.test(name) || /日報|速報/.test(name)) return { kind:'pl', type:'daily' };
+    if (/skdl0003/i.test(name) || /確定/.test(name)) return { kind:'pl', type:'confirmed' };
+    if (/商品|住所|product|address/i.test(name) || /エスライン原票番号|お届け先郵便番号|郵便番号|商品名|商品/.test(t)) return { kind:'product' };
+    if (/作業者|作業員|worker|driver/i.test(name) || /作業者|作業員|担当者|配送担当/.test(t)) return { kind:'worker' };
+    if (/skdl/i.test(name)) return { kind:'pl', type:'confirmed' };
+    return { kind:'unknown' };
+  },
+  _setImportType(type) {
+    document.querySelectorAll('input[name="manual-import-type"]').forEach(r => { r.checked = (r.value === type); });
+  },
+  _msg(text, type='info') {
+    const el = document.getElementById('bulk-import-msg');
+    if (!el) return;
+    const color = type === 'error' ? '#991b1b' : type === 'ok' ? '#065f46' : type === 'warn' ? '#92400e' : '#334155';
+    const bg = type === 'error' ? '#fee2e2' : type === 'ok' ? '#dcfce7' : type === 'warn' ? '#fef3c7' : '#f8fafc';
+    el.innerHTML = `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:${bg};color:${color};font-weight:700;white-space:pre-wrap">${esc(text)}</div>`;
+  },
+  async handleFiles(files) {
+    const arr = Array.from(files || []).filter(f => /\.csv$/i.test(f.name));
+    if (!arr.length) { this._msg('CSVファイルがありません', 'warn'); return; }
+    this._msg(`${arr.length}件のCSVを確認中です…`);
+
+    const groups = new Map();
+    const skipped = [];
+    for (const f of arr) {
+      let sample = '';
+      try { sample = (await f.text()).slice(0, 4000); } catch(e) {}
+      const ym = this._ymFromName(f.name);
+      const c = this._classify(f.name, sample);
+      if (!ym) { skipped.push(`${f.name}：年月をファイル名から判定できません`); continue; }
+      if (c.kind === 'unknown') { skipped.push(`${f.name}：CSV種別を判定できません`); continue; }
+      const key = `${c.kind}:${c.type || ''}:${ym}`;
+      if (!groups.has(key)) groups.set(key, { kind:c.kind, type:c.type || '', ym, files:[] });
+      groups.get(key).files.push(f);
+    }
+
+    let done = 0;
+    const logs = [];
+    for (const g of groups.values()) {
+      try {
+        if (g.kind === 'pl') {
+          this._setImportType(g.type || 'confirmed');
+          await IMPORT.processCSV(g.files, g.ym, { replace:true });
+        } else if (g.kind === 'worker') {
+          if (!window.FIELD_WORKER_IMPORT2?.handleFilesForYM) throw new Error('作業者CSV一括取込処理が未読込です');
+          await FIELD_WORKER_IMPORT2.handleFilesForYM(g.files, g.ym);
+        } else if (g.kind === 'product') {
+          if (!window.FIELD_PRODUCT_IMPORT2?.handleFilesForYM) throw new Error('商品住所CSV一括取込処理が未読込です');
+          await FIELD_PRODUCT_IMPORT2.handleFilesForYM(g.files, g.ym);
+        }
+        done += g.files.length;
+        logs.push(`OK ${ymLabel(g.ym)} ${g.kind}${g.type ? '/' + g.type : ''}：${g.files.length}件`);
+      } catch(e) {
+        logs.push(`NG ${ymLabel(g.ym)} ${g.kind}：${e.message}`);
+      }
+    }
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+    NAV.refresh();
+    renderImport();
+    const summary = [`一括取込完了：${done}件`, ...logs, ...(skipped.length ? ['','判定できずスキップ：', ...skipped] : [])].join('\n');
+    this._msg(summary, skipped.length ? 'warn' : 'ok');
+  }
+};
+
 function renderImport() {
   const listEl = document.getElementById('data-list');
   if (listEl) {

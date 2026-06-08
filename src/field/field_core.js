@@ -910,12 +910,38 @@ IMPORT.deleteFieldData = function(ym) {
     msg(`${ymText(ym)} 商品・住所CSVを入替完了：原票${record.uniqueCount.toLocaleString()}件 / 明細${record.detailRows.toLocaleString()}行 / 重複除外${record.duplicateExcluded.toLocaleString()}行${cloudMsg}`);
   }
 
+  async function importWorkerForYM(files, ym){
+    setupYmSelects();
+    const fySel = document.getElementById('field-worker-fy-select');
+    const mmSel = document.getElementById('field-worker-month-select');
+    const y = String(ym || '').replace(/[^0-9]/g,'').slice(0,6);
+    if (y.length === 6 && fySel && mmSel) {
+      fySel.value = fiscalFromYM2(y);
+      mmSel.value = String(y).slice(4,6);
+    }
+    return importWorker(files);
+  }
+
+  async function importProductForYM(files, ym){
+    setupYmSelects();
+    const fySel = document.getElementById('field-product-fy-select');
+    const mmSel = document.getElementById('field-product-month-select');
+    const y = String(ym || '').replace(/[^0-9]/g,'').slice(0,6);
+    if (y.length === 6 && fySel && mmSel) {
+      fySel.value = fiscalFromYM2(y);
+      mmSel.value = String(y).slice(4,6);
+    }
+    return importProduct(files);
+  }
+
   window.FIELD_WORKER_IMPORT2 = {
     handleFiles(files){ importWorker(files).catch(e => msg('作業者CSV取込エラー：' + e.message, 'error')); },
+    handleFilesForYM(files, ym){ return importWorkerForYM(files, ym); },
     handleDrop(e){ e.preventDefault(); importWorker(e.dataTransfer.files).catch(err => msg('作業者CSV取込エラー：' + err.message, 'error')); }
   };
   window.FIELD_PRODUCT_IMPORT2 = {
     handleFiles(files){ importProduct(files).catch(e => msg('商品・住所CSV取込エラー：' + e.message, 'error')); },
+    handleFilesForYM(files, ym){ return importProductForYM(files, ym); },
     handleDrop(e){ e.preventDefault(); importProduct(e.dataTransfer.files).catch(err => msg('商品・住所CSV取込エラー：' + err.message, 'error')); }
   };
 

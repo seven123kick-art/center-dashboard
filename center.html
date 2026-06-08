@@ -934,6 +934,51 @@
           <div style="margin-top:4px"><span id="import-target-note">ページは共通ですが、保存キー・クラウドパス・IndexedDBはセンターIDで分離します。</span></div>
         </div>
       </div>
+      <details class="card" style="margin-bottom:14px">
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="card-title">🧭 旧形式データ移行</span>
+            <span class="badge badge-info">shared_bundle → 月別・種類別</span>
+          </div>
+          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
+        </summary>
+        <div class="card-body" style="font-size:12px;line-height:1.8;color:var(--text2)">
+          旧形式の一括保存データが残っている場合、新しい月別・種類別のDB保存へ自動移行します。<br>
+          再取込の前に、まずこの移行を実行してください。旧形式データは削除せず、互換用として残します。
+          <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+            <button class="btn btn-primary" onclick="LEGACY_MIGRATION.run()" style="font-size:12px">旧形式データを移行</button>
+            <button class="btn" onclick="LEGACY_MIGRATION.check()" style="font-size:12px">保存状態を確認</button>
+          </div>
+          <div id="legacy-migration-msg"></div>
+        </div>
+      </details>
+
+      <details class="card" style="margin-bottom:14px">
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="card-title">📦 CSV一括取込</span>
+            <span class="badge badge-info">複数CSVまとめて選択</span>
+          </div>
+          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
+        </summary>
+        <div class="card-body" style="font-size:12px;line-height:1.8;color:var(--text2)">
+          ファイル名に年月が入っているCSVをまとめて選択できます。<br>
+          例：202604_SKDL0003.csv、202604_作業者.csv、202604_商品住所.csv<br>
+          <span style="color:#92400e">年月がファイル名から判定できないCSVはスキップします。</span>
+          <div class="upload-zone no-print" style="margin-top:10px;padding:18px;border-radius:8px;border:2px dashed var(--border2);background:#f8fafc;text-align:center;cursor:pointer"
+               onclick="document.getElementById('bulk-csv-file-input').click()"
+               ondragover="event.preventDefault();this.classList.add('drag')"
+               ondragleave="this.classList.remove('drag')"
+               ondrop="this.classList.remove('drag');event.preventDefault();BULK_IMPORT.handleFiles(event.dataTransfer.files)">
+            <input type="file" id="bulk-csv-file-input" accept=".csv" multiple style="display:none" onchange="BULK_IMPORT.handleFiles(this.files);this.value=''">
+            <div style="font-size:24px;color:#94a3b8;margin-bottom:6px">⬆</div>
+            <div style="font-size:13px;font-weight:900;color:var(--text)">CSVをまとめて選択またはドロップ</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px">収支CSV / 作業者CSV / 商品・住所CSVを自動判定</div>
+          </div>
+          <div id="bulk-import-msg"></div>
+        </div>
+      </details>
+
       <div class="card" style="margin-bottom:14px">
         <div class="card-body">
           <div class="upload-zone no-print" id="upload-zone">
