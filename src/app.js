@@ -1686,16 +1686,22 @@ function updateFiscalInputState(kind) {
 function initFiscalYearSelects() {
   const now = new Date();
   const defaultFY = getDefaultFiscalYear();
+  // STORE.load() で復元された STATE.fiscalYear を優先する。
+  // なければ今年度をデフォルトにする。
+  const currentFY = STATE.fiscalYear || defaultFY;
   ['library-fy','library-bulk-fy','report-fy','plan-year-sel','tsv-year-sel-history'].forEach(id=>{
     const el=document.getElementById(id); if(!el) return;
-    const current = el.value || defaultFY;
     el.innerHTML = '';
     for (let y=now.getFullYear()+1; y>=2020; y--) {
       el.innerHTML += `<option value="${y}">${y}年度</option>`;
     }
-    el.value = [...el.options].some(o=>o.value===current) ? current : defaultFY;
+    el.value = [...el.options].some(o=>o.value===currentFY) ? currentFY : defaultFY;
   });
-  STATE.fiscalYear = document.getElementById('plan-year-sel')?.value || defaultFY;
+  // STATE.fiscalYear は STORE.load() 済みの値を維持する（上書きしない）。
+  // plan-year-sel の値で上書きすると localStorageに保存された過去年度が
+  // デフォルト年度（今年度）で上書きされ、pullInitialForBoot が
+  // 誤った年度のデータしか取得しない原因になる。
+  if (!STATE.fiscalYear) STATE.fiscalYear = defaultFY;
   const planSel = document.getElementById('plan-year-sel');
   if (planSel) planSel.onchange = () => updateFiscalInputState('plan');
   const histSel = document.getElementById('tsv-year-sel-history');
