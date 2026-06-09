@@ -571,9 +571,7 @@ var CLOUD = window.CLOUD = {
   async pullManifestAndMissing() {
     const manifest = await this._loadManifestOrBuildFromDb();
     if (!manifest) return { ok:false, error:'manifestなし' };
-    // manifest.deleted はここで STATE.deleted へマージしない。
-    // Supabase 側に古い削除フラグが残っていると、再取込済みのDB実データまで
-    // applyDeletionTombstonesToState() で消されるため、DB上に実データがあるものは復元を優先する。
+    // manifest.deleted は古い削除フラグ汚染の原因になるためマージしない。
     let changed = 0;
 
     const datasetMetas = Array.isArray(manifest.datasets) ? manifest.datasets : [];
@@ -665,8 +663,7 @@ var CLOUD = window.CLOUD = {
       const monthSet = new Set(months);
       const manifest = await this._loadManifestOrBuildFromDb();
       if (!manifest) return { ok:false, error:'manifestなし' };
-      // 現場分析の遅延読込でも manifest.deleted はマージしない。
-      // 旧削除フラグが field/product/worker の復元や収支データを巻き戻すのを防ぐ。
+      // manifest.deleted は古い削除フラグ汚染の原因になるためマージしない。
 
       if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
       if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
@@ -837,9 +834,7 @@ var CLOUD = window.CLOUD = {
         return { ok:true, changed:false, source:'no_cloud_data', noData:true, note:legacy?.error || 'クラウドに対象センターのデータがありません' };
       }
 
-      // manifest.deleted はここで STATE.deleted へマージしない。
-      // Supabase 側に古い削除フラグが残っている場合、CSV再取込済みのデータまで
-      // 起動直後に削除扱いされ、月選択が全て未登録になる事故を防ぐ。
+      // manifest.deleted は古い削除フラグ汚染の原因になるためマージしない。
 
       const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
       const localLatest = latestRealDS && latestRealDS();
@@ -862,7 +857,7 @@ var CLOUD = window.CLOUD = {
 
       const targetMetas = metas.filter(m => targetYms.has(m.ym));
 
-      // DB上に実データがあるにもかかわらず古い削除フラグでブロックされる矛盾を自動解消する。
+      // DB上に実データがある月は、古い削除フラグを自動クリアする。
       for (const meta of targetMetas) {
         const metaType = meta.type || 'confirmed';
         const delKey = dataDeleteKey(meta.ym, metaType);
@@ -871,17 +866,22 @@ var CLOUD = window.CLOUD = {
         }
       }
 
-      const jobs = targetMetas.map(async (meta) => {
-        const metaType = meta.type || 'confirmed';
-        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return 0;
-        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
-        if (local && String(meta.importedAt||'') <= String(local.importedAt||'')) return 0;
-        const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
-        if (ds && ds.ym) { upsertDataset(ds); return 1; }
-        return 0;
-      });
-      const results = await Promise.allSettled(jobs);
-      for (const r of results) if (r.status === 'fulfilled') changed += Number(r.value || 0);
+      // 並列実行（Promise.allSettled）は廃止。
+      // 1ヶ月分のデータが複数chunkに分割されているため、年度分を並列取得すると
+      // Supabase側で一部リクエストが落ち、STATE.datasetsへ戻らないことがある。
+      // 直列実行にして、1ヶ月ずつ確実に復元する。
+      for (const meta of targetMetas) {
+        try {
+          const metaType = meta.type || 'confirmed';
+          if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
+          const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
+          if (local && String(meta.importedAt||'') <= String(local.importedAt||'')) continue;
+          const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
+          if (ds && ds.ym) { upsertDataset(ds); changed++; }
+        } catch(e) {
+          console.warn('[pullInitialForBoot] 月別データ取得失敗:', meta.ym, e?.message || e);
+        }
+      }
 
       if (manifest.hasPlanData) {
         const cloudPlan = await this._downloadJSON(this._planKey());
