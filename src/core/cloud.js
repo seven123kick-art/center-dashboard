@@ -851,12 +851,32 @@ var CLOUD = window.CLOUD = {
         }
       }
 
-      const targetMetas = metas.filter(m => targetYms.has(m.ym));
+      // 収支CSVはDB実データを正本として、manifestに頼らず直接再構成する。
+      // 以前のmanifestが古い/欠落していると、DBに skdl 行が存在しても画面では未登録扱いになるため。
+      const metaMap = new Map();
+      for (const m of metas) {
+        if (m && targetYms.has(m.ym)) metaMap.set(`${m.ym}_${m.type || 'confirmed'}`, m);
+      }
+      try {
+        const listedSkdl = await this._dbListStates(`storage:${CENTER.id}/skdl/`, { withPayload:false });
+        if (listedSkdl && listedSkdl.ok && Array.isArray(listedSkdl.rows)) {
+          for (const row of listedSkdl.rows) {
+            const key = String(row?.state_key || '');
+            const m = key.match(new RegExp(`^storage:${CENTER.id}/skdl/(\\d{6})_(daily|confirmed)\\.json$`));
+            if (!m || !targetYms.has(m[1])) continue;
+            metaMap.set(`${m[1]}_${m[2]}`, { ym:m[1], type:m[2], importedAt:row.updated_at, updatedAt:row.updated_at, source:'db_scan' });
+          }
+        }
+      } catch(e) {
+        console.warn('[CLOUD] skdl direct scan skipped:', e?.message || e);
+      }
+
+      const targetMetas = [...metaMap.values()];
       const jobs = targetMetas.map(async (meta) => {
         const metaType = meta.type || 'confirmed';
-        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return 0;
-        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
-        if (local && String(meta.importedAt||'') <= String(local.importedAt||'')) return 0;
+        const metaUpdatedAt = meta.importedAt || meta.updatedAt || meta.savedAt || '';
+        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), metaUpdatedAt)) return 0;
+        // DB正本化後はlocalStorage本体を見ない。センター切替後は毎回DBから復元する。
         const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
         if (ds && ds.ym) { upsertDataset(ds); return 1; }
         return 0;
