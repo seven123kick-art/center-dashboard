@@ -68,21 +68,15 @@ var CLOUD = window.CLOUD = {
   async _dbGetState(stateKey) {
     const sb = await this._client();
     if (!sb) return null;
-
-    // maybeSingle() は重複行やPostgREST側の状態によって読込全体を落とすことがある。
-    // DBを正本にするため、同じ center_key/state_key が複数あっても最新1件を採用する。
     const { data, error } = await sb
       .from('center_realtime_state')
       .select('payload,updated_at')
       .eq('center_key', CENTER.id)
       .eq('state_key', stateKey)
-      .order('updated_at', { ascending:false })
-      .limit(1);
-
+      .maybeSingle();
     if (error) throw error;
-    const row = Array.isArray(data) && data.length ? data[0] : null;
-    if (!row) return null;
-    return row.payload;
+    if (!data) return null;
+    return data.payload;
   },
   async loadState(centerKey = CENTER.id) {
     // DevTools確認用。CLOUD.loadState('toda') / CLOUD.loadState('kitasaitama') でDB上の保存行を確認できる。
@@ -134,153 +128,6 @@ var CLOUD = window.CLOUD = {
     if (error) return { ok:false, error:error.message };
     return { ok:true };
   },
-  async _dbListStates(prefix = '', options = {}) {
-    const sb = await this._client();
-    if (!sb) return { ok:false, error:'Supabase未設定' };
-    const withPayload = !!options.withPayload;
-    let q = sb
-      .from('center_realtime_state')
-      .select(withPayload ? 'state_key,updated_at,payload' : 'state_key,updated_at')
-      .eq('center_key', CENTER.id)
-      .order('state_key', { ascending:true })
-      .limit(10000);
-    if (prefix) q = q.like('state_key', `${prefix}%`);
-    const { data, error } = await q;
-    if (error) return { ok:false, error:error.message, details:error };
-    return { ok:true, rows:Array.isArray(data) ? data : [] };
-  },
-  _metaFromDbRows(rows = []) {
-    const manifest = {
-      version: 32,
-      center: CENTER.id,
-      savedAt: new Date().toISOString(),
-      datasets: [],
-      workerCsvData: [],
-      productAddressData: [],
-      hasPlanData: false,
-      hasCapacity: false,
-      hasMemos: false,
-      hasLibrary: false,
-      deleted: STATE.deleted || {}
-    };
-    const dsSeen = new Set();
-    const workerSeen = new Set();
-    const productSeen = new Set();
-    rows.forEach(row => {
-      const key = String(row?.state_key || '');
-      const payload = row?.payload || {};
-      const updatedAt = row?.updated_at || payload?.importedAt || payload?.savedAt || null;
-      let m = key.match(new RegExp(`^storage:${CENTER.id}/skdl/(\\d{6})_(daily|confirmed)\\.json$`));
-      if (m) {
-        const id = `${m[1]}_${m[2]}`;
-        if (!dsSeen.has(id)) {
-          dsSeen.add(id);
-          manifest.datasets.push({
-            ym:m[1],
-            type:m[2],
-            source:payload.source || 'csv',
-            importedAt:payload.importedAt || payload.updatedAt || payload.savedAt || updatedAt,
-            totalIncome:payload.totalIncome || 0,
-            totalExpense:payload.totalExpense || 0,
-            profit:payload.profit || 0
-          });
-        }
-        return;
-      }
-      m = key.match(new RegExp(`^storage:${CENTER.id}/field/worker/(\\d{6})\\.json$`));
-      if (m && !workerSeen.has(m[1])) {
-        workerSeen.add(m[1]);
-        manifest.workerCsvData.push({
-          ym:m[1],
-          source:payload.source || 'worker_csv',
-          importedAt:payload.importedAt || payload.updatedAt || payload.savedAt || updatedAt,
-          rowCount:payload.rowCount || payload.lineRowCount || 0,
-          workerCount:payload.workerCount || 0
-        });
-        return;
-      }
-      m = key.match(new RegExp(`^storage:${CENTER.id}/field/product/(\\d{6})\\.json$`));
-      if (m && !productSeen.has(m[1])) {
-        productSeen.add(m[1]);
-        manifest.productAddressData.push({
-          ym:m[1],
-          source:payload.source || 'product_address_csv',
-          importedAt:payload.importedAt || payload.updatedAt || payload.savedAt || updatedAt,
-          uniqueCount:payload.uniqueCount || (Array.isArray(payload.tickets) ? payload.tickets.length : 0),
-          detailRows:payload.detailRows || 0,
-          rawRows:payload.rawRows || 0,
-          amount:payload.amount || 0
-        });
-        return;
-      }
-      if (key === this._dbStateKey(this._planKey())) manifest.hasPlanData = true;
-      if (key === this._dbStateKey(this._capacityKey())) manifest.hasCapacity = true;
-      if (key === this._dbStateKey(this._memosKey())) manifest.hasMemos = true;
-      if (key === this._dbStateKey(this._libraryKey())) manifest.hasLibrary = true;
-    });
-    manifest.datasets.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)) || String(a.type).localeCompare(String(b.type)));
-    manifest.workerCsvData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
-    manifest.productAddressData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
-    return manifest;
-  },
-  async _loadManifestOrBuildFromDb() {
-    // manifestは補助台帳。ここが500/破損/重複で読めなくても、
-    // center_realtime_state の月別キーから台帳を再構成して起動を継続する。
-    let manifest = null;
-    try {
-      manifest = await this._downloadJSON(this._manifestKey());
-    } catch(e) {
-      console.warn('[CLOUD] manifest read skipped:', e?.message || e);
-      manifest = null;
-    }
-
-    // manifestだけに頼らず、DB本体の月別キーから台帳を再構成する。
-    // 商品住所CSVは分割chunkが多くなりやすく、全prefix取得ではskdl行が漏れることがあるため、
-    // 種類別prefixを個別に確認する。
-    const prefixes = [
-      `storage:${CENTER.id}/skdl/`,
-      `storage:${CENTER.id}/field/worker/`,
-      `storage:${CENTER.id}/field/product/`,
-      `storage:${CENTER.id}/plan/`,
-      `storage:${CENTER.id}/capacity/`,
-      `storage:${CENTER.id}/memos/`,
-      `storage:${CENTER.id}/library/`
-    ];
-
-    const rows = [];
-    for (const prefix of prefixes) {
-      try {
-        // 起動・センター切替時は payload を読まない。
-        // 商品住所CSVの分割chunkが多い状態で payload まで一覧取得すると、PostgRESTが500を返すことがある。
-        // ここでは state_key/updated_at だけで台帳を再構成し、実データは必要な月だけ _downloadJSON で取得する。
-        const listed = await this._dbListStates(prefix, { withPayload:false });
-        if (listed && listed.ok && Array.isArray(listed.rows)) rows.push(...listed.rows);
-      } catch(e) {}
-    }
-
-    if (rows.length) {
-      const derived = this._metaFromDbRows(rows);
-      if (!manifest || typeof manifest !== 'object') manifest = derived;
-      else {
-        const mergeBy = (a = [], b = [], keyFn) => {
-          const map = new Map();
-          a.forEach(x => { if (x) map.set(keyFn(x), x); });
-          b.forEach(x => { if (x) map.set(keyFn(x), { ...(map.get(keyFn(x)) || {}), ...x }); });
-          return [...map.values()];
-        };
-        manifest.datasets = mergeBy(manifest.datasets || [], derived.datasets || [], x => `${x.ym}_${x.type || 'confirmed'}`);
-        manifest.workerCsvData = mergeBy(manifest.workerCsvData || [], derived.workerCsvData || [], x => x.ym);
-        manifest.productAddressData = mergeBy(manifest.productAddressData || [], derived.productAddressData || [], x => x.ym);
-        manifest.hasPlanData = !!(manifest.hasPlanData || derived.hasPlanData);
-        manifest.hasCapacity = !!(manifest.hasCapacity || derived.hasCapacity);
-        manifest.hasMemos = !!(manifest.hasMemos || derived.hasMemos);
-        manifest.hasLibrary = !!(manifest.hasLibrary || derived.hasLibrary);
-        manifest.deleted = mergeDeletedStates(manifest.deleted || {}, derived.deleted || {});
-      }
-      // 起動・読込時にはmanifestを書き戻さない。保存時のpushAll/pushMonthで更新する。
-    }
-    return manifest;
-  },
   _manifestKey() { return `${CENTER.id}/manifest.json`; },
   _datasetKey(ym, type='confirmed') { return `${CENTER.id}/skdl/${ym}_${type || 'confirmed'}.json`; },
   _capacityKey() { return `${CENTER.id}/capacity/master.json`; },
@@ -301,11 +148,142 @@ var CLOUD = window.CLOUD = {
     return `${CENTER.id}/library_files/${safeFy}/${uid}.${ext}`;
   },
   _legacyKey() { return `${CENTER.id}/data_v5.json`; },
+  async _listDbStateKeys(prefix='storage:') {
+    const sb = await this._client();
+    if (!sb) return [];
+    const rows = [];
+    let from = 0;
+    const page = 1000;
+    while (true) {
+      const { data, error } = await sb
+        .from('center_realtime_state')
+        .select('state_key,updated_at')
+        .eq('center_key', CENTER.id)
+        .like('state_key', `${prefix}%`)
+        .order('updated_at', { ascending:false })
+        .range(from, from + page - 1);
+      if (error) throw error;
+      const part = Array.isArray(data) ? data : [];
+      rows.push(...part);
+      if (part.length < page) break;
+      from += page;
+    }
+    return rows;
+  },
+  _manifestFromDbRows(rows=[]) {
+    const center = CENTER.id;
+    const baseKeys = new Map();
+    for (const r of (Array.isArray(rows) ? rows : [])) {
+      const sk = String(r?.state_key || '');
+      if (!sk || sk.includes('::chunk::')) continue;
+      // 分割chunk本体ではなく、pointer行だけを台帳化する。
+      baseKeys.set(sk, r?.updated_at || '');
+    }
+
+    const manifest = {
+      version: 40,
+      center,
+      savedAt: new Date().toISOString(),
+      datasets: [],
+      workerCsvData: [],
+      productAddressData: [],
+      hasCapacity: false,
+      hasFieldData: false,
+      hasPlanData: false,
+      hasMemos: false,
+      hasLibrary: false,
+      hasReportKnowledge: false,
+      deleted: STATE.deleted || {},
+      source: 'db_scan'
+    };
+
+    const dsSeen = new Set();
+    const workerSeen = new Set();
+    const productSeen = new Set();
+    for (const [sk, updatedAt] of baseKeys.entries()) {
+      let m = sk.match(new RegExp(`^storage:${center}/skdl/(\\d{6})_([^/.]+)\\.json$`));
+      if (m) {
+        const ym = m[1];
+        const type = m[2] || 'confirmed';
+        const id = `${ym}|${type}`;
+        if (!dsSeen.has(id)) {
+          dsSeen.add(id);
+          manifest.datasets.push({ ym, type, source:'db_scan', importedAt: updatedAt || null, updatedAt: updatedAt || null });
+        }
+        continue;
+      }
+      m = sk.match(new RegExp(`^storage:${center}/field/worker/(\\d{6})\\.json$`));
+      if (m) {
+        const ym = m[1];
+        if (!workerSeen.has(ym)) {
+          workerSeen.add(ym);
+          manifest.workerCsvData.push({ ym, source:'db_scan', importedAt: updatedAt || null, updatedAt: updatedAt || null });
+        }
+        continue;
+      }
+      m = sk.match(new RegExp(`^storage:${center}/field/product/(\\d{6})\\.json$`));
+      if (m) {
+        const ym = m[1];
+        if (!productSeen.has(ym)) {
+          productSeen.add(ym);
+          manifest.productAddressData.push({ ym, source:'db_scan', importedAt: updatedAt || null, updatedAt: updatedAt || null });
+        }
+        continue;
+      }
+      if (sk === `storage:${center}/capacity/master.json`) manifest.hasCapacity = true;
+      if (sk === `storage:${center}/plan/data.json`) manifest.hasPlanData = true;
+      if (sk === `storage:${center}/memos/data.json`) manifest.hasMemos = true;
+      if (sk === `storage:${center}/library/data.json`) manifest.hasLibrary = true;
+    }
+    manifest.datasets.sort((a,b) => String(a.ym).localeCompare(String(b.ym)) || String(a.type).localeCompare(String(b.type)));
+    manifest.workerCsvData.sort((a,b) => String(a.ym).localeCompare(String(b.ym)));
+    manifest.productAddressData.sort((a,b) => String(a.ym).localeCompare(String(b.ym)));
+    return manifest;
+  },
+  async _loadManifestOrBuildFromDb() {
+    let manifest = null;
+    try { manifest = await this._downloadJSON(this._manifestKey()); } catch(e) { manifest = null; }
+    let dbManifest = null;
+    try {
+      const rows = await this._listDbStateKeys(`storage:${CENTER.id}/`);
+      dbManifest = this._manifestFromDbRows(rows);
+    } catch(e) {
+      dbManifest = null;
+    }
+    if (!manifest && dbManifest) return dbManifest;
+    if (!manifest) return null;
+    if (!dbManifest) return manifest;
+
+    // manifest が古い/壊れていてもDB実データを正とする。既存manifestの補助情報は残す。
+    const byDs = new Map();
+    for (const m of (Array.isArray(manifest.datasets) ? manifest.datasets : [])) if (m?.ym) byDs.set(`${m.ym}|${m.type||'confirmed'}`, m);
+    for (const m of (dbManifest.datasets || [])) byDs.set(`${m.ym}|${m.type||'confirmed'}`, { ...(byDs.get(`${m.ym}|${m.type||'confirmed'}`)||{}), ...m });
+
+    const byWorker = new Map();
+    for (const m of (Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [])) if (m?.ym) byWorker.set(m.ym, m);
+    for (const m of (dbManifest.workerCsvData || [])) byWorker.set(m.ym, { ...(byWorker.get(m.ym)||{}), ...m });
+
+    const byProduct = new Map();
+    for (const m of (Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [])) if (m?.ym) byProduct.set(m.ym, m);
+    for (const m of (dbManifest.productAddressData || [])) byProduct.set(m.ym, { ...(byProduct.get(m.ym)||{}), ...m });
+
+    return {
+      ...manifest,
+      source: 'manifest_plus_db_scan',
+      datasets: Array.from(byDs.values()).sort((a,b)=>String(a.ym).localeCompare(String(b.ym)) || String(a.type||'').localeCompare(String(b.type||''))),
+      workerCsvData: Array.from(byWorker.values()).sort((a,b)=>String(a.ym).localeCompare(String(b.ym))),
+      productAddressData: Array.from(byProduct.values()).sort((a,b)=>String(a.ym).localeCompare(String(b.ym))),
+      hasCapacity: !!(manifest.hasCapacity || dbManifest.hasCapacity),
+      hasPlanData: !!(manifest.hasPlanData || dbManifest.hasPlanData),
+      hasMemos: !!(manifest.hasMemos || dbManifest.hasMemos),
+      hasLibrary: !!(manifest.hasLibrary || dbManifest.hasLibrary),
+    };
+  },
   _makeManifest() {
     const workerCsv = Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData : [];
     const productCsv = Array.isArray(STATE.productAddressData) ? STATE.productAddressData : [];
     return {
-      version: 33,
+      version: 31,
       center: CENTER.id,
       savedAt: new Date().toISOString(),
       datasets: STATE.datasets.filter(d => d.source !== 'history').map(d => ({
@@ -823,7 +801,8 @@ var CLOUD = window.CLOUD = {
 
       const manifest = await this._loadManifestOrBuildFromDb();
       if (!manifest) {
-        // 新形式DB行もmanifestも無い場合のみ旧形式へ逃がす。
+        // manifest が無い古い環境だけ互換取得へ逃がす。
+        // 旧形式も無いセンター（例：まだ未取込の戸田など）は「クラウド失敗」ではなく「クラウドにデータなし」として扱う。
         const legacy = await this.pullLegacy();
         if (legacy && legacy.ok) return legacy;
         UI.updateCloudBadge('ok');
@@ -851,32 +830,12 @@ var CLOUD = window.CLOUD = {
         }
       }
 
-      // 収支CSVはDB実データを正本として、manifestに頼らず直接再構成する。
-      // 以前のmanifestが古い/欠落していると、DBに skdl 行が存在しても画面では未登録扱いになるため。
-      const metaMap = new Map();
-      for (const m of metas) {
-        if (m && targetYms.has(m.ym)) metaMap.set(`${m.ym}_${m.type || 'confirmed'}`, m);
-      }
-      try {
-        const listedSkdl = await this._dbListStates(`storage:${CENTER.id}/skdl/`, { withPayload:false });
-        if (listedSkdl && listedSkdl.ok && Array.isArray(listedSkdl.rows)) {
-          for (const row of listedSkdl.rows) {
-            const key = String(row?.state_key || '');
-            const m = key.match(new RegExp(`^storage:${CENTER.id}/skdl/(\\d{6})_(daily|confirmed)\\.json$`));
-            if (!m || !targetYms.has(m[1])) continue;
-            metaMap.set(`${m[1]}_${m[2]}`, { ym:m[1], type:m[2], importedAt:row.updated_at, updatedAt:row.updated_at, source:'db_scan' });
-          }
-        }
-      } catch(e) {
-        console.warn('[CLOUD] skdl direct scan skipped:', e?.message || e);
-      }
-
-      const targetMetas = [...metaMap.values()];
+      const targetMetas = metas.filter(m => targetYms.has(m.ym));
       const jobs = targetMetas.map(async (meta) => {
         const metaType = meta.type || 'confirmed';
-        const metaUpdatedAt = meta.importedAt || meta.updatedAt || meta.savedAt || '';
-        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), metaUpdatedAt)) return 0;
-        // DB正本化後はlocalStorage本体を見ない。センター切替後は毎回DBから復元する。
+        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return 0;
+        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
+        if (local && String(meta.importedAt||'') <= String(local.importedAt||'')) return 0;
         const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
         if (ds && ds.ym) { upsertDataset(ds); return 1; }
         return 0;
