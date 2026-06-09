@@ -857,6 +857,10 @@ var CLOUD = window.CLOUD = {
 
       const targetMetas = metas.filter(m => targetYms.has(m.ym));
 
+      console.log('[BOOT_DEBUG] metas:', metas.length, 'targetMetas:', targetMetas.length,
+        'fySet:', [...fySet], 'latestYm:', latestYm, 'STATE.fiscalYear:', STATE.fiscalYear,
+        'targetYms sample:', [...targetYms].slice(0,3));
+
       // DB上に実データがある月は、古い削除フラグを自動クリアする。
       for (const meta of targetMetas) {
         const metaType = meta.type || 'confirmed';
@@ -866,22 +870,26 @@ var CLOUD = window.CLOUD = {
         }
       }
 
-      // 並列実行（Promise.allSettled）は廃止。
-      // 1ヶ月分のデータが複数chunkに分割されているため、年度分を並列取得すると
-      // Supabase側で一部リクエストが落ち、STATE.datasetsへ戻らないことがある。
-      // 直列実行にして、1ヶ月ずつ確実に復元する。
+      // 並列実行（Promise.allSettled）は廃止。直列実行で1件ずつ確実に復元する。
       for (const meta of targetMetas) {
         try {
           const metaType = meta.type || 'confirmed';
-          if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
+          if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) {
+            console.log('[BOOT_DEBUG] skip(deleted):', meta.ym); continue;
+          }
           const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
-          if (local && String(meta.importedAt||'') <= String(local.importedAt||'')) continue;
+          if (local && String(meta.importedAt||'') <= String(local.importedAt||'')) {
+            console.log('[BOOT_DEBUG] skip(local newer):', meta.ym, 'cloudAt:', meta.importedAt, 'localAt:', local.importedAt); continue;
+          }
+          console.log('[BOOT_DEBUG] downloading:', meta.ym);
           const ds = await this._downloadJSON(this._datasetKey(meta.ym, metaType));
+          console.log('[BOOT_DEBUG] downloaded:', meta.ym, 'ds.ym:', ds?.ym, 'ok:', !!(ds && ds.ym));
           if (ds && ds.ym) { upsertDataset(ds); changed++; }
         } catch(e) {
-          console.warn('[pullInitialForBoot] 月別データ取得失敗:', meta.ym, e?.message || e);
+          console.warn('[BOOT_DEBUG] ERROR:', meta.ym, e?.message || e);
         }
       }
+      console.log('[BOOT_DEBUG] loop done. changed:', changed, 'STATE.datasets.length:', STATE.datasets.length);
 
       if (manifest.hasPlanData) {
         const cloudPlan = await this._downloadJSON(this._planKey());
