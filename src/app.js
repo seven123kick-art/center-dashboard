@@ -5577,7 +5577,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const banner = document.getElementById('js-error-banner');
       if (banner) {
         banner.style.display = 'block';
-        banner.textContent = 'クラウド読込に時間がかかっているため、ローカルデータで起動しました。';
+        banner.textContent = 'クラウド読込に時間がかかっています。データが表示されない場合は、通信状況を確認してページを再読み込みしてください。';
         setTimeout(() => { banner.style.display = 'none'; }, 6000);
       }
     } catch(e) {}
@@ -5656,7 +5656,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (pullResult && pullResult.ok && pullResult.changed) {
       setTimeout(() => UI.toast('クラウドの主要データを反映しました'), 300);
     } else if (pullResult && pullResult.error) {
-      setTimeout(() => UI.toast('クラウド読込に失敗したため、ローカルデータで起動しました', 'warn'), 300);
+      setTimeout(() => UI.toast('クラウドに接続できないため、データを表示できません。通信状況・Supabase設定を確認してください', 'warn'), 300);
     }
 
     // 起動後の全量クラウド取得は行わない。
