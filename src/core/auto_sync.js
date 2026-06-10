@@ -3,7 +3,11 @@
    ・ページを開いた時は CLOUD.pull() でクラウド → ローカルを反映する
    ・CSV取込・削除・補完・計画更新などで STORE.save() が走ったら、自動でクラウドへ保存する
    ・自動保存では syncSmart（双方向同期）を使わない。保存のたびに pull すると重くなり、古いクラウド/ローカルとの再マージで復活事故が起きるため。
-   ・自動保存は pushAll（ローカル → クラウド）のみ。削除済みマーカーも full_state/manifest に必ず入る。
+   ・自動保存は pushAll({onlyChanged:true})（ローカル → クラウド・差分のみ）。
+     前回pushから内容が変わっていないキーはアップロードしない。
+     これにより「メモ1行の修正で商品住所CSV全月を再アップロード」する無駄と、
+     再分割書込中に他PCが読み込んで壊れるリスクを排除する。
+   ・削除済みマーカーは full_state/manifest（毎回アップロード）に必ず入る。
 */
 var AUTO_SYNC = window.AUTO_SYNC = {
   _timer: null,
@@ -57,7 +61,7 @@ var AUTO_SYNC = window.AUTO_SYNC = {
 
     try {
       UI.updateCloudBadge && UI.updateCloudBadge('configured');
-      const r = await CLOUD.pushAll();
+      const r = await CLOUD.pushAll({ onlyChanged:true });
       if (r && r.ok) {
         UI.updateSaveStatus && UI.updateSaveStatus();
         UI.updateCloudBadge && UI.updateCloudBadge('ok');
@@ -79,21 +83,24 @@ var AUTO_SYNC = window.AUTO_SYNC = {
     }
   },
 
+  // 入れ子呼び出し対応：内側の解除で外側の抑制が消えないよう、元の値へ戻す。
   withoutSync(fn) {
+    const prev = this._suppress;
     this._suppress = true;
     try {
       return fn();
     } finally {
-      this._suppress = false;
+      this._suppress = prev;
     }
   },
 
   async withoutSyncAsync(fn) {
+    const prev = this._suppress;
     this._suppress = true;
     try {
       return await fn();
     } finally {
-      this._suppress = false;
+      this._suppress = prev;
     }
   }
 };

@@ -11,8 +11,10 @@ var CLOUD = window.CLOUD = {
       if (s) {
         const saved = JSON.parse(s);
         // プロジェクト移行後に古いURLがlocalStorageへ残ると、旧Supabaseへ接続してしまう。
-        // center.html/config.local.js のURLを正とし、URLが違う保存済み設定は無視する。
+        // center.html/config.local.js のURL・keyを正とし、不一致の保存済み設定は無視する。
+        // （keyローテーション時に古いkeyがlocalStorageへ残り続ける事故を防ぐ）
         if (def.url && saved.url && saved.url !== def.url) return def;
+        if (def.key && saved.key && saved.key !== def.key) return def;
         return { ...def, ...saved };
       }
     } catch(e) {}
@@ -48,6 +50,39 @@ var CLOUD = window.CLOUD = {
   },
   _dbChunkKey(stateKey, idx) {
     return `${stateKey}::chunk::${String(idx).padStart(4,'0')}`;
+  },
+  // 世代付きchunkキー。書込途中の中断でも旧世代を壊さないために使う。
+  _dbChunkKeyGen(stateKey, gen, idx) {
+    return `${stateKey}::chunk::${gen}::${String(idx).padStart(4,'0')}`;
+  },
+  // SQLのLIKEでは「_」は任意1文字、「%」はワイルドカード。
+  // state_key には 202604_confirmed のように「_」が含まれるため、必ずエスケープしてから使う。
+  _likeEscape(s) {
+    return String(s || '').replace(/([\\%_])/g, '\\$1');
+  },
+  // 差分push用の軽量ハッシュ（FNV-1a + 長さ）。内容が前回pushと同じならアップロードを省略する。
+  _hashStr(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return (h >>> 0).toString(36) + ':' + s.length;
+  },
+  _pushedHashes: null,
+  _hashLSKey() { return `mgmt5_${CENTER.id}_push_hashes`; },
+  _loadPushedHashes() {
+    if (this._pushedHashes) return this._pushedHashes;
+    try { this._pushedHashes = JSON.parse(localStorage.getItem(this._hashLSKey()) || '{}') || {}; }
+    catch(e) { this._pushedHashes = {}; }
+    return this._pushedHashes;
+  },
+  _rememberPushed(stateKey, hash) {
+    const m = this._loadPushedHashes();
+    m[stateKey] = hash;
+    try { localStorage.setItem(this._hashLSKey(), JSON.stringify(m)); } catch(e) {}
+  },
+  _forgetPushed(stateKey) {
+    const m = this._loadPushedHashes();
+    delete m[stateKey];
+    try { localStorage.setItem(this._hashLSKey(), JSON.stringify(m)); } catch(e) {}
   },
   async _dbUpsertState(stateKey, payload) {
     const sb = await this._client();
@@ -130,7 +165,23 @@ var CLOUD = window.CLOUD = {
       .from('center_realtime_state')
       .delete()
       .eq('center_key', CENTER.id)
-      .like('state_key', `${prefix}%`);
+      .like('state_key', `${this._likeEscape(prefix)}%`);
+    if (error) return { ok:false, error:error.message };
+    return { ok:true };
+  },
+  // 指定stateKeyのchunk行を削除する。keepGen を渡した場合、その世代のchunkだけ残す。
+  // keepGen=null なら旧形式（世代なし）chunkも含めて全chunkを削除する。
+  async _dbDeleteChunksExceptGen(stateKey, keepGen) {
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
+    const prefix = `${stateKey}::chunk::`;
+    let q = sb
+      .from('center_realtime_state')
+      .delete()
+      .eq('center_key', CENTER.id)
+      .like('state_key', `${this._likeEscape(prefix)}%`);
+    if (keepGen) q = q.not('state_key', 'like', `${this._likeEscape(prefix + keepGen + '::')}%`);
+    const { error } = await q;
     if (error) return { ok:false, error:error.message };
     return { ok:true };
   },
@@ -144,7 +195,7 @@ var CLOUD = window.CLOUD = {
       .eq('center_key', CENTER.id)
       .order('state_key', { ascending:true })
       .limit(10000);
-    if (prefix) q = q.like('state_key', `${prefix}%`);
+    if (prefix) q = q.like('state_key', `${this._likeEscape(prefix)}%`);
     const { data, error } = await q;
     if (error) return { ok:false, error:error.message, details:error };
     return { ok:true, rows:Array.isArray(data) ? data : [] };
@@ -248,14 +299,30 @@ var CLOUD = window.CLOUD = {
     ];
 
     const rows = [];
+    let listFailures = 0;
     for (const prefix of prefixes) {
       try {
         // 起動・センター切替時は payload を読まない。
         // 商品住所CSVの分割chunkが多い状態で payload まで一覧取得すると、PostgRESTが500を返すことがある。
         // ここでは state_key/updated_at だけで台帳を再構成し、実データは必要な月だけ _downloadJSON で取得する。
         const listed = await this._dbListStates(prefix, { withPayload:false });
-        if (listed && listed.ok && Array.isArray(listed.rows)) rows.push(...listed.rows);
-      } catch(e) {}
+        if (listed && listed.ok && Array.isArray(listed.rows)) {
+          rows.push(...listed.rows);
+        } else {
+          listFailures++;
+          console.warn('[CLOUD] state一覧取得失敗:', prefix, listed?.error || '不明');
+        }
+      } catch(e) {
+        listFailures++;
+        console.warn('[CLOUD] state一覧取得例外:', prefix, e?.message || e);
+      }
+    }
+
+    // 一覧取得が全滅し、保存済みmanifestも無い場合は「データなし」と誤判定しない。
+    // null を返して上位（pullInitialForBoot等）の通信異常系へ流す。
+    if (listFailures >= prefixes.length && !rows.length && !manifest) {
+      console.warn('[CLOUD] 台帳再構成不可（全prefix取得失敗）。クラウド接続を確認してください。');
+      return null;
     }
 
     if (rows.length) {
@@ -398,35 +465,52 @@ var CLOUD = window.CLOUD = {
     if (error) throw error;
     return { ok:true };
   },
-  async _uploadJSON(key, value) {
+  async _uploadJSON(key, value, options = {}) {
     // 正本は Supabase DB(center_realtime_state)。Storage bucketは元ファイル/添付用途に限定する。
     // key は従来のStorageパスをそのまま state_key 化するため、既存呼び出し側は変更しない。
     value = sanitizedCloneForExport(value);
     const stateKey = this._dbStateKey(key);
     const json = JSON.stringify(value);
+    const hash = this._hashStr(json);
+
+    // 差分push：前回push成功時と内容が同じならアップロードしない。
+    // 自動同期(pushAll onlyChanged)で全データ再アップロードが走るのを防ぎ、
+    // 書込中の隙間に他PCが読込んで壊れる確率と通信量を大幅に下げる。
+    if (options.skipIfUnchanged && this._loadPushedHashes()[stateKey] === hash) {
+      return { ok:true, db:true, skipped:true };
+    }
 
     // jsonb 1行へ巨大CSVを入れない。大きいものはDB上で分割保存する。
-    // pointer行 + chunk行構成にすることで、商品住所CSVが増えてもlocalStorage/単一payloadの上限に依存しない。
     const chunkThreshold = 280 * 1024;
     if (json.length <= chunkThreshold) {
-      // 以前に分割保存されていた可能性があるため、旧chunkを掃除してから本体を保存する。
-      await this._dbDeletePrefix(this._dbChunkKey(stateKey, 0).replace(/0000$/, ''));
+      // 重要：先に本体行を確定させてから旧chunkを掃除する。
+      // （旧実装は「削除→書込」の順で、途中失敗時にpointerが宙に浮きデータ消失に見えた）
       await this._dbUpsertState(stateKey, value);
+      try { await this._dbDeleteChunksExceptGen(stateKey, null); } catch(e) {
+        console.warn('[CLOUD] 旧chunk掃除失敗（本体保存は完了済み）:', key, e?.message || e);
+      }
+      this._rememberPushed(stateKey, hash);
       return { ok:true, db:true, chunked:false };
     }
 
+    // ════ アトミックな世代切替方式 ════
+    // 1. 新しい世代IDでchunkを全て書き込む（既存pointer・旧世代chunkには触れない）
+    // 2. 全chunk書込成功後に、pointerを新世代へ一括切替（この1回のupsertが切替点）
+    // 3. 最後に旧世代chunkを掃除（ここで失敗してもデータは壊れない）
+    // 途中で失敗・中断しても、pointerは常に「完全な世代」を指し続ける。
     const chunkSize = 240 * 1024;
     const chunks = [];
     for (let i=0; i<json.length; i += chunkSize) chunks.push(json.slice(i, i + chunkSize));
 
-    await this._dbDeletePrefix(this._dbChunkKey(stateKey, 0).replace(/0000$/, ''));
+    const gen = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
     for (let i=0; i<chunks.length; i++) {
-      await this._dbUpsertState(this._dbChunkKey(stateKey, i), { text: chunks[i] });
+      await this._dbUpsertState(this._dbChunkKeyGen(stateKey, gen, i), { text: chunks[i] });
     }
 
     const pointer = {
       __db_chunked: true,
-      version: 1,
+      version: 2,
+      gen,
       center: CENTER.id,
       key,
       stateKey,
@@ -436,7 +520,12 @@ var CLOUD = window.CLOUD = {
       bytes: json.length
     };
     await this._dbUpsertState(stateKey, pointer);
-    return { ok:true, db:true, chunked:true, chunks:chunks.length };
+
+    try { await this._dbDeleteChunksExceptGen(stateKey, gen); } catch(e) {
+      console.warn('[CLOUD] 旧世代chunk掃除失敗（保存自体は完了済み）:', key, e?.message || e);
+    }
+    this._rememberPushed(stateKey, hash);
+    return { ok:true, db:true, chunked:true, chunks:chunks.length, gen };
   },
   async _downloadJSON(key) {
     const stateKey = this._dbStateKey(key);
@@ -444,9 +533,12 @@ var CLOUD = window.CLOUD = {
     if (!first) return null;
 
     if (first && first.__db_chunked && Number(first.chunks) > 0) {
+      // version:2（世代付き）と version:1（世代なし）の両対応
+      const useGen = !!first.gen;
       let joined = '';
       for (let i=0; i<Number(first.chunks); i++) {
-        const part = await this._dbGetState(this._dbChunkKey(stateKey, i));
+        const ck = useGen ? this._dbChunkKeyGen(stateKey, first.gen, i) : this._dbChunkKey(stateKey, i);
+        const part = await this._dbGetState(ck);
         if (!part || typeof part.text !== 'string') throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
         joined += part.text;
       }
@@ -478,10 +570,11 @@ var CLOUD = window.CLOUD = {
   async deleteFile(key) {
     if (!key) return { ok:false, error:'キーなし' };
 
-    // JSON系データはDB保存。state本体と分割chunkを削除する。
+    // JSON系データはDB保存。state本体と分割chunk（世代付き含む）を削除する。
     const stateKey = this._dbStateKey(key);
-    await this._dbDeletePrefix(this._dbChunkKey(stateKey, 0).replace(/0000$/, ''));
+    try { await this._dbDeleteChunksExceptGen(stateKey, null); } catch(e) {}
     const dbResult = await this._dbDeleteStates([stateKey]);
+    this._forgetPushed(stateKey);
 
     // 添付ファイルなどStorageに置くものは従来通り削除も試す。失敗してもDB削除済ならOK扱い。
     try {
@@ -529,22 +622,30 @@ var CLOUD = window.CLOUD = {
     } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
     finally { this._busy = false; }
   },
-  async pushAll() {
+  async pushAll(options = {}) {
     if (this._busy) return { ok:false, error:'同期処理中' };
     this._busy = true;
+    // onlyChanged:true（自動同期用）の場合、前回pushから内容が変わったキーだけアップロードする。
+    // 手動の「全同期」ボタン等からは options なしで呼ばれ、従来通り全件アップロードする。
+    const onlyChanged = !!options.onlyChanged;
+    const up = (key, value) => this._uploadJSON(key, value, { skipIfUnchanged: onlyChanged });
     try {
-      for (const ds of STATE.datasets.filter(d => d.source !== 'history')) await this._uploadJSON(this._datasetKey(ds.ym, ds.type || 'confirmed'), ds);
-      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
-      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
-      if (STATE.capacity) await this._uploadJSON(this._capacityKey(), STATE.capacity);
-      await this._uploadJSON(this._planKey(), STATE.planData || {});
-      if (STATE.memos && Object.keys(STATE.memos).length) await this._uploadJSON(this._memosKey(), STATE.memos);
-      if (STATE.library && STATE.library.length) await this._uploadJSON(this._libraryKey(), STATE.library);
+      for (const ds of STATE.datasets.filter(d => d.source !== 'history')) await up(this._datasetKey(ds.ym, ds.type || 'confirmed'), ds);
+      for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await up(this._workerMonthKey(w.ym), w);
+      for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await up(this._productMonthKey(pr.ym), pr);
+      if (STATE.capacity) await up(this._capacityKey(), STATE.capacity);
+      await up(this._planKey(), STATE.planData || {});
+      if (STATE.memos && Object.keys(STATE.memos).length) await up(this._memosKey(), STATE.memos);
+      if (STATE.library && STATE.library.length) await up(this._libraryKey(), STATE.library);
       // 旧形式data_v5.json / 旧field/data.json は大きいデータ・個人情報混入リスクがあるため削除する。
-      try {
-        const sb = await this._client();
-        if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]);
-      } catch(e) {}
+      // （自動同期では毎回走らせず、手動全同期時のみ）
+      if (!onlyChanged) {
+        try {
+          const sb = await this._client();
+          if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]);
+        } catch(e) {}
+      }
+      // manifest / full_state は軽量かつ savedAt を含むため、常にアップロードする。
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
       await this._uploadJSON(this._fullStateKey(), this._makeFullState());
       UI.updateCloudBadge('ok');
@@ -946,7 +1047,10 @@ var CLOUD = window.CLOUD = {
   async syncSmart() {
     if (this._busy) return { ok:false, error:'同期処理中' };
     this._busy = true;
-    try {
+    // 旧実装は途中で _busy を一時解除しており、その隙間に AUTO_SYNC.flush が
+    // 割り込んで pushAll と交差する再入の穴があった。
+    // _busy は最後まで保持し、処理中の STORE.save による自動同期予約は suppress する。
+    const run = async () => {
       const cloudFull = await this._downloadJSON(this._fullStateKey());
       const localFull = this._makeFullState();
 
@@ -959,9 +1063,7 @@ var CLOUD = window.CLOUD = {
       mergedBase.deleted = mergeDeletedStates(localFull.deleted || {}, cloudFull?.deleted || {});
       applyDeletionTombstonesToState(mergedBase);
       this._applyFullState(mergedBase);
-      this._busy = false;
       const manifestResult = await this.pullManifestAndMissing();
-      this._busy = true;
 
       // manifest取得後の最新STATEを full_state として再保存
       const finalFull = this._makeFullState();
@@ -976,6 +1078,12 @@ var CLOUD = window.CLOUD = {
 
       UI.updateCloudBadge('ok');
       return { ok:true, changed:true, source:'smart+manifest', manifestChanged: !!(manifestResult && manifestResult.changed) };
+    };
+    try {
+      if (typeof AUTO_SYNC !== 'undefined' && AUTO_SYNC && AUTO_SYNC.withoutSyncAsync) {
+        return await AUTO_SYNC.withoutSyncAsync(run);
+      }
+      return await run();
     } catch(e) {
       UI.updateCloudBadge('error');
       return { ok:false, error:e.message };
