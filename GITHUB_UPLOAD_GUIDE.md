@@ -12,5 +12,5 @@
 
 ## 注意
 
-`service_role` や `sb_secret` は絶対に入れないでください。
+`service_role` や `sb_secret` 絶対に入れないでください。
 フロントで使うのは Supabase の publishable key / anon public key のみです。
