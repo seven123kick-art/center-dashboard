@@ -857,7 +857,6 @@
 
       box.innerHTML = `
         <div class="fa-area-v3">
-          ${selectorHtml(ym)}
           ${cardHtml(ym, rows)}
           ${toolbarHtml(mode, sortMode, metric)}
           ${mode === 'history'
