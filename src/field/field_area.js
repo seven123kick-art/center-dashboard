@@ -441,11 +441,19 @@
 
   function selectorHtml(ym){
     const yms = allYMs();
+    const isBootSyncing = !!(window.APP_BOOT_STATE && APP_BOOT_STATE.cloudSyncPending);
     const years = window.PERIOD_UI?.fiscalYears ? PERIOD_UI.fiscalYears('field') : fiscalYears(yms);
-    if (!years.length) years.push(String(new Date().getFullYear()));
+    if (!years.length) years.push(String(window.STATE?.fiscalYear || new Date().getFullYear()));
     const fy = fiscalFromYM(ym) || selectedFY || window.STATE?.fiscalYear || years[0] || '';
     const safeFY = years.includes(String(fy)) ? String(fy) : years[0];
     const months = (typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(safeFY) : monthsForFY(yms, safeFY);
+    const monthOptions = (!yms.length && isBootSyncing)
+      ? '<option value="">読込中...</option>'
+      : months.map(m=>{
+          const has = yms.includes(m);
+          const label = ymText(m) + (has ? '（現場明細あり）' : '（未登録）');
+          return `<option value="${esc(m)}" ${String(m)===String(ym)?'selected':''} ${has?'':'disabled'}>${esc(label)}</option>`;
+        }).join('');
 
     return `
       <div class="fa3-selector" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border,#d9dee8);border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.05)">
@@ -460,12 +468,8 @@
             </select>
           </label>
           <label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
-            <select id="fa3-ym-select" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
-              ${months.map(m=>{
-                const has = yms.includes(m);
-                const label = ymText(m) + (has ? '（現場明細あり）' : '（未登録）');
-                return `<option value="${esc(m)}" ${String(m)===String(ym)?'selected':''} ${has?'':'disabled'}>${esc(label)}</option>`;
-              }).join('')}
+            <select id="fa3-ym-select" ${(!yms.length && isBootSyncing) ? 'disabled' : ''} style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
+              ${monthOptions}
             </select>
           </label>
         </div>
@@ -843,10 +847,18 @@
       const selector = selectorHtml(ym);
 
       if (!record) {
+        const syncing = !!(window.APP_BOOT_STATE && APP_BOOT_STATE.cloudSyncPending);
         box.innerHTML = `
           <div class="fa-area-v3">
             ${selector}
-            <div class="fa3-empty">商品・住所CSVを読み込んでください</div>
+            ${syncing ? `
+              <div class="fa3-loading">
+                <span class="fa3-spinner"></span>
+                <div>
+                  <b>エリア分析データを読込中です</b>
+                  <small>先に画面を表示しています。キャッシュまたはクラウド同期完了後に自動で反映します。</small>
+                </div>
+              </div>` : '<div class="fa3-empty">商品・住所CSVを読み込んでください</div>'}
           </div>`;
         bindControls();
         return;

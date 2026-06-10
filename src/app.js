@@ -1316,12 +1316,17 @@ const PERIOD_UI = {
     const months = monthsOfFiscalYear(safeFY);
     const fyId = `${viewKey}-fy-select`;
     const ymId = `${viewKey}-ym-select`;
-    const monthHtml = months.map(ym => {
-      const has = this.hasData(ym, kind);
-      const selected = ym === selectedYM ? 'selected' : '';
-      const disabled = has ? '' : 'disabled';
-      return `<option value="${esc(ym)}" ${selected} ${disabled}>${esc(this.monthLabel(ym, kind))}</option>`;
-    }).join('');
+    const isBootSyncing = !!(window.APP_BOOT_STATE && APP_BOOT_STATE.cloudSyncPending);
+    const hasAnyMonthData = months.some(ym => this.hasData(ym, kind));
+    const showLoadingMonth = useMonth && isBootSyncing && !hasAnyMonthData;
+    const monthHtml = showLoadingMonth
+      ? '<option value="">読込中...</option>'
+      : months.map(ym => {
+          const has = this.hasData(ym, kind);
+          const selected = ym === selectedYM ? 'selected' : '';
+          const disabled = has ? '' : 'disabled';
+          return `<option value="${esc(ym)}" ${selected} ${disabled}>${esc(this.monthLabel(ym, kind))}</option>`;
+        }).join('');
 
     container.className = container.className || 'period-selector-wrap';
     container.innerHTML = `
@@ -1337,7 +1342,7 @@ const PERIOD_UI = {
             </select>
           </label>
           ${useMonth ? `<label style="font-size:12px;font-weight:800;color:var(--text2,#52606d)">対象月
-            <select id="${ymId}" style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
+            <select id="${ymId}" ${showLoadingMonth ? 'disabled' : ''} style="margin-left:6px;padding:8px 28px 8px 10px;border:1px solid var(--border,#d9dee8);border-radius:9px;background:#fff;font-weight:800;min-width:210px">
               ${monthHtml || '<option value="">データなし</option>'}
             </select>
           </label>` : ''}
@@ -5202,6 +5207,14 @@ function renderFieldViewAfterCloud(view, renderFn) {
 }
 
 
+/* ════════ 起動状態（先表示・バックグラウンド同期のUI制御） ════════════ */
+window.APP_BOOT_STATE = window.APP_BOOT_STATE || {
+  cloudSyncPending: false,
+  initialRendered: false,
+  renderedFromCache: false,
+  lastCloudSyncAt: null
+};
+
 /* ════════ IndexedDB 高速キャッシュ（Supabase正本・PC内即時表示用） ════════════ */
 const IDB_CACHE = window.IDB_CACHE = {
   _db: null,
@@ -5714,7 +5727,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     STORE.load();
 
     // 1.1 IndexedDBキャッシュを先に復元し、Supabase待ちの「データなし」ちらつきを防ぐ。
+    if (window.APP_BOOT_STATE) APP_BOOT_STATE.cloudSyncPending = true;
     if (window.IDB_CACHE?.hydrateState) await IDB_CACHE.hydrateState();
+    if (window.APP_BOOT_STATE) {
+      APP_BOOT_STATE.renderedFromCache = !!((STATE.datasets || []).length || (STATE.workerCsvData || []).length || (STATE.productAddressData || []).length);
+    }
 
     // 1.5 保存・取込・更新時の自動同期を有効化
     AUTO_SYNC.install();
@@ -5760,7 +5777,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     CLOUD.renderForm();
     UI.updateSaveStatus();
 
-    // 10. 起動専用の軽量読込後に初回描画する
+    // 9.5 ここで先に画面を表示する。
+    // IndexedDB/localStorageのキャッシュを即表示し、Supabase取得はバックグラウンドで反映する。
+    clearTimeout(_bootSafetyTimer);
+    _bootRender(_lastView);
+
+    // 10. 起動専用の軽量読込をバックグラウンドで実行する
     // full pull を待つと、作業者CSV・商品住所CSV・資料まで取得して起動が重くなるため、
     // 初回表示に必要な収支・計画・キャパだけを先に取得する。
     let pullResult = null;
@@ -5771,13 +5793,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       pullResult = { ok:false, error:e };
     }
 
-    clearTimeout(_bootSafetyTimer);
-    _bootRender(_lastView);
+    if (window.APP_BOOT_STATE) {
+      APP_BOOT_STATE.cloudSyncPending = false;
+      APP_BOOT_STATE.lastCloudSyncAt = new Date().toISOString();
+    }
+
+    if (pullResult && pullResult.ok) {
+      if (window.IDB_CACHE?.persistStateSoon) IDB_CACHE.persistStateSoon();
+      setTimeout(() => { try { NAV.refresh(); } catch(e){} }, 0);
+    }
 
     if (pullResult && pullResult.ok && pullResult.changed) {
       setTimeout(() => UI.toast('クラウドの主要データを反映しました'), 300);
     } else if (pullResult && pullResult.error) {
-      setTimeout(() => UI.toast('クラウドに接続できないため、データを表示できません。通信状況・Supabase設定を確認してください', 'warn'), 300);
+      setTimeout(() => UI.toast('クラウドに接続できないため、キャッシュ表示を継続しています。通信状況・Supabase設定を確認してください', 'warn'), 300);
     }
 
     // 起動後の全量クラウド取得は行わない。
