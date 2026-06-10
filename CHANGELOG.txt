@@ -1,0 +1,31 @@
+2026-06-11
+
+[修正対象]
+center.html
+- 起動時ローディングを中央カード型に変更
+- 進捗バー風アニメーションと4段階ステップ表示を追加
+
+assets/css/app.css
+- 中央ローディングオーバーレイ用CSSを追加
+- 進捗バー・ステップ表示・スピナーのデザインを追加
+
+src/app.js
+- UI_LOADING を追加し、画面中央ローディングを共通制御できるように変更
+- 起動時の段階表示を追加
+- 現場分析データの年度別クラウド遅延読込時に中央ローディングを表示
+- Consoleに [PERF] ログを出す簡易計測を追加
+
+src/field/field_area.js
+- エリア分析の郵便番号マスタ読込・集計中に中央ローディングを表示
+- rawRecords() の同一render内再計算を抑制
+- 郵便番号マスタ読込時間・集計時間・全体render時間を [PERF] ログ出力
+
+[確認済]
+- node --check src/app.js 成功
+- node --check src/field/field_area.js 成功
+- node --check src/core/cloud.js 成功
+
+[次に確認すること]
+- エリア分析を開いた時、画面中央に「エリア分析を集計中です」が出るか
+- Consoleに [PERF] field-cloud / field-area の秒数が出るか
+- 表示完了後にローディングが残らないか

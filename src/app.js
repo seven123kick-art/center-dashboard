@@ -5151,6 +5151,7 @@ function currentFieldFiscalYearForLoad() {
   return String(ym ? fiscalYearFromYM(ym) : getDefaultFiscalYear());
 }
 function renderFieldCloudNotice(view, text='現場分析データをクラウドから読み込み中...') {
+  if (window.UI_LOADING) UI_LOADING.show('現場分析データを読み込んでいます', '対象年度の作業者・商品住所データをSupabaseから取得しています。完了後に自動表示します。', 2);
   const viewEl = document.getElementById('view-' + view);
   if (!viewEl) return;
   let box = viewEl.querySelector('#field-cloud-lazy-loader');
@@ -5165,6 +5166,7 @@ function renderFieldCloudNotice(view, text='現場分析データをクラウド
 }
 function removeFieldCloudNotice(view) {
   document.getElementById('view-' + view)?.querySelector('#field-cloud-lazy-loader')?.remove();
+  if (window.UI_LOADING) UI_LOADING.hide(180);
 }
 function renderFieldViewAfterCloud(view, renderFn) {
   const fy = currentFieldFiscalYearForLoad();
@@ -5187,13 +5189,14 @@ function renderFieldViewAfterCloud(view, renderFn) {
   else renderFieldCloudNotice(view);
 
   if (!FIELD_CLOUD_LOAD.promises[key]) {
+    if (window.PERF_LOG) PERF_LOG.start(`field-cloud:${fy}`);
     FIELD_CLOUD_LOAD.promises[key] = AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullFieldDataForFiscalYear(fy))
       .then(r => {
         FIELD_CLOUD_LOAD.done[key] = true;
         return r;
       })
       .catch(e => ({ ok:false, error:e?.message || String(e) }))
-      .finally(() => { delete FIELD_CLOUD_LOAD.promises[key]; });
+      .finally(() => { if (window.PERF_LOG) PERF_LOG.end(`field-cloud:${fy}`); delete FIELD_CLOUD_LOAD.promises[key]; });
   }
 
   FIELD_CLOUD_LOAD.promises[key].then(r => {
@@ -5213,6 +5216,59 @@ window.APP_BOOT_STATE = window.APP_BOOT_STATE || {
   initialRendered: false,
   renderedFromCache: false,
   lastCloudSyncAt: null
+};
+
+
+/* ════════ 体感速度用ローディングUI・簡易計測 ════════════ */
+const PERF_LOG = window.PERF_LOG = window.PERF_LOG || {
+  marks: {},
+  start(name) {
+    this.marks[name] = performance.now();
+    console.log(`[PERF] ${name} start`);
+  },
+  end(name, extra='') {
+    const st = this.marks[name];
+    const ms = st ? Math.round(performance.now() - st) : null;
+    console.log(`[PERF] ${name} ${ms != null ? ms + 'ms' : ''}${extra ? ' / ' + extra : ''}`);
+    delete this.marks[name];
+    return ms;
+  }
+};
+
+const UI_LOADING = window.UI_LOADING = window.UI_LOADING || {
+  _visible: false,
+  _lastStep: 1,
+  show(message='読み込み中です', detail='処理を実行しています。', step=1) {
+    const ov = document.getElementById('app-loading-overlay');
+    if (!ov) return;
+    this._visible = true;
+    this._lastStep = Math.max(1, Math.min(4, Number(step || 1)));
+    ov.style.display = 'flex';
+    ov.style.opacity = '1';
+    ov.setAttribute('aria-busy', 'true');
+    this.set(message, detail, this._lastStep);
+  },
+  set(message, detail, step) {
+    const msg = document.getElementById('app-loading-message');
+    const det = document.getElementById('app-loading-detail');
+    if (msg && message) msg.textContent = message;
+    if (det && detail) det.textContent = detail;
+    if (step != null) this._lastStep = Math.max(1, Math.min(4, Number(step || 1)));
+    for (let i=1; i<=4; i++) {
+      const el = document.getElementById('app-loading-step-' + i);
+      if (!el) continue;
+      el.classList.toggle('done', i < this._lastStep);
+      el.classList.toggle('active', i === this._lastStep);
+    }
+  },
+  hide(delay=220) {
+    const ov = document.getElementById('app-loading-overlay');
+    if (!ov) return;
+    this._visible = false;
+    ov.style.opacity = '0';
+    ov.setAttribute('aria-busy', 'false');
+    setTimeout(() => { if (!this._visible) ov.style.display = 'none'; }, delay);
+  }
 };
 
 /* ════════ IndexedDB 高速キャッシュ（Supabase正本・PC内即時表示用） ════════════ */
@@ -5680,10 +5736,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   let _bootRendered = false;
 
   function _hideOverlay() {
-    const ov = document.getElementById('app-loading-overlay');
-    if (!ov) return;
-    ov.style.opacity = '0';
-    setTimeout(() => ov.remove(), 400);
+    if (window.UI_LOADING) UI_LOADING.hide(240);
+    else {
+      const ov = document.getElementById('app-loading-overlay');
+      if (!ov) return;
+      ov.style.opacity = '0';
+      setTimeout(() => { ov.style.display = 'none'; }, 240);
+    }
   }
 
   function _bootRender(view) {
@@ -5715,6 +5774,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }, 45000);
 
   try {
+    if (window.UI_LOADING) UI_LOADING.set('起動準備中です', '画面モジュールを確認しています。', 1);
+
     // 0. 画面別モジュール読込（荷主分析など）
     try {
       await loadScreenModules();
@@ -5723,8 +5784,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       UI.toast('一部画面モジュールの読み込みに失敗しました', 'warn');
     }
 
+    if (window.UI_LOADING) UI_LOADING.set('ローカル設定を読込中です', '前回表示した年度・月などの軽量設定を復元しています。', 1);
+
     // 1. localStorageから軽量設定だけ読込。CSV本体はDBから復元する。
     STORE.load();
+
+    if (window.UI_LOADING) UI_LOADING.set('キャッシュデータを確認中です', 'このPCに保存済みのデータがあれば先に表示します。', 2);
 
     // 1.1 IndexedDBキャッシュを先に復元し、Supabase待ちの「データなし」ちらつきを防ぐ。
     if (window.APP_BOOT_STATE) APP_BOOT_STATE.cloudSyncPending = true;
@@ -5777,10 +5842,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     CLOUD.renderForm();
     UI.updateSaveStatus();
 
+    if (window.UI_LOADING) UI_LOADING.set('画面を表示しています', 'キャッシュ確認が終わったため、先に画面を表示します。', 3);
+
     // 9.5 ここで先に画面を表示する。
     // IndexedDB/localStorageのキャッシュを即表示し、Supabase取得はバックグラウンドで反映する。
     clearTimeout(_bootSafetyTimer);
     _bootRender(_lastView);
+
+    if (window.UI_LOADING) UI_LOADING.set('クラウド同期を確認中です', '画面は先に表示し、Supabaseの最新データは裏側で確認します。', 4);
 
     // 10. 起動専用の軽量読込をバックグラウンドで実行する
     // full pull を待つと、作業者CSV・商品住所CSV・資料まで取得して起動が重くなるため、

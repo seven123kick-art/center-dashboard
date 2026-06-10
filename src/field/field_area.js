@@ -18,6 +18,7 @@
   let selectedYMState = '';
   let guardTimer = null;
   let observer = null;
+  let renderRecordsCache = null;
 
   function arr(v){ return Array.isArray(v) ? v : []; }
   function obj(v){ return v && typeof v === 'object' && !Array.isArray(v); }
@@ -245,6 +246,7 @@
   }
 
   function rawRecords(){
+    if (Array.isArray(renderRecordsCache)) return renderRecordsCache;
     const out = [];
 
     function pushRecord(x, source){
@@ -840,8 +842,11 @@
 
     rendering = true;
     ensureStyle();
+    if (window.PERF_LOG) PERF_LOG.start('field-area:render');
 
     try {
+      renderRecordsCache = null;
+      renderRecordsCache = rawRecords();
       const ym = selectedYM();
       const record = selectedRecord(ym);
       const selector = selectorHtml(ym);
@@ -865,6 +870,11 @@
       }
 
       // 郵便番号マスタ読込・市区町村集計に時間がかかるため、空白画面を出さず明示的に待機表示する。
+      if (window.UI_LOADING) setTimeout(() => {
+        if (rendering && window.STATE?.view === 'field-area') {
+          UI_LOADING.show(`${ymText(ym)} エリア分析を集計中です`, '郵便番号マスタと商品・住所CSVを照合しています。完了後に自動表示します。', 3);
+        }
+      }, 0);
       box.innerHTML = `
         <div class="fa-area-v3">
           ${selector}
@@ -878,14 +888,18 @@
         </div>`;
       bindControls();
 
+      if (window.PERF_LOG) PERF_LOG.start('field-area:zip-master');
       await ensureZipParts(record);
+      if (window.PERF_LOG) PERF_LOG.end('field-area:zip-master');
 
       const mode = getMode();
       const sortMode = getSortMode();
       const metric = getMetric();
       const level = mode === 'pref' ? 'pref' : 'city';
 
+      if (window.PERF_LOG) PERF_LOG.start('field-area:aggregate');
       let rows = sortRows(buildRows(record, level), sortMode);
+      if (window.PERF_LOG) PERF_LOG.end('field-area:aggregate', `${rows.length} rows / ${arr(record.tickets).length} tickets`);
 
       box.innerHTML = `
         <div class="fa-area-v3">
@@ -898,6 +912,7 @@
         </div>`;
 
       bindControls();
+      if (window.UI_LOADING) UI_LOADING.hide(180);
 
       const no = document.getElementById('map-no-data');
       if (no) no.style.display = 'none';
@@ -908,8 +923,11 @@
       }
     } catch(e) {
       console.error(e);
+      if (window.UI_LOADING) UI_LOADING.hide(180);
       box.innerHTML = `<div class="fa3-empty">エリア分析の表示でエラー：${esc(e.message || e)}</div>`;
     } finally {
+      if (window.PERF_LOG) PERF_LOG.end('field-area:render');
+      renderRecordsCache = null;
       rendering = false;
     }
   }
