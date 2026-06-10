@@ -458,6 +458,16 @@ var CLOUD = window.CLOUD = {
   _chunkKey(key, idx) {
     return `${key}.chunks/${String(idx).padStart(4,'0')}.part`;
   },
+  _cacheKindForKey(key) {
+    const k = String(key || '');
+    const ds = k.match(new RegExp(`^${CENTER.id}/skdl/(\\d{6})_([^/]+)\\.json$`));
+    if (ds) return { kind:'dataset', id:`${ds[1]}_${ds[2] || 'confirmed'}` };
+    const worker = k.match(new RegExp(`^${CENTER.id}/field/worker/(\\d{6})\\.json$`));
+    if (worker) return { kind:'worker', id:worker[1] };
+    const product = k.match(new RegExp(`^${CENTER.id}/field/product/(\\d{6})\\.json$`));
+    if (product) return { kind:'product', id:product[1] };
+    return null;
+  },
   async _uploadBlob(key, blob, contentType='application/octet-stream') {
     const sb = await this._client();
     if (!sb) return { ok:false, error:'Supabase未設定' };
@@ -528,10 +538,14 @@ var CLOUD = window.CLOUD = {
     return { ok:true, db:true, chunked:true, chunks:chunks.length, gen };
   },
   async _downloadJSON(key) {
+    const cacheKind = this._cacheKindForKey ? this._cacheKindForKey(key) : null;
+    const cacheFallback = cacheKind && window.IDB_CACHE ? await IDB_CACHE.get(cacheKind.kind, cacheKind.id) : null;
+
     const stateKey = this._dbStateKey(key);
     const first = await this._dbGetState(stateKey);
-    if (!first) return null;
+    if (!first) return cacheFallback || null;
 
+    let value = first;
     if (first && first.__db_chunked && Number(first.chunks) > 0) {
       // version:2（世代付き）と version:1（世代なし）の両対応
       const useGen = !!first.gen;
@@ -539,23 +553,31 @@ var CLOUD = window.CLOUD = {
       for (let i=0; i<Number(first.chunks); i++) {
         const ck = useGen ? this._dbChunkKeyGen(stateKey, first.gen, i) : this._dbChunkKey(stateKey, i);
         const part = await this._dbGetState(ck);
-        if (!part || typeof part.text !== 'string') throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
+        if (!part || typeof part.text !== 'string') {
+          if (cacheFallback) return cacheFallback;
+          throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
+        }
         joined += part.text;
       }
-      return JSON.parse(joined);
+      value = JSON.parse(joined);
     }
 
     // 旧Storage分割ポインタがDBに入っていた場合の互換
-    if (first && first.__chunked && Number(first.chunks) > 0) {
+    if (value && value.__chunked && Number(value.chunks) > 0) {
       let joined = '';
-      for (let i=0; i<Number(first.chunks); i++) {
+      for (let i=0; i<Number(value.chunks); i++) {
         const part = await this._dbGetState(this._dbChunkKey(stateKey, i));
-        if (!part || typeof part.text !== 'string') throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
+        if (!part || typeof part.text !== 'string') {
+          if (cacheFallback) return cacheFallback;
+          throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
+        }
         joined += part.text;
       }
-      return JSON.parse(joined);
+      value = JSON.parse(joined);
     }
-    return first;
+
+    if (cacheKind && window.IDB_CACHE && value) IDB_CACHE.set(cacheKind.kind, cacheKind.id, value);
+    return value;
   },
   async uploadFile(key, file) {
     const sb = await this._client();

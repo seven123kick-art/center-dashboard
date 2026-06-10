@@ -5201,6 +5201,124 @@ function renderFieldViewAfterCloud(view, renderFn) {
   });
 }
 
+
+/* ════════ IndexedDB 高速キャッシュ（Supabase正本・PC内即時表示用） ════════════ */
+const IDB_CACHE = window.IDB_CACHE = {
+  _db: null,
+  _timer: null,
+  _dbName: 'mgmt5_center_cache_v2',
+  _storeName: 'items',
+
+  async _open() {
+    if (this._db) return this._db;
+    if (!('indexedDB' in window)) return null;
+    this._db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open(this._dbName, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(this._storeName)) db.createObjectStore(this._storeName);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return this._db;
+  },
+
+  _key(kind, id) { return `${CENTER.id}:${kind}:${id}`; },
+
+  async get(kind, id) {
+    try {
+      const db = await this._open();
+      if (!db) return null;
+      return await new Promise(resolve => {
+        const tx = db.transaction(this._storeName, 'readonly');
+        const req = tx.objectStore(this._storeName).get(this._key(kind, id));
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+    } catch(e) {
+      console.warn('[IDB_CACHE] get failed', kind, id, e?.message || e);
+      return null;
+    }
+  },
+
+  async set(kind, id, value) {
+    try {
+      const db = await this._open();
+      if (!db) return false;
+      await new Promise(resolve => {
+        const tx = db.transaction(this._storeName, 'readwrite');
+        tx.objectStore(this._storeName).put(value, this._key(kind, id));
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      });
+      return true;
+    } catch(e) {
+      console.warn('[IDB_CACHE] set failed', kind, id, e?.message || e);
+      return false;
+    }
+  },
+
+  async _eachIndex(kind, localStorageKey, buildId, apply) {
+    const index = (window.STORE && STORE._g) ? (STORE._g(localStorageKey) || []) : [];
+    for (const meta of index) {
+      const id = buildId(meta);
+      if (!id) continue;
+      const rec = await this.get(kind, id);
+      if (rec) apply(rec);
+    }
+  },
+
+  async hydrateState() {
+    try {
+      await this._eachIndex('dataset', 'dataset_index', m => m?.ym ? `${m.ym}_${m.type || 'confirmed'}` : null, rec => {
+        if (rec && rec.ym) upsertDataset(rec);
+      });
+
+      const workers = [];
+      await this._eachIndex('worker', 'field_worker_index', m => m?.ym || null, rec => {
+        if (rec && rec.ym) workers.push(rec);
+      });
+      if (workers.length) STATE.workerCsvData = workers.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+
+      const products = [];
+      await this._eachIndex('product', 'field_product_index', m => m?.ym || null, rec => {
+        if (rec && rec.ym) products.push(rec);
+      });
+      if (products.length) STATE.productAddressData = products.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+
+      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+      return { ok:true };
+    } catch(e) {
+      console.warn('[IDB_CACHE] hydrate failed', e?.message || e);
+      return { ok:false, error:e?.message || String(e) };
+    }
+  },
+
+  persistStateSoon() {
+    clearTimeout(this._timer);
+    this._timer = setTimeout(() => this.persistState(), 300);
+  },
+
+  async persistState() {
+    try {
+      for (const ds of (STATE.datasets || [])) {
+        if (ds && ds.ym) await this.set('dataset', `${ds.ym}_${ds.type || 'confirmed'}`, ds);
+      }
+      for (const rec of (STATE.workerCsvData || [])) {
+        if (rec && rec.ym) await this.set('worker', rec.ym, rec);
+      }
+      for (const rec of (STATE.productAddressData || [])) {
+        if (rec && rec.ym) await this.set('product', rec.ym, rec);
+      }
+      return { ok:true };
+    } catch(e) {
+      console.warn('[IDB_CACHE] persist failed', e?.message || e);
+      return { ok:false, error:e?.message || String(e) };
+    }
+  }
+};
+
 /* ════════ §25 NAV ══════════════════════════════════════════════ */
 const NAV = {
   // メイン画面切替（同期なし、再描画のみ）
@@ -5577,11 +5695,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       const banner = document.getElementById('js-error-banner');
       if (banner) {
         banner.style.display = 'block';
-        banner.textContent = 'クラウド読込に時間がかかっています。データが表示されない場合は、通信状況を確認してページを再読み込みしてください。';
+        banner.textContent = 'クラウド読込に時間がかかっているため、ローカルキャッシュで起動しました。';
         setTimeout(() => { banner.style.display = 'none'; }, 6000);
       }
     } catch(e) {}
-  }, 15000);
+  }, 45000);
 
   try {
     // 0. 画面別モジュール読込（荷主分析など）
@@ -5594,6 +5712,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 1. localStorageから軽量設定だけ読込。CSV本体はDBから復元する。
     STORE.load();
+
+    // 1.1 IndexedDBキャッシュを先に復元し、Supabase待ちの「データなし」ちらつきを防ぐ。
+    if (window.IDB_CACHE?.hydrateState) await IDB_CACHE.hydrateState();
 
     // 1.5 保存・取込・更新時の自動同期を有効化
     AUTO_SYNC.install();

@@ -130,6 +130,9 @@ var STORE = window.STORE = {
     this._s('reportKnowledge', STATE.reportKnowledge);
     this._s('deleted', STATE.deleted);
     if (STATE.fiscalYear) this._s('fiscalYear', STATE.fiscalYear);
+
+    // 大容量本体はIndexedDBへ退避し、次回起動時はSupabaseを待たず即表示する。
+    if (window.IDB_CACHE?.persistStateSoon) IDB_CACHE.persistStateSoon();
   },
 
   exportJSON() {
