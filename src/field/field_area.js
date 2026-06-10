@@ -840,11 +840,31 @@
     try {
       const ym = selectedYM();
       const record = selectedRecord(ym);
+      const selector = selectorHtml(ym);
 
       if (!record) {
-        box.innerHTML = '<div class="fa3-empty">商品・住所CSVを読み込んでください</div>';
+        box.innerHTML = `
+          <div class="fa-area-v3">
+            ${selector}
+            <div class="fa3-empty">商品・住所CSVを読み込んでください</div>
+          </div>`;
+        bindControls();
         return;
       }
+
+      // 郵便番号マスタ読込・市区町村集計に時間がかかるため、空白画面を出さず明示的に待機表示する。
+      box.innerHTML = `
+        <div class="fa-area-v3">
+          ${selector}
+          <div class="fa3-loading">
+            <span class="fa3-spinner"></span>
+            <div>
+              <b>${esc(ymText(ym))} エリア分析を集計中です</b>
+              <small>郵便番号マスタと商品・住所CSVを照合しています。完了後に自動表示します。</small>
+            </div>
+          </div>
+        </div>`;
+      bindControls();
 
       await ensureZipParts(record);
 
@@ -857,6 +877,7 @@
 
       box.innerHTML = `
         <div class="fa-area-v3">
+          ${selectorHtml(ym)}
           ${cardHtml(ym, rows)}
           ${toolbarHtml(mode, sortMode, metric)}
           ${mode === 'history'
@@ -1011,6 +1032,11 @@
 
       #field-map{height:auto!important;min-height:260px;border:0!important;border-radius:0!important;background:#fff!important;overflow:visible!important}
       #field-map .fa-area-v3{background:#fff}
+      #field-map .fa3-selector{margin:0 0 16px!important}
+      #field-map .fa3-loading{display:flex;align-items:center;gap:14px;margin:0 0 16px;padding:22px 24px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:14px;color:#1e3a8a;font-weight:900}
+      #field-map .fa3-loading small{display:block;margin-top:4px;color:#64748b;font-size:12px;font-weight:700}
+      #field-map .fa3-spinner{width:20px;height:20px;border-radius:50%;border:3px solid #bfdbfe;border-top-color:#2563eb;animation:fa3spin .9s linear infinite;display:inline-block;flex:0 0 auto}
+      @keyframes fa3spin{to{transform:rotate(360deg)}}
       #field-map .fa3-selector{margin:0;padding:18px 20px;border-bottom:1px solid #e5e7eb;background:linear-gradient(180deg,#f8fbff,#eef5ff);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
       #field-map .fa3-selector strong{display:block;font-size:15px;font-weight:950;color:#0f172a;margin-bottom:4px}
       #field-map .fa3-selector span{display:block;font-size:12px;color:#64748b;font-weight:850}
