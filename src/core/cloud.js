@@ -778,6 +778,7 @@ var CLOUD = window.CLOUD = {
     return { ok:true, changed };
   },
   async pullFieldDataForFiscalYear(fy) {
+    const perfStart = performance.now();
     // 現場分析用の遅延読込。
     // 起動時には作業者CSV・商品住所CSVを読まず、現場分析画面を開いた時だけ対象年度分を取得する。
     try {
@@ -792,6 +793,8 @@ var CLOUD = window.CLOUD = {
       if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
 
       let changed = 0;
+      let workerDownloaded = 0;
+      let productDownloaded = 0;
 
       const workerMetas = (Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [])
         .filter(meta => meta && meta.ym && monthSet.has(meta.ym));
@@ -806,6 +809,7 @@ var CLOUD = window.CLOUD = {
             STATE.workerCsvData = STATE.workerCsvData.filter(d => d && d.ym !== rec.ym);
             STATE.workerCsvData.push(rec);
             changed++;
+            workerDownloaded++;
           }
         }
       }
@@ -823,6 +827,7 @@ var CLOUD = window.CLOUD = {
             STATE.productAddressData = STATE.productAddressData.filter(d => d && d.ym !== rec.ym);
             STATE.productAddressData.push(rec);
             changed++;
+            productDownloaded++;
           }
         }
       }
@@ -831,9 +836,11 @@ var CLOUD = window.CLOUD = {
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
       if (changed) STORE.save();
       UI.updateCloudBadge('ok');
-      return { ok:true, changed, source:'field_lazy', fiscalYear, workerMonths:workerMetas.length, productMonths:productMetas.length };
+      console.log(`[PERF] field-cloud:${fiscalYear}:done ms=${Math.round(performance.now()-perfStart)} workerMonths=${workerMetas.length} productMonths=${productMetas.length} workerDownloaded=${workerDownloaded} productDownloaded=${productDownloaded} changed=${changed}`);
+      return { ok:true, changed, source:'field_lazy', fiscalYear, workerMonths:workerMetas.length, productMonths:productMetas.length, workerDownloaded, productDownloaded };
     } catch(e) {
       UI.updateCloudBadge('error');
+      console.log(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
       return { ok:false, error:e.message };
     }
   },
@@ -1031,6 +1038,7 @@ var CLOUD = window.CLOUD = {
       return { ok:true, changed:!!changed, source:'boot_fiscal_year_skdl_only' };
     } catch(e) {
       UI.updateCloudBadge('error');
+      console.log(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
       return { ok:false, error:e.message };
     }
   },
@@ -1108,6 +1116,7 @@ var CLOUD = window.CLOUD = {
       return await run();
     } catch(e) {
       UI.updateCloudBadge('error');
+      console.log(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
       return { ok:false, error:e.message };
     } finally {
       this._busy = false;
@@ -1130,6 +1139,7 @@ var CLOUD = window.CLOUD = {
       return { ok:true };
     } catch(e) {
       UI.updateCloudBadge('error');
+      console.log(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
       return { ok:false, error:e.message };
     }
   },

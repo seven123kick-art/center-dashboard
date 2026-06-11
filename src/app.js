@@ -1365,21 +1365,6 @@ const PERIOD_UI = {
 };
 window.PERIOD_UI = PERIOD_UI;
 
-
-/* PERF_LOG: 画面速度確認用。consoleに処理時間と件数を出すだけで、画面動作は変更しない。 */
-window.PERF_LOG = window.PERF_LOG || {
-  enabled: true,
-  now() { return (window.performance && performance.now) ? performance.now() : Date.now(); },
-  ms(start) { return Math.round(this.now() - Number(start || this.now())); },
-  info(label, data={}) {
-    if (!this.enabled) return;
-    const suffix = data && Object.keys(data).length
-      ? ' ' + Object.entries(data).map(([k,v]) => `${k}=${v}`).join(' ')
-      : '';
-    console.info(`[PERF] ${label}${suffix}`);
-  }
-};
-
 function renderCommonPeriodSelector(viewKey, opt={}) {
   const view = document.getElementById('view-' + viewKey);
   if (!view || !window.PERIOD_UI) return;
@@ -5188,27 +5173,19 @@ function removeFieldCloudNotice(view) {
   document.getElementById('view-' + view)?.querySelector('#field-cloud-lazy-loader')?.remove();
 }
 function renderFieldViewAfterCloud(view, renderFn) {
+  const viewStart = performance.now();
   const fy = currentFieldFiscalYearForLoad();
   const key = `${CENTER.id}:${fy}`;
-  const tAll = PERF_LOG.now();
   const localMonths = new Set([
     ...(Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData.map(d=>d?.ym) : []),
     ...(Array.isArray(STATE.productAddressData) ? STATE.productAddressData.map(d=>d?.ym) : [])
   ].filter(Boolean));
   const fyMonths = new Set((typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(fy) : []);
-  const localFyMonths = [...localMonths].filter(ym => fyMonths.has(ym));
-  const hasLocalForFY = localFyMonths.length > 0;
-  PERF_LOG.info(`field-view:${view}:start`, { fy, localMonths:localFyMonths.length, done:FIELD_CLOUD_LOAD.done[key] ? 1 : 0 });
-
-  const runRender = (reason='render') => {
-    const t = PERF_LOG.now();
-    renderFn();
-    PERF_LOG.info(`field-view:${view}:${reason}`, { ms:PERF_LOG.ms(t) });
-  };
+  const hasLocalForFY = [...localMonths].some(ym => fyMonths.has(ym));
 
   if (!CLOUD.pullFieldDataForFiscalYear || FIELD_CLOUD_LOAD.done[key]) {
-    runRender(FIELD_CLOUD_LOAD.done[key] ? 'render-done' : 'render-no-cloud');
-    PERF_LOG.info(`field-view:${view}:end`, { ms:PERF_LOG.ms(tAll) });
+    renderFn();
+    console.log(`[PERF] field-view:${view}:render-local-done ms=${Math.round(performance.now()-viewStart)} fy=${fy} localMonths=${localMonths.size}`);
     return;
   }
 
@@ -5216,38 +5193,25 @@ function renderFieldViewAfterCloud(view, renderFn) {
 
   // ローカルに対象年度の現場データがある場合は先に表示し、裏で差分だけ取得する。
   // ローカルが空の場合は、空表示を出さないように読み込み表示を挟む。
-  if (hasLocalForFY) runRender('render-local-first');
-  else renderFieldCloudNotice(view);
+  if (hasLocalForFY) {
+    renderFn();
+    console.log(`[PERF] field-view:${view}:render-from-idb ms=${Math.round(performance.now()-viewStart)} fy=${fy} localMonths=${localMonths.size}`);
+  } else {
+    renderFieldCloudNotice(view);
+  }
 
   if (!FIELD_CLOUD_LOAD.promises[key]) {
-    const tCloud = PERF_LOG.now();
-    PERF_LOG.info(`field-cloud:${fy}:start`, { view });
     FIELD_CLOUD_LOAD.promises[key] = AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullFieldDataForFiscalYear(fy))
       .then(r => {
         FIELD_CLOUD_LOAD.done[key] = true;
-        PERF_LOG.info(`field-cloud:${fy}:done`, {
-          ms:PERF_LOG.ms(tCloud),
-          ok:r?.ok ? 1 : 0,
-          changed:r?.changed ? 1 : 0,
-          workerMonths:r?.workerMonths ?? '-',
-          productMonths:r?.productMonths ?? '-'
-        });
         return r;
       })
-      .catch(e => {
-        PERF_LOG.info(`field-cloud:${fy}:error`, { ms:PERF_LOG.ms(tCloud), error:e?.message || String(e) });
-        return { ok:false, error:e?.message || String(e) };
-      })
+      .catch(e => ({ ok:false, error:e?.message || String(e) }))
       .finally(() => { delete FIELD_CLOUD_LOAD.promises[key]; });
-  } else {
-    PERF_LOG.info(`field-cloud:${fy}:reuse-promise`, { view });
   }
 
   const waitKey = `${view}:${key}`;
-  if (FIELD_CLOUD_LOAD.bound[waitKey]) {
-    PERF_LOG.info(`field-view:${view}:wait-skip`, { fy });
-    return;
-  }
+  if (FIELD_CLOUD_LOAD.bound[waitKey]) return;
   FIELD_CLOUD_LOAD.bound[waitKey] = true;
 
   FIELD_CLOUD_LOAD.promises[key].then(r => {
@@ -5257,13 +5221,15 @@ function renderFieldViewAfterCloud(view, renderFn) {
     if (r && !r.ok) UI.toast('現場分析データの取得に失敗しました: ' + (r.error || '不明'), 'warn');
     const afterSnapshot = fieldCloudSnapshot();
     if (!hasLocalForFY || beforeSnapshot !== afterSnapshot) {
-      runRender('render-after-cloud');
+      const renderStart = performance.now();
+      renderFn();
+      console.log(`[PERF] field-view:${view}:render-after-cloud ms=${Math.round(performance.now()-renderStart)} fy=${fy} localMonths=${localMonths.size}`);
     } else {
-      PERF_LOG.info(`field-cloud:${fy}:no-change-skip-render`, { view });
+      console.log(`[PERF] field-cloud:${fy} no-change skip render`);
     }
+    console.log(`[PERF] field-view:${view}:end ms=${Math.round(performance.now()-viewStart)} fy=${fy} localBefore=${hasLocalForFY ? 1 : 0}`);
     UI.updateTopbar(view);
     UI.updateSaveStatus();
-    PERF_LOG.info(`field-view:${view}:end`, { ms:PERF_LOG.ms(tAll) });
   });
 }
 
@@ -5299,6 +5265,7 @@ const IDB_CACHE = window.IDB_CACHE = {
   },
 
   _key(kind, id) { return `${CENTER.id}:${kind}:${id}`; },
+  _indexKey(kind) { return `${CENTER.id}:__index:${kind}`; },
 
   async get(kind, id) {
     try {
@@ -5316,13 +5283,59 @@ const IDB_CACHE = window.IDB_CACHE = {
     }
   },
 
+  async _readIndex(kind) {
+    try {
+      const db = await this._open();
+      if (!db) return [];
+      return await new Promise(resolve => {
+        const tx = db.transaction(this._storeName, 'readonly');
+        const req = tx.objectStore(this._storeName).get(this._indexKey(kind));
+        req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result.filter(Boolean) : []);
+        req.onerror = () => resolve([]);
+      });
+    } catch(e) { return []; }
+  },
+
+  async _scanIds(kind) {
+    try {
+      const db = await this._open();
+      if (!db) return [];
+      const prefix = `${CENTER.id}:${kind}:`;
+      return await new Promise(resolve => {
+        const ids = [];
+        const tx = db.transaction(this._storeName, 'readonly');
+        const req = tx.objectStore(this._storeName).openCursor();
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (!cursor) return resolve(ids);
+          const key = String(cursor.key || '');
+          if (key.startsWith(prefix)) ids.push(key.slice(prefix.length));
+          cursor.continue();
+        };
+        req.onerror = () => resolve(ids);
+      });
+    } catch(e) { return []; }
+  },
+
+  async ids(kind) {
+    const known = await this._readIndex(kind);
+    const scanned = await this._scanIds(kind);
+    return [...new Set([...known, ...scanned])].filter(Boolean).sort();
+  },
+
   async set(kind, id, value) {
     try {
       const db = await this._open();
       if (!db) return false;
+      const cleanId = String(id || '');
+      if (!cleanId) return false;
+      const currentIndex = await this._readIndex(kind);
+      const nextIndex = currentIndex.includes(cleanId) ? currentIndex : [...currentIndex, cleanId].sort();
       await new Promise(resolve => {
         const tx = db.transaction(this._storeName, 'readwrite');
-        tx.objectStore(this._storeName).put(value, this._key(kind, id));
+        const store = tx.objectStore(this._storeName);
+        store.put(value, this._key(kind, cleanId));
+        store.put(nextIndex, this._indexKey(kind));
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
       });
@@ -5334,35 +5347,45 @@ const IDB_CACHE = window.IDB_CACHE = {
   },
 
   async _eachIndex(kind, localStorageKey, buildId, apply) {
+    const ids = new Set();
     const index = (window.STORE && STORE._g) ? (STORE._g(localStorageKey) || []) : [];
     for (const meta of index) {
       const id = buildId(meta);
-      if (!id) continue;
-      const rec = await this.get(kind, id);
-      if (rec) apply(rec);
+      if (id) ids.add(String(id));
     }
+    for (const id of await this.ids(kind)) ids.add(String(id));
+
+    let applied = 0;
+    for (const id of ids) {
+      const rec = await this.get(kind, id);
+      if (rec) { apply(rec); applied++; }
+    }
+    return applied;
   },
 
   async hydrateState() {
     try {
-      await this._eachIndex('dataset', 'dataset_index', m => m?.ym ? `${m.ym}_${m.type || 'confirmed'}` : null, rec => {
+      const t0 = performance.now();
+      let datasets = 0;
+      datasets = await this._eachIndex('dataset', 'dataset_index', m => m?.ym ? `${m.ym}_${m.type || 'confirmed'}` : null, rec => {
         if (rec && rec.ym) upsertDataset(rec);
       });
 
       const workers = [];
-      await this._eachIndex('worker', 'field_worker_index', m => m?.ym || null, rec => {
+      const workerCount = await this._eachIndex('worker', 'field_worker_index', m => m?.ym || null, rec => {
         if (rec && rec.ym) workers.push(rec);
       });
       if (workers.length) STATE.workerCsvData = workers.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
 
       const products = [];
-      await this._eachIndex('product', 'field_product_index', m => m?.ym || null, rec => {
+      const productCount = await this._eachIndex('product', 'field_product_index', m => m?.ym || null, rec => {
         if (rec && rec.ym) products.push(rec);
       });
       if (products.length) STATE.productAddressData = products.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
 
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-      return { ok:true };
+      console.log(`[PERF] idb-hydrate ms=${Math.round(performance.now()-t0)} datasets=${datasets} workers=${workerCount} products=${productCount}`);
+      return { ok:true, datasets, workers:workerCount, products:productCount };
     } catch(e) {
       console.warn('[IDB_CACHE] hydrate failed', e?.message || e);
       return { ok:false, error:e?.message || String(e) };
