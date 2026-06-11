@@ -1365,6 +1365,21 @@ const PERIOD_UI = {
 };
 window.PERIOD_UI = PERIOD_UI;
 
+
+/* PERF_LOG: 画面速度確認用。consoleに処理時間と件数を出すだけで、画面動作は変更しない。 */
+window.PERF_LOG = window.PERF_LOG || {
+  enabled: true,
+  now() { return (window.performance && performance.now) ? performance.now() : Date.now(); },
+  ms(start) { return Math.round(this.now() - Number(start || this.now())); },
+  info(label, data={}) {
+    if (!this.enabled) return;
+    const suffix = data && Object.keys(data).length
+      ? ' ' + Object.entries(data).map(([k,v]) => `${k}=${v}`).join(' ')
+      : '';
+    console.info(`[PERF] ${label}${suffix}`);
+  }
+};
+
 function renderCommonPeriodSelector(viewKey, opt={}) {
   const view = document.getElementById('view-' + viewKey);
   if (!view || !window.PERIOD_UI) return;
@@ -5175,15 +5190,25 @@ function removeFieldCloudNotice(view) {
 function renderFieldViewAfterCloud(view, renderFn) {
   const fy = currentFieldFiscalYearForLoad();
   const key = `${CENTER.id}:${fy}`;
+  const tAll = PERF_LOG.now();
   const localMonths = new Set([
     ...(Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData.map(d=>d?.ym) : []),
     ...(Array.isArray(STATE.productAddressData) ? STATE.productAddressData.map(d=>d?.ym) : [])
   ].filter(Boolean));
   const fyMonths = new Set((typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(fy) : []);
-  const hasLocalForFY = [...localMonths].some(ym => fyMonths.has(ym));
+  const localFyMonths = [...localMonths].filter(ym => fyMonths.has(ym));
+  const hasLocalForFY = localFyMonths.length > 0;
+  PERF_LOG.info(`field-view:${view}:start`, { fy, localMonths:localFyMonths.length, done:FIELD_CLOUD_LOAD.done[key] ? 1 : 0 });
+
+  const runRender = (reason='render') => {
+    const t = PERF_LOG.now();
+    renderFn();
+    PERF_LOG.info(`field-view:${view}:${reason}`, { ms:PERF_LOG.ms(t) });
+  };
 
   if (!CLOUD.pullFieldDataForFiscalYear || FIELD_CLOUD_LOAD.done[key]) {
-    renderFn();
+    runRender(FIELD_CLOUD_LOAD.done[key] ? 'render-done' : 'render-no-cloud');
+    PERF_LOG.info(`field-view:${view}:end`, { ms:PERF_LOG.ms(tAll) });
     return;
   }
 
@@ -5191,21 +5216,38 @@ function renderFieldViewAfterCloud(view, renderFn) {
 
   // ローカルに対象年度の現場データがある場合は先に表示し、裏で差分だけ取得する。
   // ローカルが空の場合は、空表示を出さないように読み込み表示を挟む。
-  if (hasLocalForFY) renderFn();
+  if (hasLocalForFY) runRender('render-local-first');
   else renderFieldCloudNotice(view);
 
   if (!FIELD_CLOUD_LOAD.promises[key]) {
+    const tCloud = PERF_LOG.now();
+    PERF_LOG.info(`field-cloud:${fy}:start`, { view });
     FIELD_CLOUD_LOAD.promises[key] = AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullFieldDataForFiscalYear(fy))
       .then(r => {
         FIELD_CLOUD_LOAD.done[key] = true;
+        PERF_LOG.info(`field-cloud:${fy}:done`, {
+          ms:PERF_LOG.ms(tCloud),
+          ok:r?.ok ? 1 : 0,
+          changed:r?.changed ? 1 : 0,
+          workerMonths:r?.workerMonths ?? '-',
+          productMonths:r?.productMonths ?? '-'
+        });
         return r;
       })
-      .catch(e => ({ ok:false, error:e?.message || String(e) }))
+      .catch(e => {
+        PERF_LOG.info(`field-cloud:${fy}:error`, { ms:PERF_LOG.ms(tCloud), error:e?.message || String(e) });
+        return { ok:false, error:e?.message || String(e) };
+      })
       .finally(() => { delete FIELD_CLOUD_LOAD.promises[key]; });
+  } else {
+    PERF_LOG.info(`field-cloud:${fy}:reuse-promise`, { view });
   }
 
   const waitKey = `${view}:${key}`;
-  if (FIELD_CLOUD_LOAD.bound[waitKey]) return;
+  if (FIELD_CLOUD_LOAD.bound[waitKey]) {
+    PERF_LOG.info(`field-view:${view}:wait-skip`, { fy });
+    return;
+  }
   FIELD_CLOUD_LOAD.bound[waitKey] = true;
 
   FIELD_CLOUD_LOAD.promises[key].then(r => {
@@ -5215,12 +5257,13 @@ function renderFieldViewAfterCloud(view, renderFn) {
     if (r && !r.ok) UI.toast('現場分析データの取得に失敗しました: ' + (r.error || '不明'), 'warn');
     const afterSnapshot = fieldCloudSnapshot();
     if (!hasLocalForFY || beforeSnapshot !== afterSnapshot) {
-      renderFn();
+      runRender('render-after-cloud');
     } else {
-      console.log(`[PERF] field-cloud:${fy} no-change skip render`);
+      PERF_LOG.info(`field-cloud:${fy}:no-change-skip-render`, { view });
     }
     UI.updateTopbar(view);
     UI.updateSaveStatus();
+    PERF_LOG.info(`field-view:${view}:end`, { ms:PERF_LOG.ms(tAll) });
   });
 }
 
