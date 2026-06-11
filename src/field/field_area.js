@@ -18,7 +18,9 @@
   let selectedYMState = '';
   let guardTimer = null;
   let observer = null;
-  let renderRecordsCache = null;
+  let renderQueued = false;
+  let lastRenderSignature = '';
+  let lastRenderAt = 0;
 
   function arr(v){ return Array.isArray(v) ? v : []; }
   function obj(v){ return v && typeof v === 'object' && !Array.isArray(v); }
@@ -246,7 +248,6 @@
   }
 
   function rawRecords(){
-    if (Array.isArray(renderRecordsCache)) return renderRecordsCache;
     const out = [];
 
     function pushRecord(x, source){
@@ -291,7 +292,7 @@
 
     const common = document.getElementById('field-common-month-select');
     const commonYM = normYM(common?.value);
-    if (!selectedYMState && commonYM && yms.includes(commonYM)) {
+    if (commonYM && yms.includes(commonYM) && commonYM !== selectedYMState) {
       selectedYMState = commonYM;
       selectedFY = fiscalFromYM(commonYM);
     }
@@ -836,26 +837,44 @@
       </div>`;
   }
 
-  async function render(){
+  async function render(force=false){
     const box = document.getElementById('field-map');
-    if (!box || rendering) return;
+    if (!box) return;
+    if (rendering) {
+      renderQueued = true;
+      return;
+    }
 
     rendering = true;
     ensureStyle();
-    if (window.PERF_LOG) PERF_LOG.start('field-area:render');
 
     try {
-      renderRecordsCache = null;
-      renderRecordsCache = rawRecords();
       const ym = selectedYM();
       const record = selectedRecord(ym);
-      const selector = selectorHtml(ym);
+      const mode = getMode();
+      const sortMode = getSortMode();
+      const metric = getMetric();
+      const signature = JSON.stringify({
+        ym,
+        mode,
+        sortMode,
+        metric,
+        tickets: Array.isArray(record?.tickets) ? record.tickets.length : 0,
+        amount: record?.amount || '',
+        fy: window.STATE?.fiscalYear || '',
+        sel: window.STATE?.selYM || ''
+      });
+      const now = performance.now ? performance.now() : Date.now();
+      if (!force && signature === lastRenderSignature && box.querySelector('.fa-area-v3') && now - lastRenderAt < 700) {
+        return;
+      }
+      lastRenderSignature = signature;
+      lastRenderAt = now;
 
       if (!record) {
         const syncing = !!(window.APP_BOOT_STATE && APP_BOOT_STATE.cloudSyncPending);
         box.innerHTML = `
           <div class="fa-area-v3">
-            ${selector}
             ${syncing ? `
               <div class="fa3-loading">
                 <span class="fa3-spinner"></span>
@@ -870,14 +889,8 @@
       }
 
       // 郵便番号マスタ読込・市区町村集計に時間がかかるため、空白画面を出さず明示的に待機表示する。
-      if (window.UI_LOADING) setTimeout(() => {
-        if (rendering && window.STATE?.view === 'field-area') {
-          UI_LOADING.show(`${ymText(ym)} エリア分析を集計中です`, '郵便番号マスタと商品・住所CSVを照合しています。完了後に自動表示します。', 3);
-        }
-      }, 0);
       box.innerHTML = `
         <div class="fa-area-v3">
-          ${selector}
           <div class="fa3-loading">
             <span class="fa3-spinner"></span>
             <div>
@@ -888,22 +901,14 @@
         </div>`;
       bindControls();
 
-      if (window.PERF_LOG) PERF_LOG.start('field-area:zip-master');
       await ensureZipParts(record);
-      if (window.PERF_LOG) PERF_LOG.end('field-area:zip-master');
 
-      const mode = getMode();
-      const sortMode = getSortMode();
-      const metric = getMetric();
       const level = mode === 'pref' ? 'pref' : 'city';
 
-      if (window.PERF_LOG) PERF_LOG.start('field-area:aggregate');
       let rows = sortRows(buildRows(record, level), sortMode);
-      if (window.PERF_LOG) PERF_LOG.end('field-area:aggregate', `${rows.length} rows / ${arr(record.tickets).length} tickets`);
 
       box.innerHTML = `
         <div class="fa-area-v3">
-          ${selectorHtml(ym)}
           ${cardHtml(ym, rows)}
           ${toolbarHtml(mode, sortMode, metric)}
           ${mode === 'history'
@@ -912,7 +917,6 @@
         </div>`;
 
       bindControls();
-      if (window.UI_LOADING) UI_LOADING.hide(180);
 
       const no = document.getElementById('map-no-data');
       if (no) no.style.display = 'none';
@@ -923,12 +927,13 @@
       }
     } catch(e) {
       console.error(e);
-      if (window.UI_LOADING) UI_LOADING.hide(180);
       box.innerHTML = `<div class="fa3-empty">エリア分析の表示でエラー：${esc(e.message || e)}</div>`;
     } finally {
-      if (window.PERF_LOG) PERF_LOG.end('field-area:render');
-      renderRecordsCache = null;
       rendering = false;
+      if (renderQueued) {
+        renderQueued = false;
+        setTimeout(()=>render(true), 0);
+      }
     }
   }
 
@@ -998,7 +1003,7 @@
       const el = document.getElementById(id);
       if (!el || el.__fa3ExternalBound) return;
       el.__fa3ExternalBound = true;
-      el.addEventListener('change', ()=>setTimeout(render, 120));
+      el.addEventListener('change', ()=>setTimeout(()=>render(true), 80));
     });
   }
 
