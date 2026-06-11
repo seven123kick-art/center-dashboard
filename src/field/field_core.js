@@ -974,9 +974,14 @@ IMPORT.deleteFieldData = function(ym) {
     const fieldYms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : fieldAllYms();
     const years = (window.PERIOD_UI?.fiscalYears ? PERIOD_UI.fiscalYears('field') : [...new Set(fieldYms.map(ym=>fiscalFromYM2(ym)))]).sort((a,b)=>Number(b)-Number(a));
     if (!years.length) years.push(String(getDefaultFiscalYear()));
-    const preferredFY = String(STATE.fiscalYear || fiscalFromYM2(STATE.selYM || fieldYms.at(-1) || `${new Date().getFullYear()}04`));
+
+    // 現場分析は「未登録の未来月」よりも、実際に登録済みの最新月を初期表示にする。
+    // STATE.fiscalYear が 2026 のまま残っていても、現場データが 2026年3月までなら 2025年度を選ぶ。
+    const stateYM = STATE.selYM && fieldYms.includes(STATE.selYM) ? STATE.selYM : '';
+    const latestFieldYM = fieldYms.at(-1) || '';
+    const preferredFY = String(fiscalFromYM2(stateYM || latestFieldYM || `${new Date().getFullYear()}04`));
     const fy = years.includes(preferredFY) ? preferredFY : years[0];
-    const currentYM = STATE.selYM && monthsOfFiscalYear(fy).includes(STATE.selYM) ? STATE.selYM : '';
+    const currentYM = stateYM && monthsOfFiscalYear(fy).includes(stateYM) ? stateYM : '';
     const latestInFY = monthsOfFiscalYear(fy).filter(ym => fieldYms.includes(ym)).at(-1) || '';
     const selectedYM = currentYM || latestInFY || ymFromFiscalMonth(fy, '04');
 

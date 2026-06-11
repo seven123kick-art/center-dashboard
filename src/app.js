@@ -5140,21 +5140,30 @@ function fieldCloudSnapshot(){
   const pack = arr => arr.map(x => `${x?.ym || ''}:${Array.isArray(x?.rows) ? x.rows.length : Array.isArray(x?.tickets) ? x.tickets.length : 0}`).sort().join('|');
   return `${w.length}/${p.length}::${pack(w)}::${pack(p)}`;
 }
-function currentFieldFiscalYearForLoad() {
-  const sel = document.getElementById('field-common-fy-select')?.value;
-  if (sel) return String(sel);
-  if (STATE.fiscalYear) return String(STATE.fiscalYear);
-  const yms = [];
-  if (STATE.selYM) yms.push(STATE.selYM);
-  const ds = selectedDashboardDS?.() || latestRealDS?.() || latestDS?.();
-  if (ds?.ym) yms.push(ds.ym);
-  const fieldYms = [
+function fieldLocalYmsForLoad() {
+  return [
     ...(Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData.map(d=>d?.ym) : []),
     ...(Array.isArray(STATE.productAddressData) ? STATE.productAddressData.map(d=>d?.ym) : [])
   ].filter(Boolean).sort();
-  if (fieldYms.length) yms.push(fieldYms[fieldYms.length - 1]);
-  const ym = yms.find(Boolean);
-  return String(ym ? fiscalYearFromYM(ym) : getDefaultFiscalYear());
+}
+function currentFieldFiscalYearForLoad() {
+  const fieldYms = fieldLocalYmsForLoad();
+  const selectedMonth = document.getElementById('field-common-month-select')?.value || STATE.selYM || '';
+  if (selectedMonth && fieldYms.includes(selectedMonth)) return String(fiscalYearFromYM(selectedMonth));
+
+  const sel = document.getElementById('field-common-fy-select')?.value;
+  if (sel) {
+    const months = new Set((typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(sel) : []);
+    if (fieldYms.some(ym => months.has(ym))) return String(sel);
+  }
+
+  // 対象年度に現場データが無い場合は、空の年度ではなく最新の現場データ年度を優先する。
+  // これにより IndexedDB 復元済みのデータをクラウド待ちせず先表示できる。
+  if (fieldYms.length) return String(fiscalYearFromYM(fieldYms[fieldYms.length - 1]));
+
+  if (STATE.fiscalYear) return String(STATE.fiscalYear);
+  const ds = selectedDashboardDS?.() || latestRealDS?.() || latestDS?.();
+  return String(ds?.ym ? fiscalYearFromYM(ds.ym) : getDefaultFiscalYear());
 }
 function renderFieldCloudNotice(view, text='現場分析データをクラウドから読み込み中...') {
   const viewEl = document.getElementById('view-' + view);
