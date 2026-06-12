@@ -954,21 +954,33 @@ IMPORT.deleteFieldData = function(ym) {
   }
   function setupFieldCommonSelectors(){
     ensureState();
-    const view = document.querySelector('#view-field-worker.view.active, #view-field-content.view.active, #view-field-product.view.active, #view-field-area.view.active, #view-field.view.active')
+
+    // 現場分析の共通フィルタは、現在表示中のビューへ必ず1つだけ配置する。
+    // 以前は active クラス未反映のタイミングで作業者分析ビューへ配置され、
+    // エリア分析ではフィルタが消えたように見えることがあった。
+    const stateView = String(window.STATE?.view || '');
+    const preferredViewId = stateView && stateView.startsWith('field') ? `view-${stateView}` : '';
+    const view = (preferredViewId ? document.getElementById(preferredViewId) : null)
+      || document.querySelector('#view-field-worker.view.active, #view-field-content.view.active, #view-field-product.view.active, #view-field-area.view.active, #view-field.view.active')
       || document.getElementById('view-field-worker')
       || document.getElementById('view-field-content')
       || document.getElementById('view-field-product')
       || document.getElementById('view-field-area')
       || document.getElementById('view-field');
     if (!view) return;
+
     let box = document.getElementById('field-common-selector-box');
     if (!box) {
       box = document.createElement('div');
       box.id = 'field-common-selector-box';
       box.style.cssText = 'margin-bottom:14px';
-      view.insertBefore(box, view.firstChild);
-    } else if (box.parentElement !== view) {
-      view.insertBefore(box, view.firstChild);
+    }
+
+    // エリア分析では配送エリアカードの直前に固定する。
+    // firstChild へ入れるだけだと、DOM再構成や旧描画処理の影響で意図しない位置へ移動しやすい。
+    const anchor = view.id === 'view-field-area' ? document.getElementById('fpane-map') : view.firstChild;
+    if (box.parentElement !== view || box.nextSibling !== anchor) {
+      view.insertBefore(box, anchor || view.firstChild);
     }
 
     const fieldYms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : fieldAllYms();
