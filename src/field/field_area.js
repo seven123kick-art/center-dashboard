@@ -16,9 +16,8 @@
   let rendering = false;
   let selectedFY = '';
   let selectedYMState = '';
-  let guardTimer = null;
-  let observer = null;
   let renderQueued = false;
+  let scheduledRender = false;
   let lastRenderSignature = '';
   let lastRenderAt = 0;
 
@@ -97,6 +96,18 @@
     const view = document.getElementById('view-field-area');
     if (!view) return false;
     return view.classList.contains('active') || (window.STATE && STATE.view === 'field-area');
+  }
+
+  function requestRender(force=false, delay=0){
+    if (scheduledRender) return;
+    scheduledRender = true;
+    const run = ()=>{
+      scheduledRender = false;
+      if (active()) render(force);
+    };
+    if (delay > 0) setTimeout(run, delay);
+    else if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else setTimeout(run, 0);
   }
 
   function rawAt(row, idx){
@@ -838,6 +849,7 @@
   }
 
   async function render(force=false){
+    if (!active()) return;
     const box = document.getElementById('field-map');
     if (!box) return;
     if (rendering) {
@@ -938,7 +950,7 @@
       rendering = false;
       if (renderQueued) {
         renderQueued = false;
-        setTimeout(()=>render(true), 0);
+        requestRender(true);
       }
     }
   }
@@ -958,7 +970,7 @@
         if (commonFy) commonFy.value = selectedFY;
         const commonYm = document.getElementById('field-common-month-select');
         if (commonYm && selectedYMState) commonYm.value = selectedYMState;
-        setTimeout(render, 0);
+        requestRender(false);
       });
     }
 
@@ -972,7 +984,7 @@
         const commonYm = document.getElementById('field-common-month-select');
         if (commonYm) commonYm.value = selectedYMState;
         if (window.STATE) { STATE.selYM = selectedYMState; STATE.fiscalYear = selectedFY; }
-        setTimeout(render, 0);
+        requestRender(false);
       });
     }
 
@@ -981,7 +993,7 @@
       btn.__fa3Bound = true;
       btn.addEventListener('click', ()=>{
         setMode(btn.dataset.fa3Mode);
-        setTimeout(render, 0);
+        requestRender(false);
       });
     });
 
@@ -990,7 +1002,7 @@
       sort.__fa3Bound = true;
       sort.addEventListener('change', ()=>{
         setSortMode(sort.value);
-        setTimeout(render, 0);
+        requestRender(false);
       });
     }
 
@@ -999,7 +1011,7 @@
       metric.__fa3Bound = true;
       metric.addEventListener('change', ()=>{
         setMetric(metric.value);
-        setTimeout(render, 0);
+        requestRender(false);
       });
     }
   }
@@ -1009,7 +1021,7 @@
       const el = document.getElementById(id);
       if (!el || el.__fa3ExternalBound) return;
       el.__fa3ExternalBound = true;
-      el.addEventListener('change', ()=>setTimeout(()=>render(true), 80));
+      el.addEventListener('change', ()=>requestRender(true, 80));
     });
   }
 
@@ -1036,29 +1048,21 @@
     bindExternalControls();
   }
 
-  function ensureObserver(){
-    const box = document.getElementById('field-map');
-    if (!box || observer) return;
+  function bindAreaLifecycleEvents(){
+    if (bindAreaLifecycleEvents.done) return;
+    bindAreaLifecycleEvents.done = true;
 
-    observer = new MutationObserver(()=>{
-      if (!active() || rendering) return;
-      if (!box.querySelector('.fa-area-v3') && box.textContent.trim()) {
-        setTimeout(render, 80);
-      }
-    });
-    observer.observe(box, { childList:true, subtree:false });
+    // 監視ループではなく、実際に画面・データが変わった時だけ再描画する。
+    // これにより350msごとの再描画監視による多重renderを防ぐ。
+    window.addEventListener('hashchange', ()=>requestRender(true, 40));
+    window.addEventListener('focus', ()=>requestRender(false, 120));
+
+    document.addEventListener('click', (ev)=>{
+      const tab = ev.target && ev.target.closest ? ev.target.closest('[data-view], [data-tab], .nav-item, .sidebar-link') : null;
+      if (tab) requestRender(true, 80);
+    }, true);
   }
 
-  function startGuard(){
-    if (guardTimer) return;
-    guardTimer = setInterval(()=>{
-      if (!active()) return;
-      install();
-      ensureObserver();
-      const box = document.getElementById('field-map');
-      if (box && !box.querySelector('.fa-area-v3')) render();
-    }, 350);
-  }
 
   function ensureStyle(){
     if (document.getElementById('field-area-v3-style')) return;
@@ -1246,19 +1250,19 @@
   }
 
   install();
-  startGuard();
+  bindAreaLifecycleEvents();
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', ()=>{
       install();
-      ensureObserver();
-      if (active()) render();
+      bindExternalControls();
+      requestRender(false);
     });
   } else {
     setTimeout(()=>{
       install();
-      ensureObserver();
-      if (active()) render();
+      bindExternalControls();
+      requestRender(false);
     }, 0);
   }
 })();
