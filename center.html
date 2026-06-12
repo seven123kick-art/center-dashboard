@@ -146,6 +146,9 @@
   <div class="nav-item" data-view="pl" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="14" height="2" rx="1"/><rect x="1" y="5" width="14" height="2" rx="1"/><rect x="1" y="9" width="14" height="2" rx="1"/><rect x="1" y="13" width="8" height="2" rx="1"/></svg>月次収支表
   </div>
+  <div class="nav-item" data-view="profit-structure" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13h12"/><path d="M4 11V7"/><path d="M8 11V4"/><path d="M12 11V2"/><path d="M3 5l4 2 5-4"/></svg>利益構造分析
+  </div>
   <div class="nav-item" data-view="trend" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="1,12 5,7 9,9 15,3"/></svg>売上推移
   </div>
@@ -313,6 +316,12 @@
           </table>
         </div>
       </div>
+    </div>
+
+
+    <!-- ▼ 利益構造分析 -->
+    <div class="view" id="view-profit-structure">
+      <div id="profit-structure-root"></div>
     </div>
 
     <!-- ▼ 売上推移 -->
@@ -1267,6 +1276,7 @@
 <script src="src/modules/shipper.js" id="module-shipper" defer></script>
 <script src="src/modules/kamoku.js" id="module-kamoku" defer></script>
 <script src="src/modules/pl.js" defer></script>
+<script src="src/modules/profit_structure.js" defer></script>
 <script src="src/modules/trend.js" defer></script>
 
 <script src="src/field/field_core.js" defer></script>

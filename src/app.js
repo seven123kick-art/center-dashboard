@@ -343,7 +343,7 @@ const CONFIG = {
 
   COLORS: ['#1a4d7c','#e05b4d','#1a7a52','#b45309','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#d97706'],
   VIEW_TITLES: {
-    dashboard:'ダッシュボード', pl:'月次収支表', trend:'売上推移',
+    dashboard:'ダッシュボード', pl:'月次収支表', 'profit-structure':'利益構造分析', trend:'売上推移',
     shipper:'荷主分析', indicators:'経営指標', annual:'年次サマリー',
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
@@ -5468,6 +5468,7 @@ const NAV = {
     switch(view) {
       case 'dashboard':  renderDashboard();   break;
       case 'pl':         renderPL();           break;
+      case 'profit-structure': if (window.PROFIT_STRUCTURE_UI?.render) PROFIT_STRUCTURE_UI.render(); break;
       case 'trend':      renderTrend();        break;
       case 'shipper':    renderShipper();      break;
       case 'indicators': renderIndicators();   break;
