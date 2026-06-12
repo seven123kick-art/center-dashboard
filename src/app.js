@@ -47,6 +47,16 @@
 ════════════════════════════════════════════════════════════════ */
 'use strict';
 
+/* 開発用PERFログ制御：通常は非表示。URLに ?debug=1 / ?perf=1、または localStorage.mgmt_debug=1 で表示 */
+window.__mgmtPerfLog = window.__mgmtPerfLog || function(){
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const enabled = params.get('debug') === '1' || params.get('perf') === '1' || localStorage.getItem('mgmt_debug') === '1' || localStorage.getItem('mgmt_perf') === '1';
+    if (enabled) console.log.apply(console, arguments);
+  } catch(e) {}
+};
+
+
 
 /* ════════ ASSET LOADER（重い外部ライブラリは必要時だけ読む） ════════ */
 const ASSETS = {
@@ -5194,7 +5204,7 @@ function renderFieldViewAfterCloud(view, renderFn) {
 
   if (!CLOUD.pullFieldDataForFiscalYear || FIELD_CLOUD_LOAD.done[key]) {
     renderFn();
-    console.log(`[PERF] field-view:${view}:render-local-done ms=${Math.round(performance.now()-viewStart)} fy=${fy} localMonths=${localMonths.size}`);
+    window.__mgmtPerfLog(`[PERF] field-view:${view}:render-local-done ms=${Math.round(performance.now()-viewStart)} fy=${fy} localMonths=${localMonths.size}`);
     return;
   }
 
@@ -5204,7 +5214,7 @@ function renderFieldViewAfterCloud(view, renderFn) {
   // ローカルが空の場合は、空表示を出さないように読み込み表示を挟む。
   if (hasLocalForFY) {
     renderFn();
-    console.log(`[PERF] field-view:${view}:render-from-idb ms=${Math.round(performance.now()-viewStart)} fy=${fy} localMonths=${localMonths.size}`);
+    window.__mgmtPerfLog(`[PERF] field-view:${view}:render-from-idb ms=${Math.round(performance.now()-viewStart)} fy=${fy} localMonths=${localMonths.size}`);
   } else {
     renderFieldCloudNotice(view);
   }
@@ -5232,11 +5242,11 @@ function renderFieldViewAfterCloud(view, renderFn) {
     if (!hasLocalForFY || beforeSnapshot !== afterSnapshot) {
       const renderStart = performance.now();
       renderFn();
-      console.log(`[PERF] field-view:${view}:render-after-cloud ms=${Math.round(performance.now()-renderStart)} fy=${fy} localMonths=${localMonths.size}`);
+      window.__mgmtPerfLog(`[PERF] field-view:${view}:render-after-cloud ms=${Math.round(performance.now()-renderStart)} fy=${fy} localMonths=${localMonths.size}`);
     } else {
-      console.log(`[PERF] field-cloud:${fy} no-change skip render`);
+      window.__mgmtPerfLog(`[PERF] field-cloud:${fy} no-change skip render`);
     }
-    console.log(`[PERF] field-view:${view}:end ms=${Math.round(performance.now()-viewStart)} fy=${fy} localBefore=${hasLocalForFY ? 1 : 0}`);
+    window.__mgmtPerfLog(`[PERF] field-view:${view}:end ms=${Math.round(performance.now()-viewStart)} fy=${fy} localBefore=${hasLocalForFY ? 1 : 0}`);
     UI.updateTopbar(view);
     UI.updateSaveStatus();
   });
@@ -5393,7 +5403,7 @@ const IDB_CACHE = window.IDB_CACHE = {
       if (products.length) STATE.productAddressData = products.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
 
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-      console.log(`[PERF] idb-hydrate ms=${Math.round(performance.now()-t0)} datasets=${datasets} workers=${workerCount} products=${productCount}`);
+      window.__mgmtPerfLog(`[PERF] idb-hydrate ms=${Math.round(performance.now()-t0)} datasets=${datasets} workers=${workerCount} products=${productCount}`);
       return { ok:true, datasets, workers:workerCount, products:productCount };
     } catch(e) {
       console.warn('[IDB_CACHE] hydrate failed', e?.message || e);

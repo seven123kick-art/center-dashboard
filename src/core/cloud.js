@@ -1,9 +1,21 @@
+/* 開発用PERFログ制御：通常は非表示。URLに ?debug=1 / ?perf=1、または localStorage.mgmt_debug=1 で表示 */
+window.__mgmtPerfLog = window.__mgmtPerfLog || function(){
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const enabled = params.get('debug') === '1' || params.get('perf') === '1' || localStorage.getItem('mgmt_debug') === '1' || localStorage.getItem('mgmt_perf') === '1';
+    if (enabled) console.log.apply(console, arguments);
+  } catch(e) {}
+};
+
 /* ════════ §9 CLOUD（Supabase — 取込時のみ自動実行） ═══════════ */
 var CLOUD = window.CLOUD = {
   _sb: null,
   _clientPromise: null,
   _LSKEY: 'mgmt5_cloud_cfg',
   _busy: false,
+  _fieldPullPromises: null,
+  _fieldPullDone: null,
+  _manifestFastCache: null,
 
   _cfg() {
     const def = { url: CONFIG.SUPABASE_URL, key: CONFIG.SUPABASE_KEY, bucket: CONFIG.SUPABASE_BUCKET };
@@ -312,23 +324,43 @@ var CLOUD = window.CLOUD = {
   async _loadManifestFastOrBuildFromDb(options = {}) {
     // 速度優先の台帳読込。
     // 通常は manifest.json だけを読む。manifest が無い／壊れている場合だけDB行一覧から再構成する。
-    // 現場分析の裏同期では毎回prefix一覧を全走査すると数秒かかるため、この軽量経路を使う。
+    // 同一画面内で複数ビューが連続して現場データを要求しても、manifest読込は短時間だけ共有する。
     const allowRebuild = options.rebuild !== false;
-    try {
-      const manifest = await this._downloadJSON(this._manifestKey());
-      if (manifest && typeof manifest === 'object') {
-        const hasAnyMeta =
-          (Array.isArray(manifest.datasets) && manifest.datasets.length) ||
-          (Array.isArray(manifest.workerCsvData) && manifest.workerCsvData.length) ||
-          (Array.isArray(manifest.productAddressData) && manifest.productAddressData.length) ||
-          manifest.hasPlanData || manifest.hasCapacity || manifest.hasMemos || manifest.hasLibrary;
-        if (hasAnyMeta) return manifest;
-      }
-    } catch(e) {
-      console.warn('[CLOUD] manifest fast read skipped:', e?.message || e);
+    const now = Date.now();
+    const cacheKey = `${CENTER.id}:${this._manifestKey()}`;
+    const cached = this._manifestFastCache;
+    if (cached && cached.key === cacheKey && cached.expiresAt > now) {
+      if (cached.promise) return cached.promise;
+      if (cached.value) return cached.value;
     }
-    if (!allowRebuild) return null;
-    return await this._loadManifestOrBuildFromDb();
+
+    const promise = (async () => {
+      try {
+        const manifest = await this._downloadJSON(this._manifestKey());
+        if (manifest && typeof manifest === 'object') {
+          const hasAnyMeta =
+            (Array.isArray(manifest.datasets) && manifest.datasets.length) ||
+            (Array.isArray(manifest.workerCsvData) && manifest.workerCsvData.length) ||
+            (Array.isArray(manifest.productAddressData) && manifest.productAddressData.length) ||
+            manifest.hasPlanData || manifest.hasCapacity || manifest.hasMemos || manifest.hasLibrary;
+          if (hasAnyMeta) return manifest;
+        }
+      } catch(e) {
+        console.warn('[CLOUD] manifest fast read skipped:', e?.message || e);
+      }
+      if (!allowRebuild) return null;
+      return await this._loadManifestOrBuildFromDb();
+    })();
+
+    this._manifestFastCache = { key: cacheKey, promise, value: null, expiresAt: now + 15000 };
+    try {
+      const value = await promise;
+      this._manifestFastCache = { key: cacheKey, promise: null, value, expiresAt: Date.now() + 15000 };
+      return value;
+    } catch(e) {
+      this._manifestFastCache = null;
+      throw e;
+    }
   },
 
   async _loadManifestOrBuildFromDb() {
@@ -537,6 +569,7 @@ var CLOUD = window.CLOUD = {
     // key は従来のStorageパスをそのまま state_key 化するため、既存呼び出し側は変更しない。
     value = sanitizedCloneForExport(value);
     const stateKey = this._dbStateKey(key);
+    if (key === this._manifestKey()) this._manifestFastCache = null;
     const json = JSON.stringify(value);
     const hash = this._hashStr(json);
 
@@ -834,12 +867,25 @@ var CLOUD = window.CLOUD = {
     UI.updateCloudBadge('ok');
     return { ok:true, changed };
   },
-  async pullFieldDataForFiscalYear(fy) {
+  async pullFieldDataForFiscalYear(fy, options = {}) {
     const perfStart = performance.now();
     // 現場分析用の遅延読込。
     // 起動時には作業者CSV・商品住所CSVを読まず、現場分析画面を開いた時だけ対象年度分を取得する。
-    try {
-      const fiscalYear = String(fy || STATE.fiscalYear || getDefaultFiscalYear());
+    const fiscalYear = String(fy || STATE.fiscalYear || getDefaultFiscalYear());
+    const loadKey = `${CENTER.id}:${fiscalYear}`;
+    this._fieldPullPromises = this._fieldPullPromises || {};
+    this._fieldPullDone = this._fieldPullDone || {};
+    if (!options.force && this._fieldPullDone[loadKey]) {
+      window.__mgmtPerfLog(`[PERF] field-cloud:${fiscalYear}:skip already-loaded ms=${Math.round(performance.now()-perfStart)}`);
+      return { ok:true, changed:0, skipped:true, source:'field_lazy_cache', fiscalYear };
+    }
+    if (!options.force && this._fieldPullPromises[loadKey]) {
+      window.__mgmtPerfLog(`[PERF] field-cloud:${fiscalYear}:join in-flight`);
+      return this._fieldPullPromises[loadKey];
+    }
+
+    const run = (async () => {
+      try {
       const months = (typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(fiscalYear) : [];
       const monthSet = new Set(months);
       const manifest = await this._loadManifestFastOrBuildFromDb();
@@ -893,12 +939,21 @@ var CLOUD = window.CLOUD = {
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
       if (changed) STORE.save();
       UI.updateCloudBadge('ok');
-      console.log(`[PERF] field-cloud:${fiscalYear}:done ms=${Math.round(performance.now()-perfStart)} workerMonths=${workerMetas.length} productMonths=${productMetas.length} workerDownloaded=${workerDownloaded} productDownloaded=${productDownloaded} changed=${changed}`);
+      window.__mgmtPerfLog(`[PERF] field-cloud:${fiscalYear}:done ms=${Math.round(performance.now()-perfStart)} workerMonths=${workerMetas.length} productMonths=${productMetas.length} workerDownloaded=${workerDownloaded} productDownloaded=${productDownloaded} changed=${changed}`);
+      this._fieldPullDone[loadKey] = true;
       return { ok:true, changed, source:'field_lazy', fiscalYear, workerMonths:workerMetas.length, productMonths:productMetas.length, workerDownloaded, productDownloaded };
     } catch(e) {
       UI.updateCloudBadge('error');
-      console.log(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
+      window.__mgmtPerfLog(`[PERF] field-cloud:${fiscalYear}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
       return { ok:false, error:e.message };
+    }
+    })();
+
+    this._fieldPullPromises[loadKey] = run;
+    try {
+      return await run;
+    } finally {
+      delete this._fieldPullPromises[loadKey];
     }
   },
   _extractLegacyBundle(shared) {
@@ -1095,7 +1150,7 @@ var CLOUD = window.CLOUD = {
       return { ok:true, changed:!!changed, source:'boot_fiscal_year_skdl_only' };
     } catch(e) {
       UI.updateCloudBadge('error');
-      console.log(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
+      window.__mgmtPerfLog(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
       return { ok:false, error:e.message };
     }
   },
@@ -1173,7 +1228,7 @@ var CLOUD = window.CLOUD = {
       return await run();
     } catch(e) {
       UI.updateCloudBadge('error');
-      console.log(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
+      window.__mgmtPerfLog(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
       return { ok:false, error:e.message };
     } finally {
       this._busy = false;
@@ -1196,7 +1251,7 @@ var CLOUD = window.CLOUD = {
       return { ok:true };
     } catch(e) {
       UI.updateCloudBadge('error');
-      console.log(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
+      window.__mgmtPerfLog(`[PERF] field-cloud:${fy || STATE.fiscalYear || ''}:error ms=${Math.round(performance.now()-perfStart)} error=${e?.message || e}`);
       return { ok:false, error:e.message };
     }
   },
