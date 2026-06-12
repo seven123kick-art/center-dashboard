@@ -274,6 +274,28 @@ var CLOUD = window.CLOUD = {
     manifest.productAddressData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
     return manifest;
   },
+  async _loadManifestFastOrBuildFromDb(options = {}) {
+    // 速度優先の台帳読込。
+    // 通常は manifest.json だけを読む。manifest が無い／壊れている場合だけDB行一覧から再構成する。
+    // 現場分析の裏同期では毎回prefix一覧を全走査すると数秒かかるため、この軽量経路を使う。
+    const allowRebuild = options.rebuild !== false;
+    try {
+      const manifest = await this._downloadJSON(this._manifestKey());
+      if (manifest && typeof manifest === 'object') {
+        const hasAnyMeta =
+          (Array.isArray(manifest.datasets) && manifest.datasets.length) ||
+          (Array.isArray(manifest.workerCsvData) && manifest.workerCsvData.length) ||
+          (Array.isArray(manifest.productAddressData) && manifest.productAddressData.length) ||
+          manifest.hasPlanData || manifest.hasCapacity || manifest.hasMemos || manifest.hasLibrary;
+        if (hasAnyMeta) return manifest;
+      }
+    } catch(e) {
+      console.warn('[CLOUD] manifest fast read skipped:', e?.message || e);
+    }
+    if (!allowRebuild) return null;
+    return await this._loadManifestOrBuildFromDb();
+  },
+
   async _loadManifestOrBuildFromDb() {
     // manifestは補助台帳。ここが500/破損/重複で読めなくても、
     // center_realtime_state の月別キーから台帳を再構成して起動を継続する。
@@ -785,7 +807,7 @@ var CLOUD = window.CLOUD = {
       const fiscalYear = String(fy || STATE.fiscalYear || getDefaultFiscalYear());
       const months = (typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(fiscalYear) : [];
       const monthSet = new Set(months);
-      const manifest = await this._loadManifestOrBuildFromDb();
+      const manifest = await this._loadManifestFastOrBuildFromDb();
       if (!manifest) return { ok:false, error:'manifestなし' };
       // manifest.deleted は古い削除フラグ汚染の原因になるためマージしない。
 
