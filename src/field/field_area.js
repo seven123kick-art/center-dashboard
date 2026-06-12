@@ -848,6 +848,12 @@
     rendering = true;
     ensureStyle();
 
+    // 表示対象（対象年度・対象月）は field_core.js の共通フィルタを正とする。
+    // エリア分析側では画面内に重複フィルタを作らず、ここで共通フィルタだけを必ず復旧する。
+    if (typeof window.setupFieldCommonSelectors === 'function') {
+      try { window.setupFieldCommonSelectors(); } catch(e) { console.warn('[field_area] setupFieldCommonSelectors failed', e); }
+    }
+
     try {
       const ym = selectedYM();
       const record = selectedRecord(ym);
