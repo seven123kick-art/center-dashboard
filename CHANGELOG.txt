@@ -2,17 +2,24 @@
 
 [修正]
 src/core/cloud.js
-- Supabase createClient() の並行実行を抑制しました。
-- 同一URL/keyのSupabase Clientをページ内グローバルキャッシュで1個に集約しました。
-- GoTrueClient multiple instances 警告の発生原因になりやすい多重生成を防止しました。
-- detectSessionInUrl=false と storageKey を明示し、認証クライアント設定を安定化しました。
+- 現場分析データのクラウド遅延読込に年度単位の二重実行ガードを追加。
+- 同一センター・同一年度の読込が並行発生した場合は、後続処理が既存Promiseへ合流するように変更。
+- 同一セッション内で読込済みの年度は再取得せず、不要なクラウド同期を抑制。
+- manifest.json の短時間キャッシュを追加し、画面切替直後の重複manifest読込を抑制。
+- manifest.json 保存時は短時間キャッシュを破棄し、保存後の古い台帳参照を防止。
 
-[変更していないこと]
-- IndexedDB処理は変更していません。
-- エリア分析、集計、描画、フィルタ、売上計算は変更していません。
-- Supabaseの取得・保存ロジック本体は変更していません。
+[触っていない箇所]
+- 集計ロジック
+- 画面描画ロジック
+- フィルタUI
+- IndexedDB保存・復元処理
+- Supabase接続設定
 
-[確認事項]
-- エリア分析を開き、Consoleで「Multiple GoTrueClient instances detected」が出ない、または減っていること。
-- エリア分析・商品カテゴリ分析・作業者分析でデータ表示に影響がないこと。
-- Supabase同期が正常に完了すること。
+[確認]
+- node --check src/core/cloud.js 実施済み。
+
+[GitHub投入後の確認]
+1. エリア分析を開く。
+2. Consoleで field-cloud のログが1回程度で止まることを確認。
+3. 作業者分析・商品カテゴリ分析へ移動しても、同一年度で不要な再同期が走り続けないことを確認。
+4. 対象年度を変更した場合は、その年度分だけ cloud 同期が走ることを確認。
