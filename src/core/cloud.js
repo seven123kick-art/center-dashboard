@@ -1,6 +1,7 @@
 /* ════════ §9 CLOUD（Supabase — 取込時のみ自動実行） ═══════════ */
 var CLOUD = window.CLOUD = {
   _sb: null,
+  _clientPromise: null,
   _LSKEY: 'mgmt5_cloud_cfg',
   _busy: false,
 
@@ -20,17 +21,51 @@ var CLOUD = window.CLOUD = {
     } catch(e) {}
     return def;
   },
-  _saveCfg(url, key, bucket) { try { localStorage.setItem(this._LSKEY, JSON.stringify({ url, key, bucket })); } catch(e) {} this._sb = null; },
+  _saveCfg(url, key, bucket) {
+    try { localStorage.setItem(this._LSKEY, JSON.stringify({ url, key, bucket })); } catch(e) {}
+    this._sb = null;
+    this._clientPromise = null;
+  },
   async _client() {
     if (this._sb) return this._sb;
-    try {
-      await ASSETS.supabase();
-      if (!window.supabase) return null;
-      const cfg = this._cfg();
-      if (!cfg.url || !cfg.key) return null;
-      this._sb = window.supabase.createClient(cfg.url, cfg.key);
-      return this._sb;
-    } catch(e) { return null; }
+    if (this._clientPromise) return this._clientPromise;
+
+    this._clientPromise = (async () => {
+      try {
+        await ASSETS.supabase();
+        if (!window.supabase) return null;
+
+        const cfg = this._cfg();
+        if (!cfg.url || !cfg.key) return null;
+
+        // createClient() の並行実行を避ける。
+        // 同一ブラウザ内で同じSupabase URL/keyに対して複数Clientを生成すると
+        // GoTrueClient warning が出るため、ページ内グローバルで1個に集約する。
+        const cacheKey = `${cfg.url}|${cfg.key}`;
+        const cache = window.__MGMT_SUPABASE_CLIENT_CACHE__ = window.__MGMT_SUPABASE_CLIENT_CACHE__ || {};
+        if (cache[cacheKey]) {
+          this._sb = cache[cacheKey];
+          return this._sb;
+        }
+
+        this._sb = window.supabase.createClient(cfg.url, cfg.key, {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: false,
+            storageKey: 'mgmt5_supabase_auth'
+          }
+        });
+        cache[cacheKey] = this._sb;
+        return this._sb;
+      } catch(e) {
+        return null;
+      } finally {
+        this._clientPromise = null;
+      }
+    })();
+
+    return this._clientPromise;
   },
   _bucket() { return this._cfg().bucket || CONFIG.SUPABASE_BUCKET; },
   _clientId() {

@@ -1,22 +1,18 @@
 2026-06-12
 
-[修正対象]
+[修正]
 src/core/cloud.js
+- Supabase createClient() の並行実行を抑制しました。
+- 同一URL/keyのSupabase Clientをページ内グローバルキャッシュで1個に集約しました。
+- GoTrueClient multiple instances 警告の発生原因になりやすい多重生成を防止しました。
+- detectSessionInUrl=false と storageKey を明示し、認証クライアント設定を安定化しました。
 
-[修正内容]
-- 現場分析のクラウド同期時に、毎回DBのprefix一覧を全走査しない軽量manifest読込を追加。
-- 通常は manifest.json だけで対象月の台帳を判断し、manifestが無い／壊れている場合だけ従来のDB再構成処理へフォールバック。
-- エリア分析の初期表示後に発生していた field-cloud の裏同期時間短縮を狙う修正。
-
-[触っていない箇所]
-- エリア分析の描画処理
-- フィルタ表示処理
-- IndexedDB処理
-- 集計・売上・件数計算
-- Supabase保存処理
+[変更していないこと]
+- IndexedDB処理は変更していません。
+- エリア分析、集計、描画、フィルタ、売上計算は変更していません。
+- Supabaseの取得・保存ロジック本体は変更していません。
 
 [確認事項]
-1. エリア分析を開いて、表示が崩れないこと。
-2. Consoleで [PERF] field-cloud:YYYY:done ms= の時間が短くなるか確認。
-3. changed=0 の場合、no-change skip render が出て再描画されないこと。
-4. 月変更で表示内容が切り替わること。
+- エリア分析を開き、Consoleで「Multiple GoTrueClient instances detected」が出ない、または減っていること。
+- エリア分析・商品カテゴリ分析・作業者分析でデータ表示に影響がないこと。
+- Supabase同期が正常に完了すること。
