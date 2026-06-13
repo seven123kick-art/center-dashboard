@@ -259,6 +259,7 @@ var CLOUD = window.CLOUD = {
       hasCapacity: false,
       hasMemos: false,
       hasLibrary: false,
+      hasDailyRecords: false,
       deleted: STATE.deleted || {}
     };
     const dsSeen = new Set();
@@ -494,6 +495,7 @@ var CLOUD = window.CLOUD = {
       hasPlanData: !!(STATE.planData && Object.keys(STATE.planData).length),
       planDataUpdatedAt: latestPlanUpdatedAt(),
       hasMemos: !!(STATE.memos && Object.keys(STATE.memos).length),
+      hasDailyRecords: !!(STATE.dailyRecords && STATE.dailyRecords.length),
       hasLibrary: !!(STATE.library && STATE.library.length),
       hasReportKnowledge: !!(STATE.reportKnowledge && ((STATE.reportKnowledge.references||[]).length || Object.keys(STATE.reportKnowledge.policies||{}).length)),
       deleted: STATE.deleted || {},
@@ -511,6 +513,7 @@ var CLOUD = window.CLOUD = {
       fiscalYear: STATE.fiscalYear || null,
       capacity: STATE.capacity || null,
       planData: STATE.planData || {},
+      dailyRecords: STATE.dailyRecords || [],
       memos: STATE.memos || {},
       library: STATE.library || [],
       reportKnowledge: STATE.reportKnowledge || { policies:{}, references:[] },
@@ -527,6 +530,7 @@ var CLOUD = window.CLOUD = {
     if ('capacity' in full) STATE.capacity = full.capacity || null;
     if (full.planData) STATE.planData = normalizePlanData(full.planData);
     if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
+    if (Array.isArray(full.dailyRecords)) STATE.dailyRecords = full.dailyRecords;
     if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
     if (Array.isArray(full.library)) STATE.library = full.library;
     if (full.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(full.reportKnowledge);
@@ -1140,6 +1144,14 @@ var CLOUD = window.CLOUD = {
       if (manifest.hasCapacity && !STATE.capacity) {
         const cap = await this._downloadJSON(this._capacityKey());
         if (cap) { STATE.capacity = cap; changed++; }
+      }
+
+      if (manifest.hasDailyRecords) {
+        const full = await this._downloadJSON(this._fullStateKey());
+        if (full && Array.isArray(full.dailyRecords)) {
+          STATE.dailyRecords = full.dailyRecords;
+          changed++;
+        }
       }
 
       applyDeletionTombstonesToState(STATE);

@@ -343,7 +343,7 @@ const CONFIG = {
 
   COLORS: ['#1a4d7c','#e05b4d','#1a7a52','#b45309','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#d97706'],
   VIEW_TITLES: {
-    dashboard:'ダッシュボード', pl:'月次収支表', 'profit-structure':'利益構造分析', trend:'売上推移',
+    dashboard:'ダッシュボード', pl:'月次収支表', 'profit-structure':'利益構造分析', 'landing-forecast':'着地予測', trend:'売上推移',
     shipper:'荷主分析', indicators:'経営指標', annual:'年次サマリー',
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
@@ -365,6 +365,7 @@ const STATE = {
   datasets:  [],    // [{ym,type,rows,totalIncome,totalExpense,profit,...}]
   workerCsvData: [], // 現場明細CSV（作業者CSV）月単位データ
   productAddressData: [], // 現場明細CSV（商品住所CSV）月単位データ
+  dailyRecords: [], // 日別実績CSV（着地予測用） [{date,ym,revenue,labor,yosha,other,profit}]
   fieldData: [],    // [{ym,areas:{name:{count,shippers:{}}}}]
   areaData:  [],    // 旧データ互換用（現在は旧帳票関連では使用しない）
   capacity:  null,  // {areas:{name:{max}},updatedAt}
@@ -4522,6 +4523,8 @@ function renderImport() {
     listEl.innerHTML = storageHtml + auditHtml + monthlyHtml + qualityHtml + historyHtml;
   }
 
+  if (window.LANDING_FORECAST_UI?.renderImportPanel) LANDING_FORECAST_UI.renderImportPanel();
+
   const storageEl = document.getElementById('storage-info');
   if (storageEl) {
     const info = STORE.storageInfo();
@@ -5469,6 +5472,7 @@ const NAV = {
       case 'dashboard':  renderDashboard();   break;
       case 'pl':         renderPL();           break;
       case 'profit-structure': if (window.PROFIT_STRUCTURE_UI?.render) PROFIT_STRUCTURE_UI.render(); break;
+      case 'landing-forecast': if (window.LANDING_FORECAST_UI?.render) LANDING_FORECAST_UI.render(); break;
       case 'trend':      renderTrend();        break;
       case 'shipper':    renderShipper();      break;
       case 'indicators': renderIndicators();   break;

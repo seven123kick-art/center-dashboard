@@ -149,6 +149,9 @@
   <div class="nav-item" data-view="profit-structure" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13h12"/><path d="M4 11V7"/><path d="M8 11V4"/><path d="M12 11V2"/><path d="M3 5l4 2 5-4"/></svg>利益構造分析
   </div>
+  <div class="nav-item" data-view="landing-forecast" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13h12"/><path d="M3 10l3-3 3 2 4-5"/><circle cx="6" cy="7" r="1"/><circle cx="9" cy="9" r="1"/><circle cx="13" cy="4" r="1"/></svg>着地予測
+  </div>
   <div class="nav-item" data-view="trend" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="1,12 5,7 9,9 15,3"/></svg>売上推移
   </div>
@@ -318,10 +321,14 @@
       </div>
     </div>
 
-
     <!-- ▼ 利益構造分析 -->
     <div class="view" id="view-profit-structure">
       <div id="profit-structure-root"></div>
+    </div>
+
+    <!-- ▼ 着地予測 -->
+    <div class="view" id="view-landing-forecast">
+      <div id="landing-forecast-root"></div>
     </div>
 
     <!-- ▼ 売上推移 -->
@@ -997,6 +1004,8 @@
         <div class="card-header"><span class="card-title">読み込み済みデータ</span></div>
         <div id="data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
       </div>
+
+      <div id="daily-forecast-import-root"></div>
       <!-- 計画データ取込 -->
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
@@ -1278,6 +1287,7 @@
 <script src="src/modules/pl.js" defer></script>
 <script src="src/modules/profit_structure.js" defer></script>
 <script src="src/modules/trend.js" defer></script>
+<script src="src/modules/landing_forecast.js" defer></script>
 
 <script src="src/field/field_core.js" defer></script>
 <script src="src/field/field_worker.js" defer></script>

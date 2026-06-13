@@ -97,6 +97,7 @@ var STORE = window.STORE = {
     STATE.datasets = [];
     STATE.workerCsvData = [];
     STATE.productAddressData = [];
+    STATE.dailyRecords = this._g('dailyRecords') || [];
     STATE.fieldData = [];
     STATE.areaData = [];
 
@@ -123,6 +124,8 @@ var STORE = window.STORE = {
     this._saveFieldIndex('worker', STATE.workerCsvData || []);
     this._saveFieldIndex('product', STATE.productAddressData || []);
 
+    this._s('dailyRecords', STATE.dailyRecords || []);
+
     this._s('capacity',  STATE.capacity);
     this._s('planData',  STATE.planData);
     this._s('memos',     STATE.memos);
@@ -139,7 +142,7 @@ var STORE = window.STORE = {
     sanitizePersonalDataState(STATE);
     const blob = new Blob([JSON.stringify({
       center:CENTER.id, exportedAt:new Date().toISOString(),
-      datasets:STATE.datasets, workerCsvData:STATE.workerCsvData || [], productAddressData:STATE.productAddressData || [], fieldData:STATE.fieldData, areaData:STATE.areaData,
+      datasets:STATE.datasets, workerCsvData:STATE.workerCsvData || [], productAddressData:STATE.productAddressData || [], dailyRecords:STATE.dailyRecords || [], fieldData:STATE.fieldData, areaData:STATE.areaData,
       capacity:STATE.capacity, planData:STATE.planData, memos:STATE.memos, library:STATE.library, reportKnowledge:STATE.reportKnowledge, deleted:STATE.deleted,
     },null,2)], {type:'application/json'});
     const a = document.createElement('a');
@@ -156,6 +159,7 @@ var STORE = window.STORE = {
       if (d.datasets)  STATE.datasets  = d.datasets;
       if (d.workerCsvData) STATE.workerCsvData = d.workerCsvData;
       if (d.productAddressData) STATE.productAddressData = d.productAddressData;
+      if (Array.isArray(d.dailyRecords)) STATE.dailyRecords = d.dailyRecords;
       if (d.fieldData) STATE.fieldData = d.fieldData;
       if (d.areaData)  STATE.areaData  = d.areaData;
       if (d.capacity)  STATE.capacity  = d.capacity;
@@ -176,6 +180,7 @@ var STORE = window.STORE = {
   storageInfo() {
     const keys = [
       'dataset_index','field_worker_index','field_product_index',
+      'dailyRecords',
       'capacity','planData','memos','library','reportKnowledge','deleted','fiscalYear'
     ];
     let size = 0;
