@@ -51,42 +51,9 @@
     return [...map.values()];
   }
 
-  function workerMonth(ym){
-    return (STATE.workerCsvData || []).find(x=>x && x.ym===ym) || null;
-  }
-  function monthRoutes(ym){
-    const rec = (STATE.routeData || []).find(x=>x && x.ym===ym);
-    return rec ? (rec.routes || []) : [];
-  }
-  function routePayments(ym){
-    const ds = (STATE.datasets || []).filter(x=>x && x.ym===ym && Array.isArray(x.routePayments));
-    const confirmed = ds.find(x=>(x.type||'confirmed')==='confirmed');
-    const daily = ds.find(x=>(x.type||'confirmed')==='daily');
-    return (confirmed || daily || {}).routePayments || [];
-  }
-
   function joinedRows(ym){
-    const rec = workerMonth(ym);
-    const workers = rec?.workers || {};
-    const workerEntries = Object.values(workers);
-    const payments = routePayments(ym);
-    return monthRoutes(ym).map(route=>{
-      const w = workerEntries.find(x=>norm(x.name)===norm(route.worker));
-      const allSlips = Object.values(w?.slips || {});
-      let matched = allSlips.filter(s=>String(s.date||'').replace(/\D/g,'')===String(route.date||'').replace(/\D/g,''));
-      let matchMode = '作業者＋日付';
-      if ((route.slips||[]).length) {
-        const set = new Set(route.slips.map(String));
-        const exact = allSlips.filter(s=>set.has(String(s.slip||'')));
-        if (exact.length) { matched=exact; matchMode='原票一致'; }
-      }
-      const count = new Set(matched.map(s=>String(s.slip||''))).size;
-      const sales = matched.reduce((sum,s)=>sum+Number(s.amount||0),0);
-      const payRows = payments.filter(p=>String(p.headNumber)===String(route.headNumber));
-      const payment = payRows.reduce((sum,p)=>sum+Number(p.amount||0),0);
-      const status = !w ? '作業者未一致' : !count ? '売上未一致' : !payRows.length ? '傭車費なし' : matchMode;
-      return {...route,count,sales,payment,margin:sales-payment,avg:count?sales/count:0,status};
-    }).sort((a,b)=>String(a.date).localeCompare(String(b.date)) || String(a.headNumber).localeCompare(String(b.headNumber)));
+    if (!window.LEDGER?.buildMonth) return [];
+    return LEDGER.buildMonth(ym).routes;
   }
 
   async function importFiles(files){
@@ -150,14 +117,16 @@
   function render(){
     setup();
     const sel=document.getElementById('route-ym-select');
-    const yms=[...new Set([...(STATE.routeData||[]).map(x=>x.ym), ...(STATE.workerCsvData||[]).map(x=>x.ym), ...(STATE.datasets||[]).map(x=>x.ym)])].filter(Boolean).sort();
+    const yms=window.LEDGER?.availableMonths ? LEDGER.availableMonths() : [...new Set([...(STATE.routeData||[]).map(x=>x.ym), ...(STATE.workerCsvData||[]).map(x=>x.ym), ...(STATE.datasets||[]).map(x=>x.ym)])].filter(Boolean).sort();
     if(sel){
       const cur=sel.value;
       sel.innerHTML=yms.map(ym=>`<option value="${ym}">${ym.slice(0,4)}年${Number(ym.slice(4,6))}月</option>`).join('');
       sel.value=yms.includes(cur)?cur:(STATE.selYM&&yms.includes(STATE.selYM)?STATE.selYM:(yms.at(-1)||''));
     }
     const ym=sel?.value||'';
-    const rows=joinedRows(ym);
+    const ledger=window.LEDGER?.buildMonth ? LEDGER.buildMonth(ym) : {routes:joinedRows(ym),diagnostics:null};
+    const rows=ledger.routes || [];
+    const diag=ledger.diagnostics;
     const totalCount=rows.reduce((s,r)=>s+r.count,0), totalSales=rows.reduce((s,r)=>s+r.sales,0), totalPay=rows.reduce((s,r)=>s+r.payment,0);
     const kpi=document.getElementById('route-kpi');
     if(kpi) kpi.innerHTML=`
@@ -165,6 +134,17 @@
       <div class="kpi-card accent-green"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}件</div></div>
       <div class="kpi-card accent-navy"><div class="kpi-label">売上</div><div class="kpi-value">${fmt(totalSales)}円</div></div>
       <div class="kpi-card accent-amber"><div class="kpi-label">売上－傭車支払</div><div class="kpi-value">${fmt(totalSales-totalPay)}円</div></div>`;
+    const diagnostic=document.getElementById('route-diagnostic');
+    if(diagnostic && diag){
+      const missing=[];
+      if(!diag.sourceStatus.routePdf) missing.push('配達持出リストPDF');
+      if(!diag.sourceStatus.workerCsv) missing.push('作業者別CSV');
+      if(!diag.sourceStatus.productCsv) missing.push('荷主別CSV');
+      if(!diag.sourceStatus.skdl0001) missing.push('SKDL0001（傭車支払）');
+      diagnostic.innerHTML=missing.length
+        ? `<div class="msg msg-warn" style="margin:0 0 12px">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`
+        : `<div class="msg msg-info" style="margin:0 0 12px">照合率 <strong>${Number(diag.integrationRate||0).toFixed(1)}%</strong>　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　作業者未一致便 ${fmt(diag.routesWithoutWorker)}便　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`;
+    }
     const body=document.getElementById('route-tbody');
     if(body) body.innerHTML=rows.length?rows.map(r=>`<tr>
       <td>${esc(r.date)}</td><td><strong>${esc(r.headNumber)}</strong></td><td>${esc(r.worker||'未取得')}</td>

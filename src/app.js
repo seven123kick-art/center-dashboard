@@ -5489,14 +5489,20 @@ const IDB_CACHE = window.IDB_CACHE = {
       });
       if (products.length) STATE.productAddressData = products.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
 
+      const routes = [];
+      const routeCount = await this._eachIndex('route', 'route_index', m => m?.ym || null, rec => {
+        if (rec && rec.ym) routes.push(rec);
+      });
+      if (routes.length) STATE.routeData = routes.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+
       // 重要：IndexedDBキャッシュは削除操作時にパージされない場合があるため、
       // 復元直後に必ず削除済みトゥームストーンを再適用する。
       // これをしないと「削除→リロード」で古いキャッシュから復活してしまう。
       if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
 
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-      window.__mgmtPerfLog(`[PERF] idb-hydrate ms=${Math.round(performance.now()-t0)} datasets=${datasets} workers=${workerCount} products=${productCount}`);
-      return { ok:true, datasets, workers:workerCount, products:productCount };
+      window.__mgmtPerfLog(`[PERF] idb-hydrate ms=${Math.round(performance.now()-t0)} datasets=${datasets} workers=${workerCount} products=${productCount} routes=${routeCount}`);
+      return { ok:true, datasets, workers:workerCount, products:productCount, routes:routeCount };
     } catch(e) {
       console.warn('[IDB_CACHE] hydrate failed', e?.message || e);
       return { ok:false, error:e?.message || String(e) };
@@ -5518,6 +5524,9 @@ const IDB_CACHE = window.IDB_CACHE = {
       }
       for (const rec of (STATE.productAddressData || [])) {
         if (rec && rec.ym) await this.set('product', rec.ym, rec);
+      }
+      for (const rec of (STATE.routeData || [])) {
+        if (rec && rec.ym) await this.set('route', rec.ym, rec);
       }
       return { ok:true };
     } catch(e) {

@@ -7,7 +7,8 @@ var STORE = window.STORE = {
     'workerCsvData',
     'productAddressData',
     'fieldData',
-    'areaData'
+    'areaData',
+    'routeData'
   ],
 
   _s(k, v) {
@@ -91,13 +92,15 @@ var STORE = window.STORE = {
   },
 
   load() {
+    // 旧版でlocalStorageに保存されていた配達持出データは、削除前に一度だけ退避する。
+    const legacyRouteData = this._g('routeData') || [];
     // データ本体はlocalStorageから復元しない。
     // 起動後にCLOUD.pullInitialForBoot / 画面別遅延読込でDBから復元する。
     this._cleanupLargeLocalData();
     STATE.datasets = [];
     STATE.workerCsvData = [];
     STATE.productAddressData = [];
-    STATE.routeData = this._g('routeData') || [];
+    STATE.routeData = legacyRouteData;
     STATE.dailyRecords = this._g('dailyRecords') || [];
     STATE.fieldData = [];
     STATE.areaData = [];
@@ -126,7 +129,6 @@ var STORE = window.STORE = {
     this._saveFieldIndex('product', STATE.productAddressData || []);
 
     this._s('dailyRecords', STATE.dailyRecords || []);
-    this._s('routeData', STATE.routeData || []);
 
     this._s('capacity',  STATE.capacity);
     this._s('planData',  STATE.planData);
@@ -183,7 +185,7 @@ var STORE = window.STORE = {
   storageInfo() {
     const keys = [
       'dataset_index','field_worker_index','field_product_index',
-      'dailyRecords','routeData',
+      'dailyRecords',
       'capacity','planData','memos','library','reportKnowledge','deleted','fiscalYear'
     ];
     let size = 0;
