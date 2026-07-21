@@ -782,6 +782,19 @@ function upsertDataset(ds) {
   });
 }
 
+// 確定CSVが入った月は、速報（daily）を残さず削除する。
+// 「確定が優先」ではなく「確定が入った時点で速報自体を消す」という運用要望に合わせる。
+async function supersedeDailyWithConfirmed(ym) {
+  const daily = STATE.datasets.find(d => d.ym === ym && (d.type || 'confirmed') === 'daily' && d.source !== 'history');
+  if (!daily) return false;
+  if (typeof markDataDeleted === 'function') markDataDeleted('datasets', dataDeleteKey(ym, 'daily'));
+  STATE.datasets = STATE.datasets.filter(d => !(d.ym === ym && (d.type || 'confirmed') === 'daily' && d.source !== 'history'));
+  try { if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('dataset', `${ym}_daily`); } catch(e) {}
+  try { if (window.CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD._datasetKey(ym, 'daily')); } catch(e) {}
+  return true;
+}
+window.supersedeDailyWithConfirmed = supersedeDailyWithConfirmed;
+
 /* ════════ §7 IMPORT ════════════════════════════════════════════ */
 const IMPORT = {
   _pending: [],
@@ -849,6 +862,10 @@ const IMPORT = {
     }
     if (imported > 0) {
       STORE.save();
+      // 確定CSVが入った月は速報を残さず削除する
+      if (importType === 'confirmed') {
+        try { await supersedeDailyWithConfirmed(ym); STORE.save(); } catch(e) {}
+      }
       // 単体取込では従来通り取込月だけ同期する。
       // 一括取込では opt.awaitCloud === false を指定し、ループ後に pushAll() を1回だけ実行する。
       if (opt.awaitCloud === true) {
@@ -968,6 +985,9 @@ ${ds.fileName || 'ファイル名なし'}
     STATE.datasets = STATE.datasets.filter(d=>!(d.ym===ym && (d.type || 'confirmed') === type && d.source !== 'history'));
     applyDeletionTombstonesToState(STATE);
     STORE.save();
+    try {
+      if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('dataset', `${ym}_${type}`);
+    } catch(e) {}
     try {
       if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD._datasetKey(ym, type));
       if (CLOUD?.pushAll) await CLOUD.pushAll();
@@ -4215,6 +4235,11 @@ window.DATA_STORAGE_TABLE = {
     applyDeletionTombstonesToState(STATE);
     try {
       for (const d of rows) {
+        if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('dataset', `${d.ym}_${d.type || 'confirmed'}`);
+      }
+    } catch(e) {}
+    try {
+      for (const d of rows) {
         if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD._datasetKey(d.ym, d.type || 'confirmed'));
       }
     } catch(e) {}
@@ -4311,6 +4336,11 @@ const BULK_IMPORT = window.BULK_IMPORT = {
     }
 
     if (!imported) throw new Error(`${ymLabel(ym)}の収支CSVを1件も取り込めませんでした`);
+
+    // 確定CSVが入った月は速報を残さず削除する
+    if (type === 'confirmed') {
+      try { await supersedeDailyWithConfirmed(ym); } catch(e) {}
+    }
 
     STORE.save();
 
@@ -5368,6 +5398,29 @@ const IDB_CACHE = window.IDB_CACHE = {
     }
   },
 
+  async remove(kind, id) {
+    try {
+      const db = await this._open();
+      if (!db) return false;
+      const cleanId = String(id || '');
+      if (!cleanId) return false;
+      const currentIndex = await this._readIndex(kind);
+      const nextIndex = currentIndex.filter(x => x !== cleanId);
+      await new Promise(resolve => {
+        const tx = db.transaction(this._storeName, 'readwrite');
+        const store = tx.objectStore(this._storeName);
+        store.delete(this._key(kind, cleanId));
+        store.put(nextIndex, this._indexKey(kind));
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      });
+      return true;
+    } catch(e) {
+      console.warn('[IDB_CACHE] remove failed', kind, id, e?.message || e);
+      return false;
+    }
+  },
+
   async _eachIndex(kind, localStorageKey, buildId, apply) {
     const ids = new Set();
     const index = (window.STORE && STORE._g) ? (STORE._g(localStorageKey) || []) : [];
@@ -5404,6 +5457,11 @@ const IDB_CACHE = window.IDB_CACHE = {
         if (rec && rec.ym) products.push(rec);
       });
       if (products.length) STATE.productAddressData = products.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+
+      // 重要：IndexedDBキャッシュは削除操作時にパージされない場合があるため、
+      // 復元直後に必ず削除済みトゥームストーンを再適用する。
+      // これをしないと「削除→リロード」で古いキャッシュから復活してしまう。
+      if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
 
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
       window.__mgmtPerfLog(`[PERF] idb-hydrate ms=${Math.round(performance.now()-t0)} datasets=${datasets} workers=${workerCount} products=${productCount}`);

@@ -1349,11 +1349,13 @@ IMPORT.deleteFieldData = function(ym) {
     if (type === 'worker' || type === 'all') {
       if (typeof markDataDeleted === 'function') markDataDeleted('workerMonths', ym);
       STATE.workerCsvData = safeArray(STATE.workerCsvData).filter(d => d.ym !== ym);
+      if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('worker', ym);
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     }
     if (type === 'product' || type === 'all') {
       if (typeof markDataDeleted === 'function') markDataDeleted('productMonths', ym);
       STATE.productAddressData = safeArray(STATE.productAddressData).filter(d => d.ym !== ym);
+      if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('product', ym);
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     }
     if (type === 'all' && typeof markDataDeleted === 'function') markDataDeleted('fieldMonths', ym);
