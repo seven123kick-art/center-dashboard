@@ -348,7 +348,7 @@ const CONFIG = {
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
     'field-worker':'作業者分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
-    capacity:'キャパ分析', import:'データ取込',
+    capacity:'キャパ分析', import:'データ取込', 'csv-import':'CSV取込',
     kamoku:'収支科目 詳細分析', report:'会議報告書',
   },
 };
@@ -5481,6 +5481,12 @@ const NAV = {
       case 'memo':       renderMemo();         break;
       case 'capacity':   CAPACITY_UI.render(); CAPACITY_UI.populateYMSel(); break;
       case 'import':     renderImport();       break;
+      case 'csv-import':
+        renderFieldViewAfterCloud(view, () => {
+          renderImport();
+          if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh();
+        });
+        break;
       case 'library':    PAST_LIBRARY.renderList(); break;
       case 'field':
         renderFieldViewAfterCloud(view, () => { FIELD_UI.renderDataList(); FIELD_UI.updatePeriodBadge(); });
@@ -5585,11 +5591,32 @@ const DB = {
   showStorageInfo() { renderImport(); NAV.go('import'); },
 };
 const DATA_RESET = {
-  clearFieldAll() {
-    if (!confirm('現場データを全件削除しますか？')) return;
+  async clearFieldAll() {
+    if (!confirm('作業者別CSV・商品住所CSVを全月削除しますか？\n収支CSV・収支補完・計画データは削除しません。')) return;
+    const yms = new Set([
+      ...(STATE.workerCsvData || []).map(d=>d?.ym),
+      ...(STATE.productAddressData || []).map(d=>d?.ym)
+    ].filter(Boolean));
+    yms.forEach(ym => {
+      if (typeof markDataDeleted === 'function') {
+        markDataDeleted('workerMonths', ym);
+        markDataDeleted('productMonths', ym);
+        markDataDeleted('fieldMonths', ym);
+      }
+    });
+    STATE.workerCsvData = [];
+    STATE.productAddressData = [];
     STATE.fieldData = [];
+    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
     STORE.save();
-    UI.toast('現場データを削除しました');
+    try {
+      if (CLOUD?.pushAll) await CLOUD.pushAll();
+    } catch(e) {
+      UI.toast('ローカル削除は完了しましたが、クラウド同期に失敗しました: ' + e.message, 'warn');
+    }
+    if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh();
+    NAV.refresh();
+    UI.toast('作業者別CSV・商品住所CSVを全月削除しました');
   },
 };
 const SIMPLE_STORE = {

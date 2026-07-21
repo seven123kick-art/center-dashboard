@@ -1266,8 +1266,8 @@ IMPORT.deleteFieldData = function(ym) {
         if (p || w) {
           note = [
             note,
-            w ? `作業者 ${nfmt(w.rowCount)}行 / ${nfmt(w.workerCount)}名` : '',
-            p ? `商品住所 原票${nfmt(p.uniqueCount)}件 / 明細${nfmt(p.detailRows)}行 / 重複除外${nfmt(p.duplicateExcluded)}行` : ''
+            w ? `作業者 ${nfmt(w.rowCount)}行 / ${nfmt(w.workerCount)}名（${typeof formatImportedAt === 'function' ? formatImportedAt(w.importedAt) : w.importedAt || '?'}）` : '',
+            p ? `商品住所 原票${nfmt(p.uniqueCount)}件 / 明細${nfmt(p.detailRows)}行 / 重複除外${nfmt(p.duplicateExcluded)}行（${typeof formatImportedAt === 'function' ? formatImportedAt(p.importedAt) : p.importedAt || '?'}）` : ''
           ].filter(Boolean).join(' / ');
         }
         const hasConfirmed = safeArray(STATE.datasets).some(d => d && d.ym === ym && d.source !== 'history' && (d.type || 'confirmed') === 'confirmed');
