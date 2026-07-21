@@ -183,6 +183,9 @@
   <div class="nav-item" data-view="field-worker" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="5" r="3"/><path d="M1.5 14c.8-3 2.8-5 4.5-5s3.7 2 4.5 5"/></svg>作業者分析
   </div>
+  <div class="nav-item" data-view="route-analysis" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="4" width="9" height="7" rx="1"/><path d="M10.5 6h2l2 2v3h-4z"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="12.5" cy="12.5" r="1.5"/></svg>便別採算分析
+  </div>
   <div class="nav-item" data-view="field-content" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="1.5"/><line x1="5" y1="6" x2="11" y2="6"/><line x1="5" y1="10" x2="11" y2="10"/></svg>作業内容分析
   </div>
@@ -794,6 +797,33 @@
             </div>
     </div>
 
+
+    <!-- ▼ 便別採算分析 -->
+    <div class="view" id="view-route-analysis">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header"><span class="card-title">配達持出リスト取込</span></div>
+        <div class="card-body">
+          <div class="upload-zone no-print" id="route-pdf-upload-zone" onclick="document.getElementById('route-pdf-file-input').click()">
+            <input type="file" id="route-pdf-file-input" accept=".pdf" multiple style="display:none">
+            <div style="font-size:28px;margin-bottom:8px">🚚</div>
+            <div style="font-weight:700">配達持出リストPDFをクリック / ドロップ</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:5px">配達日・ヘッド番号・作業者・原票番号だけを保存し、氏名・住所は保存しません。</div>
+          </div>
+          <div id="route-import-msg" style="margin-top:8px"></div>
+        </div>
+      </div>
+      <div class="kpi-row kpi-row-4" id="route-kpi"></div>
+      <div class="card">
+        <div class="card-header" style="gap:10px;flex-wrap:wrap">
+          <span class="card-title">1台・1便別 件数／売上／傭車支払</span>
+          <select id="route-ym-select" onchange="ROUTE_ANALYSIS_UI.render()" style="margin-left:auto"></select>
+        </div>
+        <div class="scroll-x">
+          <table class="tbl"><thead><tr><th>配達日</th><th>ヘッドNo</th><th>作業者</th><th class="r">件数</th><th class="r">売上</th><th class="r">傭車支払</th><th class="r">一次差額</th><th class="r">1件売上</th><th>照合</th></tr></thead><tbody id="route-tbody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
     <!-- ▼ 作業内容分析 -->
     <div class="view" id="view-field-content">
       <!-- 作業内容別 -->
@@ -1314,6 +1344,7 @@
 
 <script src="src/field/field_core.js" defer></script>
 <script src="src/field/field_worker.js" defer></script>
+<script src="src/field/route_analysis.js" defer></script>
 <script src="src/field/field_content.js" defer></script>
 <script src="src/field/field_task.js" defer></script>
 <script src="src/field/field_product.js" defer></script>

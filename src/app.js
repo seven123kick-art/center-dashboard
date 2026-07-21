@@ -347,7 +347,7 @@ const CONFIG = {
     shipper:'荷主分析', indicators:'経営指標', annual:'年次サマリー',
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
-    'field-worker':'作業者分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
+    'field-worker':'作業者分析', 'route-analysis':'便別採算分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
     capacity:'キャパ分析', import:'データ取込', 'csv-import':'CSV取込',
     kamoku:'収支科目 詳細分析', report:'会議報告書',
   },
@@ -365,6 +365,7 @@ const STATE = {
   datasets:  [],    // [{ym,type,rows,totalIncome,totalExpense,profit,...}]
   workerCsvData: [], // 現場明細CSV（作業者CSV）月単位データ
   productAddressData: [], // 現場明細CSV（商品住所CSV）月単位データ
+  routeData: [], // 配達持出PDFから抽出した便情報 [{ym,routes:[{date,headNumber,worker,slips}]}]
   dailyRecords: [], // 日別実績CSV（着地予測用） [{date,ym,revenue,labor,yosha,other,profit}]
   fieldData: [],    // [{ym,areas:{name:{count,shippers:{}}}}]
   areaData:  [],    // 旧データ互換用（現在は旧帳票関連では使用しない）
@@ -667,6 +668,32 @@ const CSV = {
     return found > 0 ? result : null;
   },
 
+  // SKDL0001から便単位の傭車支払明細を抽出する。
+  // 顧客情報は保持せず、ヘッド番号・計上日・科目・金額・傭車コードのみ保存する。
+  parseRoutePayments(text) {
+    const rows = this.toRows(text);
+    if (!rows.length) return [];
+    const header = rows[0].map(v => String(v || '').replace(/[\s　\u3000]/g,''));
+    const idx = name => header.findIndex(v => v === name);
+    const cDate=idx('計上日'), cCode=idx('収支科目コード'), cName=idx('収支科目名'), cAmount=idx('金額');
+    const cHead=idx('ヘッド番号'), cYosha=idx('傭車コード'), cPartner=idx('取引先');
+    if (cHead < 0 || cAmount < 0) return [];
+    const out=[];
+    for (let i=1;i<rows.length;i++) {
+      const r=rows[i];
+      const head=String(r[cHead] || '').replace(/\D/g,'');
+      if (!head) continue;
+      const code=String(r[cCode] || '').replace(/\D/g,'');
+      const name=String(r[cName] || '').trim();
+      if (!(code === '120901' || code === '120902' || /路線傭車|集配傭車/.test(name))) continue;
+      const amount=Number(String(r[cAmount] || '').replace(/,/g,'').replace(/[^\d.-]/g,'')) || 0;
+      const rawDate=String(r[cDate] || '').replace(/\D/g,'');
+      const date=rawDate.length >= 8 ? `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}` : '';
+      out.push({ headNumber:head, date, accountCode:code, accountName:name, amount, yoshaCode:String(r[cYosha] || '').trim(), partner:String(r[cPartner] || '').trim() });
+    }
+    return out;
+  },
+
   // 計画データ（貼り付けテキスト）解析
   // 前提：科目名 + 年間合計 + 4月〜9月 + 上期計 + 10月〜3月 + 下期計
   // 単位：千円。保存時に円変換しない。
@@ -848,6 +875,7 @@ const IMPORT = {
         if (!rows) { UI.toast(`${f.name}: データ行が見つかりません`,'warn'); continue; }
         const type = importType;
         const ds = processDataset(ym, type, rows);
+        ds.routePayments = CSV.parseRoutePayments(text);
         ds.source = 'csv';
         ds.fileName = f.name;
         ds.fiscalYear = fiscalYearFromYM(ym);
@@ -1564,6 +1592,8 @@ function mergeFullState(localFull, cloudFull) {
     memos: { ...(local.memos || {}), ...(cloud.memos || {}) },
     library: (cloud.library && cloud.library.length) ? cloud.library : (local.library || []),
     reportKnowledge: mergeReportKnowledge(local.reportKnowledge || {}, cloud.reportKnowledge || {}),
+    routeData: (cloud.routeData && cloud.routeData.length) ? cloud.routeData : (local.routeData || []),
+    dailyRecords: (cloud.dailyRecords && cloud.dailyRecords.length) ? cloud.dailyRecords : (local.dailyRecords || []),
     deleted,
   };
   return applyDeletionTombstonesToState(merged);
@@ -4322,6 +4352,7 @@ const BULK_IMPORT = window.BULK_IMPORT = {
       if (!rows) throw new Error(`${f.name}: SKDLの科目/金額を読み取れません`);
 
       const ds = processDataset(ym, type, rows);
+      ds.routePayments = CSV.parseRoutePayments(text);
       ds.source = 'csv';
       ds.fileName = f.name;
       ds.fiscalYear = fiscalYearFromYM(ym);
@@ -5551,6 +5582,9 @@ const NAV = {
         break;
       case 'field-worker':
         renderFieldViewAfterCloud(view, () => { if (window.FIELD_WORKER_UI?.render) FIELD_WORKER_UI.render(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); });
+        break;
+      case 'route-analysis':
+        renderFieldViewAfterCloud(view, () => { if (window.ROUTE_ANALYSIS_UI?.render) ROUTE_ANALYSIS_UI.render(); });
         break;
       case 'field-content':
         renderFieldViewAfterCloud(view, () => { if (window.FIELD_CONTENT_UI?.render) FIELD_CONTENT_UI.render(); else if (window.FIELD_TASK_UI?.render) FIELD_TASK_UI.render(); else if (window.FIELD_CSV_REBUILD?.renderContent) FIELD_CSV_REBUILD.renderContent(); else if (window.FIELD_CSV_REBUILD?.refresh) FIELD_CSV_REBUILD.refresh(); });

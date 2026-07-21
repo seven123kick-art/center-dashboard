@@ -514,6 +514,7 @@ var CLOUD = window.CLOUD = {
       capacity: STATE.capacity || null,
       planData: STATE.planData || {},
       dailyRecords: STATE.dailyRecords || [],
+      routeData: STATE.routeData || [],
       memos: STATE.memos || {},
       library: STATE.library || [],
       reportKnowledge: STATE.reportKnowledge || { policies:{}, references:[] },
@@ -531,6 +532,7 @@ var CLOUD = window.CLOUD = {
     if (full.planData) STATE.planData = normalizePlanData(full.planData);
     if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
     if (Array.isArray(full.dailyRecords)) STATE.dailyRecords = full.dailyRecords;
+    if (Array.isArray(full.routeData)) STATE.routeData = full.routeData;
     if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
     if (Array.isArray(full.library)) STATE.library = full.library;
     if (full.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(full.reportKnowledge);
