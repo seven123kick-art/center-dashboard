@@ -348,7 +348,7 @@ const CONFIG = {
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
     'field-worker':'作業者分析', 'route-analysis':'便別採算分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
-    capacity:'キャパ分析', import:'データ取込', 'csv-import':'CSV取込',
+    capacity:'キャパ分析', import:'その他取込', 'csv-import':'CSV取込',
     kamoku:'収支科目 詳細分析', report:'会議報告書',
   },
 };
@@ -5569,7 +5569,10 @@ const NAV = {
       case 'alerts':     renderAlerts();       break;
       case 'memo':       renderMemo();         break;
       case 'capacity':   CAPACITY_UI.render(); CAPACITY_UI.populateYMSel(); break;
-      case 'import':     renderImport();       break;
+      case 'import':
+        renderImport();
+        if (window.ROUTE_ANALYSIS_UI?.setup) ROUTE_ANALYSIS_UI.setup();
+        break;
       case 'csv-import':
         renderFieldViewAfterCloud(view, () => {
           renderImport();
@@ -5615,7 +5618,7 @@ const UI = {
     }
     // センター名を全要素に反映
     document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
-    document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent=CENTER.name+'データ取込');
+    document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent='その他取込');
   },
 
   updateSaveStatus() {
@@ -5965,7 +5968,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 2. センター情報を画面に反映
     document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
-    document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent=CENTER.name+'データ取込');
+    document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent='その他取込');
 
     // 3. ドロップゾーン設定
     setupDropZone('upload-zone', 'file-input', f=>IMPORT.handleFiles(f));

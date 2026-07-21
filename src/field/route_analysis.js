@@ -16,17 +16,18 @@
   }
 
   function parsePageText(text){
-    const clean = String(text || '').replace(/\u0000/g,' ');
-    const head = (clean.match(/ヘッド番号\s*[:：]?\s*(\d{8,12})/) || [])[1] || '';
-    const dm = clean.match(/配達日[\s\S]{0,80}?(20\d{2})[\/\-年 ](\d{1,2})[\/\-月 ](\d{1,2})/)
-      || clean.match(/(20\d{2})[\/\-年 ](\d{1,2})[\/\-月 ](\d{1,2})/);
+    const clean = String(text || '').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ');
+    const compact = clean.replace(/\s+/g,' ');
+    const head = (compact.match(/ヘッド番号[^0-9]{0,20}(\d{8,12})/) || compact.match(/(38\d{8})/) || [])[1] || '';
+    const dm = compact.match(/(20\d{2})\s*[\/\-年]\s*(\d{1,2})\s*[\/\-月]\s*(\d{1,2})/);
     const date = dm ? `${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}` : '';
     let worker = '';
-    const wm = clean.match(/作業者\s*[:：]?\s*(.+?)(?=\s+20\d{2}[\/\-年]|\s+配達持出リスト|\s+作業者TEL)/);
-    if (wm) worker = wm[1].trim();
+    const wm = compact.match(/作業者\s+(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店)/);
+    if (wm) worker = wm[1].replace(/^[:：]\s*/,'').trim();
 
-    // 原票番号は主に 5/9 で始まる12桁。荷主伝票番号との混同を抑える。
-    const slips = [...new Set((clean.match(/\b[59]\d{11}\b/g) || []).map(String))];
+    // 原票番号は主に5または9で始まる12桁。荷主伝票番号との混同を抑える。
+    const slips = [...new Set((compact.match(/(?:^|\D)([59]\d{11})(?=\D|$)/g) || [])
+      .map(v=>(v.match(/[59]\d{11}/)||[])[0]).filter(Boolean))];
     return { headNumber:head, date, worker, slips };
   }
 
@@ -95,8 +96,10 @@
     try{
       if(msg) msg.innerHTML='<span style="color:#334155;font-weight:700">PDFを解析中です…</span>';
       const byYm=new Map();
+      let parsedRouteCount = 0;
       for(const f of arr){
         const routes=await parsePdf(f);
+        parsedRouteCount += routes.length;
         for(const r of routes){
           const ym=ymOfDate(r.date);
           if(!ym) continue;
@@ -121,7 +124,11 @@
       STATE.routeData.sort((a,b)=>a.ym.localeCompare(b.ym));
       STORE.save();
       if(window.CLOUD?.pushAll) CLOUD.pushAll({onlyChanged:true}).catch(()=>{});
-      if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルを取り込みました。</span>`;
+      if (!parsedRouteCount) {
+        if(msg) msg.innerHTML='<span style="color:#991b1b;font-weight:700">PDFは読み込みましたが、配達日・ヘッド番号を取得できませんでした。対象が「配達持出リスト」か確認してください。</span>';
+        return;
+      }
+      if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルから${parsedRouteCount}便を取り込みました。</span>`;
       render();
     }catch(e){
       console.error(e);
@@ -167,5 +174,5 @@
     </tr>`).join(''):`<tr><td colspan="9" style="padding:30px;text-align:center;color:var(--text3)">配達持出PDF、作業者別CSV、SKDL0001を取り込んでください。</td></tr>`;
   }
 
-  window.ROUTE_ANALYSIS_UI={render,importFiles,joinedRows};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,joinedRows};
 })();

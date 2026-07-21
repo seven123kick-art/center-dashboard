@@ -205,7 +205,7 @@
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M5 8h6M5 5.5h6M5 10.5h3"/></svg>CSV取込
   </div>
   <div class="nav-item" data-view="import" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M5 7l3 3 3-3M2 12v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg><span data-center-import-name>北埼玉センターデータ取込</span>
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M5 7l3 3 3-3M2 12v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg><span data-center-import-name>その他取込</span>
   </div>
 
   <div class="sidebar-bottom">
@@ -800,17 +800,8 @@
 
     <!-- ▼ 便別採算分析 -->
     <div class="view" id="view-route-analysis">
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-header"><span class="card-title">配達持出リスト取込</span></div>
-        <div class="card-body">
-          <div class="upload-zone no-print" id="route-pdf-upload-zone" onclick="document.getElementById('route-pdf-file-input').click()">
-            <input type="file" id="route-pdf-file-input" accept=".pdf" multiple style="display:none">
-            <div style="font-size:28px;margin-bottom:8px">🚚</div>
-            <div style="font-weight:700">配達持出リストPDFをクリック / ドロップ</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:5px">配達日・ヘッド番号・作業者・原票番号だけを保存し、氏名・住所は保存しません。</div>
-          </div>
-          <div id="route-import-msg" style="margin-top:8px"></div>
-        </div>
+      <div class="msg msg-info" style="margin-bottom:14px">
+        配達持出リストPDFは、データ管理の「その他取込」から登録してください。CSVは「CSV取込」から登録します。
       </div>
       <div class="kpi-row kpi-row-4" id="route-kpi"></div>
       <div class="card">
@@ -1133,18 +1124,34 @@
         <div class="view" id="view-import">
       <div class="card" id="import-center-card" style="margin-bottom:14px;border:2px solid #60a5fa;background:#eff6ff">
         <div class="card-header" style="border-bottom:1px solid #bfdbfe">
-          <span class="card-title" id="import-target-title">取込先センター確認</span>
-          <span id="import-target-badge" class="badge badge-info">センター別取込</span>
+          <span class="card-title" id="import-target-title">その他取込</span>
+          <span id="import-target-badge" class="badge badge-info">PDF・直接入力</span>
         </div>
         <div class="card-body" style="font-size:12px;line-height:1.8;color:var(--text2)">
-          <div id="import-target-desc" style="font-weight:700;color:var(--navy)">この画面で取り込んだデータは、選択中センターだけに保存されます。</div>
-          <div style="margin-top:4px"><span id="import-target-note">ページは共通ですが、保存キー・クラウドパス・IndexedDBはセンターIDで分離します。</span></div>
+          <div id="import-target-desc" style="font-weight:700;color:var(--navy)">CSV以外のデータを、この画面から取り込みます。</div>
+          <div style="margin-top:4px"><span id="import-target-note">配達持出リストPDF、計画データ、過去実績補完などを登録できます。</span></div>
         </div>
       </div>
       <div class="card" style="margin-bottom:14px;background:#f8fafc">
         <div class="card-body" style="font-size:12px;color:var(--text2);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-          <span>収支CSV・作業者別CSV・商品住所CSVの取込と取込状況の確認は「CSV取込」画面に移動しました。</span>
+          <span>SKDL・作業者別・荷主別などのCSVは「CSV取込」から登録してください。</span>
           <button class="btn btn-primary" onclick="NAV.go(document.querySelector('.nav-item[data-view=&quot;csv-import&quot;]'))" style="font-size:12px;white-space:nowrap">📦 CSV取込を開く</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header">
+          <span class="card-title">🚚 配達持出リストPDF取込</span>
+          <span class="badge badge-info">便別採算分析用</span>
+        </div>
+        <div class="card-body">
+          <div class="upload-zone no-print" id="route-pdf-upload-zone" onclick="document.getElementById('route-pdf-file-input').click()">
+            <input type="file" id="route-pdf-file-input" accept=".pdf" multiple style="display:none">
+            <div style="font-size:28px;margin-bottom:8px">🚚</div>
+            <div style="font-weight:700">配達持出リストPDFをクリック / ドロップ</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:5px">1日分または複数日分をまとめて登録できます。配達日・ヘッド番号・作業者・原票番号だけを保存します。</div>
+          </div>
+          <div id="route-import-msg" style="margin-top:8px"></div>
         </div>
       </div>
 
@@ -1284,7 +1291,7 @@
         <div class="card-body">
           <div class="rule-list">
             <p>収支CSV・作業者別CSV・商品住所CSVの取込は「CSV取込」タブに移動しました</p>
-            <p>このタブは、計画データ・過去実績補完・クラウド同期設定・ストレージ管理をまとめた画面です</p>
+            <p>このタブは、配達持出リストPDF・直接入力・過去実績補完・クラウド同期設定・ストレージ管理をまとめた「その他取込」画面です</p>
             <p>複数月まとめて選択すると推移グラフが自動生成されます</p>
             <p>同一月のファイルを再度読み込むと上書き更新されます</p>
             <p>クラウド同期設定済みの場合、データはSupabaseにも自動保存されます</p>
