@@ -343,7 +343,7 @@ const CONFIG = {
 
   COLORS: ['#1a4d7c','#e05b4d','#1a7a52','#b45309','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#d97706'],
   VIEW_TITLES: {
-    dashboard:'ダッシュボード', pl:'月次収支表', 'profit-structure':'利益構造分析', 'landing-forecast':'着地予測', trend:'売上推移',
+    dashboard:'ホーム', pl:'月次収支表', 'profit-structure':'利益構造分析', 'landing-forecast':'着地予測', trend:'売上推移',
     shipper:'荷主分析', indicators:'経営指標', annual:'年次サマリー',
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
@@ -5549,6 +5549,24 @@ const IDB_CACHE = window.IDB_CACHE = {
 };
 
 /* ════════ §25 NAV ══════════════════════════════════════════════ */
+const NAVGROUP = {
+  toggle(name, forceOpen) {
+    const group = document.querySelector(`.nav-group[data-group="${name}"]`);
+    if (!group) return;
+    const open = typeof forceOpen === 'boolean' ? forceOpen : !group.classList.contains('open');
+    group.classList.toggle('open', open);
+    const btn = group.querySelector('.nav-group-toggle');
+    if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  },
+  sync(view) {
+    document.querySelectorAll('.nav-group').forEach(group => {
+      const has = !!group.querySelector(`.nav-item[data-view="${view}"]`);
+      group.classList.toggle('has-active', has);
+      if (has) this.toggle(group.dataset.group, true);
+    });
+  }
+};
+
 const NAV = {
   // メイン画面切替（同期なし、再描画のみ）
   go(el) {
@@ -5565,6 +5583,7 @@ const NAV = {
 
     const navEl = document.querySelector(`.nav-item[data-view="${view}"]`);
     if (navEl) navEl.classList.add('active');
+    if (window.NAVGROUP) NAVGROUP.sync(view);
 
     UI.updateTopbar(view);
     this._render(view);
