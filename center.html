@@ -801,22 +801,45 @@
     </div>
 
 
-    <!-- ▼ 便別採算分析 -->
+    <!-- ▼ 便別採算分析 / Version 2 -->
     <div class="view" id="view-route-analysis">
-      <div class="msg msg-info" style="margin-bottom:14px">
-        配達持出リストPDFは、データ管理の「その他取込」から登録してください。CSVは「CSV取込」から登録します。
+      <div class="saas-page-head">
+        <div>
+          <div class="saas-eyebrow">DELIVERY PROFITABILITY</div>
+          <h1 class="saas-page-title">便別採算</h1>
+          <p class="saas-page-sub">売上・傭車支払・一次利益を便単位で把握し、原票まで掘り下げます。</p>
+        </div>
+        <div class="saas-head-actions">
+          <button class="btn saas-btn-secondary" onclick="NAV.go(document.querySelector('.nav-item[data-view=\'import\']'))">PDF取込</button>
+          <button class="btn btn-primary" onclick="NAV.go(document.querySelector('.nav-item[data-view=\'csv-import\']'))">CSV取込</button>
+        </div>
       </div>
-      <div class="kpi-row kpi-row-4" id="route-kpi"></div>
+
+      <div class="saas-toolbar">
+        <div class="saas-filter-group"><label>対象年月</label><select id="route-ym-select" onchange="ROUTE_ANALYSIS_UI.render()"></select></div>
+        <div class="saas-filter-group"><label>所属会社</label><select id="route-company-select" onchange="ROUTE_ANALYSIS_UI.render()"><option value="">すべて</option></select></div>
+        <div class="saas-filter-group"><label>運行区分</label><select id="route-type-select" onchange="ROUTE_ANALYSIS_UI.render()"><option value="">すべて</option></select></div>
+        <div class="saas-filter-group saas-filter-search"><label>検索</label><input id="route-search" type="text" placeholder="作業者・ヘッドNo" oninput="ROUTE_ANALYSIS_UI.render()"></div>
+        <div class="saas-view-switch" role="group" aria-label="表示切替">
+          <button id="route-view-table" class="active" onclick="ROUTE_ANALYSIS_UI.setView('table')">一覧</button>
+          <button id="route-view-card" onclick="ROUTE_ANALYSIS_UI.setView('card')">カード</button>
+        </div>
+      </div>
+
+      <div class="kpi-row kpi-row-4 saas-kpi-grid" id="route-kpi"></div>
       <div id="route-diagnostic"></div>
-      <div class="card">
-        <div class="card-header" style="gap:10px;flex-wrap:wrap">
-          <span class="card-title">1台・1便別 件数／売上／傭車支払</span>
-          <select id="route-ym-select" onchange="ROUTE_ANALYSIS_UI.render()" style="margin-left:auto"></select>
+
+      <div class="saas-content-card">
+        <div class="saas-content-head">
+          <div><strong>便別一覧</strong><span id="route-result-count">0件</span></div>
+          <div class="saas-legend"><span><i class="dot dot-ok"></i>照合済</span><span><i class="dot dot-warn"></i>要確認</span></div>
         </div>
-        <div class="scroll-x">
-          <table class="tbl"><thead><tr><th>配達日</th><th>ヘッドNo</th><th>作業者</th><th class="r">件数</th><th class="r">売上</th><th class="r">傭車支払</th><th class="r">一次差額</th><th class="r">1件売上</th><th>照合</th></tr></thead><tbody id="route-tbody"></tbody></table>
+        <div id="route-table-wrap" class="scroll-x">
+          <table class="tbl saas-table"><thead><tr><th>配達日</th><th>便・ヘッドNo</th><th>作業者</th><th>所属会社</th><th class="r">件数</th><th class="r">売上</th><th class="r">傭車支払</th><th class="r">一次利益</th><th class="r">利益率</th><th>状態</th></tr></thead><tbody id="route-tbody"></tbody></table>
         </div>
+        <div id="route-card-grid" class="route-card-grid" style="display:none"></div>
       </div>
+      <div id="route-detail-modal"></div>
     </div>
 
     <!-- ▼ 作業内容分析 -->

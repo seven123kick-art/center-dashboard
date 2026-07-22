@@ -114,6 +114,68 @@
     zone.addEventListener('drop',e=>importFiles(e.dataTransfer.files));
   }
 
+  let viewMode = 'table';
+  let currentRows = [];
+
+  function statusClass(status){
+    return status === '原票一致' ? 'ok' : 'warn';
+  }
+
+  function marginRate(r){
+    return Number(r.sales) ? Number(r.margin) / Number(r.sales) * 100 : 0;
+  }
+
+  function setOptions(select, values, selected, allLabel='すべて'){
+    if(!select) return;
+    select.innerHTML = `<option value="">${esc(allLabel)}</option>` + values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    select.value = values.includes(selected) ? selected : '';
+  }
+
+  function setView(mode){
+    viewMode = mode === 'card' ? 'card' : 'table';
+    document.getElementById('route-view-table')?.classList.toggle('active', viewMode==='table');
+    document.getElementById('route-view-card')?.classList.toggle('active', viewMode==='card');
+    const table=document.getElementById('route-table-wrap');
+    const cards=document.getElementById('route-card-grid');
+    if(table) table.style.display=viewMode==='table'?'block':'none';
+    if(cards) cards.style.display=viewMode==='card'?'grid':'none';
+  }
+
+  function openDetail(routeId){
+    const r=currentRows.find(x=>x.routeId===routeId);
+    const root=document.getElementById('route-detail-modal');
+    if(!r||!root) return;
+    const rate=marginRate(r);
+    const slips=(r.slipRows||[]);
+    root.innerHTML=`<div class="route-detail-overlay" onclick="if(event.target===this)ROUTE_ANALYSIS_UI.closeDetail()">
+      <section class="route-detail-panel" role="dialog" aria-modal="true" aria-label="便詳細">
+        <div class="route-detail-head">
+          <div><div class="saas-eyebrow">ROUTE DETAIL</div><h2>${esc(r.date)} / ${esc(r.headNumber)}</h2><div style="font-size:11px;color:var(--text2)">${esc(r.companyName||'未設定')}　${esc(r.worker||'未取得')}　${esc(r.operationType||'')}</div></div>
+          <button class="route-detail-close" onclick="ROUTE_ANALYSIS_UI.closeDetail()">×</button>
+        </div>
+        <div class="route-detail-body">
+          <div class="route-detail-kpis">
+            <div class="route-detail-kpi"><span>配送件数</span><strong>${fmt(r.count)}件</strong></div>
+            <div class="route-detail-kpi"><span>売上</span><strong>${fmt(r.sales)}円</strong></div>
+            <div class="route-detail-kpi"><span>傭車支払</span><strong>${fmt(r.payment)}円</strong></div>
+            <div class="route-detail-kpi"><span>一次利益 / 利益率</span><strong class="${r.margin>=0?'profit-positive':'profit-negative'}">${fmt(r.margin)}円 / ${rate.toFixed(1)}%</strong></div>
+          </div>
+          <div class="saas-content-card" style="box-shadow:none">
+            <div class="saas-content-head"><div><strong>原票明細</strong><span>${fmt(slips.length)}件</span></div><span class="route-status ${statusClass(r.status)}">${esc(r.status)}</span></div>
+            <div class="scroll-x"><table class="tbl saas-table"><thead><tr><th>原票番号</th><th>荷主</th><th>商品・カテゴリ</th><th>エリア</th><th class="r">売上</th><th>照合</th></tr></thead><tbody>
+              ${slips.length?slips.map(x=>`<tr><td><strong>${esc(x.slip)}</strong></td><td>${esc(x.shipperName||x.shipperCode||'未取得')}</td><td>${esc(x.product||x.category||'未取得')}</td><td>${esc(x.city||x.area||'未取得')}</td><td class="r">${fmt(x.sales)}円</td><td><span class="route-status ${x.workerMatched?'ok':'warn'}">${x.workerMatched?'一致':'未一致'}</span></td></tr>`).join(''):`<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text3)">原票明細を取得できませんでした。</td></tr>`}
+            </tbody></table></div>
+          </div>
+        </div>
+      </section>
+    </div>`;
+  }
+
+  function closeDetail(){
+    const root=document.getElementById('route-detail-modal');
+    if(root) root.innerHTML='';
+  }
+
   function render(){
     setup();
     const sel=document.getElementById('route-ym-select');
@@ -125,36 +187,57 @@
     }
     const ym=sel?.value||'';
     const ledger=window.LEDGER?.buildMonth ? LEDGER.buildMonth(ym) : {routes:joinedRows(ym),diagnostics:null};
-    const rows=ledger.routes || [];
+    const allRows=ledger.routes || [];
     const diag=ledger.diagnostics;
-    const totalCount=rows.reduce((s,r)=>s+r.count,0), totalSales=rows.reduce((s,r)=>s+r.sales,0), totalPay=rows.reduce((s,r)=>s+r.payment,0);
+
+    const companySel=document.getElementById('route-company-select');
+    const typeSel=document.getElementById('route-type-select');
+    const prevCompany=companySel?.value||'';
+    const prevType=typeSel?.value||'';
+    const companies=[...new Set(allRows.map(r=>r.companyName).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja'));
+    const types=[...new Set(allRows.map(r=>r.operationType).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja'));
+    setOptions(companySel,companies,prevCompany);
+    setOptions(typeSel,types,prevType);
+    const company=companySel?.value||'';
+    const type=typeSel?.value||'';
+    const q=String(document.getElementById('route-search')?.value||'').trim().toLowerCase();
+    const rows=allRows.filter(r=>(!company||r.companyName===company)&&(!type||r.operationType===type)&&(!q||`${r.worker} ${r.headNumber} ${r.companyName}`.toLowerCase().includes(q)));
+    currentRows=rows;
+
+    const totalCount=rows.reduce((s,r)=>s+r.count,0), totalSales=rows.reduce((s,r)=>s+r.sales,0), totalPay=rows.reduce((s,r)=>s+r.payment,0), totalMargin=totalSales-totalPay;
     const kpi=document.getElementById('route-kpi');
     if(kpi) kpi.innerHTML=`
-      <div class="kpi-card accent-navy"><div class="kpi-label">便数</div><div class="kpi-value">${fmt(rows.length)}便</div></div>
-      <div class="kpi-card accent-green"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}件</div></div>
-      <div class="kpi-card accent-navy"><div class="kpi-label">売上</div><div class="kpi-value">${fmt(totalSales)}円</div></div>
-      <div class="kpi-card accent-amber"><div class="kpi-label">売上－傭車支払</div><div class="kpi-value">${fmt(totalSales-totalPay)}円</div></div>`;
+      <div class="kpi-card accent-navy"><div class="kpi-label">対象便数</div><div class="kpi-value">${fmt(rows.length)}<small style="font-size:11px;margin-left:4px">便</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">配送 ${fmt(totalCount)}件</div></div>
+      <div class="kpi-card accent-green"><div class="kpi-label">売上</div><div class="kpi-value">${fmt(totalSales)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">1件平均 ${fmt(totalCount?totalSales/totalCount:0)}円</div></div>
+      <div class="kpi-card accent-amber"><div class="kpi-label">傭車支払</div><div class="kpi-value">${fmt(totalPay)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">売上比 ${totalSales?(totalPay/totalSales*100).toFixed(1):'0.0'}%</div></div>
+      <div class="kpi-card accent-navy"><div class="kpi-label">一次利益</div><div class="kpi-value ${totalMargin>=0?'profit-positive':'profit-negative'}">${fmt(totalMargin)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">利益率 ${totalSales?(totalMargin/totalSales*100).toFixed(1):'0.0'}%</div></div>`;
+
     const diagnostic=document.getElementById('route-diagnostic');
     if(diagnostic && diag){
       const missing=[];
       if(!diag.sourceStatus.routePdf) missing.push('配達持出リストPDF');
       if(!diag.sourceStatus.workerCsv) missing.push('作業者別CSV');
       if(!diag.sourceStatus.productCsv) missing.push('荷主別CSV');
-      if(!diag.sourceStatus.skdl0001) missing.push('SKDL0001（傭車支払）');
-      const masterWarn=(diag.unregisteredWorkers||[]).length ? `<div class="msg msg-warn" style="margin:0 0 12px">作業者マスタ未登録：${diag.unregisteredWorkers.map(esc).join('、')}。データ管理の「作業者マスタ」から所属会社・運行区分を登録してください。</div>` : '';
-      diagnostic.innerHTML=(missing.length
-        ? `<div class="msg msg-warn" style="margin:0 0 12px">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`
-        : `<div class="msg msg-info" style="margin:0 0 12px">照合率 <strong>${Number(diag.integrationRate||0).toFixed(1)}%</strong>　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　作業者未一致便 ${fmt(diag.routesWithoutWorker)}便　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`) + masterWarn;
+      if(!diag.sourceStatus.skdl0001) missing.push('SKDL0001');
+      const notices=[];
+      if(missing.length) notices.push(`<div class="msg msg-warn">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`);
+      else notices.push(`<div class="msg msg-info">統合率 <strong>${Number(diag.integrationRate||0).toFixed(1)}%</strong>　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　作業者未一致便 ${fmt(diag.routesWithoutWorker)}便　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`);
+      if((diag.unregisteredWorkers||[]).length) notices.push(`<div class="msg msg-warn">マスタ未登録：${diag.unregisteredWorkers.map(esc).join('、')}。マスタ管理から所属会社を登録してください。</div>`);
+      diagnostic.innerHTML=notices.join('');
     }
+
+    const count=document.getElementById('route-result-count');
+    if(count) count.textContent=`${fmt(rows.length)}件`;
     const body=document.getElementById('route-tbody');
-    if(body) body.innerHTML=rows.length?rows.map(r=>`<tr>
-      <td>${esc(r.date)}</td><td><strong>${esc(r.headNumber)}</strong></td><td>${esc(r.worker||'未取得')}</td>
-      <td>${r.workerRegistered ? `${esc(r.companyName||'未設定')}<div style="font-size:10px;color:var(--text3)">${esc(r.operationType||'未設定')}</div>` : '<span style="color:#b45309;font-weight:700">未登録</span>'}</td>
-      <td class="r">${fmt(r.count)}件</td><td class="r">${fmt(r.sales)}円</td><td class="r">${fmt(r.payment)}円</td>
-      <td class="r"><strong>${fmt(r.margin)}円</strong></td><td class="r">${fmt(r.avg)}円</td>
-      <td><span style="font-size:10px;font-weight:700;color:${r.status==='原票一致'?'#065f46':'#92400e'}">${esc(r.status)}</span></td>
-    </tr>`).join(''):`<tr><td colspan="10" style="padding:30px;text-align:center;color:var(--text3)">配達持出PDF、作業者別CSV、SKDL0001を取り込んでください。</td></tr>`;
+    if(body) body.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<tr onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')">
+      <td>${esc(r.date)}</td><td><strong>${esc(r.headNumber)}</strong></td><td>${esc(r.worker||'未取得')}</td><td>${r.workerRegistered?`${esc(r.companyName||'未設定')}<div style="font-size:10px;color:var(--text3);margin-top:2px">${esc(r.operationType||'')}</div>`:'<span class="route-status warn">未登録</span>'}</td>
+      <td class="r">${fmt(r.count)}件</td><td class="r">${fmt(r.sales)}円</td><td class="r">${fmt(r.payment)}円</td><td class="r"><strong class="${r.margin>=0?'profit-positive':'profit-negative'}">${fmt(r.margin)}円</strong></td><td class="r">${rate.toFixed(1)}%</td><td><span class="route-status ${statusClass(r.status)}">${esc(r.status)}</span></td>
+    </tr>`}).join(''):`<tr><td colspan="10" style="padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</td></tr>`;
+
+    const cards=document.getElementById('route-card-grid');
+    if(cards) cards.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<article class="route-profit-card" onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')"><div class="route-card-top"><div><div class="route-card-date">${esc(r.date)}</div><div class="route-card-title">${esc(r.headNumber)}</div><div class="route-card-worker">${esc(r.companyName||'未設定')} / ${esc(r.worker||'未取得')}</div></div><div><div class="route-card-profit-label">一次利益</div><div class="route-card-profit ${r.margin>=0?'profit-positive':'profit-negative'}">${fmt(r.margin)}円</div><div style="text-align:right;margin-top:5px"><span class="route-status ${statusClass(r.status)}">${esc(r.status)}</span></div></div></div><div class="route-card-metrics"><div>売上<strong>${fmt(r.sales)}円</strong></div><div>傭車支払<strong>${fmt(r.payment)}円</strong></div><div>利益率<strong>${rate.toFixed(1)}%</strong></div></div></article>`}).join(''):`<div style="grid-column:1/-1;padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</div>`;
+    setView(viewMode);
   }
 
-  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,joinedRows};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,joinedRows,setView,openDetail,closeDetail};
 })();
