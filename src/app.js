@@ -343,11 +343,11 @@ const CONFIG = {
 
   COLORS: ['#1a4d7c','#e05b4d','#1a7a52','#b45309','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#d97706'],
   VIEW_TITLES: {
-    dashboard:'ホーム', pl:'月次収支表', 'profit-structure':'利益構造分析', 'landing-forecast':'着地予測', trend:'売上推移',
+    dashboard:'ホーム', pl:'月次収支表', 'profit-structure':'経営分析', 'landing-forecast':'着地予測', trend:'売上推移',
     shipper:'荷主分析', indicators:'経営指標', annual:'年次サマリー',
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
-    'field-worker':'作業者分析', 'route-analysis':'便別採算分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
+    'field-worker':'作業者分析', 'route-analysis':'配送分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
     capacity:'キャパ分析', import:'その他取込', 'csv-import':'CSV取込', 'worker-master':'マスタ管理',
     kamoku:'収支科目 詳細分析', report:'会議報告書',
   },
@@ -1804,167 +1804,92 @@ const CHART_MGR = {
 /* ════════ §12 RENDER — Dashboard ══════════════════════════════ */
 function renderDashboard() {
   const area = document.getElementById('kpi-area');
+  const checkList = document.getElementById('home-check-list');
+  const headline = document.getElementById('home-headline');
+  const lead = document.getElementById('home-lead');
+  const periodLabel = document.getElementById('home-period-label');
   if (!area) return;
+
   renderDashboardSelector();
   const ds = selectedDashboardDS();
 
   if (!ds) {
-    area.innerHTML = `<div style="grid-column:1/-1" class="msg msg-info">データがありません。左メニューの「データ取込」からCSVを読み込んでください。</div>`;
-    ['exp-bars-area','shipper-bars-area'].forEach(id=>{
-      const el=document.getElementById(id); if(el) el.innerHTML='<div style="padding:10px;font-size:12px;color:var(--text3)">データなし</div>';
-    });
+    area.innerHTML = `
+      <div class="home-empty-kpi">
+        <strong>実績データがありません</strong>
+        <span>まずCSV取込から月次データを登録してください。</span>
+        <button class="btn btn-primary" onclick="NAV.go('csv-import')">CSV取込を開く</button>
+      </div>`;
+    if (headline) headline.textContent = '最初のデータを登録してください';
+    if (lead) lead.textContent = '取込後は、利益・注意点・配送採算をこの画面から確認できます。';
+    if (periodLabel) periodLabel.textContent = CENTER.name;
+    if (checkList) checkList.innerHTML = `
+      <button class="home-check info" onclick="NAV.go('csv-import')">
+        <span class="home-check-icon">1</span>
+        <span><strong>月次CSVを取り込む</strong><small>SKDL0001またはSKDL0003を登録します</small></span>
+        <b>›</b>
+      </button>`;
     CHART_MGR.destroyAll();
     return;
   }
 
-  // KPI Cards
-  const profitClass = ds.profit >= 0 ? 'green' : 'red';
-  const profitAccent = ds.profit >= 0 ? 'accent-green' : 'accent-red';
   const prevDs = prevDS(ds.ym);
+  const profitClass = ds.profit >= 0 ? 'positive' : 'negative';
+  const profitDiff = prevDs ? ds.profit - prevDs.profit : null;
+  const incomeDiff = prevDs ? ds.totalIncome - prevDs.totalIncome : null;
+
+  if (periodLabel) periodLabel.textContent = `${ymLabel(ds.ym)} ${datasetKindLabel(ds)} / ${CENTER.name}`;
+  if (headline) headline.textContent = ds.profit >= 0 ? '利益は黒字で推移しています' : '利益が赤字です';
+  if (lead) {
+    const diffText = profitDiff == null ? '前月比較データはありません。' : `前月から ${profitDiff >= 0 ? '+' : ''}${fmtK(profitDiff)}千円です。`;
+    lead.textContent = `営業利益 ${fmtK(ds.profit)}千円、利益率 ${pct(ds.profitRate)}。${diffText}`;
+  }
 
   area.innerHTML = `
-    <div class="kpi-card accent-navy">
-      <div class="kpi-label">営業収益（当月）</div>
-      <div class="kpi-value navy">${fmtK(ds.totalIncome)}<span style="font-size:13px;font-weight:400">千円</span></div>
-      <div class="kpi-sub-row">
-        <span class="kpi-sub">${ymLabel(ds.ym)}（${datasetKindLabel(ds)}）</span>
-        ${prevDs ? `<span class="pill ${ds.totalIncome>=prevDs.totalIncome?'up':'down'}">${ratio(ds.totalIncome,prevDs.totalIncome)} 前月比</span>` : ''}
+    <article class="home-kpi home-kpi-primary ${profitClass}" onclick="NAV.go('profit-structure')">
+      <div class="home-kpi-label">営業利益</div>
+      <div class="home-kpi-value">${fmtK(ds.profit)}<small>千円</small></div>
+      <div class="home-kpi-meta">
+        <span>利益率 ${pct(ds.profitRate)}</span>
+        ${profitDiff == null ? '' : `<span class="home-delta ${profitDiff >= 0 ? 'up' : 'down'}">前月 ${profitDiff >= 0 ? '+' : ''}${fmtK(profitDiff)}千円</span>`}
       </div>
-    </div>
-    <div class="kpi-card accent-red">
-      <div class="kpi-label">費用合計（当月）</div>
-      <div class="kpi-value red">${fmtK(ds.totalExpense)}<span style="font-size:13px;font-weight:400">千円</span></div>
-      <div class="kpi-sub-row">
-        <span class="kpi-sub">利益率目標：${CONFIG.TARGETS.pseudoLaborRate}%以下（人件費率）</span>
-      </div>
-    </div>
-    <div class="kpi-card ${profitAccent}">
-      <div class="kpi-label">センター利益（粗利）</div>
-      <div class="kpi-value ${profitClass}">${fmtK(ds.profit)}<span style="font-size:13px;font-weight:400">千円</span></div>
-      <div class="kpi-sub-row">
-        <span class="pill ${ds.profit>=0?'up':'down'}">${pct(ds.profitRate)} 利益率</span>
-      </div>
-    </div>
-    <div class="kpi-card accent-amber">
-      <div class="kpi-label">みなし人件費率</div>
-      <div class="kpi-value ${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'green' : 'red'}">${pct(ds.pseudoLaborRate)}</div>
-      <div class="kpi-sub-row">
-        <span class="kpi-sub">目標：${CONFIG.TARGETS.pseudoLaborRate}%以内</span>
-        <span class="pill ${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'up' : 'down'}">${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? '✓ 達成' : '⚠ 超過'}</span>
-      </div>
-    </div>`;
+    </article>
+    <article class="home-kpi" onclick="NAV.go('profit-structure')">
+      <div class="home-kpi-label">営業収益</div>
+      <div class="home-kpi-value">${fmtK(ds.totalIncome)}<small>千円</small></div>
+      <div class="home-kpi-meta">${incomeDiff == null ? '<span>前月比較なし</span>' : `<span class="home-delta ${incomeDiff >= 0 ? 'up' : 'down'}">前月 ${incomeDiff >= 0 ? '+' : ''}${fmtK(incomeDiff)}千円</span>`}</div>
+    </article>
+    <article class="home-kpi" onclick="NAV.go('profit-structure')">
+      <div class="home-kpi-label">費用合計</div>
+      <div class="home-kpi-value">${fmtK(ds.totalExpense)}<small>千円</small></div>
+      <div class="home-kpi-meta"><span>収益比 ${pct(ds.totalIncome ? ds.totalExpense / ds.totalIncome * 100 : 0)}</span></div>
+    </article>
+    <article class="home-kpi" onclick="NAV.go('profit-structure')">
+      <div class="home-kpi-label">みなし人件費率</div>
+      <div class="home-kpi-value">${pct(ds.pseudoLaborRate)}</div>
+      <div class="home-kpi-meta"><span>目標 ${CONFIG.TARGETS.pseudoLaborRate}%以内</span><span class="home-status ${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'ok' : 'warn'}">${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? '達成' : '超過'}</span></div>
+    </article>`;
 
-  // メインチャート（月次収支推移）
-  const dashboardTrendList = dashboardDatasetsForSelectedFiscalYear();
-  const labels = dashboardTrendList.map(d=>ymLabel(d.ym));
-  const inc  = dashboardTrendList.map(d=>d.totalIncome/1000);
-  const exp  = dashboardTrendList.map(d=>d.totalExpense/1000);
-  const prof = dashboardTrendList.map(d=>d.profit/1000);
+  const items = [];
+  const ledger = window.LEDGER?.buildMonth ? LEDGER.buildMonth(ds.ym) : null;
+  const diag = ledger?.diagnostics || null;
 
-  CHART_MGR.make('c-main-trend', {
-    type:'bar',
-    data: {
-      labels,
-      datasets:[
-        {label:'収入',data:inc,backgroundColor:'rgba(26,77,124,.7)',order:2},
-        {label:'費用',data:exp,backgroundColor:'rgba(224,91,77,.7)',order:2},
-        {label:'利益',data:prof,type:'line',borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,.1)',
-          pointRadius:3,tension:.3,fill:false,order:1,yAxisID:'y2'},
-      ]
-    },
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{mode:'index'}},
-      scales:{
-        y:{title:{display:true,text:'千円'},grid:{color:'#f0f0f0'}},
-        y2:{position:'right',title:{display:true,text:'利益（千円）'},grid:{display:false}},
-      }
-    }
-  });
+  if (!diag?.sourceStatus?.routePdf) items.push({ level:'warn', icon:'!', title:'配達持出リストPDFが未登録です', sub:'便別採算を確認するには「その他取込」から登録してください。', view:'import' });
+  if (diag?.unmatchedRouteSlipCount > 0) items.push({ level:'warn', icon:'!', title:`原票が ${diag.unmatchedRouteSlipCount}件 未照合です`, sub:'配送分析で一致状況を確認してください。', view:'route-analysis' });
+  if (diag?.routesWithUnregisteredWorker > 0) items.push({ level:'warn', icon:'!', title:`未登録作業者を含む便が ${diag.routesWithUnregisteredWorker}便 あります`, sub:'マスタ管理で会社・作業者を登録してください。', view:'worker-master' });
+  if (diag?.routesWithoutPayment > 0) items.push({ level:'info', icon:'i', title:`傭車費未一致の便が ${diag.routesWithoutPayment}便 あります`, sub:'SKDL0001とヘッド番号の一致を確認してください。', view:'route-analysis' });
+  if (ds.profit < 0) items.push({ level:'danger', icon:'!', title:'営業利益が赤字です', sub:'経営分析から悪化している科目を確認してください。', view:'profit-structure' });
+  if (ds.pseudoLaborRate > CONFIG.TARGETS.pseudoLaborRate) items.push({ level:'warn', icon:'!', title:'みなし人件費率が目標を超えています', sub:'人件費と傭車費の内訳を確認してください。', view:'profit-structure' });
+  if (!items.length) items.push({ level:'ok', icon:'✓', title:'現在、優先して対応する項目はありません', sub:'必要に応じて経営分析または配送分析へ進んでください。', view:'profit-structure' });
 
-  // 収入構成（当月）ドーナツ
-  const incItems = CONFIG.INCOME_KEYS.filter(k=>n(ds.rows[k])>0);
-  CHART_MGR.make('c-inc-donut', {
-    type:'doughnut',
-    data:{
-      labels: incItems,
-      datasets:[{data:incItems.map(k=>n(ds.rows[k])/1000), backgroundColor:CONFIG.COLORS, borderWidth:1}]
-    },
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}
-  });
-  const leg = document.getElementById('inc-donut-legend');
-  if (leg) leg.innerHTML = incItems.map((k,i)=>`
-    <div class="legend-item"><div class="legend-dot" style="background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div>${esc(k)}</div>`).join('');
+  if (checkList) checkList.innerHTML = items.slice(0, 5).map(item => `
+    <button class="home-check ${item.level}" onclick="NAV.go('${item.view}')">
+      <span class="home-check-icon">${item.icon}</span>
+      <span><strong>${esc(item.title)}</strong><small>${esc(item.sub)}</small></span>
+      <b>›</b>
+    </button>`).join('');
 
-  // 費用内訳（当月）
-  // 確定CSV/速報CSV/収支補完に保存されている ds.rows をそのまま使用する。
-  // 画面は既存カード内に「上位費用＋構成比」を整理表示するだけにし、不要な円グラフは出さない。
-  const expArea = document.getElementById('exp-bars-area');
-  if (expArea && ds && ds.rows) {
-    if (STATE._charts && STATE._charts['c-exp-donut']) {
-      try { STATE._charts['c-exp-donut'].destroy(); } catch(e) {}
-      delete STATE._charts['c-exp-donut'];
-    }
-
-    const expenseGroups = (CONFIG.PL_DEF || [])
-      .filter(def => def && def.type === 'group' && def.id !== 'revenue')
-      .map(def => {
-        const value = (def.keys || []).reduce((sum, key) => sum + n(ds.rows[key]), 0);
-        return { label: def.label || def.id || '未設定', value };
-      })
-      .filter(item => item.value > 0)
-      .sort((a, b) => b.value - a.value);
-
-    if (!expenseGroups.length) {
-      expArea.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">費用内訳データがありません</div>';
-    } else {
-      const top = expenseGroups.slice(0, 8);
-      const otherValue = expenseGroups.slice(8).reduce((sum, item) => sum + item.value, 0);
-      const rows = otherValue > 0 ? [...top, { label:'その他', value: otherValue }] : top;
-      const maxValue = Math.max(...rows.map(item => item.value), 1);
-      const denominator = ds.totalExpense || rows.reduce((sum, item) => sum + item.value, 0) || 1;
-      const totalRowsValue = rows.reduce((sum, item) => sum + item.value, 0);
-
-      expArea.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;font-size:11px;color:var(--text3)">
-          <span>データ元：${datasetKindLabel(ds)}CSV / ${ymLabel(ds.ym)}</span>
-          <span>費用合計 ${fmtK(ds.totalExpense)}千円</span>
-        </div>
-        <div style="display:grid;gap:7px">
-          ${rows.map((item, i) => {
-            const width = (item.value / maxValue * 100).toFixed(1);
-            const rate = denominator > 0 ? (item.value / denominator * 100) : 0;
-            return `
-              <div style="display:grid;grid-template-columns:120px 1fr 96px;gap:8px;align-items:center">
-                <div style="font-size:12px;font-weight:700;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.label)}">${esc(item.label)}</div>
-                <div style="height:14px;background:#e5e7eb;border-radius:999px;overflow:hidden">
-                  <div style="height:100%;width:${width}%;background:${CONFIG.COLORS[(i+1)%CONFIG.COLORS.length]};border-radius:999px"></div>
-                </div>
-                <div style="font-size:12px;font-weight:800;text-align:right;white-space:nowrap">${fmtK(item.value)}千 <span style="color:var(--text3);font-weight:700">${rate.toFixed(1)}%</span></div>
-              </div>`;
-          }).join('')}
-        </div>
-        ${Math.abs(totalRowsValue - denominator) > 1 ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">※ 表示内訳 ${fmtK(totalRowsValue)}千円 / 費用合計 ${fmtK(denominator)}千円</div>` : ''}
-      `;
-    }
-  }
-
-  // 荷主バー（shippers存在時のみ）
-  const shipArea = document.getElementById('shipper-bars-area');
-  if (shipArea) {
-    if (ds.shippers && Object.keys(ds.shippers).length) {
-      const items = Object.entries(ds.shippers).sort((a,b)=>b[1].income-a[1].income).slice(0,8);
-      const maxV = Math.max(...items.map(x=>x[1].income),1);
-      shipArea.innerHTML = items.map(([name,d],i)=>`
-        <div class="mbar-row">
-          <div class="mbar-label" title="${esc(name)}">${esc(name)}</div>
-          <div class="mbar-track"><div class="mbar-fill" style="width:${(d.income/maxV*100).toFixed(1)}%;background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div></div>
-          <div class="mbar-val">${fmtK(d.income)}千</div>
-        </div>`).join('');
-    } else {
-      shipArea.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">荷主データは別途CSV取込が必要です</div>';
-    }
-  }
+  CHART_MGR.destroyAll();
 }
 
 
