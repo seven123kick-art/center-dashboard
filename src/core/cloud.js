@@ -507,7 +507,7 @@ var CLOUD = window.CLOUD = {
     // ここへ大きい配列を入れると Supabase Storage の object size 上限で同期失敗する。
     sanitizePersonalDataState(STATE);
     return {
-      version: 31,
+      version: 32,
       center: CENTER.id,
       savedAt: new Date().toISOString(),
       fiscalYear: STATE.fiscalYear || null,
@@ -515,6 +515,7 @@ var CLOUD = window.CLOUD = {
       planData: STATE.planData || {},
       dailyRecords: STATE.dailyRecords || [],
       routeData: STATE.routeData || [],
+      workerMaster: STATE.workerMaster || [],
       memos: STATE.memos || {},
       library: STATE.library || [],
       reportKnowledge: STATE.reportKnowledge || { policies:{}, references:[] },
@@ -533,6 +534,7 @@ var CLOUD = window.CLOUD = {
     if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
     if (Array.isArray(full.dailyRecords)) STATE.dailyRecords = full.dailyRecords;
     if (Array.isArray(full.routeData)) STATE.routeData = full.routeData;
+    if (Array.isArray(full.workerMaster)) STATE.workerMaster = full.workerMaster;
     if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
     if (Array.isArray(full.library)) STATE.library = full.library;
     if (full.reportKnowledge) STATE.reportKnowledge = normalizeReportKnowledge(full.reportKnowledge);

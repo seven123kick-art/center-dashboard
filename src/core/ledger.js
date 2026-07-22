@@ -5,6 +5,7 @@
 
   const arr = v => Array.isArray(v) ? v : [];
   const text = v => String(v ?? '').trim();
+  const exact = v => String(v ?? '');
   const num = v => Number(v || 0) || 0;
   const digits = v => String(v ?? '').replace(/\D/g,'');
   const dateKey = v => digits(v).slice(0,8);
@@ -87,7 +88,8 @@
     const usedPaymentKeys = new Set();
 
     routes.forEach((route, routeIndex) => {
-      const workerName = text(route.worker);
+      const workerName = exact(route.worker);
+      const master = window.WORKERS?.find ? WORKERS.find(workerName, route.date) : null;
       // 作業者名は登録制の正式名称をそのままキーとして使用する。
       const worker = workers.byName.get(workerName) || null;
       const selected = slipsForRoute(route, worker);
@@ -116,6 +118,9 @@
           routeId: `${dateKey(route.date)}|${digits(route.headNumber)}`,
           headNumber: digits(route.headNumber),
           workerName,
+          companyName: exact(master?.companyName),
+          operationType: exact(master?.operationType),
+          workerRegistered: !!master,
           slip,
           sales: num(workerSlip?.amount),
           shipperCode: text(product?.shipperCode),
@@ -147,6 +152,9 @@
         date: text(route.date),
         headNumber: digits(route.headNumber),
         worker: workerName,
+        companyName: exact(master?.companyName),
+        operationType: exact(master?.operationType),
+        workerRegistered: !!master,
         slips: selected.slips,
         slipRows: routeSlipRows,
         count: matchedCount,
@@ -187,6 +195,8 @@
       paymentRowTotal: payments.length,
       routesWithoutPayment: routeRows.filter(r=>r.status === '傭車費なし').length,
       routesWithoutWorker: routeRows.filter(r=>r.status === '作業者未一致').length,
+      routesWithUnregisteredWorker: routeRows.filter(r=>r.worker && !r.workerRegistered).length,
+      unregisteredWorkers: [...new Set(routeRows.filter(r=>r.worker && !r.workerRegistered).map(r=>r.worker))],
       routesWithoutSales: routeRows.filter(r=>r.status === '売上未一致' || r.status === '原票未取得').length,
       integrationRate: routeSlipTotal ? matchedRouteSlipCount / routeSlipTotal * 100 : 0
     };
@@ -203,5 +213,6 @@
     ].filter(Boolean))].sort();
   }
 
-  window.LEDGER = { buildMonth, availableMonths };
+  function invalidate(){}
+  window.LEDGER = { buildMonth, availableMonths, invalidate };
 })();

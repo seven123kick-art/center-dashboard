@@ -348,7 +348,7 @@ const CONFIG = {
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
     'field-worker':'作業者分析', 'route-analysis':'便別採算分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
-    capacity:'キャパ分析', import:'その他取込', 'csv-import':'CSV取込',
+    capacity:'キャパ分析', import:'その他取込', 'csv-import':'CSV取込', 'worker-master':'作業者マスタ',
     kamoku:'収支科目 詳細分析', report:'会議報告書',
   },
 };
@@ -366,6 +366,7 @@ const STATE = {
   workerCsvData: [], // 現場明細CSV（作業者CSV）月単位データ
   productAddressData: [], // 現場明細CSV（商品住所CSV）月単位データ
   routeData: [], // 配達持出PDFから抽出した便情報 [{ym,routes:[{date,headNumber,worker,slips}]}]
+  workerMaster: [], // 作業者マスタ [{workerName,companyName,operationType,validFrom,validTo}]
   dailyRecords: [], // 日別実績CSV（着地予測用） [{date,ym,revenue,labor,yosha,other,profit}]
   fieldData: [],    // [{ym,areas:{name:{count,shippers:{}}}}]
   areaData:  [],    // 旧データ互換用（現在は旧帳票関連では使用しない）
@@ -5581,6 +5582,9 @@ const NAV = {
       case 'import':
         renderImport();
         if (window.ROUTE_ANALYSIS_UI?.setup) ROUTE_ANALYSIS_UI.setup();
+        break;
+      case 'worker-master':
+        if (window.WORKER_MASTER_UI?.render) WORKER_MASTER_UI.render();
         break;
       case 'csv-import':
         renderFieldViewAfterCloud(view, () => {

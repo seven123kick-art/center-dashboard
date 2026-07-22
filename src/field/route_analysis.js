@@ -141,17 +141,19 @@
       if(!diag.sourceStatus.workerCsv) missing.push('作業者別CSV');
       if(!diag.sourceStatus.productCsv) missing.push('荷主別CSV');
       if(!diag.sourceStatus.skdl0001) missing.push('SKDL0001（傭車支払）');
-      diagnostic.innerHTML=missing.length
+      const masterWarn=(diag.unregisteredWorkers||[]).length ? `<div class="msg msg-warn" style="margin:0 0 12px">作業者マスタ未登録：${diag.unregisteredWorkers.map(esc).join('、')}。データ管理の「作業者マスタ」から所属会社・運行区分を登録してください。</div>` : '';
+      diagnostic.innerHTML=(missing.length
         ? `<div class="msg msg-warn" style="margin:0 0 12px">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`
-        : `<div class="msg msg-info" style="margin:0 0 12px">照合率 <strong>${Number(diag.integrationRate||0).toFixed(1)}%</strong>　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　作業者未一致便 ${fmt(diag.routesWithoutWorker)}便　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`;
+        : `<div class="msg msg-info" style="margin:0 0 12px">照合率 <strong>${Number(diag.integrationRate||0).toFixed(1)}%</strong>　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　作業者未一致便 ${fmt(diag.routesWithoutWorker)}便　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`) + masterWarn;
     }
     const body=document.getElementById('route-tbody');
     if(body) body.innerHTML=rows.length?rows.map(r=>`<tr>
       <td>${esc(r.date)}</td><td><strong>${esc(r.headNumber)}</strong></td><td>${esc(r.worker||'未取得')}</td>
+      <td>${r.workerRegistered ? `${esc(r.companyName||'未設定')}<div style="font-size:10px;color:var(--text3)">${esc(r.operationType||'未設定')}</div>` : '<span style="color:#b45309;font-weight:700">未登録</span>'}</td>
       <td class="r">${fmt(r.count)}件</td><td class="r">${fmt(r.sales)}円</td><td class="r">${fmt(r.payment)}円</td>
       <td class="r"><strong>${fmt(r.margin)}円</strong></td><td class="r">${fmt(r.avg)}円</td>
       <td><span style="font-size:10px;font-weight:700;color:${r.status==='原票一致'?'#065f46':'#92400e'}">${esc(r.status)}</span></td>
-    </tr>`).join(''):`<tr><td colspan="9" style="padding:30px;text-align:center;color:var(--text3)">配達持出PDF、作業者別CSV、SKDL0001を取り込んでください。</td></tr>`;
+    </tr>`).join(''):`<tr><td colspan="10" style="padding:30px;text-align:center;color:var(--text3)">配達持出PDF、作業者別CSV、SKDL0001を取り込んでください。</td></tr>`;
   }
 
   window.ROUTE_ANALYSIS_UI={render,setup,importFiles,joinedRows};

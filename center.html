@@ -207,6 +207,9 @@
   <div class="nav-item" data-view="import" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M5 7l3 3 3-3M2 12v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg><span data-center-import-name>その他取込</span>
   </div>
+  <div class="nav-item" data-view="worker-master" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="5" r="2.5"/><path d="M1.5 14c.4-3 2-4.5 4.5-4.5s4.1 1.5 4.5 4.5M11 4h4M13 2v4"/></svg>作業者マスタ
+  </div>
 
   <div class="sidebar-bottom">
     <div style="margin-bottom:8px">
@@ -786,7 +789,7 @@
                 <div class="scroll-x">
                   <table class="tbl">
                     <thead><tr>
-                      <th>作業者</th><th class="r">件数</th><th class="r">売上（千円）</th>
+                      <th>作業者</th><th>所属・区分</th><th class="r">件数</th><th class="r">売上（千円）</th>
                       <th class="r">構成比</th><th class="r">1件単価（円）</th>
                       <th class="r">配送料</th><th class="r">設置料</th><th class="r">リサイクル</th>
                     </tr></thead>
@@ -970,6 +973,10 @@
     <!-- ▼ 科目分析 -->
     <div class="view" id="view-kamoku">
       <div id="kamoku-root"></div>
+    </div>
+
+        <div class="view" id="view-worker-master">
+      <div id="worker-master-root"></div>
     </div>
 
         <div class="view" id="view-csv-import">
@@ -1343,6 +1350,7 @@
 <script src="src/core/cloud.js" defer></script>
 <script src="src/core/auto_sync.js" defer></script>
 <script src="src/core/ledger.js" defer></script>
+<script src="src/core/workers.js" defer></script>
 <script src="src/modules/dashboard.js" defer></script>
 <script src="src/modules/shipper.js" id="module-shipper" defer></script>
 <script src="src/modules/kamoku.js" id="module-kamoku" defer></script>
