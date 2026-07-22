@@ -161,17 +161,9 @@
     <span class="nav-label">配送分析</span>
   </div>
 
-  <div class="nav-group" data-group="data">
-    <button type="button" class="nav-group-toggle" onclick="NAVGROUP.toggle('data')" aria-expanded="false">
-      <span class="nav-group-main"><svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12v9H2z"/><path d="M5 4V2h6v2"/><path d="M5 8h6M5 11h4"/></svg><span>データ管理</span></span>
-      <span class="nav-group-chevron">›</span>
-    </button>
-    <div class="nav-group-items">
-      <div class="nav-item nav-subitem" data-view="csv-import" onclick="NAV.go(this)">CSV取込</div>
-      <div class="nav-item nav-subitem" data-view="import" onclick="NAV.go(this)"><span data-center-import-name>その他取込</span></div>
-      <div class="nav-item nav-subitem" data-view="worker-master" onclick="NAV.go(this)">マスタ管理</div>
-      <div class="nav-item nav-subitem" data-view="library" onclick="NAV.go(this)">過去資料</div>
-    </div>
+  <div class="nav-item nav-primary" data-view="csv-import" data-nav-hub="data" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12v9H2z"/><path d="M5 4V2h6v2"/><path d="M5 8h6M5 11h4"/></svg>
+    <span class="nav-label">データ管理</span>
   </div>
 
   <div class="sidebar-bottom">
@@ -191,7 +183,7 @@
         style="flex:1;font-size:10px;padding:4px 0;color:#a8bdd4;border-color:#2e5282;background:transparent">↓ 書出</button>
       <button onclick="document.getElementById('session-load-input').click()" class="btn" title="バックアップJSONから復元"
         style="flex:1;font-size:10px;padding:4px 0;color:#a8bdd4;border-color:#2e5282;background:transparent">↑ 復元</button>
-      <button onclick="NAV.go(document.querySelector('.nav-item[data-view=\'import\']'))" class="btn"
+      <button onclick="NAV.go('import')" class="btn"
         title="データ管理（容量確認・月削除）"
         style="flex:1;font-size:10px;padding:4px 0;color:#a8bdd4;border-color:#2e5282;background:transparent">⚙ 管理</button>
       <input type="file" id="session-load-input" accept=".json" style="display:none" onchange="DB.importJSON(this.files[0])">
@@ -576,6 +568,12 @@
 
         <!-- ▼ 過去資料ライブラリ -->
     <div class="view" id="view-library">
+      <div class="analysis-hub-tabs" data-management-tabs>
+        <button type="button" data-management-view="csv-import" onclick="DATA_MANAGEMENT_NAV.go('csv-import')">CSV取込</button>
+        <button type="button" data-management-view="import" onclick="DATA_MANAGEMENT_NAV.go('import')">PDF・その他取込</button>
+        <button type="button" data-management-view="worker-master" onclick="DATA_MANAGEMENT_NAV.go('worker-master')">マスタ管理</button>
+        <button type="button" data-management-view="library" onclick="DATA_MANAGEMENT_NAV.go('library')">過去資料</button>
+      </div>
       <div class="card" style="margin-bottom:14px;border-top:3px solid var(--navy)">
         <div class="card-header">
           <span class="card-title">過去資料 一括取込</span>
@@ -828,8 +826,8 @@
           <p class="saas-page-sub">売上・傭車支払・一次利益を便単位で把握し、原票まで掘り下げます。</p>
         </div>
         <div class="saas-head-actions">
-          <button class="btn saas-btn-secondary" onclick="NAV.go(document.querySelector('.nav-item[data-view=\'import\']'))">PDF取込</button>
-          <button class="btn btn-primary" onclick="NAV.go(document.querySelector('.nav-item[data-view=\'csv-import\']'))">CSV取込</button>
+          <button class="btn saas-btn-secondary" onclick="NAV.go('import')">PDF取込</button>
+          <button class="btn btn-primary" onclick="NAV.go('csv-import')">CSV取込</button>
         </div>
       </div>
 
@@ -1049,10 +1047,22 @@
     </div>
 
         <div class="view" id="view-worker-master">
+      <div class="analysis-hub-tabs" data-management-tabs>
+        <button type="button" data-management-view="csv-import" onclick="DATA_MANAGEMENT_NAV.go('csv-import')">CSV取込</button>
+        <button type="button" data-management-view="import" onclick="DATA_MANAGEMENT_NAV.go('import')">PDF・その他取込</button>
+        <button type="button" data-management-view="worker-master" onclick="DATA_MANAGEMENT_NAV.go('worker-master')">マスタ管理</button>
+        <button type="button" data-management-view="library" onclick="DATA_MANAGEMENT_NAV.go('library')">過去資料</button>
+      </div>
       <div id="worker-master-root"></div>
     </div>
 
         <div class="view" id="view-csv-import">
+      <div class="analysis-hub-tabs" data-management-tabs>
+        <button type="button" data-management-view="csv-import" onclick="DATA_MANAGEMENT_NAV.go('csv-import')">CSV取込</button>
+        <button type="button" data-management-view="import" onclick="DATA_MANAGEMENT_NAV.go('import')">PDF・その他取込</button>
+        <button type="button" data-management-view="worker-master" onclick="DATA_MANAGEMENT_NAV.go('worker-master')">マスタ管理</button>
+        <button type="button" data-management-view="library" onclick="DATA_MANAGEMENT_NAV.go('library')">過去資料</button>
+      </div>
       <div class="card" style="margin-bottom:14px;border:2px solid #60a5fa;background:#eff6ff">
         <div class="card-header" style="border-bottom:1px solid #bfdbfe">
           <span class="card-title">📦 CSV取込</span>
@@ -1203,6 +1213,12 @@
         </div>
 
         <div class="view" id="view-import">
+      <div class="analysis-hub-tabs" data-management-tabs>
+        <button type="button" data-management-view="csv-import" onclick="DATA_MANAGEMENT_NAV.go('csv-import')">CSV取込</button>
+        <button type="button" data-management-view="import" onclick="DATA_MANAGEMENT_NAV.go('import')">PDF・その他取込</button>
+        <button type="button" data-management-view="worker-master" onclick="DATA_MANAGEMENT_NAV.go('worker-master')">マスタ管理</button>
+        <button type="button" data-management-view="library" onclick="DATA_MANAGEMENT_NAV.go('library')">過去資料</button>
+      </div>
       <div class="card" id="import-center-card" style="margin-bottom:14px;border:2px solid #60a5fa;background:#eff6ff">
         <div class="card-header" style="border-bottom:1px solid #bfdbfe">
           <span class="card-title" id="import-target-title">その他取込</span>
@@ -1216,7 +1232,7 @@
       <div class="card" style="margin-bottom:14px;background:#f8fafc">
         <div class="card-body" style="font-size:12px;color:var(--text2);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
           <span>SKDL・作業者別・荷主別などのCSVは「CSV取込」から登録してください。</span>
-          <button class="btn btn-primary" onclick="NAV.go(document.querySelector('.nav-item[data-view=&quot;csv-import&quot;]'))" style="font-size:12px;white-space:nowrap">📦 CSV取込を開く</button>
+          <button class="btn btn-primary" onclick="NAV.go('csv-import')" style="font-size:12px;white-space:nowrap">📦 CSV取込を開く</button>
         </div>
       </div>
 

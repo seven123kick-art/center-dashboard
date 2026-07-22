@@ -5511,6 +5511,24 @@ const DELIVERY_NAV = {
   }
 };
 
+const DATA_MANAGEMENT_NAV = {
+  views: new Set(['csv-import','import','worker-master','library']),
+  go(view) {
+    if (!this.views.has(view)) return;
+    NAV.go(view);
+  },
+  sync(view) {
+    const active = this.views.has(view);
+    const hub = document.querySelector('[data-nav-hub="data"]');
+    if (hub) hub.classList.toggle('active', active);
+    document.querySelectorAll('[data-management-tabs]').forEach(tabs => {
+      tabs.querySelectorAll('[data-management-view]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.managementView === view);
+      });
+    });
+  }
+};
+
 const NAV = {
   // メイン画面切替（同期なし、再描画のみ）
   go(el) {
@@ -5529,6 +5547,7 @@ const NAV = {
     if (navEl) navEl.classList.add('active');
     if (window.NAVGROUP) NAVGROUP.sync(view);
     DELIVERY_NAV.sync(view);
+    DATA_MANAGEMENT_NAV.sync(view);
 
     UI.updateTopbar(view);
     this._render(view);
