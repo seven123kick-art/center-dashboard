@@ -94,6 +94,36 @@ function renderPL() {
   }
   if (notice) notice.innerHTML = '';
 
+  const kpiArea = document.getElementById('pl-kpi-area');
+  if (kpiArea) {
+    const revenue = n(ds.totalIncome || 0);
+    const expense = n(ds.totalExpense || 0);
+    const profit = revenue - expense;
+    const profitRate = revenue > 0 ? profit / revenue * 100 : 0;
+    const laborRate = n(ds.pseudoLaborRate || 0);
+    kpiArea.innerHTML = `
+      <div class="pl-kpi-card pl-kpi-primary">
+        <span>センター利益（粗利）</span>
+        <strong class="${profit >= 0 ? 'profit-positive' : 'profit-negative'}">${fmtK(profit)}<small>千円</small></strong>
+        <em>利益率 ${pct(profitRate)}</em>
+      </div>
+      <div class="pl-kpi-card">
+        <span>営業収益</span>
+        <strong>${fmtK(revenue)}<small>千円</small></strong>
+        <em>${ymLabel(ds.ym)} ${datasetKindLabel(ds)}</em>
+      </div>
+      <div class="pl-kpi-card">
+        <span>費用合計</span>
+        <strong>${fmtK(expense)}<small>千円</small></strong>
+        <em>収入比 ${revenue > 0 ? pct(expense / revenue * 100) : '—'}</em>
+      </div>
+      <div class="pl-kpi-card">
+        <span>みなし人件費率</span>
+        <strong class="${laborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'profit-positive' : 'profit-negative'}">${pct(laborRate)}</strong>
+        <em>目標 ${CONFIG.TARGETS.pseudoLaborRate}%以内</em>
+      </div>`;
+  }
+
   const prev = prevDS(ds.ym);
   const py   = sameMonthLastYear(ds.ym);
   const fy   = fiscalYearFromYM(ds.ym);

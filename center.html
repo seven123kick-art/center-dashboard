@@ -139,26 +139,36 @@
   </div>
   <a class="sidebar-top-link" href="index.html">← TOPへ戻る</a>
 
-  <div class="sidebar-section">メイン</div>
+  <div class="sidebar-section">ナビゲーション</div>
 
   <div class="nav-item active nav-primary" data-view="dashboard" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 7.2L8 2l6 5.2V14a1 1 0 0 1-1 1h-3.2v-4.3H6.2V15H3a1 1 0 0 1-1-1z"/></svg>
     <span class="nav-label">ホーム</span>
   </div>
 
-  <div class="nav-item nav-primary" data-view="profit-structure" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13h12"/><path d="M3 10l3-3 3 2 4-5"/></svg>
-    <span class="nav-label">経営分析</span>
+  <div class="nav-item nav-primary" data-view="pl" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 6h12M6 2v12M10 2v12"/></svg>
+    <span class="nav-label">月次収支</span>
   </div>
 
   <div class="nav-item nav-primary" data-view="landing-forecast" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12h12M3 9l3-3 3 2 4-5"/><circle cx="13" cy="3" r="1" fill="currentColor"/></svg>
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13h12"/><path d="M3 10l3-3 3 2 4-5"/><circle cx="6" cy="7" r="1" fill="currentColor"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="13" cy="4" r="1" fill="currentColor"/></svg>
     <span class="nav-label">着地予測</span>
   </div>
 
-  <div class="nav-item nav-primary" data-view="route-analysis" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="4" width="9" height="7" rx="1"/><path d="M10.5 6h2l2 2v3h-4z"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="12.5" cy="12.5" r="1.5"/></svg>
-    <span class="nav-label">配送分析</span>
+  <div class="nav-group" data-group="delivery">
+    <button type="button" class="nav-group-toggle" onclick="NAVGROUP.toggle('delivery')" aria-expanded="false">
+      <span class="nav-group-main"><svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="4" width="9" height="7" rx="1"/><path d="M10.5 6h2l2 2v3h-4z"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="12.5" cy="12.5" r="1.5"/></svg><span>配送</span></span>
+      <span class="nav-group-chevron">›</span>
+    </button>
+    <div class="nav-group-items">
+      <div class="nav-item nav-subitem" data-view="route-analysis" onclick="NAV.go(this)">便別採算</div>
+      <div class="nav-item nav-subitem" data-view="field-worker" onclick="NAV.go(this)">作業者別</div>
+      <div class="nav-item nav-subitem" data-view="field-content" onclick="NAV.go(this)">作業内容</div>
+      <div class="nav-item nav-subitem" data-view="field-product" onclick="NAV.go(this)">商品カテゴリ</div>
+      <div class="nav-item nav-subitem" data-view="field-area" onclick="NAV.go(this)">エリア別</div>
+      <div class="nav-item nav-subitem" data-view="capacity" onclick="NAV.go(this)">キャパ分析</div>
+    </div>
   </div>
 
   <div class="nav-group" data-group="data">
@@ -222,54 +232,55 @@
   <!-- コンテンツ -->
   <div id="content">
 
-    <!-- ▼ ホーム -->
+    <!-- ▼ ダッシュボード -->
     <div class="view active" id="view-dashboard">
-      <section class="home-hero" id="home-hero">
-        <div>
-          <div class="home-eyebrow" id="home-period-label">最新実績</div>
-          <h1 id="home-headline">経営状況を確認</h1>
-          <p id="home-lead">データを読み込むと、利益・注意点・次に見る場所をここへ集約します。</p>
-        </div>
-        <div class="home-hero-actions">
-          <button class="btn btn-primary" onclick="NAV.go('profit-structure')">経営分析を見る</button>
-          <button class="btn" onclick="NAV.go('landing-forecast')">着地予測を見る</button>
-        </div>
-      </section>
-
-      <div class="home-kpi-grid" id="kpi-area"></div>
-
-      <div class="home-grid-main">
-        <section class="card home-focus-card">
+      <div class="kpi-row kpi-row-4" id="kpi-area"></div>
+      <div class="grid-6-4">
+        <div class="card">
           <div class="card-header">
-            <div>
-              <span class="card-title">確認すること</span>
-              <div class="home-card-sub">対応が必要なものだけを表示します</div>
+            <span class="card-title">月次収支推移</span>
+            <div class="legend" style="margin:0">
+              <div class="legend-item"><div class="legend-dot" style="background:#1a4d7c"></div>収入</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#e05b4d"></div>費用</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div>利益</div>
             </div>
           </div>
-          <div class="home-check-list" id="home-check-list"></div>
-        </section>
-
-        <section class="card">
-          <div class="card-header">
-            <div>
-              <span class="card-title">次に見る</span>
-              <div class="home-card-sub">目的から選んで掘り下げます</div>
-            </div>
+          <div class="card-body">
+            <div class="chart-wrap" style="height:200px"><canvas id="c-main-trend"></canvas></div>
           </div>
-          <div class="home-action-list">
-            <button class="home-action" onclick="NAV.go('profit-structure')"><span><strong>利益の中身を確認</strong><small>売上・費用・利益構造</small></span><b>›</b></button>
-            <button class="home-action" onclick="NAV.go('landing-forecast')"><span><strong>月末着地を確認</strong><small>見込みと不足額、打ち手</small></span><b>›</b></button>
-            <button class="home-action" onclick="NAV.go('route-analysis')"><span><strong>配送採算を確認</strong><small>便・作業者・協力会社・原票</small></span><b>›</b></button>
-            <button class="home-action" onclick="NAV.go('csv-import')"><span><strong>データを更新</strong><small>CSV・PDF・マスタ</small></span><b>›</b></button>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">収入構成（当月）</span></div>
+          <div class="card-body">
+            <div class="chart-wrap" style="height:140px"><canvas id="c-inc-donut"></canvas></div>
+            <div id="inc-donut-legend" class="legend" style="margin-top:8px;margin-bottom:0"></div>
           </div>
-        </section>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-header"><span class="card-title">費用内訳（当月）</span></div>
+          <div class="card-body-sm" id="exp-bars-area"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">荷主別売上　上位8社（当月）</span></div>
+          <div class="card-body-sm" id="shipper-bars-area"></div>
+        </div>
       </div>
     </div>
 
     <!-- ▼ 月次収支表 -->
     <div class="view" id="view-pl">
       <div id="pl-notice"></div>
-      <div class="card">
+      <div id="pl-kpi-area" class="pl-kpi-grid"></div>
+      <div class="pl-screen-guide">
+        <div>
+          <strong>見慣れた月次収支をそのまま確認</strong>
+          <span>実績・収入比・計画・前月・前年を横並びで比較できます。科目左側の＋で内訳を展開します。</span>
+        </div>
+        <span class="pl-guide-badge">単位：千円</span>
+      </div>
+      <div class="card pl-main-card">
         <div class="card-header">
           <span class="card-title" id="pl-card-title">月次収支表</span>
           <div style="display:flex;gap:8px;align-items:center">
