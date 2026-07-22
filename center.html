@@ -156,19 +156,9 @@
     <span class="nav-label">着地予測</span>
   </div>
 
-  <div class="nav-group" data-group="delivery">
-    <button type="button" class="nav-group-toggle" onclick="NAVGROUP.toggle('delivery')" aria-expanded="false">
-      <span class="nav-group-main"><svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="4" width="9" height="7" rx="1"/><path d="M10.5 6h2l2 2v3h-4z"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="12.5" cy="12.5" r="1.5"/></svg><span>配送</span></span>
-      <span class="nav-group-chevron">›</span>
-    </button>
-    <div class="nav-group-items">
-      <div class="nav-item nav-subitem" data-view="route-analysis" onclick="NAV.go(this)">便別採算</div>
-      <div class="nav-item nav-subitem" data-view="field-worker" onclick="NAV.go(this)">作業者別</div>
-      <div class="nav-item nav-subitem" data-view="field-content" onclick="NAV.go(this)">作業内容</div>
-      <div class="nav-item nav-subitem" data-view="field-product" onclick="NAV.go(this)">商品カテゴリ</div>
-      <div class="nav-item nav-subitem" data-view="field-area" onclick="NAV.go(this)">エリア別</div>
-      <div class="nav-item nav-subitem" data-view="capacity" onclick="NAV.go(this)">キャパ分析</div>
-    </div>
+  <div class="nav-item nav-primary" data-view="route-analysis" data-nav-hub="delivery" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="4" width="9" height="7" rx="1"/><path d="M10.5 6h2l2 2v3h-4z"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="12.5" cy="12.5" r="1.5"/></svg>
+    <span class="nav-label">配送分析</span>
   </div>
 
   <div class="nav-group" data-group="data">
@@ -783,6 +773,14 @@
 
     <!-- ▼ 作業者分析 -->
     <div class="view" id="view-field-worker">
+      <div class="analysis-hub-tabs" data-delivery-tabs>
+        <button type="button" data-delivery-view="route-analysis" onclick="DELIVERY_NAV.go('route-analysis')">便別採算</button>
+        <button type="button" data-delivery-view="field-worker" onclick="DELIVERY_NAV.go('field-worker')">作業者別</button>
+        <button type="button" data-delivery-view="field-content" onclick="DELIVERY_NAV.go('field-content')">作業内容</button>
+        <button type="button" data-delivery-view="field-product" onclick="DELIVERY_NAV.go('field-product')">商品カテゴリ</button>
+        <button type="button" data-delivery-view="field-area" onclick="DELIVERY_NAV.go('field-area')">エリア別</button>
+        <button type="button" data-delivery-view="capacity" onclick="DELIVERY_NAV.go('capacity')">キャパ分析</button>
+      </div>
       <!-- 作業者別 -->
             <div class="field-pane active" id="fpane-worker">
               <div class="kpi-row kpi-row-4" id="f-kpi-worker"></div>
@@ -815,6 +813,14 @@
 
     <!-- ▼ 便別採算分析 / Version 2 -->
     <div class="view" id="view-route-analysis">
+      <div class="analysis-hub-tabs" data-delivery-tabs>
+        <button type="button" data-delivery-view="route-analysis" onclick="DELIVERY_NAV.go('route-analysis')">便別採算</button>
+        <button type="button" data-delivery-view="field-worker" onclick="DELIVERY_NAV.go('field-worker')">作業者別</button>
+        <button type="button" data-delivery-view="field-content" onclick="DELIVERY_NAV.go('field-content')">作業内容</button>
+        <button type="button" data-delivery-view="field-product" onclick="DELIVERY_NAV.go('field-product')">商品カテゴリ</button>
+        <button type="button" data-delivery-view="field-area" onclick="DELIVERY_NAV.go('field-area')">エリア別</button>
+        <button type="button" data-delivery-view="capacity" onclick="DELIVERY_NAV.go('capacity')">キャパ分析</button>
+      </div>
       <div class="saas-page-head">
         <div>
           <div class="saas-eyebrow">DELIVERY PROFITABILITY</div>
@@ -856,6 +862,14 @@
 
     <!-- ▼ 作業内容分析 -->
     <div class="view" id="view-field-content">
+      <div class="analysis-hub-tabs" data-delivery-tabs>
+        <button type="button" data-delivery-view="route-analysis" onclick="DELIVERY_NAV.go('route-analysis')">便別採算</button>
+        <button type="button" data-delivery-view="field-worker" onclick="DELIVERY_NAV.go('field-worker')">作業者別</button>
+        <button type="button" data-delivery-view="field-content" onclick="DELIVERY_NAV.go('field-content')">作業内容</button>
+        <button type="button" data-delivery-view="field-product" onclick="DELIVERY_NAV.go('field-product')">商品カテゴリ</button>
+        <button type="button" data-delivery-view="field-area" onclick="DELIVERY_NAV.go('field-area')">エリア別</button>
+        <button type="button" data-delivery-view="capacity" onclick="DELIVERY_NAV.go('capacity')">キャパ分析</button>
+      </div>
       <!-- 作業内容別 -->
             <div class="field-pane active" id="fpane-content">
               <div class="grid2">
@@ -888,6 +902,14 @@
 
     <!-- ▼ 商品カテゴリ分析 -->
     <div class="view" id="view-field-product">
+      <div class="analysis-hub-tabs" data-delivery-tabs>
+        <button type="button" data-delivery-view="route-analysis" onclick="DELIVERY_NAV.go('route-analysis')">便別採算</button>
+        <button type="button" data-delivery-view="field-worker" onclick="DELIVERY_NAV.go('field-worker')">作業者別</button>
+        <button type="button" data-delivery-view="field-content" onclick="DELIVERY_NAV.go('field-content')">作業内容</button>
+        <button type="button" data-delivery-view="field-product" onclick="DELIVERY_NAV.go('field-product')">商品カテゴリ</button>
+        <button type="button" data-delivery-view="field-area" onclick="DELIVERY_NAV.go('field-area')">エリア別</button>
+        <button type="button" data-delivery-view="capacity" onclick="DELIVERY_NAV.go('capacity')">キャパ分析</button>
+      </div>
       <!-- 商品カテゴリ -->
             <div class="field-pane active" id="fpane-product">
               <div class="card" style="margin-bottom:14px">
@@ -912,6 +934,14 @@
 
     <!-- ▼ エリア分析 -->
     <div class="view" id="view-field-area">
+      <div class="analysis-hub-tabs" data-delivery-tabs>
+        <button type="button" data-delivery-view="route-analysis" onclick="DELIVERY_NAV.go('route-analysis')">便別採算</button>
+        <button type="button" data-delivery-view="field-worker" onclick="DELIVERY_NAV.go('field-worker')">作業者別</button>
+        <button type="button" data-delivery-view="field-content" onclick="DELIVERY_NAV.go('field-content')">作業内容</button>
+        <button type="button" data-delivery-view="field-product" onclick="DELIVERY_NAV.go('field-product')">商品カテゴリ</button>
+        <button type="button" data-delivery-view="field-area" onclick="DELIVERY_NAV.go('field-area')">エリア別</button>
+        <button type="button" data-delivery-view="capacity" onclick="DELIVERY_NAV.go('capacity')">キャパ分析</button>
+      </div>
       <!-- エリア地図 -->
             <div class="field-pane active" id="fpane-map">
               <div class="card" style="margin-bottom:14px">
@@ -950,6 +980,14 @@
 
     <!-- ▼ キャパ分析 -->
     <div class="view" id="view-capacity">
+      <div class="analysis-hub-tabs" data-delivery-tabs>
+        <button type="button" data-delivery-view="route-analysis" onclick="DELIVERY_NAV.go('route-analysis')">便別採算</button>
+        <button type="button" data-delivery-view="field-worker" onclick="DELIVERY_NAV.go('field-worker')">作業者別</button>
+        <button type="button" data-delivery-view="field-content" onclick="DELIVERY_NAV.go('field-content')">作業内容</button>
+        <button type="button" data-delivery-view="field-product" onclick="DELIVERY_NAV.go('field-product')">商品カテゴリ</button>
+        <button type="button" data-delivery-view="field-area" onclick="DELIVERY_NAV.go('field-area')">エリア別</button>
+        <button type="button" data-delivery-view="capacity" onclick="DELIVERY_NAV.go('capacity')">キャパ分析</button>
+      </div>
       <div class="card" style="margin-bottom:14px;border-top:3px solid var(--navy)">
         <div class="card-header">
           <span class="card-title">キャパ分析</span>

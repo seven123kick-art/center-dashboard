@@ -5492,6 +5492,25 @@ const NAVGROUP = {
   }
 };
 
+
+const DELIVERY_NAV = {
+  views: new Set(['route-analysis','field-worker','field-content','field-product','field-area','capacity']),
+  go(view) {
+    if (!this.views.has(view)) return;
+    NAV.go(view);
+  },
+  sync(view) {
+    const active = this.views.has(view);
+    const hub = document.querySelector('[data-nav-hub="delivery"]');
+    if (hub) hub.classList.toggle('active', active);
+    document.querySelectorAll('[data-delivery-tabs]').forEach(tabs => {
+      tabs.querySelectorAll('[data-delivery-view]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.deliveryView === view);
+      });
+    });
+  }
+};
+
 const NAV = {
   // メイン画面切替（同期なし、再描画のみ）
   go(el) {
@@ -5509,6 +5528,7 @@ const NAV = {
     const navEl = document.querySelector(`.nav-item[data-view="${view}"]`);
     if (navEl) navEl.classList.add('active');
     if (window.NAVGROUP) NAVGROUP.sync(view);
+    DELIVERY_NAV.sync(view);
 
     UI.updateTopbar(view);
     this._render(view);
