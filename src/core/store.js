@@ -101,6 +101,7 @@ var STORE = window.STORE = {
     STATE.workerCsvData = [];
     STATE.productAddressData = [];
     STATE.routeData = legacyRouteData;
+    STATE.companyMaster = this._g('companyMaster') || [];
     STATE.workerMaster = this._g('workerMaster') || [];
     STATE.dailyRecords = this._g('dailyRecords') || [];
     STATE.fieldData = [];
@@ -130,6 +131,7 @@ var STORE = window.STORE = {
     this._saveFieldIndex('product', STATE.productAddressData || []);
 
     this._s('dailyRecords', STATE.dailyRecords || []);
+    this._s('companyMaster', STATE.companyMaster || []);
     this._s('workerMaster', STATE.workerMaster || []);
 
     this._s('capacity',  STATE.capacity);
@@ -149,7 +151,7 @@ var STORE = window.STORE = {
     const blob = new Blob([JSON.stringify({
       center:CENTER.id, exportedAt:new Date().toISOString(),
       datasets:STATE.datasets, workerCsvData:STATE.workerCsvData || [], productAddressData:STATE.productAddressData || [], routeData:STATE.routeData || [], dailyRecords:STATE.dailyRecords || [], fieldData:STATE.fieldData, areaData:STATE.areaData,
-      capacity:STATE.capacity, planData:STATE.planData, workerMaster:STATE.workerMaster || [], memos:STATE.memos, library:STATE.library, reportKnowledge:STATE.reportKnowledge, deleted:STATE.deleted,
+      capacity:STATE.capacity, planData:STATE.planData, companyMaster:STATE.companyMaster || [], workerMaster:STATE.workerMaster || [], memos:STATE.memos, library:STATE.library, reportKnowledge:STATE.reportKnowledge, deleted:STATE.deleted,
     },null,2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -166,6 +168,7 @@ var STORE = window.STORE = {
       if (d.workerCsvData) STATE.workerCsvData = d.workerCsvData;
       if (d.productAddressData) STATE.productAddressData = d.productAddressData;
       if (Array.isArray(d.routeData)) STATE.routeData = d.routeData;
+      if (Array.isArray(d.companyMaster)) STATE.companyMaster = d.companyMaster;
       if (Array.isArray(d.workerMaster)) STATE.workerMaster = d.workerMaster;
       if (Array.isArray(d.dailyRecords)) STATE.dailyRecords = d.dailyRecords;
       if (d.fieldData) STATE.fieldData = d.fieldData;
@@ -188,7 +191,7 @@ var STORE = window.STORE = {
   storageInfo() {
     const keys = [
       'dataset_index','field_worker_index','field_product_index',
-      'dailyRecords','workerMaster',
+      'dailyRecords','companyMaster','workerMaster',
       'capacity','planData','memos','library','reportKnowledge','deleted','fiscalYear'
     ];
     let size = 0;

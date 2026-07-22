@@ -348,7 +348,7 @@ const CONFIG = {
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
     'field-worker':'作業者分析', 'route-analysis':'便別採算分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
-    capacity:'キャパ分析', import:'その他取込', 'csv-import':'CSV取込', 'worker-master':'作業者マスタ',
+    capacity:'キャパ分析', import:'その他取込', 'csv-import':'CSV取込', 'worker-master':'マスタ管理',
     kamoku:'収支科目 詳細分析', report:'会議報告書',
   },
 };
@@ -366,7 +366,8 @@ const STATE = {
   workerCsvData: [], // 現場明細CSV（作業者CSV）月単位データ
   productAddressData: [], // 現場明細CSV（商品住所CSV）月単位データ
   routeData: [], // 配達持出PDFから抽出した便情報 [{ym,routes:[{date,headNumber,worker,slips}]}]
-  workerMaster: [], // 作業者マスタ [{workerName,companyName,operationType,validFrom,validTo}]
+  companyMaster: [], // 会社マスタ [{companyCode,companyName,operationType,active}]
+  workerMaster: [], // 作業者マスタ [{workerCode,workerName,companyCode,analysisTarget,validFrom,validTo}]
   dailyRecords: [], // 日別実績CSV（着地予測用） [{date,ym,revenue,labor,yosha,other,profit}]
   fieldData: [],    // [{ym,areas:{name:{count,shippers:{}}}}]
   areaData:  [],    // 旧データ互換用（現在は旧帳票関連では使用しない）
@@ -772,18 +773,28 @@ function processDataset(ym, type, rows) {
   const totalExpense = CONFIG.EXPENSE_KEYS.reduce((s,k)=>s+n(rows[k]),0);
   const profit = totalIncome - totalExpense;
 
-  const laborCost = [...CONFIG.LABOR_KEYS,...CONFIG.YOSHA_KEYS].reduce((s,k)=>s+n(rows[k]),0);
+  // みなし人件費率：委託取引を分子・分母の双方から除外する。
+  // 分子 = 人件費 + 傭車費（委託費を除く）
+  // 分母 = 営業収益 - 委託収入
+  const employeeLaborCost = CONFIG.LABOR_KEYS.reduce((s,k)=>s+n(rows[k]),0);
+  const subcontractTransportCost = CONFIG.YOSHA_KEYS
+    .filter(k => k !== '委託費')
+    .reduce((s,k)=>s+n(rows[k]),0);
+  const excludedConsignmentExpense = n(rows['委託費']);
+  const excludedConsignmentIncome = n(rows['委託収入']);
+  const laborCost = employeeLaborCost + subcontractTransportCost;
+  const pseudoLaborIncome = Math.max(0, totalIncome - excludedConsignmentIncome);
   const fixedCost = CONFIG.FIXED_KEYS.reduce((s,k)=>s+n(rows[k]),0);
   const varCost   = CONFIG.VARIABLE_KEYS.reduce((s,k)=>s+n(rows[k]),0);
 
-  const pseudoLaborRate = totalIncome > 0 ? laborCost/totalIncome*100 : 0;
+  const pseudoLaborRate = pseudoLaborIncome > 0 ? laborCost/pseudoLaborIncome*100 : 0;
   const variableRate    = totalIncome > 0 ? varCost/totalIncome*100   : 0;
   const fixedRate       = totalIncome > 0 ? fixedCost/totalIncome*100 : 0;
   const profitRate      = totalIncome > 0 ? profit/totalIncome*100    : 0;
 
   return { ym, type, rows, totalIncome, totalExpense, profit,
     pseudoLaborRate, variableRate, fixedRate, profitRate,
-    laborCost, fixedCost, varCost, importedAt: new Date().toISOString() };
+    laborCost, employeeLaborCost, subcontractTransportCost, pseudoLaborIncome, excludedConsignmentExpense, excludedConsignmentIncome, fixedCost, varCost, importedAt: new Date().toISOString() };
 }
 
 function upsertDataset(ds) {

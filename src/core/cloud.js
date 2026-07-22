@@ -515,6 +515,7 @@ var CLOUD = window.CLOUD = {
       planData: STATE.planData || {},
       dailyRecords: STATE.dailyRecords || [],
       routeData: STATE.routeData || [],
+      companyMaster: STATE.companyMaster || [],
       workerMaster: STATE.workerMaster || [],
       memos: STATE.memos || {},
       library: STATE.library || [],
@@ -534,6 +535,7 @@ var CLOUD = window.CLOUD = {
     if (full.fiscalYear) STATE.fiscalYear = full.fiscalYear;
     if (Array.isArray(full.dailyRecords)) STATE.dailyRecords = full.dailyRecords;
     if (Array.isArray(full.routeData)) STATE.routeData = full.routeData;
+    if (Array.isArray(full.companyMaster)) STATE.companyMaster = full.companyMaster;
     if (Array.isArray(full.workerMaster)) STATE.workerMaster = full.workerMaster;
     if (full.memos && typeof full.memos === 'object') STATE.memos = full.memos;
     if (Array.isArray(full.library)) STATE.library = full.library;
