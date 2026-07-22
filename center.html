@@ -273,18 +273,12 @@
     <div class="view" id="view-pl">
       <div id="pl-notice"></div>
       <div id="pl-kpi-area" class="pl-kpi-grid"></div>
-      <div class="pl-screen-guide">
-        <div>
-          <strong>見慣れた月次収支をそのまま確認</strong>
-          <span>実績・収入比・計画・前月・前年を横並びで比較できます。科目左側の＋で内訳を展開します。</span>
-        </div>
-        <span class="pl-guide-badge">単位：千円</span>
-      </div>
       <div class="card pl-main-card">
         <div class="card-header">
           <span class="card-title" id="pl-card-title">月次収支表</span>
-          <div style="display:flex;gap:8px;align-items:center">
-            <span style="font-size:11px;color:var(--text3)">単位：千円</span>
+          <div class="pl-card-actions">
+            <span class="pl-unit-label">単位：千円</span>
+            <button type="button" class="btn btn-secondary pl-fullview-button" onclick="openPLFullView()">全項目を一覧表示</button>
           </div>
         </div>
         <div class="scroll-x">
@@ -310,6 +304,43 @@
         </div>
       </div>
     </div>
+
+      <div class="pl-fullscreen" id="pl-fullscreen" aria-hidden="true">
+        <div class="pl-fullscreen-panel">
+          <div class="pl-fullscreen-header">
+            <div>
+              <span class="pl-fullscreen-eyebrow">MONTHLY P&amp;L</span>
+              <h2 id="pl-fullscreen-title">月次収支表 全項目</h2>
+              <p>すべての科目と内訳を一括表示しています。</p>
+            </div>
+            <div class="pl-fullscreen-actions">
+              <span class="pl-unit-label">単位：千円</span>
+              <button type="button" class="btn btn-secondary" onclick="closePLFullView()">閉じる</button>
+            </div>
+          </div>
+          <div class="pl-fullscreen-table-wrap">
+            <table class="tbl" id="pl-full-tbl">
+              <thead>
+                <tr>
+                  <th style="min-width:140px">科目</th>
+                  <th class="r col-current" style="min-width:80px">実績</th>
+                  <th class="r" style="min-width:60px">収入比</th>
+                  <th class="r" style="min-width:80px;background:#fff9e6;color:#7a5800">計画</th>
+                  <th class="r" style="min-width:70px;background:#fff9e6;color:#7a5800">計画差異</th>
+                  <th class="r" style="min-width:60px;background:#fff9e6;color:#7a5800">達成率</th>
+                  <th class="r vs-col" style="min-width:80px">前月実績</th>
+                  <th class="r vs-col" style="min-width:70px">前月差異</th>
+                  <th class="r vs-col" style="min-width:60px">前月比</th>
+                  <th class="r vs-col" style="min-width:80px">前年実績</th>
+                  <th class="r vs-col" style="min-width:70px">前年差異</th>
+                  <th class="r vs-col" style="min-width:60px">前年比</th>
+                </tr>
+              </thead>
+              <tbody id="pl-full-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
 
     <!-- ▼ 利益構造分析 -->
     <div class="view" id="view-profit-structure">

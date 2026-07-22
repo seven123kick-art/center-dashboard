@@ -258,6 +258,50 @@ function renderPL() {
   if (title) title.textContent = `月次収支表（${ymLabel(ds.ym)}・${datasetKindLabel(ds)}）`;
 }
 
+
+function openPLFullView() {
+  const modal = document.getElementById('pl-fullscreen');
+  const fullBody = document.getElementById('pl-full-tbody');
+  if (!modal || !fullBody) return;
+
+  const savedOpen = { ...PL_TOGGLE._open };
+  for (const def of CONFIG.PL_DEF) {
+    if (def.type === 'group') PL_TOGGLE._open[def.id] = true;
+  }
+
+  renderPL();
+  const mainBody = document.getElementById('pl-tbody');
+  fullBody.innerHTML = mainBody ? mainBody.innerHTML : '';
+  fullBody.querySelectorAll('.pl-fold-btn').forEach((button) => {
+    const label = document.createElement('span');
+    label.className = 'pl-fold-spacer';
+    button.replaceWith(label);
+  });
+
+  PL_TOGGLE._open = savedOpen;
+  renderPL();
+
+  const ds = selectedDashboardDS();
+  const title = document.getElementById('pl-fullscreen-title');
+  if (title && ds) title.textContent = `月次収支表 全項目（${ymLabel(ds.ym)}・${datasetKindLabel(ds)}）`;
+
+  modal.classList.add('is-open');
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('pl-fullscreen-open');
+}
+
+function closePLFullView() {
+  const modal = document.getElementById('pl-fullscreen');
+  if (!modal) return;
+  modal.classList.remove('is-open');
+  modal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('pl-fullscreen-open');
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closePLFullView();
+});
+
 function makePLRow(opt) {
   const label = opt.label || '';
   const v = n(opt.value);
@@ -301,4 +345,6 @@ function makePLRow(opt) {
 
   window.PL_TOGGLE = PL_TOGGLE;
   window.renderPL = renderPL;
+  window.openPLFullView = openPLFullView;
+  window.closePLFullView = closePLFullView;
 })();

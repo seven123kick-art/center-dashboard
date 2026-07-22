@@ -438,3 +438,37 @@ select,input[type=text]{border-radius:9px;padding:8px 10px;border-color:var(--bo
 #pl-tbl .pl-profit-row td:first-child{background:#ecfdf5}
 @media(max-width:1100px){.pl-kpi-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:700px){.pl-kpi-grid{grid-template-columns:1fr}.pl-screen-guide{align-items:flex-start;flex-direction:column}.pl-main-card .scroll-x{max-height:none}}
+
+
+/* ===== Version2: 月次収支 全項目一覧 ===== */
+.pl-card-actions{display:flex;gap:9px;align-items:center}
+.pl-unit-label{font-size:10px;color:var(--text3);white-space:nowrap}
+.pl-fullview-button{min-height:32px;padding:6px 11px;font-size:11px}
+.pl-fullscreen{position:fixed;inset:0;z-index:3000;background:rgba(15,23,42,.58);backdrop-filter:blur(3px);display:none;padding:18px}
+.pl-fullscreen.is-open{display:block}
+body.pl-fullscreen-open{overflow:hidden}
+.pl-fullscreen-panel{height:100%;display:flex;flex-direction:column;background:#f4f7fb;border:1px solid rgba(255,255,255,.7);border-radius:16px;box-shadow:0 26px 70px rgba(15,23,42,.28);overflow:hidden}
+.pl-fullscreen-header{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:17px 20px;background:#fff;border-bottom:1px solid var(--border)}
+.pl-fullscreen-eyebrow{display:block;font-size:9px;font-weight:900;letter-spacing:.14em;color:#2563a6;margin-bottom:4px}
+.pl-fullscreen-header h2{font-size:18px;line-height:1.2;margin:0;color:var(--text)}
+.pl-fullscreen-header p{font-size:10px;color:var(--text3);margin:4px 0 0}
+.pl-fullscreen-actions{display:flex;align-items:center;gap:10px}
+.pl-fullscreen-table-wrap{flex:1;overflow:auto;padding:14px}
+#pl-full-tbl{border-collapse:separate;border-spacing:0;min-width:1120px;background:#fff;box-shadow:var(--shadow);border-radius:12px;overflow:hidden}
+#pl-full-tbl thead th{position:sticky;top:0;z-index:4;box-shadow:0 1px 0 var(--border2)}
+#pl-full-tbl th:first-child,#pl-full-tbl td:first-child{position:sticky;left:0;z-index:3;background:#fff;box-shadow:1px 0 0 var(--border2)}
+#pl-full-tbl thead th:first-child{z-index:6;background:#f8fafc}
+#pl-full-tbl .pl-group-row td{background:#f8fafc;border-top:1px solid #cbd5e1}
+#pl-full-tbl .pl-group-row td:first-child{background:#f8fafc}
+#pl-full-tbl .pl-child-row td{font-size:12px;color:#475569}
+#pl-full-tbl .pl-total-row td{background:#eef2f7;font-weight:900;border-top:2px solid #94a3b8}
+#pl-full-tbl .pl-total-row td:first-child{background:#eef2f7}
+#pl-full-tbl .pl-profit-row td{background:#ecfdf5;font-weight:900;border-top:2px solid #16a34a}
+#pl-full-tbl .pl-profit-row td:first-child{background:#ecfdf5}
+#pl-full-tbl .col-current{background:#eef6ff}
+#pl-full-tbl .col-plan{background:#fff8e1}
+#pl-full-tbl .col-prev{background:#f5f6f8;border-left:4px solid #94a3b8}
+#pl-full-tbl .col-lastyear{background:#fff1f7;border-left:4px solid #d946ef}
+#pl-full-tbl .pl-fold-spacer{display:inline-block;width:32px}
+#pl-full-tbl .pl-child-label{color:#475569}
+@media(max-width:700px){.pl-card-actions{gap:6px}.pl-unit-label{display:none}.pl-fullscreen{padding:0}.pl-fullscreen-panel{border-radius:0}.pl-fullscreen-header{padding:13px 14px}.pl-fullscreen-header p{display:none}.pl-fullscreen-table-wrap{padding:8px}}
