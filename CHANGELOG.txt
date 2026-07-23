@@ -49,3 +49,8 @@ Version2 データ管理ハブ化パッチ（2026-07-22）
 
 ■ 削除対象
 なし
+
+
+=== Sprint1.2 ===
+- app.css documented as stylesheet entry point.
+- Continued migration to foundation/features structure.
