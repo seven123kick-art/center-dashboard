@@ -1291,15 +1291,6 @@ function selectedDashboardDS() {
 }
 
 
-function selectedYMForImport() {
-  // 取込時の年月は画面で選択している年度・月を最優先にする。
-  return dashboardSelectedYM() || STATE.selYM || latestDS()?.ym || null;
-}
-
-function selectedFiscalYearForImport() {
-  return dashboardSelectedFiscalYear() || STATE.fiscalYear || getDefaultFiscalYear();
-}
-
 function dashboardDatasetsForSelectedFiscalYear() {
   const fy = dashboardSelectedFiscalYear();
   const months = monthsOfFiscalYear(fy);
@@ -1574,23 +1565,6 @@ function mergePlanDataByUpdatedAt(localRaw, cloudRaw) {
     if (!l || String(ct) >= String(lt)) out[fy] = c;
   });
   return out;
-}
-
-function mergeDatasetsByImportedAt(localList, cloudList) {
-  const map = {};
-  [...(localList || []), ...(cloudList || [])].forEach(d => {
-    if (!d || !d.ym) return;
-    const key = `${d.ym}_${d.type || 'confirmed'}`;
-    const old = map[key];
-    if (!old || String(d.importedAt || d.updatedAt || '') >= String(old.importedAt || old.updatedAt || '')) {
-      map[key] = d;
-    }
-  });
-  return Object.values(map).sort((a,b) => {
-    const ym = String(a.ym || '').localeCompare(String(b.ym || ''));
-    if (ym !== 0) return ym;
-    return String(a.type || '').localeCompare(String(b.type || ''));
-  });
 }
 
 function mergeFullState(localFull, cloudFull) {
@@ -4651,17 +4625,9 @@ function mergeReportKnowledge(localRaw, cloudRaw) {
   return { policies, references:[...refMap.values()].sort((a,b)=>String(b.savedAt||'').localeCompare(String(a.savedAt||''))) };
 }
 
-function reportPolicyKey(fy, half) {
-  return `${String(fy || getDefaultFiscalYear())}_${half || '上期'}`;
-}
-
 function reportHalfFromYM(ym) {
   const mm = Number(String(ym || '').slice(4,6));
   return (mm >= 4 && mm <= 9) ? '上期' : '下期';
-}
-
-function reportFYFromYM(ym) {
-  return ym ? fiscalYearFromYM(ym) : getDefaultFiscalYear();
 }
 
 /* ════════ §23 REPORT_UI（スタブ） ═════════════════════════════ */
