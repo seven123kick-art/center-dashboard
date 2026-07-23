@@ -1,15 +1,3 @@
-
-
-// ===== Version2 KPI Dashboard (Sprint2.3) =====
-const DASHBOARD_WIDGETS = [
-  {id:"today", title:"今日"},
-  {id:"monthly", title:"今月"},
-  {id:"forecast", title:"着地"},
-  {id:"csv", title:"CSV取込"},
-  {id:"sync", title:"同期"}
-];
-// ==============================================
-
 /* =====================================================================
    経営管理システム dashboard.js
    2026-05-01
@@ -209,3 +197,18 @@ window.renderDashboard = function renderDashboard() {
   }
 };
 })();
+
+
+
+// ===== Version2 Sprint2.4 =====
+function renderKPICards(container, data = {}) {
+    const widgets = (typeof DASHBOARD_WIDGETS !== "undefined")
+        ? DASHBOARD_WIDGETS
+        : [];
+    return widgets.map(w => ({
+        id: w.id,
+        title: w.title,
+        value: data[w.id] ?? "-"
+    }));
+}
+// ===============================

@@ -61,5 +61,5 @@ Version2 データ管理ハブ化パッチ（2026-07-22）
 - app.js designated as application orchestrator.
 
 
-=== Sprint2.3 ===
-- Added dashboard widget definition scaffold.
+=== Sprint2.4 ===
+- Added renderKPICards() scaffold for dashboard rendering.
