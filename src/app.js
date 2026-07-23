@@ -1148,22 +1148,8 @@ const MODAL = {
 
 /* ════════ §9 CLOUD は core/cloud.js へ分離 ════════ */
 
-/* ════════ §10 フォーマットヘルパー ════════════════════════════ */
-function fmt(v,d=0) {
-  if (v==null||isNaN(v)) return '—';
-  return new Intl.NumberFormat('ja-JP',{maximumFractionDigits:d,minimumFractionDigits:d}).format(Math.round(v));
-}
-function fmtK(v,d=0) { // 千円単位
-  if (v==null||isNaN(v)) return '—';
-  return fmt(v/1000,d);
-}
-function pct(v,d=1) { return (v==null||isNaN(v)||!isFinite(v)) ? '—' : fmt(v,d)+'%'; }
-function diff(a,b) { if(!a||!b) return '—'; const d=a-b; return (d>=0?'+':'')+fmtK(d); }
-function ratio(a,b) { if(!a||!b) return '—'; return pct((a/b-1)*100); }
-function ymLabel(ym) { return ym ? `${ym.slice(0,4)}年${parseInt(ym.slice(4,6))}月` : '—'; }
-function dt() { return new Date().toISOString().slice(0,10); }
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-
+/* ════════ §10 フォーマットヘルパー（fmt/fmtK/pct/esc等）は src/core/format.js へ分離 ════════ */
+/* ════════ §10B データセット選定・計画データヘルパー ═══════════ */
 function datasetStoredAsKyen(ds) {
   if (!ds) return false;
   return ds.source === 'history' || String(ds.unit || '').includes('千円');
