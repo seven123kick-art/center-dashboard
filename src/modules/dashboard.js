@@ -1,11 +1,15 @@
 
-/* ===== Version2 Sprint2.2 =====
-Dashboard roadmap:
-- KPI cards
-- CSV Import Status
-- Landing Forecast
-- Sync Status
-================================ */
+
+// ===== Version2 KPI Dashboard (Sprint2.3) =====
+const DASHBOARD_WIDGETS = [
+  {id:"today", title:"今日"},
+  {id:"monthly", title:"今月"},
+  {id:"forecast", title:"着地"},
+  {id:"csv", title:"CSV取込"},
+  {id:"sync", title:"同期"}
+];
+// ==============================================
+
 /* =====================================================================
    経営管理システム dashboard.js
    2026-05-01
