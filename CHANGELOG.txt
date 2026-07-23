@@ -59,3 +59,8 @@ Version2 データ管理ハブ化パッチ（2026-07-22）
 === Sprint2.1 ===
 - Begin Home Dashboard refactoring.
 - app.js designated as application orchestrator.
+
+
+=== Sprint2.2 ===
+- Dashboard module prepared for KPI widgets.
+- Home dashboard refactoring started.

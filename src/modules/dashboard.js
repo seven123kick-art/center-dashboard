@@ -1,3 +1,11 @@
+
+/* ===== Version2 Sprint2.2 =====
+Dashboard roadmap:
+- KPI cards
+- CSV Import Status
+- Landing Forecast
+- Sync Status
+================================ */
 /* =====================================================================
    経営管理システム dashboard.js
    2026-05-01
