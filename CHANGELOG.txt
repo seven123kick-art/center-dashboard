@@ -1,3 +1,39 @@
+============================================================
+Version2 Sprint 1.1 - UI Foundation CSS再構成
+2026-07-23
+============================================================
+
+【変更目的】
+単一の app.css に集中していた共通UI・画面固有CSSを責務別に分離し、
+今後のホーム・月次収支・配送分析の全面再構築で同じCSSを重複追加しない基盤へ変更しました。
+
+【変更内容】
+・assets/css/app.css をCSSエントリーポイントへ全面書き直し
+・foundation 配下へ基本トークン、画面骨格、共通部品、共通テーマを分離
+・features 配下へ既存機能固有のCSSを分離
+・既存の読み込み順とセレクタを維持し、JavaScript・HTML・表示機能には変更なし
+・今後 app.css へ直接スタイルを追記しない運用ルールを明記
+
+【追加ファイル】
+・assets/css/foundation/base.css
+・assets/css/foundation/shell.css
+・assets/css/foundation/components.css
+・assets/css/foundation/theme.css
+・assets/css/features/shell-extras.css
+・assets/css/features/capacity-loading.css
+・assets/css/features/route-analysis.css
+・assets/css/features/version2.css
+
+【変更ファイル】
+・assets/css/app.css
+・CHANGELOG.txt
+
+【削除ファイル】
+なし
+
+【影響範囲】
+見た目と機能は現状維持です。center.html は従来どおり assets/css/app.css のみを読み込みます。
+
 Version2 データ管理ハブ化パッチ（2026-07-22）
 
 ■ 変更ファイル

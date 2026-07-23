@@ -1,0 +1,55 @@
+/* Version2 feature styles: boot state, center shell, and field helpers */
+
+/* 起動直後に保存済み画面へ復元するまで、ダッシュボードの一瞬表示を隠す */
+html.restore-view-booting #main{visibility:hidden;}
+html.restore-view-booting body::after{
+  content:'画面を復元中...';
+  position:fixed;
+  left:50%;top:50%;transform:translate(-50%,-50%);
+  z-index:99998;
+  background:#ffffff;
+  border:1px solid #e0e2e6;
+  border-radius:10px;
+  box-shadow:0 8px 24px rgba(15,23,42,.12);
+  padding:14px 20px;
+  color:#4b5563;
+  font-size:13px;
+  font-family:'Meiryo','メイリオ','Yu Gothic','游ゴシック',Arial,sans-serif;
+}
+
+
+/* 固定センター表示・TOPリンク */
+.fixed-center-box{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08)}
+.fixed-center-label{font-size:10px;color:#607d9a;margin-bottom:5px;letter-spacing:.04em;font-weight:700}
+.fixed-center-name{font-size:12px;font-weight:700;color:#fff;line-height:1.5}
+.sidebar-top-link{display:flex;align-items:center;gap:8px;padding:9px 16px;color:var(--sidebar-text);font-size:12px;text-decoration:none;border-left:3px solid transparent;transition:all .15s}
+.sidebar-top-link:hover{background:var(--sidebar-hover);color:#fff}
+
+
+/* Common center build */
+.center-fixed-box{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08)}
+.center-fixed-label{font-size:10px;color:#607d9a;margin-bottom:5px;padding-left:4px;letter-spacing:.04em;font-weight:700}
+.center-fixed-name{font-size:12px;font-weight:700;color:#fff;padding-left:4px;line-height:1.5}
+.sidebar-top-link{display:flex;align-items:center;gap:8px;padding:8px 16px;color:#a8bdd4;text-decoration:none;font-size:12px;border-left:3px solid transparent}
+.sidebar-top-link:hover{background:#243a55;color:#fff}
+
+/* キャパ分析 */
+.capacity-status{display:inline-flex;align-items:center;justify-content:center;min-width:54px;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800}
+.capacity-status.over{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+.capacity-status.full{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
+.capacity-status.ok{background:#dcfce7;color:#166534;border:1px solid #86efac}
+.capacity-area-row{cursor:pointer}
+.capacity-area-row:hover td{background:#eff6ff!important}
+.capacity-area-row.selected td{background:#dbeafe!important}
+.capacity-mini-bar{height:8px;background:#e5e7eb;border-radius:99px;overflow:hidden;min-width:80px}
+.capacity-mini-fill{height:100%;border-radius:99px;background:#1a4d7c}
+
+
+/* ===== 現場分析：画面分離後の表示調整 ===== */
+#view-field-worker .field-pane,
+#view-field-content .field-pane,
+#view-field-product .field-pane,
+#view-field-area .field-pane{
+  display:block;
+}
+
