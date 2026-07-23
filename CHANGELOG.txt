@@ -54,3 +54,6 @@ Version2 データ管理ハブ化パッチ（2026-07-22）
 === Sprint1.2 ===
 - app.css documented as stylesheet entry point.
 - Continued migration to foundation/features structure.
+
+Sprint1.3
+- app.js header prepared for orchestrator migration.
