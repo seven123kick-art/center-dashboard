@@ -1,4 +1,7 @@
-/** Version2 Sprint1.3: app.js is evolving into an orchestrator. */
+// =====================================
+// Version2 Application Entry Point
+// app.js acts as the application orchestrator.
+// =====================================
 
 /* 計画データTSV読取修正版 v11 2026-04-28
    ・計画貼付データをCSVではなくタブ区切りで解析

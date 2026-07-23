@@ -55,5 +55,7 @@ Version2 データ管理ハブ化パッチ（2026-07-22）
 - app.css documented as stylesheet entry point.
 - Continued migration to foundation/features structure.
 
-Sprint1.3
-- app.js header prepared for orchestrator migration.
+
+=== Sprint2.1 ===
+- Begin Home Dashboard refactoring.
+- app.js designated as application orchestrator.
