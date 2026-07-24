@@ -1,3 +1,19 @@
+'use strict';
+
+// =====================================
+// Version2 Application Entry Point
+// =====================================
+//
+// Responsibility
+// 1. Application bootstrap
+// 2. Global application state
+// 3. Module initialization
+// 4. Event registration
+// 5. Shared orchestration only
+//
+// Detailed revision history has been moved to CHANGELOG.txt.
+// =====================================
+
 // =====================================
 // Version2 Application Entry Point
 // app.js acts as the application orchestrator.
