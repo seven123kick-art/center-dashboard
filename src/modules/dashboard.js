@@ -197,18 +197,3 @@ window.renderDashboard = function renderDashboard() {
   }
 };
 })();
-
-
-
-// ===== Version2 Sprint2.4 =====
-function renderKPICards(container, data = {}) {
-    const widgets = (typeof DASHBOARD_WIDGETS !== "undefined")
-        ? DASHBOARD_WIDGETS
-        : [];
-    return widgets.map(w => ({
-        id: w.id,
-        title: w.title,
-        value: data[w.id] ?? "-"
-    }));
-}
-// ===============================

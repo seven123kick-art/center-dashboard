@@ -1438,24 +1438,6 @@ function renderCommonPeriodSelector(viewKey, opt={}) {
     onChange: () => NAV.refresh()
   });
 }
-function renderDashboardSelector() {
-  const area = document.getElementById('kpi-area');
-  if (!area || !area.parentNode || !window.PERIOD_UI) return;
-  let box = document.getElementById('dashboard-period-selector');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'dashboard-period-selector';
-    area.parentNode.insertBefore(box, area);
-  }
-  PERIOD_UI.render(box, {
-    viewKey: 'dashboard',
-    kind: 'revenue',
-    useMonth: true,
-    subtitle: '年度順：4月 → 翌年3月 / ダッシュボードのみ切替',
-    onChange: () => { renderDashboard(); UI.updateTopbar('dashboard'); }
-  });
-}
-
 function latestDS() {
   const list = activeDatasets();
   return list.length ? list[list.length-1] : null;
@@ -1752,6 +1734,7 @@ function initFiscalYearSelects() {
 }
 
 /* ════════ §11 CHART_MGR ════════════════════════════════════════ */
+/* ════════ §12 RENDER — Dashboard は src/modules/dashboard.js に完全移行済みのため削除 ════════ */
 const CHART_MGR = {
   make(id, cfg) {
     if (STATE._charts[id]) { try{STATE._charts[id].destroy();}catch(e){} delete STATE._charts[id]; }
@@ -1767,98 +1750,6 @@ const CHART_MGR = {
 };
 
 /* ════════ §12 RENDER — Dashboard ══════════════════════════════ */
-function renderDashboard() {
-  const area = document.getElementById('kpi-area');
-  const checkList = document.getElementById('home-check-list');
-  const headline = document.getElementById('home-headline');
-  const lead = document.getElementById('home-lead');
-  const periodLabel = document.getElementById('home-period-label');
-  if (!area) return;
-
-  renderDashboardSelector();
-  const ds = selectedDashboardDS();
-
-  if (!ds) {
-    area.innerHTML = `
-      <div class="home-empty-kpi">
-        <strong>実績データがありません</strong>
-        <span>まずCSV取込から月次データを登録してください。</span>
-        <button class="btn btn-primary" onclick="NAV.go('csv-import')">CSV取込を開く</button>
-      </div>`;
-    if (headline) headline.textContent = '最初のデータを登録してください';
-    if (lead) lead.textContent = '取込後は、利益・注意点・配送採算をこの画面から確認できます。';
-    if (periodLabel) periodLabel.textContent = CENTER.name;
-    if (checkList) checkList.innerHTML = `
-      <button class="home-check info" onclick="NAV.go('csv-import')">
-        <span class="home-check-icon">1</span>
-        <span><strong>月次CSVを取り込む</strong><small>SKDL0001またはSKDL0003を登録します</small></span>
-        <b>›</b>
-      </button>`;
-    CHART_MGR.destroyAll();
-    return;
-  }
-
-  const prevDs = prevDS(ds.ym);
-  const profitClass = ds.profit >= 0 ? 'positive' : 'negative';
-  const profitDiff = prevDs ? ds.profit - prevDs.profit : null;
-  const incomeDiff = prevDs ? ds.totalIncome - prevDs.totalIncome : null;
-
-  if (periodLabel) periodLabel.textContent = `${ymLabel(ds.ym)} ${datasetKindLabel(ds)} / ${CENTER.name}`;
-  if (headline) headline.textContent = ds.profit >= 0 ? '利益は黒字で推移しています' : '利益が赤字です';
-  if (lead) {
-    const diffText = profitDiff == null ? '前月比較データはありません。' : `前月から ${profitDiff >= 0 ? '+' : ''}${fmtK(profitDiff)}千円です。`;
-    lead.textContent = `営業利益 ${fmtK(ds.profit)}千円、利益率 ${pct(ds.profitRate)}。${diffText}`;
-  }
-
-  area.innerHTML = `
-    <article class="home-kpi home-kpi-primary ${profitClass}" onclick="NAV.go('profit-structure')">
-      <div class="home-kpi-label">営業利益</div>
-      <div class="home-kpi-value">${fmtK(ds.profit)}<small>千円</small></div>
-      <div class="home-kpi-meta">
-        <span>利益率 ${pct(ds.profitRate)}</span>
-        ${profitDiff == null ? '' : `<span class="home-delta ${profitDiff >= 0 ? 'up' : 'down'}">前月 ${profitDiff >= 0 ? '+' : ''}${fmtK(profitDiff)}千円</span>`}
-      </div>
-    </article>
-    <article class="home-kpi" onclick="NAV.go('profit-structure')">
-      <div class="home-kpi-label">営業収益</div>
-      <div class="home-kpi-value">${fmtK(ds.totalIncome)}<small>千円</small></div>
-      <div class="home-kpi-meta">${incomeDiff == null ? '<span>前月比較なし</span>' : `<span class="home-delta ${incomeDiff >= 0 ? 'up' : 'down'}">前月 ${incomeDiff >= 0 ? '+' : ''}${fmtK(incomeDiff)}千円</span>`}</div>
-    </article>
-    <article class="home-kpi" onclick="NAV.go('profit-structure')">
-      <div class="home-kpi-label">費用合計</div>
-      <div class="home-kpi-value">${fmtK(ds.totalExpense)}<small>千円</small></div>
-      <div class="home-kpi-meta"><span>収益比 ${pct(ds.totalIncome ? ds.totalExpense / ds.totalIncome * 100 : 0)}</span></div>
-    </article>
-    <article class="home-kpi" onclick="NAV.go('profit-structure')">
-      <div class="home-kpi-label">みなし人件費率</div>
-      <div class="home-kpi-value">${pct(ds.pseudoLaborRate)}</div>
-      <div class="home-kpi-meta"><span>目標 ${CONFIG.TARGETS.pseudoLaborRate}%以内</span><span class="home-status ${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? 'ok' : 'warn'}">${ds.pseudoLaborRate <= CONFIG.TARGETS.pseudoLaborRate ? '達成' : '超過'}</span></div>
-    </article>`;
-
-  const items = [];
-  const ledger = window.LEDGER?.buildMonth ? LEDGER.buildMonth(ds.ym) : null;
-  const diag = ledger?.diagnostics || null;
-
-  if (!diag?.sourceStatus?.routePdf) items.push({ level:'warn', icon:'!', title:'配達持出リストPDFが未登録です', sub:'便別採算を確認するには「その他取込」から登録してください。', view:'import' });
-  if (diag?.unmatchedRouteSlipCount > 0) items.push({ level:'warn', icon:'!', title:`原票が ${diag.unmatchedRouteSlipCount}件 未照合です`, sub:'配送分析で一致状況を確認してください。', view:'route-analysis' });
-  if (diag?.routesWithUnregisteredWorker > 0) items.push({ level:'warn', icon:'!', title:`未登録作業者を含む便が ${diag.routesWithUnregisteredWorker}便 あります`, sub:'マスタ管理で会社・作業者を登録してください。', view:'worker-master' });
-  if (diag?.routesWithoutPayment > 0) items.push({ level:'info', icon:'i', title:`傭車費未一致の便が ${diag.routesWithoutPayment}便 あります`, sub:'SKDL0001とヘッド番号の一致を確認してください。', view:'route-analysis' });
-  if (ds.profit < 0) items.push({ level:'danger', icon:'!', title:'営業利益が赤字です', sub:'経営分析から悪化している科目を確認してください。', view:'profit-structure' });
-  if (ds.pseudoLaborRate > CONFIG.TARGETS.pseudoLaborRate) items.push({ level:'warn', icon:'!', title:'みなし人件費率が目標を超えています', sub:'人件費と傭車費の内訳を確認してください。', view:'profit-structure' });
-  if (!items.length) items.push({ level:'ok', icon:'✓', title:'現在、優先して対応する項目はありません', sub:'必要に応じて経営分析または配送分析へ進んでください。', view:'profit-structure' });
-
-  if (checkList) checkList.innerHTML = items.slice(0, 5).map(item => `
-    <button class="home-check ${item.level}" onclick="NAV.go('${item.view}')">
-      <span class="home-check-icon">${item.icon}</span>
-      <span><strong>${esc(item.title)}</strong><small>${esc(item.sub)}</small></span>
-      <b>›</b>
-    </button>`).join('');
-
-  CHART_MGR.destroyAll();
-}
-
-
-
 /* ════════ §14 RENDER — Trend（分割後スタブ） ══════════════════════════════════ */
 function renderTrend() {
   if (window.renderTrend && window.renderTrend !== renderTrend) {
@@ -2209,46 +2100,6 @@ function storageMonthState(fy, ym) {
   const planKind = plan ? 'ok' : 'warn';
 
   return { ym, confirmed, daily, histRows, converted, duplicated, csvLabel, csvKind, histLabel, histKind, planLabel, planKind, judge, kind, note };
-}
-function renderMonthlyCheckTable() {
-  const fy = storageFiscalYear();
-  const months = storageFiscalMonths(fy);
-  const states = months.map(ym => storageMonthState(fy, ym));
-  const missingCount = states.filter(s => s.judge === '漏れ').length;
-  const dailyOnlyCount = states.filter(s => s.judge === '注意').length;
-  const abnormalCount = states.filter(s => s.judge === '異常').length;
-  const histOnlyCount = states.filter(s => s.judge === '補完のみ').length;
-
-  const summary = abnormalCount
-    ? storageBadge(`異常 ${abnormalCount}件`, 'danger')
-    : missingCount
-      ? storageBadge(`漏れ ${missingCount}ヶ月`, 'danger')
-      : dailyOnlyCount || histOnlyCount
-        ? storageBadge(`確認 ${dailyOnlyCount + histOnlyCount}ヶ月`, 'warn')
-        : storageBadge('12ヶ月 OK', 'ok');
-
-  return `
-    <div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:12px;background:#fff">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
-        <div>
-          <div style="font-weight:900;font-size:14px">年度別 月次登録チェック表</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:3px">${fy}年度：${fy}年4月 ～ ${parseInt(fy,10)+1}年3月（年度順）</div>
-        </div>
-        <div>${summary}</div>
-      </div>
-      <div class="scroll-x"><table class="tbl"><thead><tr><th>月</th><th>収支CSV</th><th>収支補完</th><th>計画</th><th>判定</th><th>確認内容</th></tr></thead><tbody>
-        ${states.map(s=>`
-          <tr>
-            <td><strong>${ymLabel(s.ym)}</strong></td>
-            <td>${storageBadge(s.csvLabel, s.csvKind)}</td>
-            <td>${storageBadge(s.histLabel, s.histKind)}</td>
-            <td>${storageBadge(s.planLabel, s.planKind)}</td>
-            <td>${storageBadge(s.judge, s.kind)}</td>
-            <td style="min-width:220px;color:var(--text2)">${esc(s.note)}</td>
-          </tr>
-        `).join('')}
-      </tbody></table></div>
-    </div>`;
 }
 
 
@@ -3264,215 +3115,7 @@ ${extra?'\n【担当者からの追加情報】\n'+extra:''}`;
     return Packer.toBlob(doc);
   },
 };
-/* ════════ §24 PAST_LIBRARY（ファイル本体はStorage、台帳はfull_state） ══════════════════════════ */
-const PAST_LIBRARY = {
-  _selectedFile: null,
-  _bulkFiles: [],
-
-  handleBulkFiles(files) {
-    this._bulkFiles = Array.from(files || []);
-    const msg = document.getElementById('library-bulk-msg');
-    const prev = document.getElementById('library-bulk-preview');
-    if (msg) msg.textContent = `${this._bulkFiles.length}件選択しました`;
-    if (prev) {
-      prev.style.display = this._bulkFiles.length ? 'block' : 'none';
-      prev.innerHTML = this._bulkFiles.map((f, idx) => `
-        <div style="padding:7px 10px;border-bottom:1px solid var(--border,#d9dee8);font-size:12px">
-          ${idx+1}. ${esc(f.name)} <span style="color:var(--text3)">(${fmtFileSize(f.size)})</span>
-        </div>
-      `).join('');
-    }
-  },
-
-  async saveBulkSelected() {
-    if (!this._bulkFiles.length) { UI.toast('一括登録するファイルを選択してください','warn'); return; }
-
-    const cat = document.getElementById('library-bulk-category')?.value || 'その他';
-    const fy  = document.getElementById('library-bulk-fy')?.value || getDefaultFiscalYear();
-    const mm  = document.getElementById('library-bulk-month')?.value || '';
-    const autoTitle = document.getElementById('library-bulk-auto-title')?.checked !== false;
-
-    let saved = 0;
-    for (const file of this._bulkFiles) {
-      try {
-        const storagePath = CLOUD._libraryFileKey(file.name, fy);
-        await CLOUD.uploadFile(storagePath, file);
-
-        STATE.library.push({
-          id: Date.now() + saved,
-          title: autoTitle ? file.name.replace(/\.[^.]+$/, '') : file.name,
-          category: cat,
-          fiscalYear: fy,
-          month: mm,
-          memo: '',
-          content: '',
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type || '',
-          storagePath,
-          savedAt: new Date().toISOString()
-        });
-        saved++;
-      } catch(e) {
-        UI.toast(`${file.name} のアップロードに失敗: ${e.message}`, 'error');
-      }
-    }
-
-    if (saved) {
-      STORE.save();
-      this.renderList();
-      UI.toast(`${saved}件の過去資料を保存しました`);
-    }
-    this.clearBulk();
-  },
-
-  clearBulk() {
-    this._bulkFiles = [];
-    const input = document.getElementById('library-bulk-file-input');
-    if (input) input.value = '';
-    const msg = document.getElementById('library-bulk-msg');
-    if (msg) msg.textContent = '';
-    const prev = document.getElementById('library-bulk-preview');
-    if (prev) { prev.style.display = 'none'; prev.innerHTML = ''; }
-  },
-
-  handleFile(file) {
-    this._selectedFile = file || null;
-    const st = document.getElementById('library-file-status');
-    if (st) {
-      st.textContent = file
-        ? `選択: ${file.name}（${fmtFileSize(file.size)}） ※本体はStorage、台帳はfull_stateに保存`
-        : '';
-    }
-
-    const title = document.getElementById('library-title');
-    if (file && title && !title.value) title.value = file.name.replace(/\.[^.]+$/, '');
-  },
-
-  async save() {
-    const title = document.getElementById('library-title')?.value;
-    const cat   = document.getElementById('library-category')?.value;
-    const fy    = document.getElementById('library-fy')?.value || getDefaultFiscalYear();
-    const mm    = document.getElementById('library-month')?.value || '';
-    const memo  = document.getElementById('library-memo')?.value;
-    const content = document.getElementById('library-content')?.value;
-
-    if (!title) { UI.toast('資料名を入力してください','warn'); return; }
-
-    let fileMeta = {};
-    if (this._selectedFile) {
-      try {
-        const file = this._selectedFile;
-        const storagePath = CLOUD._libraryFileKey(file.name, fy);
-        await CLOUD.uploadFile(storagePath, file);
-        fileMeta = {
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type || '',
-          storagePath
-        };
-      } catch(e) {
-        UI.toast('ファイル本体のアップロードに失敗しました: ' + e.message, 'error');
-        return;
-      }
-    }
-
-    STATE.library.push({
-      id: Date.now(),
-      title,
-      category: cat,
-      fiscalYear: fy,
-      month: mm,
-      memo,
-      content,
-      ...fileMeta,
-      savedAt: new Date().toISOString()
-    });
-
-    STORE.save();
-    this.renderList();
-    UI.toast('過去資料を保存しました');
-    this.clearForm();
-  },
-
-  clearForm() {
-    ['library-title','library-memo','library-content'].forEach(id=>{
-      const el=document.getElementById(id); if(el) el.value='';
-    });
-    this._selectedFile = null;
-    const input = document.getElementById('library-file-input');
-    if (input) input.value = '';
-    const st = document.getElementById('library-file-status');
-    if (st) st.textContent = '';
-  },
-
-  renderList() {
-    const list = document.getElementById('library-list');
-    const filter = document.getElementById('library-filter-category')?.value||'';
-    if (!list) return;
-    const items = STATE.library.filter(i=>!filter||i.category===filter);
-    if (!items.length) {
-      list.innerHTML='<div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだ過去資料がありません</div>';
-      return;
-    }
-
-    list.innerHTML = items.map(i=>`
-      <div class="data-item">
-        <span class="badge badge-info">${esc(i.category||'—')}</span>
-        <span style="flex:1">
-          ${esc(i.title)}
-          ${i.fileName ? `<span style="font-size:10px;color:var(--text3);margin-left:6px">📎 ${esc(i.fileName)} / ${fmtFileSize(i.fileSize)}</span>` : ''}
-        </span>
-        <span style="font-size:10px;color:var(--text3)">${(i.savedAt||'').slice(0,10)}</span>
-        ${i.storagePath ? `<button class="btn" onclick="PAST_LIBRARY.openFile(${i.id})" style="font-size:11px;padding:2px 8px">開く</button>` : ''}
-        <button class="btn btn-danger" onclick="PAST_LIBRARY.delete(${i.id})" style="font-size:11px;padding:2px 8px">削除</button>
-      </div>`).join('');
-  },
-
-  async openFile(id) {
-    const item = STATE.library.find(i => i.id === id);
-    if (!item || !item.storagePath) { UI.toast('ファイル本体がありません','warn'); return; }
-
-    const url = await CLOUD.createSignedUrl(item.storagePath);
-    if (!url) { UI.toast('ファイルURLを作成できませんでした','error'); return; }
-    window.open(url, '_blank');
-  },
-
-  async delete(id) {
-    const item = STATE.library.find(i => i.id === id);
-    if (!item) return;
-
-    if (!confirm(`過去資料「${item.title}」を削除しますか？`)) return;
-
-    if (item.storagePath) {
-      await CLOUD.deleteFile(item.storagePath).catch(()=>{});
-    }
-
-    STATE.library=STATE.library.filter(i=>i.id!==id);
-    STORE.save();
-    this.renderList();
-  },
-
-  exportJSON() { STORE.exportJSON(); },
-
-  clearAll() {
-    if(confirm('全過去資料を削除しますか？\n※Storage上のファイル本体も削除を試行します。')){
-      const paths = (STATE.library || []).map(i=>i.storagePath).filter(Boolean);
-      paths.forEach(p => CLOUD.deleteFile(p).catch(()=>{}));
-      STATE.library=[];
-      STORE.save();
-      this.renderList();
-    }
-  },
-};
-
-function fmtFileSize(bytes) {
-  const n = Number(bytes || 0);
-  if (!n) return '0B';
-  if (n < 1024) return `${n}B`;
-  if (n < 1024 * 1024) return `${(n/1024).toFixed(1)}KB`;
-  return `${(n/1024/1024).toFixed(1)}MB`;
-}
+/* ════════ §24 PAST_LIBRARY は src/modules/past_library.js へ分離 ════════ */
 
 /* 現場分析データの遅延読込
    起動時は現場CSVを読まず、現場分析画面を開いた時だけ対象年度分を取得する。 */
@@ -4059,7 +3702,6 @@ const SIMPLE_STORE = {
 };
 const CLOUD_DEBUG = { run() { CLOUD.saveConfig(); } };
 const PUBLISH = { go() { UI.toast('GitHub Pages での公開はHTMLファイルを直接アップロードしてください'); } };
-const EVENTS = { handleFiles(files) { IMPORT.handleFiles(files); } };
 
 // 計画データ取込（PLAN）
 const PLAN = {
