@@ -1,4 +1,4 @@
-=== app.js Structure Cleanup ===
-- Removed legacy revision comments from app.js.
-- Added Version2 header and responsibility section.
-- Functional behavior unchanged.
+Structure cleanup
+- Removed duplicated Version2 header.
+- Removed legacy revision history comments from app.js header.
+- Added section markers where identifiable.
