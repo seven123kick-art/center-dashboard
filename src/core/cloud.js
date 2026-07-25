@@ -525,8 +525,9 @@ var CLOUD = window.CLOUD = {
   },
 
   _applyFullState(full) {
-    if (!full || typeof full !== 'object') return false;
-    if (full.center && full.center !== CENTER.id) return false;
+    this._beforeApplyFullStateHooks.forEach(fn => { try { fn(full); } catch(e) {} });
+    if (!full || typeof full !== 'object') { this._afterApplyFullStateHooks.forEach(fn => { try { fn(full, false); } catch(e) {} }); return false; }
+    if (full.center && full.center !== CENTER.id) { this._afterApplyFullStateHooks.forEach(fn => { try { fn(full, false); } catch(e) {} }); return false; }
     if (Array.isArray(full.datasets)) STATE.datasets = full.datasets;
     if (Array.isArray(full.fieldData)) STATE.fieldData = full.fieldData;
     if (Array.isArray(full.areaData)) STATE.areaData = full.areaData;
@@ -548,6 +549,7 @@ var CLOUD = window.CLOUD = {
     } else {
       STORE.save();
     }
+    this._afterApplyFullStateHooks.forEach(fn => { try { fn(full, true); } catch(e) {} });
     return true;
   },
   _isSizeError(error) {
@@ -1323,4 +1325,16 @@ var CLOUD = window.CLOUD = {
   dbStateKey(key) { return this._dbStateKey(key); },
   applyFullState(full) { return this._applyFullState(full); },
   isBusy() { return this._busy; },
+
+  /* ════════ Hook API（Version3 Phase3-1：追加のみ。既存処理は無変更）
+     _applyFullState() の実行前後にコールバックを差し込むための受け皿。
+     登録0件の場合は forEach が何もしないため、既存動作と完全に一致する。 ════════ */
+  _beforeApplyFullStateHooks: [],
+  _afterApplyFullStateHooks: [],
+  onBeforeApplyFullState(fn) {
+    if (typeof fn === 'function') this._beforeApplyFullStateHooks.push(fn);
+  },
+  onAfterApplyFullState(fn) {
+    if (typeof fn === 'function') this._afterApplyFullStateHooks.push(fn);
+  },
 };

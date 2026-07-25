@@ -117,6 +117,7 @@ window.DATA_MANAGEMENT_NAV = {
 window.NAV = {
   // メイン画面切替（同期なし、再描画のみ）
   go(el) {
+    this._beforeGoHooks.forEach(fn => { try { fn(el); } catch(e) {} });
     let view = (el && el.dataset) ? el.dataset.view : (typeof el==='string' ? el : 'dashboard');
     if (!view || !document.getElementById('view-' + view)) view = 'dashboard';
     STATE.view = view;
@@ -136,6 +137,7 @@ window.NAV = {
 
     UI.updateTopbar(view);
     this._render(view);
+    this._afterGoHooks.forEach(fn => { try { fn(el, view); } catch(e) {} });
   },
 
   // 現在の画面だけ再描画（データ更新後に呼ぶ）
@@ -193,6 +195,18 @@ window.NAV = {
       case 'report':     REPORT_UI.refresh(); break;
       case 'kamoku':     if (window.KAMOKU_UI?.render) KAMOKU_UI.render(); break;
     }
+  },
+
+  /* ════════ Hook API（Version3 Phase3-1：追加のみ。既存処理は無変更）
+     go() の実行前後にコールバックを差し込むための受け皿。
+     登録0件の場合は forEach が何もしないため、既存動作と完全に一致する。 ════════ */
+  _beforeGoHooks: [],
+  _afterGoHooks: [],
+  onBeforeGo(fn) {
+    if (typeof fn === 'function') this._beforeGoHooks.push(fn);
+  },
+  onAfterGo(fn) {
+    if (typeof fn === 'function') this._afterGoHooks.push(fn);
   },
 };
 })();

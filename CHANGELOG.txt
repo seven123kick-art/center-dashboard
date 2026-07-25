@@ -466,3 +466,62 @@ Phase5 (2026-07-25) Navigationモジュール分離
   そのまま残っています（今回のタスク範囲外のため、引き続き未対応）。
 
 GitHub投入可否：投入可能
+
+Version3 Phase3-1 (2026-07-25) Hook API追加（受け皿のみ、モンキーパッチは未除去）
+変更ファイル：
+  - src/core/cloud.js（編集：_applyFullStateへのhook呼び出し追加＋hook登録API追加）
+  - src/modules/navigation.js（編集：NAV.goへのhook呼び出し追加＋hook登録API追加）
+  ※ field_core.js / field_content.js / field_product.js は今回一切変更していない
+  ※ center.htmlの変更は不要（既存2ファイルの中身編集のみ、新規ファイルなし）
+
+変更理由：
+  Version3 Architecture Designで提案した「モンキーパッチのイベント方式への
+  置き換え」に向けた第一歩として、まず受け皿（Hook API）のみを追加。
+  field_core.js等の実際の書き換えは次フェーズ以降で実施する。
+
+変更内容：
+  [cloud.js]
+  - _applyFullState(full) の関数本体に、以下の3箇所へhook呼び出しを追加：
+    ・関数冒頭（バリデーション前）：before-hookを実行
+    ・2箇所の早期return（不正full/センター不一致）：after-hookを実行して
+      からreturn false
+    ・正常終了時：after-hookを実行してからreturn true
+  - 上記以外の行（STATE代入・sanitizePersonalDataState等の既存ロジック）
+    は1文字も変更していない
+  - _beforeApplyFullStateHooks / _afterApplyFullStateHooks（空配列）と、
+    onBeforeApplyFullState(fn) / onAfterApplyFullState(fn)（登録用の
+    薄いpushメソッド）を新規追加
+
+  [navigation.js]
+  - NAV.go(el) の関数本体に、以下2箇所へhook呼び出しを追加：
+    ・関数冒頭：before-hookを実行
+    ・関数末尾（this._render(view)の直後）：after-hookを実行
+  - NAV.goには元々早期returnが存在しないため、上記2箇所のみで完結
+  - 上記以外の行（画面切替・classList操作・_render呼出等）は1文字も
+    変更していない
+  - _beforeGoHooks / _afterGoHooks（空配列）と、onBeforeGo(fn) /
+    onAfterGo(fn)（登録用の薄いpushメソッド）を新規追加
+
+既存変更の有無：
+  - field_core.js のCLOUD._applyFullStateモンキーパッチ：無変更（残置）
+  - field_content.js / field_product.js のNAV.goモンキーパッチ：無変更（残置）
+  - Dataset関連（processDataset/upsertDataset/activeDatasets/
+    mergeFullState/STATE.datasets）：無変更
+  - STATE構造：無変更
+  - Cloud同期ロジック（pushMonth/pushAll/pullManifestAndMissing/
+    pullFullState/pullLegacy/syncSmart等）：無変更
+  - Navigation画面遷移ロジック（_render内のswitch文、各画面への振り分け）：
+    無変更
+  - Repository層：作成していない
+
+検証：
+  - フック未登録状態でのシミュレーション検証：登録0件の配列に対する
+    forEachは0回実行され、既存の戻り値・処理内容に一切影響しないことを
+    確認（JavaScriptの言語仕様上保証される動作）
+  - 全JSファイルのnode --check構文検証：エラーなし
+  - field_core.js / field_content.js / field_product.js の3ファイルは
+    今回のセッションで一切書き込みを行っておらず、無変更であることを確認
+
+GitHub投入可否：投入可能
+  今回はcloud.js・navigation.jsの2ファイルのみの変更で、新規ファイル・
+  center.htmlの変更はありません。
