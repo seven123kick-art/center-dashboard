@@ -525,3 +525,84 @@ Version3 Phase3-1 (2026-07-25) Hook API追加（受け皿のみ、モンキー�
 GitHub投入可否：投入可能
   今回はcloud.js・navigation.jsの2ファイルのみの変更で、新規ファイル・
   center.htmlの変更はありません。
+
+Version3 Phase3-2-1 (2026-07-25) field_product.jsをHook APIへ移行
+変更ファイル：
+  - src/field/field_product.js（編集：NAV.goモンキーパッチをNAV.onAfterGo登録へ置換）
+  ※ field_content.js / field_core.js / cloud.js / navigation.js は
+    今回一切変更していない
+
+変更理由：
+  Phase3-1で追加したNAV.onAfterGo()を使い、field_product.jsのモンキー
+  パッチを実際にHook API経由へ移行する最初の事例として実施。
+
+削除したモンキーパッチ：
+  function hook(){
+    if (window.NAV && typeof NAV.go === 'function' && !window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__) {
+      window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__ = true;
+      const old = NAV.go.bind(NAV);
+      NAV.go = function(el){
+        const ret = old.apply(this, arguments);
+        if (el && el.dataset && el.dataset.view === 'field-product') rerender();
+        return ret;
+      };
+    }
+    ...
+  }
+
+追加したHook登録：
+  function hook(){
+    if (window.NAV && typeof NAV.onAfterGo === 'function' && !window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__) {
+      window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__ = true;
+      NAV.onAfterGo(function(el){
+        if (el && el.dataset && el.dataset.view === 'field-product') rerender();
+      });
+    }
+    ...
+  }
+
+  変更点は以下の3行のみ：
+  ・ガード条件を typeof NAV.go === 'function' → typeof NAV.onAfterGo === 'function' に変更
+    （Hook APIの存在確認に変更）
+  ・NAV.goの直接代入（const old = NAV.go.bind(NAV); NAV.go = function(el){...}）を
+    NAV.onAfterGo(function(el){...}) の登録呼び出しに置換
+  ・戻り値ret の受け渡し（NAV.go自体は元々何も返さないため、この受け渡しは
+    実質無意味だった。Hook登録では戻り値を扱わない設計のため、この部分は
+    自然に無くなった）
+  ・「if (el && el.dataset && el.dataset.view === 'field-product') rerender();」
+    という判定条件そのものは1文字も変更していない
+  ・__FIELD_PRODUCT_NAV_FINAL_PATCHED__ という二重登録防止ガードは維持
+  ・hook()関数内のそれ以外の処理（document.addEventListenerによるchange
+    監視、setIntervalによる旧UI監視、rerender()の初回呼び出し、
+    window.addEventListener('load', rerender)）は1文字も変更していない
+
+動作順比較：
+  変更前：
+    NAV.go(el) が呼ばれる
+    ↓ 元のNAV.go処理（画面切替・active切替・UI.updateTopbar・_render等）
+    ↓ if (el.dataset.view === 'field-product') rerender()
+    （↑ここまでが、field_product.jsが書き換えた新しいNAV.go関数の中身）
+
+  変更後：
+    NAV.go(el) が呼ばれる（Phase3-1でhook呼び出しが内蔵された、書き換え
+    られていない本来のNAV.go）
+    ↓ 元のNAV.go処理（画面切替・active切替・UI.updateTopbar・_render等）
+    ↓ this._afterGoHooks.forEach(...)（Phase3-1で追加済みの仕組み）
+    ↓ 　└ field_product.jsが登録したコールバックが実行される
+    ↓ 　　if (el.dataset.view === 'field-product') rerender()
+
+  「元のNAV.go処理の後に、同じ条件でrerender()判定が行われる」という
+  相対的な順序・条件は完全に一致している。
+
+検証：
+  - 全JSファイルのnode --check構文検証：エラーなし
+  - field_product.js内に NAV.go = という直接代入が無くなったことを
+    grep確認
+  - field_content.js（NAV.goモンキーパッチ）、field_core.js
+    （CLOUD._applyFullStateモンキーパッチ）は今回のセッションで
+    書き込みを行っておらず無変更
+  - navigation.js / cloud.js もPhase3-1完了時点から無変更であることを
+    diffで確認
+
+GitHub投入可否：投入可能
+  今回はfield_product.jsの1ファイルのみの変更です。

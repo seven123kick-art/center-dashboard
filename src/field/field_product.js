@@ -619,14 +619,11 @@
   }
 
   function hook(){
-    if (window.NAV && typeof NAV.go === 'function' && !window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__) {
+    if (window.NAV && typeof NAV.onAfterGo === 'function' && !window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__) {
       window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__ = true;
-      const old = NAV.go.bind(NAV);
-      NAV.go = function(el){
-        const ret = old.apply(this, arguments);
+      NAV.onAfterGo(function(el){
         if (el && el.dataset && el.dataset.view === 'field-product') rerender();
-        return ret;
-      };
+      });
     }
 
     document.addEventListener('change', e=>{
