@@ -257,3 +257,123 @@ Phase4-5 (2026-07-25) 公開API整備（AUTO_SYNC / CLOUD 非公開メンバー�
     今回一切触れていない
   □ AUTO_SYNC動作変更なし → _suppress/_timerの操作タイミング・条件は
     既存と完全に同一
+
+Phase4-6 (2026-07-25) BulkImportモジュール分離
+========================================================================
+【重大な事前発見・緊急修正】center.htmlのscriptタグ欠落
+========================================================================
+今回の作業に着手する前の事前調査で、アップロードされたリポジトリの
+center.htmlに、既に作成済みのはずの以下3ファイルへのscriptタグが
+存在しないことが判明しました。
+  - src/ui/ui_helpers.js（window.UIを定義）
+  - src/core/loader.js（window.LOADERを定義）
+  - src/modules/indicators.js（window.INDICATORSを定義）
+ファイル自体はリポジトリ内に存在していましたが、center.htmlから
+読み込まれていないため、この状態のままでは window.UI が未定義となり、
+アプリ全体でエラーが発生する状態でした（app.js内のほぼ全ての画面が
+UI.toast()等を呼んでいるため）。
+原因は今回の調査range外ですが、おそらく過去のGitHub反映作業で
+center.htmlのバージョンが巻き戻った可能性があります。
+本来のBulkImport分離作業とは別件ですが、今回の変更をそのまま投入すると
+「壊れた状態にもう1つscriptタグを足すだけ」になってしまうため、
+上記3つのscriptタグを復旧した上で、bulk_import.jsのタグを追加しました。
+========================================================================
+
+変更ファイル：
+  - src/app.js（編集：§20.5 BULK_IMPORTの定義本体を削除、マーカーコメントに置換）
+  - src/modules/bulk_import.js（新規）
+  - center.html（編集：欠落していた3タグの復旧＋bulk_import.jsタグの追加）
+
+変更理由：
+  Phase4-5でAUTO_SYNC/CLOUDの公開API整備が完了したため、これまで
+  非公開プロパティ依存を理由に保留していたBulkImportの分離を実施。
+
+変更内容：
+  [事前調査で確認した対象範囲]
+  一括取込画面のイベント処理（center.html ondrop/onchange）、複数ファイルの
+  選択・読込・分類（_ymFromName/_classify）、ファイルごとの処理順序
+  （groups.values()のfor-of、pl→worker→productの順）、成功/失敗/スキップ件数
+  管理（done/logs/skipped）、AUTO_SYNCの一時停止・再開、CLOUDへの保存・同期
+  （pushAll、一時的なpushMonthモンキーパッチ）、STORE.save()（2箇所）、
+  Dataset登録（processDataset/upsertDataset呼出）、進捗表示（_msg）、
+  例外処理・finally処理、window公開（window.BULK_IMPORT）、HTMLインライン
+  イベント参照（ondrop/onchange）を全て確認した上で分離範囲を決定。
+
+  [app.jsから移動した処理]
+  BULK_IMPORTオブジェクト一式（_ymFromName, _classify, _setImportType, _msg,
+  _verifyCloudSaved, _importPLGroup, handleFilesの7メソッド、233行）を
+  src/modules/bulk_import.jsへ移動。renderImport()は移動対象外（Import画面
+  全体の描画を担い、BulkImport固有の処理ではないため、今回の分離範囲外と
+  判断）。
+
+  [互換ラッパーについて]
+  今回は互換ラッパー関数を追加していません。理由：center.htmlのondrop/
+  onchangeは元々 BULK_IMPORT.handleFiles(...) というオブジェクト経由の
+  呼び出しであり、bare関数（例：bulkImportFiles()）は最初から存在しません
+  でした。window.BULK_IMPORTの定義場所がapp.jsから新モジュールへ移っても、
+  呼び出し側の書き方は一切変える必要がなく、追加のラッパーは不要と判断
+  しました。
+
+  [AUTO_SYNC/CLOUDの依存状況]
+  事前調査の結果、BULK_IMPORTは既にPhase4-5の時点で
+  AUTO_SYNC.suppress()/resume()/cancelPending()、
+  CLOUD.downloadJSON()/datasetKey()/workerMonthKey()/productMonthKey()
+  という公開APIのみを使用しており、非公開プロパティへの直接アクセスは
+  ゼロでした（コメント内の"CLOUD._busy"という文言を除く）。そのため
+  今回の分離作業で新たにAUTO_SYNC/CLOUDの呼び出し方を変更する必要は
+  ありませんでした。
+
+  [script読込順]
+  bulk_import.jsは、依存する core/*.js（CLOUD, AUTO_SYNC, STORE）より後、
+  かつ app.js より後に配置しました。指示書には「app.jsより前」という
+  記載がありましたが、bulk_import.js内の処理は STATE / CONFIG / CSV /
+  processDataset / upsertDataset / fiscalYearFromYM / ymLabel / esc など
+  app.js側で定義される多数のグローバル関数に依存しており、app.jsより前に
+  読み込むと依存の実体が存在しない状態になります。既存の他モジュール
+  （capacity.js等）も全てapp.jsより後に読み込む構成になっているため、
+  この点は指示より実際の依存関係を優先し、既存モジュールと同じ並び
+  （src/modules/report_ui.jsの直後）に配置しました。
+
+変更禁止対象の遵守確認：
+  processDataset() / upsertDataset() / activeDatasets() / mergeFullState() /
+  CLOUD._applyFullState / CLOUD.applyFullState / field_core.jsのモンキー
+  パッチ / pullManifestAndMissing() / pullInitialForBoot() / pullFullState() /
+  pullLegacy() / syncSmart() / STATE.datasetsの構造 / manifest仕様 /
+  full_state仕様 / shared_bundle互換処理 / Cloud保存キー / CSV列定義 /
+  画面レイアウト・CSSは、いずれも今回のBULK_IMPORT抽出範囲外であり、
+  抽出前後でapp.jsの該当箇所が完全に一致すること（diffでバイト単位一致）
+  を確認済み。STATE.capacity.areas/mapping/shipperAreaCapsへの言及も
+  bulk_import.js内に存在しないことを確認済み。
+
+検証内容：
+  1. JavaScript構文エラー → 全JSファイルnode --checkで検証、エラーなし
+  2. script読込順 → 依存元(core/*)より後、app.jsより後（理由は上記）
+  3. BULK_IMPORTの単一定義 → grep確認、定義は1箇所のみ
+  4. 一括取込ボタン動作 → center.htmlのondrop/onchangeの呼び出し文字列は
+     変更していないため、従来どおり動作する想定
+  5. 複数CSV処理 → handleFiles内のロジックは1文字も変更していない
+  6. 途中エラー時のAUTO_SYNC復帰 → try/finally構造を含め全体をそのまま
+     移動したため、finally節のAUTO_SYNC.resume()呼び出しは維持
+  7. STORE.save()やCloud保存の順序 → ロジック無変更のため同一
+  8. 成功/失敗/スキップ件数 → done/logs/skipped変数の扱いは無変更
+  9. 進捗表示・通知文言 → _msg()の文言・呼び出しタイミングは無変更
+  10. 互換関数から新モジュールを呼べるか → 該当する互換関数がそもそも
+      存在しないため対象外（上記の通り）
+  11. Console Errorなし → 全JS構文検証済み。ただし、center.htmlの
+      scriptタグ欠落を修正しなければ、UI未定義によるConsole Errorが
+      多発する状態だったため、今回あわせて修正
+  12. Dataset同期・State同期・Legacy同期 → 変更対象範囲外、無変更
+  13. field_core.jsのCLOUD._applyFullStateモンキーパッチ → 無変更を確認
+  14. 保護対象STATE（capacity.areas/mapping/shipperAreaCaps） → bulk_import.js
+      内に言及なし、app.js側も無変更
+
+既知の制約：
+  - リポジトリ直下に孤立した古いapp.js（4474行、center.html等どこからも
+    読み込まれていない）が存在します。これは今回のBulkImport分離とは
+    無関係な、別途クリーンアップが必要な残留ファイルです。今回は
+    「ついでの整理」を避けるため、削除・変更していません。別途ご確認
+    ください。
+
+GitHub投入可否：投入可能
+  ただし、center.htmlのscriptタグ復旧を含むため、通常の「新規ファイル
+  追加のみ」より変更範囲がわずかに広い点にご留意ください。
