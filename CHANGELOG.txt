@@ -606,3 +606,63 @@ Version3 Phase3-2-1 (2026-07-25) field_product.jsをHook APIへ移行
 
 GitHub投入可否：投入可能
   今回はfield_product.jsの1ファイルのみの変更です。
+
+Version3 Phase3-2-2 (2026-07-25) field_content.jsをHook APIへ移行
+変更ファイル：
+  - src/field/field_content.js（編集：NAV.goモンキーパッチをNAV.onAfterGo登録へ置換）
+  ※ field_core.js / field_product.js / navigation.js / cloud.js /
+    center.html は今回一切変更していない
+
+方針確認：
+  今回はHook化のみを目的とし、document.readyState・DOMContentLoaded・
+  初期化タイミング・script読込順はいずれも変更していない。
+  navigation.jsがfield_content.jsより先に読み込まれる現在の構成は
+  正常な依存関係として維持し、解消対象としていない。
+  置き換え対象は「NAV.goを書き換えるモンキーパッチ」のみ。
+
+削除したモンキーパッチ：
+  if (window.NAV && typeof NAV.go === 'function' && !NAV.__fieldContentWrapped20260502) {
+    const oldGo = NAV.go.bind(NAV);
+    NAV.go = function(el){ const r = oldGo(el); renderSoon(); return r; };
+    NAV.__fieldContentWrapped20260502 = true;
+  }
+
+追加したHook登録：
+  if (window.NAV && typeof NAV.onAfterGo === 'function' && !NAV.__fieldContentWrapped20260502) {
+    NAV.onAfterGo(function(el){ renderSoon(); });
+    NAV.__fieldContentWrapped20260502 = true;
+  }
+
+  変更点：
+  ・ガード条件を typeof NAV.go === 'function' → typeof NAV.onAfterGo === 'function' に変更
+    （Hook APIの存在確認に変更。field_product.jsと同じ考え方）
+  ・NAV.goの直接代入をNAV.onAfterGo(function(el){ renderSoon(); }) の登録呼び出しに置換
+  ・renderSoon()は元々ビュー種別に関わらず無条件で呼ばれていたため、
+    条件分岐は追加していない（field_product.jsのケースとは異なり、
+    元の実装が最初から無条件呼び出しだった点をそのまま維持）
+  ・二重登録防止ガード NAV.__fieldContentWrapped20260502 は名前・格納先
+    （NAVオブジェクト上）とも維持
+  ・コードの記述位置（トップレベル、DOMContentLoadedを待たない）は
+    一切変更していない
+  ・この行の前後にある処理（window.FIELD_CONTENT_UI設定、change
+    イベント監視、setTimeout呼び出し等）は1文字も変更していない
+
+読込順への依存について：
+  この置き換えにより、NAV.goそのものを書き換える処理は無くなったが、
+  「NAV.onAfterGoの存在確認」自体はトップレベルで即座に行われる設計を
+  維持しているため、navigation.jsがfield_content.jsより先に読み込まれる
+  必要がある、という依存関係は変わっていない。今回はこの依存関係の
+  解消を目的としておらず、指示通り現状維持としている。
+
+検証：
+  - 全JSファイルのnode --check構文検証：エラーなし
+  - field_content.js内に NAV.go = という直接代入が無くなったことを
+    grep確認
+  - field_core.js（CLOUD._applyFullStateモンキーパッチ）、
+    field_product.js、navigation.js、cloud.jsは今回のセッションで
+    書き込みを行っておらず無変更（diffで確認）
+  - center.htmlのscript順序（navigation.js→field_content.js）は
+    今回変更していないことを確認
+
+GitHub投入可否：投入可能
+  今回はfield_content.jsの1ファイルのみの変更です。

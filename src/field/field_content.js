@@ -218,9 +218,8 @@
   window.FIELD_CONTENT_UI = { render, renderSoon };
   if (window.FIELD_CSV_REBUILD) FIELD_CSV_REBUILD.renderContent = render;
 
-  if (window.NAV && typeof NAV.go === 'function' && !NAV.__fieldContentWrapped20260502) {
-    const oldGo = NAV.go.bind(NAV);
-    NAV.go = function(el){ const r = oldGo(el); renderSoon(); return r; };
+  if (window.NAV && typeof NAV.onAfterGo === 'function' && !NAV.__fieldContentWrapped20260502) {
+    NAV.onAfterGo(function(el){ renderSoon(); });
     NAV.__fieldContentWrapped20260502 = true;
   }
   document.addEventListener('change', (e)=>{
