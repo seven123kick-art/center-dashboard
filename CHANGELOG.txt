@@ -666,3 +666,104 @@ Version3 Phase3-2-2 (2026-07-25) field_content.jsをHook APIへ移行
 
 GitHub投入可否：投入可能
   今回はfield_content.jsの1ファイルのみの変更です。
+
+Version3 Phase3-2-3 (2026-07-25) field_core.jsをHook APIへ移行
+変更ファイル：
+  - src/field/field_core.js（編集：CLOUD._applyFullStateモンキーパッチを
+    CLOUD.onAfterApplyFullState登録へ置換）
+  ※ navigation.js / cloud.js / field_content.js / field_product.js /
+    center.html は今回一切変更していない
+
+タイミング判定：
+  変更前のコードを確認したところ、field_core.jsは
+  「const ok = oldApplyFull ? oldApplyFull(full) : true;」で元の
+  _applyFullStateを先に実行し、その後に workerCsvData/productAddressData
+  の復元・ensureState・sanitizePersonalDataState・
+  applyDeletionTombstonesToState・FIELD_DATA_ACCESS.invalidateを実行して
+  いた。つまり「Cloud適用処理の後」に実行される設計であり、
+  CLOUD.onAfterApplyFullState() と完全に一致するタイミングと判断した。
+  CLOUD.onBeforeApplyFullState()は使用していない。
+
+削除したモンキーパッチ：
+  if (typeof CLOUD !== 'undefined') {
+    const oldApplyFull = CLOUD._applyFullState ? CLOUD._applyFullState.bind(CLOUD) : null;
+    CLOUD._applyFullState = function(full){
+      const ok = oldApplyFull ? oldApplyFull(full) : true;
+      if (full && Array.isArray(full.workerCsvData)) STATE.workerCsvData = full.workerCsvData;
+      if (full && Array.isArray(full.productAddressData)) STATE.productAddressData = full.productAddressData;
+      ensureState();
+      if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
+      if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+      return ok;
+    };
+  }
+
+追加したHook登録：
+  if (typeof CLOUD !== 'undefined' && typeof CLOUD.onAfterApplyFullState === 'function') {
+    CLOUD.onAfterApplyFullState(function(full){
+      if (full && Array.isArray(full.workerCsvData)) STATE.workerCsvData = full.workerCsvData;
+      if (full && Array.isArray(full.productAddressData)) STATE.productAddressData = full.productAddressData;
+      ensureState();
+      if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
+      if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+      if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+    });
+  }
+
+  変更点：
+  ・ガード条件を typeof CLOUD !== 'undefined' → typeof CLOUD !== 'undefined'
+    && typeof CLOUD.onAfterApplyFullState === 'function' に変更
+    （Hook APIの存在確認を追加。他2ファイルの移行時と同じ考え方）
+  ・CLOUD._applyFullStateの直接代入・oldApplyFullの保持・戻り値okの
+    受け渡しを、CLOUD.onAfterApplyFullState(function(full){...}) の
+    登録呼び出しに置換
+  ・登録するコールバックの中身（workerCsvData/productAddressDataの復元、
+    ensureState、sanitizePersonalDataState、
+    applyDeletionTombstonesToState、FIELD_DATA_ACCESS.invalidate）は
+    実行順序も含めて1文字も変更していない
+  ・元々このロジックは oldApplyFull の戻り値(ok)を見ずに常に無条件で
+    実行されていたため、Hook登録後も同様に無条件で実行される
+    （CLOUD.onAfterApplyFullStateは_applyFullStateの全てのreturn経路
+    （正常時・early return 2箇所）で呼ばれる設計のため、この
+    「常に実行される」という挙動は完全に一致する）
+
+  【参考・既知の理論上の差異】
+  元のコードは、CLOUD._applyFullStateが未定義であっても
+  「oldApplyFull ? oldApplyFull(full) : true」というフォールバックで
+  自身が新しい_applyFullStateとして機能する余地があった。
+  Hook登録方式ではCLOUD.onAfterApplyFullStateが存在しない場合、
+  登録自体が行われずfield_core.jsの処理は実行されなくなる。
+  ただし、現在のscript読込順（core/cloud.js→src/field/field_core.js）
+  では、CLOUD.onAfterApplyFullStateはPhase3-1で追加済みのため必ず存在し、
+  この差異が実際に問題となる状況は現状ない。
+
+処理順比較：
+  変更前：
+    CLOUD._applyFullState(full) が呼ばれる
+    ↓ oldApplyFull(full)（元のCloud適用処理）
+    ↓ field_core.jsの復元処理（workerCsvData等）
+
+  変更後：
+    CLOUD._applyFullState(full) が呼ばれる（Phase3-1でhook呼び出しが
+    内蔵された、書き換えられていない本来の関数）
+    ↓ 元のCloud適用処理
+    ↓ this._afterApplyFullStateHooks.forEach(...)（Phase3-1で追加済み）
+    ↓ 　└ field_core.jsが登録したコールバックが実行される
+    ↓ 　　workerCsvData等の復元処理
+
+  「Cloud適用処理の後に、同じ内容の復元処理が行われる」という相対順序は
+  完全に一致している。
+
+検証：
+  - 全JSファイルのnode --check構文検証：エラーなし
+  - field_core.js内に CLOUD._applyFullState = / CLOUD.applyFullState = と
+    いう直接書き換えが無くなったことをgrep確認
+  - navigation.js / cloud.js / field_content.js / field_product.js は
+    今回のセッションで書き込みを行っておらず無変更（diffで確認）
+  - Cloud同期・手動同期・Dataset反映のロジックは今回一切変更していない
+
+GitHub投入可否：投入可能
+  今回はfield_core.jsの1ファイルのみの変更です。
+  これでNAV.go・CLOUD._applyFullStateへのモンキーパッチは全て解消され、
+  Version3前半（Hook API追加・全モンキーパッチのHook化）が完了しました。

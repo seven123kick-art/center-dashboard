@@ -243,10 +243,8 @@ IMPORT.deleteFieldData = function(ym) {
 
   // クラウド同期は app.js の CLOUD 側で月単位分割保存する。
   // full_state に workerCsvData / productAddressData を入れると Supabase の object size 上限で同期失敗するため、ここでは追加しない。
-  if (typeof CLOUD !== 'undefined') {
-    const oldApplyFull = CLOUD._applyFullState ? CLOUD._applyFullState.bind(CLOUD) : null;
-    CLOUD._applyFullState = function(full){
-      const ok = oldApplyFull ? oldApplyFull(full) : true;
+  if (typeof CLOUD !== 'undefined' && typeof CLOUD.onAfterApplyFullState === 'function') {
+    CLOUD.onAfterApplyFullState(function(full){
       // 旧full_state互換：過去に大きいfull_stateへ入っていた現場CSVがある場合だけ取り込む。
       if (full && Array.isArray(full.workerCsvData)) STATE.workerCsvData = full.workerCsvData;
       if (full && Array.isArray(full.productAddressData)) STATE.productAddressData = full.productAddressData;
@@ -254,8 +252,7 @@ IMPORT.deleteFieldData = function(ym) {
       if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
       if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-      return ok;
-    };
+    });
   }
 
 
