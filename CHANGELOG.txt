@@ -7,3 +7,178 @@ Phase2 (2026-07-24)
 - §12/§20A/§23 に残っていた「分離済みを示す空の見出しコメント」の重複を1本化。
 - 現場分析データ遅延読込・IndexedDBキャッシュ部分に新規セクション見出しを追加。
 - §10B（データセット選定・計画データ）とIDB_CACHE部分にTODO(V2)コメントを追加。
+
+Phase4-1 (2026-07-25)
+変更ファイル：
+  - src/app.js（編集）
+  - src/modules/indicators.js（新規）
+  - src/ui/ui_helpers.js（新規）
+  - center.html（編集：scriptタグ追加のみ）
+
+変更理由：
+  Phase3設計書のStep順に従い、依存ゼロ（Indicators）→中程度（UIHelpers）の順で
+  将来の本格モジュール分割に向けた土台作りを実施。
+  Configuration/Dataset/GlobalState/Navigation等、指示で禁止された領域には
+  一切手を入れていない。
+
+影響範囲：
+  - renderIndicators() / renderAnnual() / renderAlerts()：
+    外部ファイルからの参照なし（Phase2調査済み）。app.js内のNAVからのみ呼ばれる
+    呼び出し方法（bare関数呼び出し）は完全維持。
+  - UI（トップバー更新・保存状態表示・クラウドバッジ・トースト通知等）：
+    13ファイルから window.UI.xxx() の形で参照されているが、
+    公開名・メソッド名・引数・戻り値は一切変更していないため影響なし。
+
+互換性：
+  - 新規window変数の追加：なし
+  - ES Modules化：行っていない（<script defer>のグローバルスコープ方式を維持）
+  - 既存のcapacity.js / past_library.js / storage_audit.js / report_ui.js と
+    同一の分割方式（IIFE等でカプセル化せず、グローバル関数・グローバルオブジェクト
+    として新ファイルへ移動）を採用し、一貫性を保った。
+
+Phase4-2 (2026-07-25)
+変更ファイル：
+  - src/modules/indicators.js（編集）
+  - src/ui/ui_helpers.js（編集）
+  ※ src/app.js, center.html は今回変更なし
+
+変更理由：
+  Phase4-1で分離したindicators.js/ui_helpers.jsが、既存モジュール
+  （capacity.js, report_ui.js, past_library.js, trend.js）と同じ設計に
+  なっているかをレビューした結果、以下2点で差異があったため統一した。
+  1. IIFE + 二重読込ガードが未実装だった
+  2. indicators.jsがrenderIndicators/renderAnnual/renderAlertsを
+     bare関数として個別公開しており、責務単位オブジェクトになっていなかった
+
+変更内容：
+  [indicators.js]
+  - IIFE（即時実行関数）+ 二重読込ガード(__INDICATORS_MODULE_LOADED_20260725__)を追加
+  - window.renderIndicators / window.renderAnnual / window.renderAlerts の
+    bare関数公開は、NAVからの既存呼び出し方法を維持するためそのまま残した
+  - 新たに window.INDICATORS = { renderIndicators, renderAnnual, renderAlerts }
+    を責務単位オブジェクトとして追加公開（Phase4-2標準に統一）
+
+  [ui_helpers.js]
+  - IIFE + 二重読込ガード(__UI_HELPERS_MODULE_LOADED_20260725__)を追加
+  - window.UI = {...} は元々オブジェクト単位の公開だったため、
+    公開方法自体の変更は不要だった（構造の統一のみ実施）
+
+  [読み込み順の確認]
+  - center.htmlのscriptタグ順（app.js → ui_helpers.js → format.js → core/* →
+    modules/* → field/*）を確認。UIが13ファイルから参照される点を踏まえ、
+    app.jsの直後という現在の位置は適切と判断。変更なし。
+
+  [不要なグローバル・重複コードの確認]
+  - indicators.js/ui_helpers.js内に重複関数・デッドコードは見つからなかった
+
+影響範囲：
+  - renderIndicators() / renderAnnual() / renderAlerts()：
+    呼び出し方法（bare関数）は完全維持のため、app.js内NAVの動作に影響なし
+  - window.UI.xxx()：呼び出し方法・メソッド名は変更していないため、
+    13ファイルすべての既存呼び出しに影響なし
+  - window.INDICATORS：新規追加のみ。既存コードから参照されていないため
+    既存動作への影響なし
+
+互換性：
+  - 既存API（bare関数・window.UI）：100%維持
+  - 新規追加：window.INDICATORS（責務単位オブジェクト、Phase4-2標準）
+  - ES Modules化：行っていない
+  - HTML（center.html）：今回変更なし
+
+確認項目：
+  □ Console Errorなし → 全JSファイルnode --checkで構文検証済み、エラーなし
+  □ 読み込み順 → app.js→ui_helpers.js→format.js→core→modules→fieldの順を確認、適切
+  □ window公開 → window.UI（既存維持）、window.INDICATORS（新規・責務単位）を確認
+  □ 画面表示 → renderIndicators/renderAnnual/renderAlertsのロジックは
+    Phase4-1から一切変更していないため、表示は完全に同一
+
+Phase4-3 (2026-07-25) Loaderモジュール分離
+変更ファイル：
+  - src/app.js（編集：§28/§29-A/§30-A の関数定義を削除、マーカーコメントに置換）
+  - src/core/loader.js（新規）
+  - center.html（編集：scriptタグ1行追加のみ）
+
+変更理由：
+  Phase3設計書の分割順序に従い、Loaderモジュール（アップロードゾーン設定・
+  計画データ取込ボタン登録・画面別モジュール遅延読込）を分離。
+  対象はsetupDropZone() / setupPlanImport() / loadExternalScriptOnce() /
+  loadScreenModules() の4関数のみで、Bootstrap・Navigation・Datasetには
+  一切触れていない。
+
+影響範囲：
+  - Bootstrap（§18、DOMContentLoadedハンドラ）からの呼び出し箇所
+    （setupDropZone/setupPlanImport/loadScreenModulesの計5箇所）は
+    diffで完全一致を確認済み、1バイトも変更していない
+  - PLAN（計画データ取込オブジェクト、app.js内で定義）への依存は維持
+  - center.htmlのDOM構造・CSS・onclick属性は変更なし
+
+互換性：
+  - 既存API（bare関数呼び出し）：window.setupDropZone等として100%維持
+  - 新規追加：window.LOADER = { setupDropZone, setupPlanImport,
+    loadExternalScriptOnce, loadScreenModules }（責務単位オブジェクト、
+    Version2標準に準拠）
+  - ES Modules化：行っていない
+  - script読み込み順：src/core/workers.jsの直後にloader.jsを追加。
+    core層のインフラとして論理的に適切な位置と判断（理由のない順序変更なし）
+
+動作確認：
+  □ Console Errorなし → 全JSファイルnode --checkで構文検証済み、エラーなし
+  □ 動作変更なし → Bootstrap以降のコードは差分ゼロ（diffで確認）を実施済み
+  □ 読み込み順問題なし → loader.jsはBootstrapが実行される前（DOMContentLoaded
+    より前）に読み込み完了するため問題なし
+  □ 既存画面動作OK → アップロードゾーン（ドラッグ&ドロップ）、計画データ取込
+    ボタン、荷主分析モジュールの遅延読込は、ロジック無変更のため動作は同一
+  □ CHANGELOG作成済
+  □ 変更ファイルのみZIP
+
+Phase4-3改訂 (2026-07-25) 共通ルール適用（ロードガード・ヘッダ・互換API統一）
+変更ファイル：
+  - src/modules/indicators.js（編集）
+  - src/ui/ui_helpers.js（編集）
+  - src/core/loader.js（編集）
+  ※ src/app.js, center.html は今回変更なし
+
+変更理由：
+  Version2共通開発ルール制定に伴い、既存3モジュールを新基準へ統一。
+
+変更内容：
+  [ロードガード名]
+  - 日付・連番付きの命名（例：__LOADER_MODULE_LOADED_20260725__）を廃止し、
+    window.__○○_MODULE_LOADED__ 形式に統一
+    （__INDICATORS_MODULE_LOADED__ / __UI_MODULE_LOADED__ /
+      __LOADER_MODULE_LOADED__）
+
+  [モジュールヘッダ]
+  - Module / 責務 / 依存 / 公開API / 互換API / 更新日 / TODO(V3) の
+    正式フォーマットへ統一
+
+  [互換API]
+  - indicators.js / loader.js：これまで直接代入（window.renderIndicators =
+    renderIndicators）だった互換APIを、正式API（window.INDICATORS /
+    window.LOADER）を呼び出すラッパー関数に変更。各互換APIに
+    「TODO(V3) app.js移行完了後に削除予定」コメントを追加
+  - ui_helpers.js：当初からwindow.UIとして責務単位オブジェクトで公開されて
+    いたため、互換APIの追加は不要と判断（ヘッダにその旨明記）
+
+影響範囲：
+  - app.js側の呼び出し方法（bare関数、window.UI.xxx()）は無変更のため、
+    app.js・center.htmlともに今回変更なし
+  - 互換APIがラッパー化されたが、戻り値・引数・呼び出し方法は完全に同一
+    （loadScreenModulesのasync/Promiseの挙動も維持）
+
+互換性：
+  - 既存API：100%維持（ラッパー経由で正式APIを呼ぶだけで、挙動は不変）
+  - 新規追加：なし（既存3モジュールの公開API自体は変更していない）
+
+確認結果：
+  □ モジュールロードガードがあるか → 3モジュールとも新命名規則で実装済み
+  □ モジュールヘッダがあるか → 3モジュールとも正式フォーマットで記載済み
+  □ 命名規則を守っているか → window.__○○_MODULE_LOADED__形式に統一済み
+  □ 正式APIは責務単位オブジェクトか → window.INDICATORS / window.LOADER /
+    window.UI（既存）で統一済み
+  □ 互換APIにTODO(V3)コメントがあるか → indicators.js・loader.jsに追加済み
+    （ui_helpers.jsは互換API自体が不要なため該当なし）
+  □ 互換APIは正式APIを呼ぶラッパーか → indicators.js・loader.jsで実装済み
+  □ 外部仕様変更なし → app.js・center.html無変更で確認
+  □ Console Errorなし → 全JSファイルnode --checkで構文検証済み
+  □ CHANGELOG記載済み → 本項目
