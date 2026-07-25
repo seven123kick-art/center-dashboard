@@ -858,3 +858,81 @@ Version3完成時に削除予定となる互換API：
   段階で削除候補となる。今回は削除しない。）
 
 GitHub投入可否：今回は不要（前回同様、開発途中のため）
+
+Version3 Phase3-3-3 (2026-07-25) DatasetRepository読み取り系メソッド実装
+変更ファイル：
+  - src/core/repository/dataset_repository.js（編集：読み取り4メソッド実装）
+  ※ registry.js / storage_repository.js / cloud_repository.js /
+    sync_coordinator.js / center.html / app.js はいずれも今回一切変更していない
+  ※ 既存画面・既存関数からは今回も一切呼び出していない（未接続のまま）
+
+実装したメソッド：
+  - getAll()：STATE.datasetsの浅いコピー配列を返す
+  - findByKey(ym, type, source)：upsertDataset()の複合キー判定述語と
+    同一ロジックで検索
+  - getActive()：activeDatasets()と同一ロジック（tombstone適用→
+    ym毎に優先順位で1件へ絞込→ym昇順ソート→表示用千円→円換算）
+  - priorityOf(dataset)：datasetPriority()と同一ロジック
+
+書き込み系（upsert/remove）：今回も未実装のまま（Phase3-3-3の対象外）
+
+調査した既存Dataset関数と場所（すべてsrc/app.js）：
+  upsertDataset(790行), datasetSourceKind(1169行), datasetPriority(1183行),
+  activeDatasets(1192行), activeDatasetByYM(1214行),
+  datasetStoredAsKyen(1150行), normalizeDatasetForDisplay(1154行),
+  applyDeletionTombstonesToState(497行), dataDeleteKey(463行),
+  isDeletedSince(491行), fiscalYearFromYM(1463行), n(759行)
+
+複合キーと優先順位の現在仕様：
+  - 複合キー：(ym, type, source) の3値。sourceは 'history' か
+    それ以外は全て 'csv' 扱いに正規化される
+  - 優先順位：confirmed=30 > daily=20 > history=10 > その他=0
+    （同一ym内で優先順位が同点の場合はimportedAtが新しい方を採用）
+
+tombstone・無効Datasetの扱い：
+  applyDeletionTombstonesToState()はSTATE.datasetsを直接書き換える設計の
+  ため、DatasetRepositoryでは同じ判定条件のみを読み取り専用で再現した
+  （STATEへの書き戻しは行わない）。
+  ただし判定の一部（history種別の年度別tombstone）はfiscalYearFromYM()
+  （CONFIG.FISCAL_STARTに依存）が必要であり、この関数を複製すると
+  将来の設定変更時にロジックが乖離するリスクがあるため、複製せず
+  window.fiscalYearFromYM等が実際に存在する場合のみ呼び出す設計とした。
+  存在しない場合は判定不能として「除外しない」方向にフォールバックする
+  （安全側）。この依存を許容するか、関数を複製すべきかは判断が必要な
+  点として残っている。
+
+既存処理との比較結果（Node.js比較テスト実施）：
+  1. Dataset件数：一致（5件）
+  2. findByKeyの検索結果：一致
+  3. Active Dataset抽出結果：ym一覧・件数・千円→円換算値とも一致
+  4. 優先順位：confirmed/daily/history全て一致
+  5. 空配列時：両方とも空配列/nullで一致
+  6. source欠損時：confirmedとして扱われることを確認、一致
+  7. 同一複合キー複数件：先頭一致を返す挙動で一致
+  8. tombstoneがある場合：両方とも除外され0件で一致
+  9. STATE/STATE.datasets未定義の場合：例外を投げず空配列を返すことを確認
+
+  全9項目について、既存関数とDatasetRepositoryの結果が完全一致する
+  ことをNode.js上で確認済み（差異は検出されなかった）。
+
+戻り値の安全性：
+  getAll()/getActive()とも、配列は都度新規生成して返すため、呼び出し側が
+  返された配列（.push/.splice等）を変更してもSTATE.datasets自体には
+  影響しない。ただし配列内のDatasetオブジェクト自体は浅いコピーのため、
+  オブジェクトのプロパティを直接書き換えるとSTATE側にも反映される
+  （既存のactiveDatasets()と同じ挙動であり、今回新たに導入した制約では
+  ない）。
+
+未実装の書き込みAPI：
+  - upsert(dataset)：TODO(V3)のまま
+  - remove(predicate)：TODO(V3)のまま
+
+次に移行するなら最も安全な既存関数：
+  activeDatasetByYM() が最も安全な移行候補と考える。理由：
+  ・読み取り専用で副作用が無い
+  ・既にgetActive()で同等ロジックを実装済みのため、
+    「REPO.getActive().find(d => d.ym === ym)」への単純な置き換えで
+    完結する
+  ・呼び出し元を1箇所ずつ確認しながら移行しやすい
+
+GitHub投入可否：今回も不要（既存画面へは未接続のため）
