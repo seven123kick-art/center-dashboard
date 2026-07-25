@@ -330,10 +330,6 @@ const CENTER = (() => {
 })();
 
 /* ════════ §3 STATE（ランタイム状態） ═══════════════════════════ */
-// ============================================================================
-// 02. Global State
-// ============================================================================
-
 const STATE = {
   datasets:  [],    // [{ym,type,rows,totalIncome,totalExpense,profit,...}]
   workerCsvData: [], // 現場明細CSV（作業者CSV）月単位データ
@@ -1676,10 +1672,6 @@ function updateFiscalInputState(kind) {
   renderImport();
   UI.toast(`${fy}年度に切替えました。貼付欄をクリアしました`, 'warn');
 }
-// ============================================================================
-// 04. Initialization
-// ============================================================================
-
 function initFiscalYearSelects() {
   const now = new Date();
   const defaultFY = getDefaultFiscalYear();
@@ -3186,10 +3178,6 @@ async function loadScreenModules() {
 
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
 function setupFieldImportYMControls(){}
-// ============================================================================
-// 09. Event Registration
-// ============================================================================
-
 document.addEventListener('DOMContentLoaded', async () => {
   let _bootRendered = false;
 

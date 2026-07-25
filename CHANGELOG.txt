@@ -1,4 +1,3 @@
-Structure cleanup
-- Removed duplicated Version2 header.
-- Removed legacy revision history comments from app.js header.
-- Added section markers where identifiable.
+Phase1
+- Removed duplicate Version2 header.
+- Removed legacy revision comment block from app.js.
