@@ -14,6 +14,14 @@ Module
     実装した。既存画面・既存関数からはまだ一切呼び出されていない
     （center.htmlにも未接続）。
 
+    【Phase3-3-4で年度計算依存を解消】
+    history種別のtombstone判定に必要な年度計算は、
+    window.CONFIG_UTILS.fiscalYearFromYM()（src/core/format.js、
+    Phase3-3-4で新設）を直接呼び出す方式に変更した。
+    「存在すれば使う・無ければ黙ってスキップ」という曖昧なフォールバックは
+    廃止し、CONFIG_UTILSが読み込まれていない場合は明示的に例外を投げる
+    設計とした（正しいscript読込順であれば発生しない）。
+
     既存の processDataset() / upsertDataset() / activeDatasets() /
     mergeFullState() 等は本ファイル作成・更新後も一切変更せず、そのまま
     app.js 側に残っている。書き込み系（upsert/remove）は今回も未実装
@@ -21,13 +29,13 @@ Module
 
 依存
     実行時：window.STATE（読み取りのみ、変更しない）
-    tombstone判定のみ、以下が存在すれば使用する（無ければ安全側にスキップ）：
+    tombstone判定（history種別）：window.CONFIG_UTILS.fiscalYearFromYM(ym)
+      　→ 必須依存。読み込まれていない場合は例外を投げる（Phase3-3-4）。
+    tombstone判定（history以外）：以下が存在すれば使用する
+    （無ければ安全側にスキップ。fiscalYearFromYMほど強く要求はしていない。
+    この点は今回のPhase3-3-4の対象外のため変更していない）：
       window.dataDeleteKey(ym, type)
       window.isDeletedSince(kind, key, itemTime)
-      window.fiscalYearFromYM(ym)
-    上記3関数は「呼べれば使う・無ければ諦める」という設計であり、
-    本ファイル単体をNode.js等で読み込んでも構文エラー・例外は発生しない
-    （下記「調査結果と判断が必要な箇所」を参照）。
 
 公開API
     window.DATASET_REPOSITORY.getAll()
@@ -47,12 +55,12 @@ Module
 TODO(V3)
     - upsert() / remove() を実装する（今回未実装）
     - Dataset ID導入（_generateId）は別フェーズ
-    - tombstone判定の外部関数依存（dataDeleteKey/isDeletedSince/
-      fiscalYearFromYM）を、将来的にどう扱うか要判断
-      （下記「調査結果と判断が必要な箇所」参照）
+    - dataDeleteKey/isDeletedSinceについても、fiscalYearFromYMと同様に
+      共通モジュール化するかどうかは別途要検討（今回はfiscalYearFromYMの
+      み対応）
 ==============================================================================
 
-■ 調査結果：既存Dataset関数とその場所（すべてsrc/app.js）
+■ 調査結果：既存Dataset関数とその場所（すべてsrc/app.js、Phase3-3-4時点）
    - upsertDataset()             790行  複合キー判定・追加/上書き・ソート
    - datasetSourceKind()        1169行  種別判定（confirmed/daily/history）
    - datasetPriority()          1183行  優先順位（confirmed=30>daily=20>history=10）
@@ -63,7 +71,10 @@ TODO(V3)
    - applyDeletionTombstonesToState() 497行  STATE.datasetsからTombstone対象を除去（STATEを直接書き換える）
    - dataDeleteKey()             463行  削除キー生成 `${ym}_${type}`
    - isDeletedSince()            491行  指定キーが指定時刻以降に削除されたか
-   - fiscalYearFromYM()         1463行  年月→年度（CONFIG.FISCAL_STARTに依存）
+   - fiscalYearFromYM()         1463行  Phase3-3-4でCONFIG_UTILS.fiscalYearFromYM()
+                                        （src/core/format.js）への互換ラッパーに
+                                        変更。年度計算ロジックの実装元は
+                                        CONFIG_UTILSの1箇所のみ。
 
 ■ 調査結果と判断が必要な箇所（推測で実装していない点）
 
@@ -72,24 +83,15 @@ TODO(V3)
       target.datasets = target.datasets.filter(...) という形で
       直接書き換える設計になっている（app.js 500-514行）。
       DatasetRepositoryはSTATE変更禁止のため、この関数はそのまま呼べない。
-      → 対応：フィルタ条件（dataDeleteKey/isDeletedSince/fiscalYearFromYM
-        を使った判定式）だけを読み取り専用で再現し、STATEへの書き戻しは
-        行わない実装とした。
+      → 対応：フィルタ条件（dataDeleteKey/isDeletedSince/
+        CONFIG_UTILS.fiscalYearFromYMを使った判定式）だけを読み取り専用で
+        再現し、STATEへの書き戻しは行わない実装とした。
 
-   2. fiscalYearFromYM() は CONFIG.FISCAL_START（現在4月）と
-      getDefaultFiscalYear()（現在日時）に依存している
-      「収支補完（history）」データのtombstone判定にのみ必要。
-      この関数を本ファイル内に独自複製すると、将来CONFIG.FISCAL_START
-      が変更された場合に本Repositoryだけ古い仕様のまま取り残される
-      （ロジック二重管理・乖離のリスク）と判断した。
-      → 対応：複製せず、window.fiscalYearFromYM が実際に存在する場合
-        のみ呼び出す設計とした。存在しない場合（＝本ファイル単体を
-        app.js無しで読み込んだ場合）は、history種別のtombstone判定を
-        スキップする（＝安全側＝除外されるべきデータが除外されない
-        方向にのみ倒れる）。これは「差異が生まれ得る」ため、⑥で
-        明記する。
-      要判断：この依存を許容するか、それとも fiscalYearFromYM 相当を
-      本ファイルへ複製すべきか、方針を確定していただきたい。
+   2.（Phase3-3-4で解消済み）fiscalYearFromYMの二重管理・黙ったフォールバック
+      問題は、年度計算ロジックをCONFIG_UTILS（src/core/format.js）へ一元化
+      することで解消した。DatasetRepositoryはCONFIG_UTILS.fiscalYearFromYM()
+      を直接呼び出し、存在しない場合は例外を投げる（詳細は_isTombstoned実装
+      を参照）。
 
    3. findByKey()の「tombstone適用有無」は既存コードに前例がない
       既存コードには「tombstone適用済みのfindByKey」に相当する関数が
@@ -222,12 +224,16 @@ TODO(V3)
         const time = ds.importedAt || ds.updatedAt || ds.savedAt || '';
 
         if (source === 'history') {
-            if (typeof window.fiscalYearFromYM !== 'function') {
-                // fiscalYearFromYMが無いと年度別tombstone判定ができないため、
-                // 安全側（除外しない）にフォールバックする。
-                return false;
+            if (!window.CONFIG_UTILS || typeof window.CONFIG_UTILS.fiscalYearFromYM !== 'function') {
+                // Phase3-3-4：黙ったフォールバックは廃止した。年度計算の
+                // 単一実装元（src/core/format.js の CONFIG_UTILS）が読み込まれて
+                // いない状態でhistory種別のtombstone判定を行うことは
+                // 「異なる結果を返す」リスクがあるため、明示的に例外を投げる。
+                // 正しいscript読込順（format.jsがdataset_repository.jsより
+                // 前に読み込まれる構成）であれば、この分岐には到達しない。
+                throw new Error('[DatasetRepository] CONFIG_UTILS.fiscalYearFromYM is required but not loaded. Check script load order (src/core/format.js must load before this file).');
             }
-            const fy = String(ds.fiscalYear || window.fiscalYearFromYM(ds.ym));
+            const fy = String(ds.fiscalYear || window.CONFIG_UTILS.fiscalYearFromYM(ds.ym));
             if (deletedState && deletedState.historyFiscalYears && deletedState.historyFiscalYears[fy]) return true;
             if (deletedState && deletedState.historyMonths && deletedState.historyMonths[ds.ym]) return true;
             return false;

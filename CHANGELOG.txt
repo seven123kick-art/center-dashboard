@@ -936,3 +936,112 @@ tombstone・無効Datasetの扱い：
   ・呼び出し元を1箇所ずつ確認しながら移行しやすい
 
 GitHub投入可否：今回も不要（既存画面へは未接続のため）
+
+Version3 Phase3-3-4 (2026-07-25) 年度計算ロジックの共通化
+変更ファイル：
+  - src/core/format.js（編集：CONFIG_UTILS.fiscalYearFromYM/
+    getDefaultFiscalYearを追加）
+  - src/app.js（編集：fiscalYearFromYM/getDefaultFiscalYearの本体を
+    CONFIG_UTILSへの互換ラッパーに置換）
+  - src/core/repository/dataset_repository.js（編集：history tombstone
+    判定のフォールバックを廃止し、CONFIG_UTILSを直接参照するよう変更）
+  ※ registry.js / storage_repository.js / cloud_repository.js /
+    sync_coordinator.js / center.html はいずれも今回一切変更していない
+  ※ center.htmlのscriptタグ・順序変更は不要だった（既存のformat.jsに
+    追加しただけのため）
+
+事前調査：
+  - fiscalYearFromYM()の実装：app.js 1463-1468行。CONFIG.FISCAL_START
+    （74行、値は4=4月始まり）とgetDefaultFiscalYear()（1457行）に依存
+  - 既存共通モジュール：src/core/format.js が唯一の「業務ロジックを
+    含まない共通ユーティリティ」ファイルだった（fmt/fmtK/pct/ymLabel等）。
+    ヘッダーコメントには「データセット選定等の業務ロジックは分離対象外」
+    と明記されていたが、fiscalYearFromYMは外部依存の少ない純粋な計算
+    ロジックであり、既存のymLabel（日付表示）と性質が近いと判断し、
+    新規ファイルを作らずformat.jsへ追加する方針とした
+  - script読込順：src/app.js（1437行）→ src/core/format.js（1439行）の順。
+    CONFIG（app.js側で定義）はformat.js読み込み時点で既に存在するため、
+    問題なし
+  - fiscalYearFromYMの全参照箇所：src/app.js、src/modules/storage_audit.js、
+    pl.js、landing_forecast.js、bulk_import.js、src/field/field_core.js、
+    src/core/store.js、src/core/cloud.js、src/core/repository/
+    dataset_repository.js の9ファイルで参照されていることを確認。
+    store.js・cloud.jsは既に「typeof fiscalYearFromYM === 'function'」と
+    いう防御的チェックを独自に持っていた（今回はこれらのチェック自体は
+    変更していない）
+
+年度計算ロジックの移設先：
+  src/core/format.js の window.CONFIG_UTILS オブジェクト
+    CONFIG_UTILS.getDefaultFiscalYear()
+    CONFIG_UTILS.fiscalYearFromYM(ym)
+
+選んだ名前空間と理由：
+  CONFIG_UTILS という名前space を選択した。理由：
+  ・fiscalYearFromYMの計算根拠はCONFIG.FISCAL_START（業務設定値）であり、
+    fmt/esc等の「表示整形」とは性質が異なる（設定値に基づく計算）
+  ・format.js内に新たにオブジェクト名前空間を作ることで、既存のbare関数群
+    （fmt/fmtK等、表示整形専用）と、CONFIG依存の計算ロジックを名前の上でも
+    区別できるようにした
+  ・新規ファイルを作らず、既存のformat.js（唯一の共通ユーティリティ
+    ファイル）に配置することで「無理に新規モジュールを作らない」方針を
+    遵守した
+
+既存fiscalYearFromYMの扱い：
+  app.js側にbare関数として維持（削除していない）。ただし中身は
+  「return CONFIG_UTILS.fiscalYearFromYM(ym);」のみの1行の互換ラッパーに
+  縮小した。getDefaultFiscalYear()も同様。
+  これにより、9ファイルにまたがる既存の呼び出し元（bare関数呼び出し）は
+  一切変更する必要がなかった。
+
+DatasetRepositoryの依存方法：
+  history種別のtombstone判定において、window.CONFIG_UTILS.fiscalYearFromYM
+  を直接呼び出す方式に変更した。「存在すれば使う」という曖昧な条件分岐は
+  廃止し、CONFIG_UTILSまたはfiscalYearFromYMメソッドが存在しない場合は
+  Error（明示的な例外）を投げる設計とした。
+
+フォールバックを廃止した内容：
+  変更前：
+    if (typeof window.fiscalYearFromYM !== 'function') {
+      return false; // 除外しない（安全側フォールバック、黙って実行継続）
+    }
+  変更後：
+    if (!window.CONFIG_UTILS || typeof window.CONFIG_UTILS.fiscalYearFromYM !== 'function') {
+      throw new Error('[DatasetRepository] CONFIG_UTILS.fiscalYearFromYM is required but not loaded. ...');
+    }
+  読み込み順によって結果が変わる（＝同じコードなのに環境によって異なる
+  挙動になる）という問題を解消し、必須依存が満たされない状態を
+  「早期に・明示的に」検知できるようにした。
+
+年度境界およびtombstoneの比較結果（Node.js比較テスト実施）：
+  1. 現行fiscalYearFromYMと共通APIの全結果：10パターン（通常月、年度境界
+     前後、空文字、5桁、13月という不正値、非数値、null、undefined）で
+     旧ロジック・CONFIG_UTILS・互換ラッパーの3者が完全一致
+  2. FISCAL_START=4での判定：一致
+  3. 年度境界（3月→2025年度、4月→2026年度）：一致
+  4. 不正なym（空文字・5桁・null）：いずれもgetDefaultFiscalYear()への
+     フォールバックで一致
+  5. history tombstone適用結果：年度単位の一括tombstone（2026年度指定）
+     で、旧ロジック・DatasetRepositoryとも対象2件が0件に除外され一致
+  6. 共通API経由と旧関数経由の結果一致：一致
+  7. DatasetRepository単独テスト：CONFIG_UTILSが読み込まれた状態での
+     getActive()が正しく動作し、千円→円換算も含め正常
+  7b. CONFIG_UTILS未読み込み状態：黙って処理を続けず、明示的なErrorが
+     投げられることを確認
+  8. script読込順：src/app.js→src/core/format.js（CONFIG_UTILS定義）の順を
+     維持。DatasetRepositoryは現時点でcenter.htmlに未接続のため、接続時に
+     format.jsより後に読み込む必要があることを設計メモとして記録
+  9. 年度計算ロジックが1か所だけになったこと：CONFIG_UTILS.fiscalYearFromYM
+     （src/core/format.js）のみに実装が存在し、app.js側は1行の互換
+     ラッパー、DatasetRepository側も複製せず直接呼び出しであることを確認
+
+次にactiveDatasetByYMを移行できる状態か：
+  年度計算の依存問題が解消されたことで、DatasetRepository.getActive()の
+  信頼性が高まった。activeDatasetByYM()自体は年度計算に直接依存しない
+  （ym一致検索のみ）ため、Phase3-3-3時点から移行の妨げにはなっていなかった
+  が、今回の変更でgetActive()内部の年度計算依存が確定的になったことで、
+  より安心して移行できる状態になったと言える。ただし今回はRepository移行
+  範囲を広げない方針のため、実際の移行はまだ行っていない。
+
+GitHub投入可否：今回も不要（既存画面へは未接続のため。ただしapp.js/
+  format.jsの変更はいずれ他の変更と合わせてGitHubへ投入することになる
+  実質的な機能修正である点に留意）

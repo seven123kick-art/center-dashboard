@@ -1455,16 +1455,16 @@ function sameMonthLastYear(ym) {
 }
 
 function getDefaultFiscalYear() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth() + 1;
-  return String(m >= CONFIG.FISCAL_START ? y : y - 1);
+  // Phase3-3-4：年度計算ロジックは src/core/format.js の CONFIG_UTILS へ一元化。
+  // ここはCONFIG_UTILSを呼ぶだけの互換ラッパー（既存の全呼び出し元との
+  // 互換性維持のため、bare関数名 getDefaultFiscalYear() は維持する）。
+  return CONFIG_UTILS.getDefaultFiscalYear();
 }
 function fiscalYearFromYM(ym) {
-  if (!ym || String(ym).length < 6) return getDefaultFiscalYear();
-  const y = parseInt(String(ym).slice(0,4),10);
-  const m = parseInt(String(ym).slice(4,6),10);
-  return String(m >= CONFIG.FISCAL_START ? y : y - 1);
+  // Phase3-3-4：年度計算ロジックは src/core/format.js の CONFIG_UTILS へ一元化。
+  // ここはCONFIG_UTILSを呼ぶだけの互換ラッパー（既存の全呼び出し元との
+  // 互換性維持のため、bare関数名 fiscalYearFromYM() は維持する）。
+  return CONFIG_UTILS.fiscalYearFromYM(ym);
 }
 function monthsOfFiscalYear(fy) {
   const y = parseInt(fy,10);
