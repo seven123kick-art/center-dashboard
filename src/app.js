@@ -27,6 +27,10 @@ window.__mgmtPerfLog = window.__mgmtPerfLog || function(){
 
 
 
+/* ════════════════════════════════════════════════════════════════
+   01. Bootstrap / Asset Loading
+   外部ライブラリの遅延読込（Supabase・XLSX等、実際に使う画面でのみ取得）
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ ASSET LOADER（重い外部ライブラリは必要時だけ読む） ════════ */
 const ASSETS = {
   _promises: {},
@@ -52,6 +56,10 @@ const ASSETS = {
     return !!window.XLSX;
   },};
 
+/* ════════════════════════════════════════════════════════════════
+   02. Configuration / Constants
+   会社設定・センター一覧・勘定科目キー等、アプリ全体で共有する定数
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §1 CONFIG ════════════════════════════════════════════ */
 const CONFIG = {
   SUPABASE_URL:    (window.SUPABASE_CONFIG||{}).url    || '',
@@ -329,6 +337,11 @@ const CENTER = (() => {
   return CONFIG.CENTERS.find(c => c.id === id) || CONFIG.CENTERS[0];
 })();
 
+/* ════════════════════════════════════════════════════════════════
+   03. Global State
+   アプリ全体で共有するランタイム状態、および状態保存前の
+   個人情報サニタイズ・削除済みデータの復活防止ロジック
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §3 STATE（ランタイム状態） ═══════════════════════════ */
 const STATE = {
   datasets:  [],    // [{ym,type,rows,totalIncome,totalExpense,profit,...}]
@@ -525,8 +538,16 @@ window.markDataDeleted = markDataDeleted;
 window.clearDataDeleted = clearDataDeleted;
 window.applyDeletionTombstonesToState = applyDeletionTombstonesToState;
 
+/* ════════════════════════════════════════════════════════════════
+   04. Storage / Persistence（core/store.js に分離済み）
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §4 STORE は core/store.js へ分離 ════════ */
 
+/* ════════════════════════════════════════════════════════════════
+   05. CSV Import Pipeline
+   CSV解析 → データセット変換 → 取込UI → 年月選択モーダル
+   （§5 CSV / §6 PROCESS / §7 IMPORT / §8 MODAL）
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §5 CSV ════════════════════════════════════════════════ */
 const CSV = {
   async read(file) {
@@ -1110,10 +1131,22 @@ const MODAL = {
   },
 };
 
+/* ════════════════════════════════════════════════════════════════
+   06. Cloud Sync（core/cloud.js に分離済み）
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §9 CLOUD は core/cloud.js へ分離 ════════ */
 
+/* ════════════════════════════════════════════════════════════════
+   07. Utility / Dataset Selection
+   表示整形（src/core/format.js に分離済み）、および
+   データセット選定・計画データのクラウドマージロジック
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §10 フォーマットヘルパー（fmt/fmtK/pct/esc等）は src/core/format.js へ分離 ════════ */
 /* ════════ §10B データセット選定・計画データヘルパー ═══════════ */
+// TODO(V2):
+// この節（データセット選定・クラウドマージ処理）はクラウド同期と
+// 密結合しているため、分離する場合は core/cloud.js との依存関係を
+// 十分に検証してから実施すること。単純な切り出しは危険。
 function datasetStoredAsKyen(ds) {
   if (!ds) return false;
   return ds.source === 'history' || String(ds.unit || '').includes('千円');
@@ -1697,6 +1730,9 @@ function initFiscalYearSelects() {
   if (histSel) histSel.onchange = () => updateFiscalInputState('history');
 }
 
+/* ════════════════════════════════════════════════════════════════
+   08. Chart Management / Screen Rendering（一部は分離済みスタブ）
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §11 CHART_MGR ════════════════════════════════════════ */
 /* ════════ §12 RENDER — Dashboard は src/modules/dashboard.js に完全移行済みのため削除 ════════ */
 const CHART_MGR = {
@@ -1713,7 +1749,6 @@ const CHART_MGR = {
   },
 };
 
-/* ════════ §12 RENDER — Dashboard ══════════════════════════════ */
 /* ════════ §14 RENDER — Trend（分割後スタブ） ══════════════════════════════════ */
 function renderTrend() {
   if (window.renderTrend && window.renderTrend !== renderTrend) {
@@ -1740,6 +1775,9 @@ function renderShipper() {
   }
 }
 
+/* ════════════════════════════════════════════════════════════════
+   09. Screen Rendering — Indicators / Annual / Alerts
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §16 RENDER — Indicators ════════════════════════════ */
 function renderIndicators() {
   const view = document.getElementById('view-indicators');
@@ -1963,15 +2001,14 @@ function renderAlerts() {
     </div>`).join('');
 }
 
+/* ════════════════════════════════════════════════════════════════
+   10. Capacity / Data Storage Location / Bulk Import（一部分離済み）
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §19 RENDER — Capacity は src/modules/capacity.js へ分離 ════════ */
 
-/* ════════ §20A データ保管場所対応表ヘルパー ═══════════════════ */
 /* ════════ §20A データ保管場所対応表ヘルパー・保存経路監査 は src/modules/storage_audit.js へ分離 ════════ */
 
-/* ════════ §20 RENDER — Import ═════════════════════════════════ */
-
-
-/* ════════ §20.5 BULK_IMPORT ════════════════════ */
+/* ════════ §20.5 BULK_IMPORT（データ取込画面のレンダリングも含む） ════════ */
 const BULK_IMPORT = window.BULK_IMPORT = {
   _ymFromName(name) {
     const s = String(name || '');
@@ -2296,6 +2333,9 @@ function renderImport() {
   }
 }
 
+/* ════════════════════════════════════════════════════════════════
+   11. Memo / Field UI（一部分離済みスタブ）
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §21 MEMO ════════════════════════════════════════════ */
 const MEMO = {
   save() {
@@ -2404,7 +2444,9 @@ function reportHalfFromYM(ym) {
   return (mm >= 4 && mm <= 9) ? '上期' : '下期';
 }
 
-/* ════════ §23 REPORT_UI（スタブ） ═════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════
+   12. Report / Past Library（分離済みスタブ）
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §23 REPORT_UI は src/modules/report_ui.js へ分離 ════════ */
 /* ════════ §24 PAST_LIBRARY は src/modules/past_library.js へ分離 ════════ */
 
@@ -2520,6 +2562,14 @@ function renderFieldViewAfterCloud(view, renderFn) {
 }
 
 
+/* ════════════════════════════════════════════════════════════════
+   13. Field Cloud Loading / IndexedDB Cache
+   現場分析データの遅延読込制御、および Supabase正本のPC内高速キャッシュ
+   ════════════════════════════════════════════════════════════════ */
+// TODO(V2):
+// IDB_CACHE は src/field/field_core.js・src/core/store.js・
+// src/core/cloud.js からも参照される共有インフラのため、
+// 将来的には core/idb_cache.js 等への分離を検討する。
 /* ════════ 起動状態（先表示・バックグラウンド同期のUI制御） ════════════ */
 window.APP_BOOT_STATE = window.APP_BOOT_STATE || {
   cloudSyncPending: false,
@@ -2739,6 +2789,9 @@ const IDB_CACHE = window.IDB_CACHE = {
   }
 };
 
+/* ════════════════════════════════════════════════════════════════
+   14. Navigation
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §25 NAV ══════════════════════════════════════════════ */
 const NAVGROUP = {
   toggle(name, forceOpen) {
@@ -2877,6 +2930,9 @@ const NAV = {
   },
 };
 
+/* ════════════════════════════════════════════════════════════════
+   15. UI Helpers
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §26 UI（ヘルパー） ══════════════════════════════════ */
 const UI = {
   updateTopbar(view) {
@@ -2951,6 +3007,10 @@ const UI = {
   },
 };
 
+/* ════════════════════════════════════════════════════════════════
+   16. Legacy Compatibility Stubs
+   center.html の古いonclick参照等との互換維持用（現役・削除不可）
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §27 互換スタブ ══════════════════════════════════════ */
 // 旧コードからの参照に対応（center.html の onclick など）
 const DB = {
@@ -3132,6 +3192,9 @@ const TSV_IMPORT = {
 
 // 現場データリスト更新・削除処理は field.js に分割
 
+/* ════════════════════════════════════════════════════════════════
+   17. Upload Zone / Plan Import / Screen Module Loader
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §28 アップロードゾーン設定 ══════════════════════════ */
 function setupDropZone(zoneId, inputId, handler) {
   const zone  = document.getElementById(zoneId);
@@ -3176,6 +3239,10 @@ async function loadScreenModules() {
   await loadExternalScriptOnce('module-shipper', 'src/modules/shipper.js');
 }
 
+/* ════════════════════════════════════════════════════════════════
+   18. Application Boot
+   全体を繋ぐ起動処理。ここは分離せず1箇所にまとめておくことを推奨。
+   ════════════════════════════════════════════════════════════════ */
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
 function setupFieldImportYMControls(){}
 document.addEventListener('DOMContentLoaded', async () => {
