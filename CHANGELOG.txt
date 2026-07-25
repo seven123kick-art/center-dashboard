@@ -1,3 +1,9 @@
 Phase1
 - Removed duplicate Version2 header.
 - Removed legacy revision comment block from app.js.
+
+Phase2 (2026-07-24)
+- app.jsをセクション(01〜18)ごとに責務単位で整理（コメントのみ、ロジック変更なし）。
+- §12/§20A/§23 に残っていた「分離済みを示す空の見出しコメント」の重複を1本化。
+- 現場分析データ遅延読込・IndexedDBキャッシュ部分に新規セクション見出しを追加。
+- §10B（データセット選定・計画データ）とIDB_CACHE部分にTODO(V2)コメントを追加。
