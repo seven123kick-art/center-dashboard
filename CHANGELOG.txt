@@ -767,3 +767,94 @@ GitHub投入可否：投入可能
   今回はfield_core.jsの1ファイルのみの変更です。
   これでNAV.go・CLOUD._applyFullStateへのモンキーパッチは全て解消され、
   Version3前半（Hook API追加・全モンキーパッチのHook化）が完了しました。
+
+Version3 Phase3-3-2 (2026-07-25) Repository Registry導入
+変更ファイル：
+  - src/core/repository/registry.js（新規）
+  ※ dataset_repository.js / storage_repository.js / cloud_repository.js /
+    sync_coordinator.js / center.html はいずれも今回一切変更していない
+
+変更理由：
+  window.DATASET_REPOSITORY等4つの個別グローバルを、将来的に
+  window.Repository という単一の名前空間へ集約するため。
+  開発期間中は両方のアクセス方法を許可し、既存への影響をゼロに保つ。
+
+Repository Registry構成：
+  window.Repository = {
+    Dataset : window.DATASET_REPOSITORY（getter経由）,
+    Storage : window.STORAGE_REPOSITORY（getter経由）,
+    Cloud   : window.CLOUD_REPOSITORY（getter経由）,
+    Sync    : window.SYNC_COORDINATOR（getter経由）
+  }
+
+  4つのプロパティはいずれもgetterとして実装した。オブジェクトリテラルで
+  一度だけ代入する方式にすると、本ファイルが4つの実体ファイルより先に
+  読み込まれた場合にundefinedを固定してしまうため、参照時（アクセスの
+  瞬間）に都度 window.DATASET_REPOSITORY 等を評価するgetter方式を
+  採用し、読込順に依存しない設計とした（動作シミュレーションで確認済み）。
+
+Repository公開方法：
+  - 正式な参照方法（将来の標準）：Repository.Dataset / Repository.Storage /
+    Repository.Cloud / Repository.Sync
+  - 互換の参照方法（今回削除しない）：window.DATASET_REPOSITORY /
+    window.STORAGE_REPOSITORY / window.CLOUD_REPOSITORY /
+    window.SYNC_COORDINATOR
+  - 両方とも同一の実体を指すため、どちらでアクセスしても結果は同じ
+
+Repository間依存図（Mermaid）：
+  graph TD
+      SYNC[SyncCoordinator<br/>Repository.Sync]
+      DATASET[DatasetRepository<br/>Repository.Dataset]
+      STORAGE[StorageRepository<br/>Repository.Storage]
+      CLOUD[CloudRepository<br/>Repository.Cloud]
+
+      SYNC --> DATASET
+      SYNC --> STORAGE
+      SYNC --> CLOUD
+
+      DATASET -.->|直接呼び出し禁止| STORAGE
+      DATASET -.->|直接呼び出し禁止| CLOUD
+      CLOUD -.->|直接呼び出し禁止| DATASET
+      CLOUD -.->|直接呼び出し禁止| STORAGE
+      STORAGE -.->|直接呼び出し禁止| DATASET
+      STORAGE -.->|直接呼び出し禁止| CLOUD
+
+  SyncCoordinatorのみが3つのRepositoryを認識してよく、
+  Dataset/Storage/Cloudの3者間に直接の矢印は存在しない設計とした。
+
+循環参照が起きないことの確認：
+  現時点では4つのRepositoryファイル（dataset/storage/cloud/
+  sync_coordinator）はいずれも中身が未実装のTODOスタブであり、
+  相互に一切呼び出していない（sync_coordinator.jsの
+  _repositoriesReady()のみが3つの存在確認をしているだけで、
+  実際のメソッド呼び出しは行っていない）。そのため現時点で循環参照は
+  物理的に発生し得ない。将来実装が進んだ後も、上記の依存図の設計
+  （SyncCoordinatorのみが他3つを参照し、Dataset/Storage/Cloud間には
+  矢印を作らない）を維持する限り、循環は起こり得ない構造である。
+
+将来DatasetRepositoryを最初に移行する場合の推奨手順：
+  Step1: DatasetRepository.getAll()/findByKey()を、既存のSTATE.datasets
+         参照処理と同じ結果を返すよう実装する（ただし呼び出し元は
+         まだ切り替えない＝既存コードは無変更のまま）
+  Step2: 実装したgetAll()/findByKey()が既存ロジックと完全に同じ結果を
+         返すことを、既存コードと並行実行して比較確認する
+  Step3: 影響範囲が最も小さい呼び出し元（例：読み取り専用の画面が1つ）
+         から、Repository.Dataset.getAll()経由へ1箇所ずつ置き換える
+  Step4: 全ての読み取り箇所の置き換えが完了したら、書き込み系
+         （upsert/remove）の移行に着手する
+  Step5: STATE.datasetsへの直接アクセスが完全に無くなったことを確認後、
+         DatasetRepositoryを「唯一の入口」として確定させる
+
+既存コードへの影響：
+  なし。registry.jsは新規ファイルであり、center.htmlからも読み込まれて
+  いないため、現行のアプリ動作には一切影響しない。
+
+Version3完成時に削除予定となる互換API：
+  - window.DATASET_REPOSITORY
+  - window.STORAGE_REPOSITORY
+  - window.CLOUD_REPOSITORY
+  - window.SYNC_COORDINATOR
+  （いずれも、利用側コードが全てRepository.Dataset等の形式に統一された
+  段階で削除候補となる。今回は削除しない。）
+
+GitHub投入可否：今回は不要（前回同様、開発途中のため）
