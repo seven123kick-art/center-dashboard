@@ -182,3 +182,78 @@ Phase4-3改訂 (2026-07-25) 共通ルール適用（ロードガード・ヘッ�
   □ 外部仕様変更なし → app.js・center.html無変更で確認
   □ Console Errorなし → 全JSファイルnode --checkで構文検証済み
   □ CHANGELOG記載済み → 本項目
+
+Phase4-5 (2026-07-25) 公開API整備（AUTO_SYNC / CLOUD 非公開メンバー依存の解消）
+変更ファイル：
+  - src/core/auto_sync.js（編集：公開API追加のみ）
+  - src/core/cloud.js（編集：公開API追加のみ）
+  - src/app.js（編集：呼び出し元の置き換えのみ）
+  - src/field/field_core.js（編集：呼び出し元の置き換えのみ）
+  - src/modules/storage_audit.js（編集：呼び出し元の置き換えのみ）
+  - src/modules/past_library.js（編集：呼び出し元の置き換えのみ）
+  ※ center.html は今回変更なし（既存ファイルの中身を書き換えただけで、
+    読み込むファイル自体・スクリプトタグは変わらないため）
+
+変更理由：
+  Phase4-4のDataset分析で判明した「BULK_IMPORTがAUTO_SYNCの非公開プロパティ
+  (_suppress/_timer)を直接操作している」問題、およびCloud同期設計書で判明した
+  「CLOUD._datasetKey等の非公開メソッドが4ファイルから直接参照されている」
+  問題を解消するため、公開APIを追加し、呼び出し元を置き換えた。
+
+変更内容：
+  [auto_sync.js] 追加のみ、既存コード（_suppress/_timer/install/queue/flush/
+  withoutSync/withoutSyncAsync）は1行も変更していない
+  - cancelPending()：保留中のタイマーを解除（既存の
+    `if (this._timer){clearTimeout(this._timer);this._timer=null;}`と同一処理）
+  - suppress()：抑止フラグON＋cancelPending()（既存の2行と同一処理）
+  - resume()：抑止フラグOFF（既存の1行と同一処理）
+
+  [cloud.js] 追加のみ、既存の非公開メンバー（_datasetKey等）は1行も変更していない
+  - datasetKey/workerMonthKey/productMonthKey/manifestKey/planKey/
+    libraryFileKey/downloadJSON/dbGetState/dbStateKey/applyFullState/isBusy
+    の11メソッドを追加。いずれも対応する非公開メンバーをそのまま呼ぶだけの
+    薄いラッパー
+
+  [呼び出し元の置き換え]
+  - app.js：AUTO_SYNC._suppress/._timerへの直接アクセス4箇所→
+    suppress()/resume()/cancelPending()（安全のためAUTO_SYNC?.を維持）
+  - app.js：CLOUD._datasetKey等への直接アクセス6箇所→対応する公開メソッド
+  - field_core.js：AUTO_SYNC._timerへの直接アクセス2箇所→cancelPending()
+  - storage_audit.js：CLOUD._dbGetState/_dbStateKey/_downloadJSON/
+    _manifestKey/_datasetKey/_workerMonthKey/_productMonthKey/_planKey
+    への直接アクセス計7箇所→対応する公開メソッド
+  - past_library.js：CLOUD._libraryFileKeyへの直接アクセス2箇所→
+    libraryFileKey()
+
+  [あえて変更しなかった箇所]
+  - field_core.js 247-248行：CLOUD._applyFullStateは「参照」ではなく
+    「関数の差し替え（デコレータパターン）」であり、公開APIへの置き換え
+    対象として性質が異なるため、非公開メンバーへの直接代入のまま維持した。
+    ロジック変更禁止の原則を優先した判断
+
+影響範囲：
+  - 全ての置き換えは「同じ処理を別の入口から呼ぶ」だけで、内部の条件分岐・
+    タイミング・戻り値は一切変えていない
+  - AUTO_SYNC.suppress()/resume()呼び出しは、既存の外側ガード
+    （`if (typeof AUTO_SYNC !== 'undefined' && AUTO_SYNC)`）をそのまま維持
+  - AUTO_SYNC?.cancelPending()呼び出しは、既存のoptional chaining
+    （`AUTO_SYNC?._timer`）と同等の安全性を維持するため`?.`を付与
+
+互換性：
+  - 既存の非公開メンバー（_suppress, _timer, _datasetKey等）：削除・変更なし
+    のため、万一他に見落としている参照があっても動作に影響しない
+  - 新規window API追加：なし（AUTO_SYNC・CLOUDとも既存のwindowオブジェクトに
+    メソッドを追加しただけ）
+  - ロジック変更：なし（全て同一処理の呼び出し経路変更のみ）
+
+確認結果：
+  □ Console Errorなし → 全JSファイルnode --checkで構文検証済み、エラーなし
+  □ 循環依存なし → 追加した公開メソッドはすべて自分自身の非公開メンバーを
+    呼ぶだけで、新たな外部依存は発生していない
+  □ 既存画面動作変更なし → ロジック無変更のため同一
+  □ Cloud同期動作変更なし → CLOUD側の非公開実装は無変更、呼び出し経路が
+    変わっただけ
+  □ Dataset同期動作変更なし → upsertDataset等のDataset処理そのものには
+    今回一切触れていない
+  □ AUTO_SYNC動作変更なし → _suppress/_timerの操作タイミング・条件は
+    既存と完全に同一

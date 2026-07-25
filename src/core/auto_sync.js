@@ -102,5 +102,18 @@ var AUTO_SYNC = window.AUTO_SYNC = {
     } finally {
       this._suppress = prev;
     }
+  },
+
+  /* ════════ 公開API（Phase4-5：BULK_IMPORT等からの非公開メンバー直接参照を解消するための薄いラッパー）
+     内部実装（_で始まる既存メンバー）は一切変更していません。 ════════ */
+  cancelPending() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+  },
+  suppress() {
+    this._suppress = true;
+    this.cancelPending();
+  },
+  resume() {
+    this._suppress = false;
   }
 };

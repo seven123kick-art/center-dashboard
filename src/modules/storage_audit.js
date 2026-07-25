@@ -265,8 +265,8 @@ window.DATA_STORAGE_AUDIT = {
   _localProduct(ym) { return (STATE.productAddressData || []).some(d => d && d.ym === ym && !deletedAt('productMonths', ym) && !deletedAt('fieldMonths', ym)); },
   async _dbExists(key) {
     try {
-      if (!CLOUD || !CLOUD._dbGetState || !CLOUD._dbStateKey) return false;
-      const v = await CLOUD._dbGetState(CLOUD._dbStateKey(key));
+      if (!CLOUD || !CLOUD.dbGetState || !CLOUD.dbStateKey) return false;
+      const v = await CLOUD.dbGetState(CLOUD.dbStateKey(key));
       return !!v;
     } catch(e) { return false; }
   },
@@ -284,7 +284,7 @@ window.DATA_STORAGE_AUDIT = {
     el.innerHTML = '確認中...';
     try {
       const months = storageFiscalMonths(fy);
-      const manifest = await CLOUD._downloadJSON(CLOUD._manifestKey()).catch(e => null);
+      const manifest = await CLOUD.downloadJSON(CLOUD.manifestKey()).catch(e => null);
       const mDatasets = new Set((manifest?.datasets || []).map(m => m && m.ym).filter(Boolean));
       const mWorkers = new Set((manifest?.workerCsvData || []).map(m => m && m.ym).filter(Boolean));
       const mProducts = new Set((manifest?.productAddressData || []).map(m => m && m.ym).filter(Boolean));
@@ -293,9 +293,9 @@ window.DATA_STORAGE_AUDIT = {
         const localFin = this._localDataset(ym);
         const localW = this._localWorker(ym);
         const localP = this._localProduct(ym);
-        const dbFin = await this._dbExists(CLOUD._datasetKey(ym, 'confirmed')) || await this._dbExists(CLOUD._datasetKey(ym, 'daily'));
-        const dbW = await this._dbExists(CLOUD._workerMonthKey(ym));
-        const dbP = await this._dbExists(CLOUD._productMonthKey(ym));
+        const dbFin = await this._dbExists(CLOUD.datasetKey(ym, 'confirmed')) || await this._dbExists(CLOUD.datasetKey(ym, 'daily'));
+        const dbW = await this._dbExists(CLOUD.workerMonthKey(ym));
+        const dbP = await this._dbExists(CLOUD.productMonthKey(ym));
         const jFin = this._judge(localFin, dbFin, mDatasets.has(ym));
         const jW = this._judge(localW, dbW, mWorkers.has(ym));
         const jP = this._judge(localP, dbP, mProducts.has(ym));
@@ -359,7 +359,7 @@ window.DATA_STORAGE_TABLE = {
     markDataDeleted('planFiscalYears', fy);
     delete STATE.planData[fy];
     applyDeletionTombstonesToState(STATE);
-    try { if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD._planKey()); } catch(e) {}
+    try { if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD.planKey()); } catch(e) {}
     await this._syncAfterDelete(`${fy}年度の計画データ`);
     UI.toast(`${fy}年度の計画データを削除しました`);
   },
@@ -404,7 +404,7 @@ window.DATA_STORAGE_TABLE = {
     } catch(e) {}
     try {
       for (const d of rows) {
-        if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD._datasetKey(d.ym, d.type || 'confirmed'));
+        if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD.datasetKey(d.ym, d.type || 'confirmed'));
       }
     } catch(e) {}
     await this._syncAfterDelete(`${ymLabel(ym)}の${label}`);

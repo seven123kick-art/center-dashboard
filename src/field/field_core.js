@@ -826,7 +826,7 @@ IMPORT.deleteFieldData = function(ym) {
     STORE.save();
     let cloudMsg = '';
     try {
-      if (AUTO_SYNC?._timer) { clearTimeout(AUTO_SYNC._timer); AUTO_SYNC._timer = null; }
+      AUTO_SYNC?.cancelPending();
       if (CLOUD?.pushMonth) {
         const r = await CLOUD.pushMonth(ym);
         if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
@@ -892,7 +892,7 @@ IMPORT.deleteFieldData = function(ym) {
     STORE.save();
     let cloudMsg = '';
     try {
-      if (AUTO_SYNC?._timer) { clearTimeout(AUTO_SYNC._timer); AUTO_SYNC._timer = null; }
+      AUTO_SYNC?.cancelPending();
       if (CLOUD?.pushMonth) {
         const r = await CLOUD.pushMonth(ym);
         if (!r || !r.ok) throw new Error(r?.error || '同期失敗');

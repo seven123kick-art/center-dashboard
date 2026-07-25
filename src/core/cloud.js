@@ -1307,5 +1307,20 @@ var CLOUD = window.CLOUD = {
     if (keyEl) { keyEl.value=cfg.key ? cfg.key.slice(0,40)+'...' : ''; keyEl.readOnly=false; }
     if (bucketEl) { bucketEl.value=cfg.bucket||CONFIG.SUPABASE_BUCKET; }
     UI.updateCloudBadge(cfg.url && cfg.key ? 'configured' : 'none');
-  }
+  },
+
+  /* ════════ 公開API（Phase4-5：他モジュールからの非公開メンバー直接参照を解消するための薄いラッパー）
+     内部実装（_で始まる既存メンバー）は一切変更していません。
+     ここに定義した公開メソッドは、既存の非公開メンバーをそのまま呼び出すだけです。 ════════ */
+  datasetKey(ym, type) { return this._datasetKey(ym, type); },
+  workerMonthKey(ym) { return this._workerMonthKey(ym); },
+  productMonthKey(ym) { return this._productMonthKey(ym); },
+  manifestKey() { return this._manifestKey(); },
+  planKey() { return this._planKey(); },
+  libraryFileKey(fileName, fy) { return this._libraryFileKey(fileName, fy); },
+  async downloadJSON(key) { return this._downloadJSON(key); },
+  async dbGetState(stateKey) { return this._dbGetState(stateKey); },
+  dbStateKey(key) { return this._dbStateKey(key); },
+  applyFullState(full) { return this._applyFullState(full); },
+  isBusy() { return this._busy; },
 };
