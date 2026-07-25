@@ -377,3 +377,92 @@ center.htmlのバージョンが巻き戻った可能性があります。
 GitHub投入可否：投入可能
   ただし、center.htmlのscriptタグ復旧を含むため、通常の「新規ファイル
   追加のみ」より変更範囲がわずかに広い点にご留意ください。
+
+Phase5 (2026-07-25) Navigationモジュール分離
+変更ファイル：
+  - src/app.js（編集：§25 NAV等の定義本体を削除、マーカーコメントに置換）
+  - src/modules/navigation.js（新規）
+  - center.html（編集：navigation.jsタグの追加のみ）
+
+変更理由：
+  Version2最終フェーズとして、画面遷移・ナビゲーション責務をapp.jsから
+  分離。
+
+事前調査で確認した対象範囲：
+  showPage相当（NAV.go）、currentPage管理（STATE.view）、menu選択
+  （NAVGROUP.toggle/sync）、activeクラス切替（NAV.go内のclassList操作）、
+  タブ切替（DELIVERY_NAV/DATA_MANAGEMENT_NAVのsync）、初期表示関連の
+  sessionStorage操作、window公開（NAV/NAVGROUP/DELIVERY_NAV/
+  DATA_MANAGEMENT_NAV）、HTMLイベント（center.html内 NAV.go 61箇所、
+  DELIVERY_NAV.go 36箇所、DATA_MANAGEMENT_NAV.go 16箇所）を確認。
+  URLハッシュ処理は本プロジェクトには存在しないことを確認（該当なし）。
+
+移動した処理：
+  NAVGROUP（メニューグループ開閉）、DELIVERY_NAV（配送ハブのタブ切替）、
+  DATA_MANAGEMENT_NAV（データ管理ハブのタブ切替）、NAV（画面切替、
+  NAV.go/NAV.refresh、および画面ごとの描画関数を呼び分けるswitch文
+  NAV._render）の4オブジェクト、計136行。
+
+残した処理（分離対象外）：
+  renderDashboard, renderPL, renderTrend, renderShipper, renderIndicators,
+  renderAnnual, renderAlerts, renderMemo, renderImport等、画面ごとの
+  描画関数そのものは全てapp.js側に残置。NAV._render内のswitch文からは
+  従来どおりこれらをbare関数・オブジェクトメソッドとして呼び出すのみで、
+  描画ロジック自体には一切触れていない。
+
+互換ラッパーについて：
+  今回も追加していません。center.html・他モジュールからの呼び出しは
+  当初からすべて NAV.go(...) / NAV.refresh() / DELIVERY_NAV.go(...) /
+  DATA_MANAGEMENT_NAV.go(...) というオブジェクト経由の呼び出しであり、
+  bare関数は存在しなかったため。
+
+【重要な事前調査の発見】script読込順の依存について：
+  src/field/field_content.js が、DOMContentLoaded等を待たずスクリプト
+  読込直後のトップレベルで NAV.go を書き換える処理（`if (window.NAV &&
+  typeof NAV.go === 'function') { ... NAV.go = function(el){...} }`）
+  を持っていることが事前調査で判明しました。この処理は他の多くの
+  「post-boot（起動完了後）にしか実行されない」パターンと異なり、
+  スクリプト実行順序そのものに依存しています。
+  そのため、navigation.js は必ず src/field/field_content.js より前に
+  読み込まれる必要があります。center.htmlでは
+  src/modules/navigation.js を src/modules/landing_forecast.js の直後
+  （src/field/*群より前）に配置し、この要件を満たしています。
+  なお src/field/field_product.js も同様の書き換えを行っていますが、
+  こちらは document.readyState を見て必要ならDOMContentLoadedまで
+  遅延する実装のため、読込順に依存しません（参考情報として記載）。
+
+依存関係：
+  STATE, UI（公開API：updateTopbar, updateSaveStatus）, document,
+  sessionStorage、および各画面の描画関数・各モジュールの公開オブジェクト
+  （CAPACITY_UI, PAST_LIBRARY, REPORT_UI, PROFIT_STRUCTURE_UI,
+  LANDING_FORECAST_UI, WORKER_MASTER_UI, ROUTE_ANALYSIS_UI, FIELD_UI,
+  FIELD_WORKER_UI, FIELD_CONTENT_UI, FIELD_PRODUCT_UI, FIELD_AREA_UI,
+  FIELD_CSV_REBUILD, KAMOKU_UI）。いずれも呼び出すだけで、実装には
+  一切変更していない。
+
+変更禁止対象の遵守確認：
+  processDataset() / upsertDataset() / activeDatasets() / mergeFullState() /
+  supersedeDailyWithConfirmed() は定義1件のみで健在。
+  field_core.jsのCLOUD._applyFullStateモンキーパッチは無変更（2箇所、
+  従来通り）。BULK_IMPORT・AUTO_SYNCは今回一切変更していない。
+  renderImport()は完全に無変更（app.js内、抽出範囲外）。
+  抽出前後でapp.jsの該当箇所前後がdiffで完全一致（バイト単位）することを
+  確認済み。
+
+検証結果：
+  □ 画面切替正常 → NAV.go/NAV._renderのロジックは1文字も変更していない
+  □ メニュー正常 → NAVGROUP.toggle/syncのロジック無変更
+  □ active表示正常 → classList操作のロジック無変更
+  □ Console Errorなし → 全JSファイルnode --checkで構文検証済み
+  □ Navigation単一定義 → NAV/NAVGROUP/DELIVERY_NAV/DATA_MANAGEMENT_NAV
+    いずれも定義1件のみ
+  □ 画面描画順変更なし → NAV._render内のswitch文の記述順・分岐は無変更
+  □ renderImport変更なし → app.js内、抽出範囲外、無変更を確認
+  □ Cloud同期変更なし → 今回の変更範囲外
+  □ Dataset変更なし → 今回の変更範囲外
+
+既知の制約：
+  前回報告した、リポジトリ直下の孤立した古いapp.js（4474行）は今回も
+  そのまま残っています（今回のタスク範囲外のため、引き続き未対応）。
+
+GitHub投入可否：投入可能
