@@ -1209,10 +1209,61 @@ function activeDatasets() {
       map[d.ym] = d;
     }
   }
-  return Object.values(map).sort((a,b)=>a.ym.localeCompare(b.ym)).map(normalizeDatasetForDisplay);
+  const existingResult = Object.values(map).sort((a,b)=>a.ym.localeCompare(b.ym)).map(normalizeDatasetForDisplay);
+
+  // ==== TODO(V3): Repository移行完了後に削除予定 ====
+  // Version3 Phase3-3-7：開発中だけの安全装置。
+  // Repository.Dataset.getActive() が利用可能な場合のみ比較を行い、
+  // 既存処理と完全に一致した場合だけRepository側の結果を採用する。
+  // 一致しない場合は必ず既存処理の結果を返し、console.warnで差異を報告する。
+  if (window.Repository && window.Repository.Dataset && typeof window.Repository.Dataset.getActive === 'function') {
+    try {
+      const repoResult = window.Repository.Dataset.getActive();
+      const existingJSON = JSON.stringify(existingResult);
+      const repoJSON = JSON.stringify(repoResult);
+      if (existingJSON === repoJSON) {
+        return repoResult;
+      }
+      console.warn(
+        '[Repository比較] activeDatasets() で既存処理とRepositoryの結果に差異があります。既存処理の結果を採用します。',
+        { existing: existingResult, repository: repoResult }
+      );
+    } catch (e) {
+      console.warn('[Repository比較] activeDatasets() の比較中にエラーが発生しました。既存処理の結果を採用します。', e);
+    }
+  }
+  // ==== TODO(V3) ここまで（比較処理はRepository移行完了後に削除予定） ====
+
+  return existingResult;
 }
 function activeDatasetByYM(ym) {
-  return activeDatasets().find(d => d.ym === ym) || null;
+  const existingResult = activeDatasets().find(d => d.ym === ym) || null;
+
+  // ==== TODO(V3): Repository移行確認後に比較処理削除予定 ====
+  // Version3 Phase3-3-5：開発中だけの安全装置。
+  // Repository.Dataset.getActive() が利用可能な場合のみ比較を行い、
+  // 既存処理と完全に一致した場合だけRepository側の結果を採用する。
+  // 一致しない場合は必ず既存処理の結果を返し、console.warnで差異を報告する。
+  if (window.Repository && window.Repository.Dataset && typeof window.Repository.Dataset.getActive === 'function') {
+    try {
+      const repoActive = window.Repository.Dataset.getActive();
+      const repoResult = repoActive.find(d => d.ym === ym) || null;
+      const existingJSON = JSON.stringify(existingResult);
+      const repoJSON = JSON.stringify(repoResult);
+      if (existingJSON === repoJSON) {
+        return repoResult;
+      }
+      console.warn(
+        '[Repository比較] activeDatasetByYM(' + ym + ') で既存処理とRepositoryの結果に差異があります。既存処理の結果を採用します。',
+        { existing: existingResult, repository: repoResult }
+      );
+    } catch (e) {
+      console.warn('[Repository比較] activeDatasetByYM(' + ym + ') の比較中にエラーが発生しました。既存処理の結果を採用します。', e);
+    }
+  }
+  // ==== TODO(V3) ここまで（比較処理はRepository移行確認後に削除予定） ====
+
+  return existingResult;
 }
 function isRealCsvDataset(ds) {
   return !!ds && datasetSourceKind(ds) !== 'history';

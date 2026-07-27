@@ -1227,3 +1227,67 @@ Repository読込対象：
     （既存動作からの変化なし）。
 
 GitHub投入可否：投入可能
+
+Version3 Phase3-3-7 (2026-07-25) activeDatasets()のRepository移行
+変更ファイル：
+  - src/app.js（編集：activeDatasets()へRepository比較の安全装置を追加）
+  ※ src/core/repository/配下5ファイル・center.htmlは今回一切変更していない
+
+変更した既存関数：
+  activeDatasets()（app.js 1192行）のみ
+
+比較方法：
+  1. 既存処理（tombstone適用→ym毎の優先順位判定→ソート→表示用正規化）を
+     必ず実行し、existingResultとして保持する（STATE.datasetsへの
+     tombstone適用というSTATE変更を伴う既存の副作用も、変更前と完全に
+     同一のタイミング・内容で発生する）
+  2. window.Repository.Dataset.getActive が利用可能な場合のみ、
+     Repository側の結果（repoResult）を計算する
+  3. 両者をJSON.stringifyで比較する（配列全体・全プロパティを含めた完全一致判定）
+  4. 一致した場合のみrepoResultを返す。不一致の場合はconsole.warnで
+     詳細を出力した上でexistingResultを返す
+  5. Repository側の呼び出しが例外を投げた場合もtry-catchで捕捉し、
+     console.warn出力の上でexistingResultにフォールバックする
+
+  コメントで「Repository移行完了後に削除予定」と明記済み。
+
+比較結果（Node.jsによるcenter.html実読込順シミュレーション、8ケース＋2件の追加確認）：
+  通常CSVのみ／dailyのみ／confirmed+daily混在（複数ym）／historyのみ／
+  複数Dataset（全種別混在・優先順位判定）／削除済みhistory（tombstone）／
+  空STATE／年度境界（3月/4月混在）
+  → 全8ケースで一致、console.warn出力なし（Repository側の結果が実際に
+    採用されていることを確認）
+  STATE未定義：新関数・旧関数とも同一のエラーメッセージで失敗することを
+    確認（既存挙動からの変化なし）
+  意図的にRepository側の値を壊したテスト：既存処理の結果が正しく返り、
+    console.warnが出力されることを確認
+
+副作用：
+  なし。既存処理は必ず実行されるため、STATE.datasetsへのtombstone適用
+  という既存の副作用（filterによる書き換え）は今回も変更前と完全に
+  同一のタイミングで発生する。Repository側が利用できない環境や、
+  結果が異なる場合も、最終的な戻り値は変更前と完全に同一。
+
+  【技術的な注記】activeDatasetByYM()との関係について：
+  activeDatasetByYM()は内部でactiveDatasets()を呼び出しているため、
+  今回の変更によりactiveDatasetByYM()呼び出し時にはactiveDatasets()内の
+  比較（今回追加分）と、activeDatasetByYM()自身の比較（Phase3-3-5で追加済み）
+  の2つの比較が二重に実行される形になる。いずれも同じRepository実装を
+  参照しており、結果が一致する限り副作用や戻り値への影響はないが、
+  Repository.Dataset.getActive()の呼び出し回数が増える点は認識しておく
+  必要がある（パフォーマンス上の軽微な冗長性。Version3の比較コード削除
+  フェーズで解消される想定）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はapp.jsの1関数のみ、既存ロジック・STATE副作用は完全に
+  維持されており、Node.js上の全比較ケースで一致・警告なしを確認済み。
+  center.html等は無変更のため、既存にRepository接続済みの環境であれば
+  そのまま反映して問題ない。
+
+次に最も安全にRepository化できる関数：
+  ロードマップ通り datasetPriority() が次の候補。理由：
+  ・DatasetRepository.priorityOf()は既にPhase3-3-3で実装済みで、
+    Phase3-3-4/3-3-7のテストでも一貫して既存ロジックと一致することを
+    確認済み
+  ・純粋関数（引数のみに依存、副作用なし）のため、比較コードの実装・
+    検証が activeDatasets() よりも単純
