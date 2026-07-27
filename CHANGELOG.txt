@@ -1045,3 +1045,185 @@ DatasetRepositoryの依存方法：
 GitHub投入可否：今回も不要（既存画面へは未接続のため。ただしapp.js/
   format.jsの変更はいずれ他の変更と合わせてGitHubへ投入することになる
   実質的な機能修正である点に留意）
+
+Version3 Phase3-3-5 (2026-07-25) Repository初回実運用接続（安全検証付き）
+変更ファイル：
+  - src/app.js（編集：activeDatasetByYM()へRepository比較の安全装置を追加）
+  ※ src/core/repository/配下の4ファイル・format.js・center.htmlは
+    今回一切変更していない
+
+変更した既存関数：
+  activeDatasetByYM(ym)（app.js 1214行）のみ
+
+比較方法：
+  1. 既存処理（activeDatasets().find(d => d.ym === ym) || null）を
+     必ず実行し、existingResultとして保持する
+  2. window.Repository.Dataset.getActive が利用可能な場合のみ、
+     同じ引数でRepository側の結果（repoResult）を計算する
+  3. 両者をJSON.stringifyで比較する（値・プロパティ構成を含めた
+     完全一致判定。今回のような単一オブジェクトの比較には
+     ym/type/source等を個別に比較するより、JSON全体比較の方が
+     「戻り値」全体の一致を漏れなく確認できると判断した）
+  4. 一致した場合のみrepoResultを返す。不一致の場合は
+     console.warnで詳細を出力した上でexistingResultを返す
+  5. Repository側の呼び出し自体が例外を投げた場合もtry-catchで
+     捕捉し、console.warn出力の上でexistingResultにフォールバックする
+
+  TODO(V3)コメントで「Repository移行確認後に比較処理削除予定」と
+  明記済み。
+
+【重要：現時点では比較が実行されない】
+  window.Repository（src/core/repository/registry.js）は現時点で
+  center.htmlに未接続のため、window.Repositoryはブラウザ上では
+  undefinedのままです。そのため今回追加した比較コードは、
+  「if (window.Repository && ...)」の条件が常にfalseとなり、
+  実運用では従来通りexistingResultがそのまま返る状態です
+  （＝今回の変更は現状ゼロ影響）。
+  実際に比較を機能させるには、center.htmlへ以下のscriptタグを
+  追加する必要があります（Phase3-3-2〜3-3-4ではいずれも
+  「既存画面から呼ばない」方針のため意図的に追加していません）。
+    <script src="src/core/repository/registry.js" defer></script>
+    <script src="src/core/repository/dataset_repository.js" defer></script>
+  今回のご指示は「変更対象：app.jsのみ」でしたが、この2行を
+  center.htmlへ追加しない限り、比較検証は実行されません。
+  center.htmlへの追加要否についてご判断をお願いします。
+
+比較項目への対応：
+  - 取得件数：activeDatasetByYMは単一オブジェクト（またはnull）を
+    返す関数のため「件数」は0/1固定。null判定も含めJSON比較で担保
+  - ym/type/source/history/confirmed/daily：いずれもオブジェクトの
+    プロパティとしてJSON比較に含まれる
+  - tombstone除外：削除済みhistoryのテストケースで、両者とも
+    nullを返すことを確認
+  - 戻り値：JSON.stringifyによる完全一致判定で担保
+
+一致結果（Node.js比較テスト実施、DatasetRepositoryを実際にrequireして検証）：
+  1. 通常CSVのみ：一致
+  2. dailyあり：一致
+  3. confirmedあり（daily共存）：一致（confirmedが優先される）
+  4. historyあり：一致（千円→円換算後の値も含めて一致）
+  5. 同年月複数（優先順位判定）：一致
+  6. 削除済みhistory（tombstone）：一致（両方null）
+  7. 空STATE：一致（null）
+  8. STATE未定義：新旧とも同一のエラーが発生することを確認
+     （本変更によるエラー内容の変化なし。既存の挙動をそのまま維持）
+  9. 年度境界（3月/4月）：一致
+  加えて、意図的にRepository側の値を狂わせたテストケースでも、
+  既存処理の結果（差異が出る前の正しい値）が返り、console.warnが
+  出力されることを確認した。
+
+差異有無：
+  上記全ケースで差異は検出されなかった（意図的に狂わせたテスト
+  ケースを除く）。
+
+副作用：
+  なし。既存処理は必ず実行されるため、Repository側が利用できない
+  環境（今回のような未接続状態）や、Repository側の結果が異なる場合も、
+  最終的な戻り値・副作う作用は変更前と完全に同一。console.warnの
+  出力自体も副作用としては軽微（画面表示・データには影響しない）。
+
+削除候補：
+  なし（今回は比較コードの追加のみ。削除候補は次フェーズ以降で判断）
+
+次に安全にRepository化できる関数：
+  Migration Planに記載の通り、次はactiveDatasets()そのものが候補。
+  ただしactiveDatasets()はapplyDeletionTombstonesToState(STATE)という
+  STATE書き換えを伴う点が異なるため、Repository.Dataset.getActive()
+  との比較時にSTATEへの書き戻しタイミングの違いに注意が必要。
+
+GitHub投入可否：判断待ち
+  app.js単体では動作に影響しない安全な変更だが、比較機能自体を
+  実際に有効化するにはcenter.htmlの変更が必要。center.html変更を
+  含めるかどうかのご判断をお願いします。
+
+Version3 Phase3-3-6 (2026-07-25) Repository正式接続（center.html）
+変更ファイル：
+  - center.html（編集：Repository関連5ファイルのscriptタグを追加）
+  ※ src/core/repository/配下の4ファイル・registry.js・app.js・
+    format.js・navigation.js・cloud.js・field_core.js・field_content.js
+    はいずれも今回一切変更していない（純粋な配線追加のみ）
+
+事前調査：
+  ① center.html現在の読込順（変更前）：
+     config.local.js → Chart.js(CDN) → app.js → ui_helpers.js → format.js
+     → store.js → cloud.js → auto_sync.js → ledger.js → companies.js
+     → workers.js → loader.js → modules/*（dashboard〜landing_forecast）
+     → navigation.js → field/*（field_core〜field_area）
+  ② 各ファイルの依存関係：
+     - format.js：CONFIG_UTILS.fiscalYearFromYM()を定義。CONFIG（app.js側）
+       を呼び出し時にのみ参照（parse時点では未実行のため順序問題なし）
+     - navigation.js：NAV.go内でHook呼び出し（Phase3-1で追加済み）。
+       Repositoryとは無関係
+     - cloud.js：fiscalYearFromYM（bare関数、app.js側）を防御的に参照。
+       CONFIG_UTILSを直接は参照しない
+     - field_core.js：CLOUD.onAfterApplyFullState経由（Phase3-2-3）。
+       Repositoryとは無関係
+     - field_content.js：NAV.onAfterGoの存在確認をトップレベルで実行
+       （navigation.jsが先に読み込まれている必要あり、Repositoryとは無関係）
+     - app.js：activeDatasetByYM()内でwindow.Repository.Dataset.getActiveを
+       呼び出し（Phase3-3-5で追加済み）。CONFIG_UTILSも呼び出し時に参照
+  ③ RepositoryがCONFIG_UTILSより前に読まれる可能性：
+     dataset_repository.jsはCONFIG_UTILSを「呼び出し時」にのみ参照する
+     設計（Phase3-3-4で確認済み）。ただし可読性・意図の明確化のため、
+     script順序としてもCONFIG_UTILS定義（format.js）の直後に配置した
+  ④ 各Repositoryがwindowへ公開されるタイミング：
+     いずれも読み込まれた瞬間（IIFE実行時）に即座にwindow.XXXへ代入される。
+     registry.jsのwindow.Repositoryはgetterのため、参照先
+     （DATASET_REPOSITORY等）が未定義でも登録自体は成立し、実際に
+     アクセスされた時点で解決される
+  ⑤ app.js実行開始時点でRepositoryが存在するか：
+     存在しない（app.jsが最初に読み込まれるため）。ただし
+     activeDatasetByYM()の実行（関数呼び出し）は常にBOOT完了後
+     （全deferスクリプト読込後）のため、実際に呼ばれる時点では
+     Repositoryは必ず存在する
+
+設計方針の採否について：
+  ご提案の推奨順「format.js→Repository→他core→field→app.js」は
+  app.js自体を他の全スクリプトより後ろへ移動する大規模な並べ替えを
+  意味しており、これは「既存依存を壊さないこと」「必要最小限の変更」
+  という方針と矛盾すると判断した。
+  実際にはapp.js側の全関数（STATE/CONFIG/processDataset等）を
+  Repositoryや他モジュールが呼び出し時に参照する構造のため、app.jsは
+  現状通り最初に読み込む必要がある。
+  そのため、「Repositoryはformat.js（CONFIG_UTILS定義）より後に読み込む」
+  という本質的な制約だけを満たす形で、既存のformat.jsの直後（store.jsの
+  直前）にRepository関連5ファイルを挿入した。これにより既存の32個の
+  scriptタグの並び順は一切変更せず、新規5行の挿入のみで済んでいる。
+
+Repository読込位置（変更後の該当箇所抜粋）：
+  <script src="src/app.js" defer></script>
+  <script src="src/ui/ui_helpers.js" defer></script>
+  <script src="src/core/format.js" defer></script>
+  <script src="src/core/repository/dataset_repository.js" defer></script>  ← 新規
+  <script src="src/core/repository/storage_repository.js" defer></script> ← 新規
+  <script src="src/core/repository/cloud_repository.js" defer></script>   ← 新規
+  <script src="src/core/repository/sync_coordinator.js" defer></script>   ← 新規
+  <script src="src/core/repository/registry.js" defer></script>          ← 新規
+  <script src="src/core/store.js" defer></script>
+  （以下、既存の並びのまま変更なし）
+
+Repository読込対象：
+  ご指示通り、5ファイルすべて（dataset_repository.js / registry.js /
+  storage_repository.js / cloud_repository.js / sync_coordinator.js）を
+  まとめて接続した。storage/cloud/sync_coordinatorは現時点で未使用
+  （TODOスタブのまま）だが、「未使用だから除外」という判断はせず、
+  Version3の基盤として一括で読み込む方針を遵守した。
+
+動作確認（Node.jsによるcenter.html読込順の実機シミュレーション）：
+  実際のformat.js→dataset_repository.js→registry.jsの順でrequireし、
+  以下を確認した：
+  - window.CONFIG_UTILS が存在すること：確認済み
+  - window.DATASET_REPOSITORY が存在すること：確認済み
+  - window.Repository が存在すること：確認済み
+  - window.Repository.Dataset === window.DATASET_REPOSITORY
+    （同一実体を指すこと）：確認済み
+
+比較検証（8ケース + STATE未定義、全てactiveDatasetByYM経由で実行）：
+  通常CSV／daily／confirmed(daily共存)／history／複数Dataset（優先順位）／
+  削除済みhistory（tombstone）／空STATE／年度境界
+  → 全ケースでconsole.warnが一切発生せず（＝Repository結果と既存結果が
+    完全一致）、Repository側の結果が正しく返っていることを確認した。
+  STATE未定義時：Repository接続前と同一のエラーが発生することを確認
+    （既存動作からの変化なし）。
+
+GitHub投入可否：投入可能
