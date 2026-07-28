@@ -1418,12 +1418,19 @@ IMPORT.deleteFieldData = function(ym) {
       };
     }
 
-    const oldParseSKDL = CSV.parseSKDL.bind(CSV);
-    CSV.parseSKDL = function(text, monthCol){
-      const result = oldParseSKDL(text, monthCol);
-      if (!result) return result;
+    /* ════════ Version4 Phase5-6：CSV.parseSKDLのHook移行（field_core.js側）════════
+       従来はCSV.parseSKDLを直接モンキーパッチしていたが、
+       CSV.onAfterParse() へのHook登録へ置き換えた（shipper.js側は
+       同フェーズで既に変換済みのため、CSV.parseSKDL自体の
+       再代入・中継役はshipper.js側の1箇所のみで足りる）。
+       CSV.parseSKDL本体（元の解析処理）は一切変更していない。
+       元のコードは`this.toRows(text)`という形でCSVオブジェクトの
+       メソッドを呼んでいたが、Hookコールバックはbare関数として
+       呼ばれるため`this`がCSVを指さない。そのため`CSV.toRows(text)`
+       という明示的な参照に置き換えている（動作は完全に同一）。 ════════ */
+    CSV.onAfterParse(function(result, text, monthCol){
       try {
-        const rows = this.toRows(text);
+        const rows = CSV.toRows(text);
         const built = buildConfirmedSlipSalesFromRows(rows);
         result._confirmedSlipSales = built.map;
         result._confirmedSlipSalesCount = built.count;
@@ -1434,8 +1441,7 @@ IMPORT.deleteFieldData = function(ym) {
         result._confirmedSlipSales = {};
         result._confirmedSlipSalesError = e.message;
       }
-      return result;
-    };
+    });
 
     const oldProcessDataset = processDataset;
     processDataset = function(ym, type, rows){

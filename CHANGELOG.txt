@@ -1727,3 +1727,242 @@ Repositoryへの影響：
 GitHub投入可否：**GitHub投入可**
   理由：追加のみで、既存の関数・モンキーパッチ・Repositoryのいずれにも
   変更がなく、回帰テストでも影響がないことを確認済み。
+
+Version4 Phase5-4 (2026-07-25) renderTrend Hook Migration
+変更ファイル：
+  - src/modules/shipper.js（編集：renderTrendモンキーパッチをHook登録へ変換）
+  ※ trend.js・dashboard.js・app.js・render_hooks.js・center.htmlは
+    今回一切変更していない。renderDashboard/renderShipperへの
+    モンキーパッチ、CSV.parseSKDL/processDatasetへのモンキーパッチも
+    今回対象外、無変更
+
+削除したモンキーパッチ（の中身）：
+  従来のrenderTrend書き換え（842-914行）は、prevRenderTrend()実行後に
+  荷主トレンドチャート・テーブル生成ロジックを直接ハードコードしていた。
+  この「ハードコードされた業務ロジック部分」を削除し、
+  window.RENDER.onAfterTrend()への登録に置き換えた。
+
+追加したHook登録：
+  window.RENDER.onAfterTrend(function(){
+    ...従来と全く同じチャート・テーブル生成ロジック...
+  });
+
+【重要・正直な報告】renderTrendの「中継役」自体は今回も残っている：
+  trend.js側のrenderTrend()本体は今回変更禁止のため、「元のrenderTrendを
+  呼んだ後にHook配列を発火する」という最小限の中継コードは、
+  今回もshipper.js側に残さざるを得なかった。
+
+  変更前：
+    const prevRenderTrend = renderTrend;
+    renderTrend = function(){
+      prevRenderTrend();
+      ...荷主トレンドの業務ロジックを直接ハードコード...
+    };
+
+  変更後：
+    const prevRenderTrend = renderTrend;
+    renderTrend = function(){
+      prevRenderTrend();
+      window.RENDER._afterTrendHooks.forEach(fn => { ... });  // 汎用的なHook発火のみ
+    };
+    window.RENDER.onAfterTrend(function(){ ...同じ業務ロジック... });
+
+  つまり「renderTrendへの書き換え」という構造そのものは今回も存在するが、
+  その中身は「shipper.js固有の業務ロジックを直接埋め込む」から
+  「汎用的なHook配列を発火するだけ」に変わった。将来trend.js自体に
+  Hook発火処理を組み込める段階になれば、shipper.js側のこの中継コードは
+  完全に削除できる見込み。
+
+Hook登録数：1件（window.RENDER.onAfterTrend、今回新規）
+残存モンキーパッチ数（対象カテゴリ、正確なカウント）：
+  - 「業務ロジックが直接ハードコードされた」真のモンキーパッチ：11件
+    （renderDashboard×3、renderShipper×3、CSV.parseSKDL×2（shipper.js・
+    field_core.js）、processDataset×2（同）、UI.updateTopbar×1）
+  - 「Hook発火のみを行う中継コード」：1件（renderTrend、今回変換）
+  - Phase5-1調査時点の総数12件のうち、1件が中継専用コードへ転換済み
+
+renderTrend本体変更有無：**無変更**（trend.js自体には一切触れていない）
+
+HTML一致確認（Node.js比較）：
+  旧モンキーパッチ方式（荷主トレンドの業務ロジックを直接実行）と、
+  新Hook方式（同じロジックをRENDER.onAfterTrend経由で実行）で、
+  `trend-table-body`要素へ書き込まれるHTML文字列が完全に一致することを
+  Node.js上で確認した。
+
+Node.js比較結果：
+  - window.RENDER._afterTrendHooks.length === 1（Hook登録数の確認）
+  - 新方式renderTrend()実行結果と、旧モンキーパッチ再現コードの実行結果で、
+    生成されるHTML文字列が完全一致
+
+Repository影響：なし。DatasetRepository・Repository Registry等は今回
+  一切参照・変更していない。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はshipper.js内のrenderTrend関連ブロックのみ。Node.js比較で
+  出力の完全一致を確認済み。renderDashboard/renderShipper/CSV.parseSKDL/
+  processDatasetへの他モンキーパッチには一切触れていない。
+
+Version4 Phase5-5 (2026-07-25) Dashboard Hook Migration（Layer3→Layer2→Layer1）
+変更ファイル：
+  - src/modules/shipper.js（編集：renderDashboardの3層モンキーパッチをHook登録へ変換）
+  ※ dashboard.js・trend.js・app.js・render_hooks.js・center.htmlは
+    今回一切変更していない。renderShipperへの3層モンキーパッチ、
+    CSV.parseSKDL/processDataset/UI.updateTopbarへのモンキーパッチも
+    今回対象外、無変更
+
+実装順序：ご指示通りLayer3→Layer2→Layer1の順（依存が少ない順）で実施し、
+  各Layer完了時にNode.js比較を実施した上で次へ進んだ。全Layerで問題は
+  見つからなかったため、Layer1まで完了。
+
+Layer3結果（UIノイズ除去）：
+  変更前：prevRenderDashboardForClean(); cleanUiNoise(); をハードコード
+  変更後：prevRenderDashboardForClean(); の後、
+    window.RENDER._afterDashboardHooks.forEach(...) を実行する汎用中継役に変更。
+    cleanUiNoise()はwindow.RENDER.onAfterDashboard()へ登録。
+  Node.js比較：Hook登録数1、base→cleanの実行順・呼び出し回数が変更前と一致
+
+Layer2結果（比較ミニパネル）：
+  変更前：prevRenderDashboardForCompare(); renderDashboardCompareMini(); を
+    ハードコードした独自の再代入
+  変更後：renderDashboardの再代入は完全に削除。
+    window.RENDER.onAfterDashboard(function(){ renderDashboardCompareMini(); });
+    のみ登録（Layer3の中継役が代わりにHookを発火するため、Layer2独自の
+    中継役は不要になった）
+  Node.js比較：Layer2+Layer3を合わせて実行し、Hook登録数2、
+    実行順が[base, compare, clean]と元の連鎖順序（Layer1→Layer2→Layer3相当）
+    と一致することを確認
+
+Layer1結果（荷主バー表示）：
+  変更前：prevRenderDashboard(); の後に荷主バー表示ロジック
+    （selectedDashboardDS取得〜innerHTML書込）をハードコード
+  変更後：renderDashboardの再代入は完全に削除。
+    window.RENDER.onAfterDashboard(function(){ ...同じロジック... });
+    のみ登録
+  これにより、renderDashboardへの直接的な再代入はLayer3（現在は汎用中継役）
+  1箇所のみとなり、Layer1・Layer2は純粋なHook登録のみになった。
+
+削除したモンキーパッチ数：3件（Layer1, Layer2の再代入構造。Layer3は
+  「ハードコードされた業務ロジック」の削除という意味では1件、
+  「再代入構造」自体は中継役として残置）
+
+追加したHook登録数：3件（今回の累計）
+  window.RENDER.onAfterDashboard × 3
+  （renderTrendの1件と合わせ、Hook登録の累計は4件）
+
+残存モンキーパッチ数（正確なカウント）：
+  - 「業務ロジックが直接ハードコードされた」真のモンキーパッチ：8件
+    （renderShipper×3、CSV.parseSKDL×2（shipper.js・field_core.js）、
+    processDataset×2（同）、UI.updateTopbar×1）
+  - 「Hook発火のみを行う中継コード」：2件（renderTrend、renderDashboard）
+  - Phase5-1調査時点の総数12件のうち、Dashboard3層+Trend1層＝4件が
+    中継専用コードまたは完全削除へ転換済み
+
+HTML比較結果（Node.js、Layerごと・全体）：
+  各Layer単独、および3Layer全体を通した実行結果とも、変更前の3層
+  モンキーパッチチェーンと完全に同一のHTML・呼び出し回数・実行順序で
+  あることを確認した。
+
+Node.js比較：
+  - Hook登録数：3（期待通り）
+  - shipArea（荷主バー）出力HTML：変更前後で完全一致（807文字、内容も一致）
+  - renderDashboardCompareMini呼び出し：一致
+  - cleanUiNoise呼び出し：一致
+  - 実行順序：[base, Layer1(shipper bars), Layer2(compare), Layer3(clean)]
+    という、元のモンキーパッチ連鎖と同じ順序を維持
+
+Repository影響：なし
+
+GitHub投入可否：**GitHub投入可**
+  理由：Node.js比較で全Layerの出力・呼び出し回数・実行順序が変更前と
+  完全一致することを確認済み。renderShipper関連・CSV.parseSKDL・
+  processDataset・UI.updateTopbarへの他モンキーパッチには一切触れていない。
+
+進捗（Phase5-1調査時点の総数12件を100%とした場合の概算）：
+  Infrastructure: 100%（Phase5-3で完了）
+  Trend: 100%（Phase5-4で完了、ただし中継役は残置）
+  Dashboard: 100%（Phase5-5で完了、ただし中継役は残置）
+  Shipper: 0%（renderShipper 3層は未着手）
+  CSV: 0%（CSV.parseSKDL 2ファイル分は未着手）
+  Dataset: 0%（processDataset 2ファイル分は未着手）
+
+Version4 Phase5-6 (2026-07-25) Shipper + CSV Hook Migration
+変更ファイル：
+  - src/modules/shipper.js（編集：renderShipper Layer3/Layer2、
+    CSV.parseSKDL（shipper.js側）をHook登録へ変換）
+  - src/field/field_core.js（編集：CSV.parseSKDL（field_core.js側）を
+    Hook登録へ変換）
+  ※ dashboard.js・trend.js・app.js・render_hooks.js・center.htmlは
+    今回一切変更していない。renderShipper Layer1（ご指示により今回禁止）、
+    processDataset（shipper.js・field_core.js両方）、UI.updateTopbar
+    への各モンキーパッチは今回対象外、無変更
+
+① renderShipper Hook化（Layer3→Layer2、Layer1は禁止のため未変更）：
+  Layer3（UIノイズ除去）：中継役を汎用化し、cleanUiNoise()を
+    window.RENDER.onAfterShipper()へ登録
+  Layer2（比較パネル）：独自の中継役を完全削除し、renderComparePanel()を
+    Hook登録のみに変更（Layer3の中継役が代わりに発火）
+  Node.js比較：Hook登録数2、実行順[base(Layer1保持分), compare, clean]が
+    変更前と一致することを確認
+
+② CSV.parseSKDL Hook化（shipper.js→field_core.jsの順）：
+  shipper.js側：中継役を汎用化（CSV._afterParseHooksを発火するdispatcher
+    へ変換）。荷主集計ロジックはCSV.onAfterParse()へ登録
+  field_core.js側：独自の中継役（CSV.parseSKDLの再代入）を完全削除し、
+    確定伝票売上抽出ロジックをCSV.onAfterParse()への登録のみに変更
+    （shipper.js側のdispatcherが代わりに発火するため）
+
+  【技術的な注記】元のコードは`this.toRows(text)`という形でCSVオブジェクト
+  のメソッドを呼んでいたが、Hookコールバックはbare関数として呼ばれるため
+  `this`がCSVを指さない。両ファイルとも`CSV.toRows(text)`という明示的な
+  参照に置き換えることで、この問題に対処した（動作は完全に同一であることを
+  Node.js比較で確認済み）。
+
+  Node.js比較：shipper.js単体・field_core.js単体、および両方を組み合わせた
+  完全なチェーンで検証を実施。旧来の二重モンキーパッチ方式（shipper.js→
+  field_core.jsの順で順次ラップ）と、新方式（shipper.jsが唯一の
+  dispatcher、field_core.jsは登録のみ）とで、生成される結果オブジェクトの
+  全プロパティ・全値が完全一致することを確認した。
+
+途中確認：
+  各Layer・各ファイルの変換ごとにNode.js比較を実施し、問題が無いことを
+  確認してから次へ進んだ。全て正常だったため、renderShipper Layer2まで、
+  CSV.parseSKDL両ファイルまで完了。
+
+Repository影響：なし
+
+GitHub投入可否：**GitHub投入可**
+  理由：全ての変換箇所でNode.js比較により出力の完全一致を確認済み。
+  renderShipper Layer1・processDataset・UI.updateTopbarには一切触れて
+  いない。
+
+=== 進捗報告 ===
+
+Infrastructure: 100%（Phase5-3で完了）
+Trend: 100%（Phase5-4で完了）
+Dashboard: 100%（Phase5-5で完了）
+Shipper: 67%（Layer3・Layer2が完了、Layer1は今回禁止のため未着手。
+  3層中2層＝約67%）
+CSV: 100%（shipper.js・field_core.js両方の変換が完了）
+Dataset（processDataset）: 0%（shipper.js・field_core.js両方とも未着手）
+
+残存Hook（累計、window.RENDER + CSV.onAfterParse）：8件
+  - RENDER.onAfterDashboard × 3
+  - RENDER.onAfterTrend × 1
+  - RENDER.onAfterShipper × 2
+  - CSV.onAfterParse × 2（shipper.js・field_core.js各1）
+
+残存Dispatcher（Hook発火専用の中継コード）：4件
+  - CSV.parseSKDL（shipper.js側、旧2重モンキーパッチが1つのdispatcherに統合）
+  - renderTrend
+  - renderShipper（Layer3、旧3層のうち中継役として残るのは1つ）
+  - renderDashboard（Layer3、同上）
+
+残存業務モンキーパッチ（ハードコードされた業務ロジックがそのまま残っている
+  もの）：4件
+  - renderShipper Layer1（本文本体、今回禁止のため対象外）
+  - processDataset（shipper.js側）
+  - processDataset（field_core.js側）
+  - UI.updateTopbar（shipper.js側）
+
+  Phase5-1調査時点の総数12件のうち、8件が変換済み（dispatcher化または
+  完全なHook登録化）、4件が未着手として残っている。

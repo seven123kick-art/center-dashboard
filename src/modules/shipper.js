@@ -725,13 +725,30 @@ function renderShipper() {
     };
   }
 
+  /* ════════ Version4 Phase5-6：CSV.parseSKDLのHook移行（shipper.js側）════════
+     従来はCSV.parseSKDLを直接モンキーパッチしていたが、
+     CSV.onAfterParse() へのHook登録へ置き換えた。
+     CSV.parseSKDL本体（元の解析処理）は一切変更していない。
+     登録したコールバックはresult/text/monthColを引数で受け取り、
+     resultへ直接プロパティを書き込む（Phase5-2設計書で定義した
+     CSV.onAfterParseの仕様通り）。
+     元のコードは`this.toRows(text)`という形でCSVオブジェクトの
+     メソッドを呼んでいたが、Hookコールバックはbare関数として
+     呼ばれるため`this`がCSVを指さない。そのため`CSV.toRows(text)`
+     という明示的な参照に置き換えている（動作は完全に同一）。 ════════ */
   const prevParseSKDL = CSV.parseSKDL.bind(CSV);
   CSV.parseSKDL = function(text, monthCol){
     const result = prevParseSKDL(text, monthCol);
     if (!result) return result;
+    CSV._afterParseHooks.forEach(fn => {
+      try { fn(result, text, monthCol); } catch (e) { console.error('[CSV.onAfterParse]', e); }
+    });
+    return result;
+  };
 
+  CSV.onAfterParse(function(result, text, monthCol){
     try {
-      const rows = this.toRows(text);
+      const rows = CSV.toRows(text);
       const agg = buildShipperAggregationV3(rows);
       result._shipperGroups = agg.groups;
       result._shipperContracts = agg.contracts;
@@ -753,9 +770,7 @@ function renderShipper() {
       result._shipperSkippedNoCode = 0;
       result._shipperError = e.message;
     }
-
-    return result;
-  };
+  });
 
   const prevProcessDataset = processDataset;
   processDataset = function(ym, type, rows){
@@ -799,10 +814,15 @@ function renderShipper() {
     return gs.reduce((sum,g)=>sum+(Number(g.count)||0),0);
   }
 
-  const prevRenderDashboard = renderDashboard;
-  renderDashboard = function(){
-    prevRenderDashboard();
-
+  /* ════════ Version4 Phase5-5 Layer1：renderDashboardのHook移行（荷主バー表示）════════
+     従来はrenderDashboardを直接モンキーパッチしていたが、
+     window.RENDER.onAfterDashboard() へのHook登録へ置き換えた。
+     Layer3（UIノイズ除去）が既にHook発火用の中継役を持っているため、
+     Layer1では独自の中継役（renderDashboardの再代入）は不要になった。
+     これによりrenderDashboardへの直接モンキーパッチは全て解消され、
+     Layer3の中継役1箇所のみが、dashboard.js本来のrenderDashboardを
+     直接ラップする形になった。 ════════ */
+  window.RENDER.onAfterDashboard(function(){
     const ds = selectedDashboardDS();
     const shipArea = document.getElementById('shipper-bars-area');
     if (!shipArea || !ds) return;
@@ -837,12 +857,23 @@ function renderShipper() {
         <div class="mbar-val">${fmtK2(g.income)}千</div>
       </div>
     `).join('');
-  };
+  });
 
+  /* ════════ Version4 Phase5-4：renderTrendのHook移行 ════════
+     従来はrenderTrendを直接モンキーパッチしていたが、
+     window.RENDER.onAfterTrend() へのHook登録へ置き換えた。
+     trend.js側のrenderTrend本体は一切変更していないため、
+     「元の処理完了後にHook配列を発火する」という最小限の
+     中継役だけをここに残している（trend.js自体は今回対象外のため）。 ════════ */
   const prevRenderTrend = renderTrend;
   renderTrend = function(){
     prevRenderTrend();
+    window.RENDER._afterTrendHooks.forEach(fn => {
+      try { fn(); } catch (e) { console.error('[RENDER.onAfterTrend]', e); }
+    });
+  };
 
+  window.RENDER.onAfterTrend(function(){
     const list = datasetsForSelectedFiscalYear();
     if (!list || !list.length) return;
     const labels = list.map(d=>ymLabel(d.ym));
@@ -911,7 +942,7 @@ function renderShipper() {
         </tr>`;
       }).join('');
     }
-  };
+  });
 
   const prevRenderShipper = renderShipper;
   renderShipper = function(){
@@ -1417,17 +1448,24 @@ function renderShipper() {
       </div>`;
   }
 
-  const prevRenderShipperForCompare = renderShipper;
-  renderShipper = function(){
-    prevRenderShipperForCompare();
+  /* ════════ Version4 Phase5-6 Layer2：renderShipperのHook移行（比較パネル）════════
+     従来はrenderShipperを直接モンキーパッチしていたが、
+     window.RENDER.onAfterShipper() へのHook登録へ置き換えた。
+     Layer3（UIノイズ除去）が既にHook発火用の中継役を持っているため、
+     Layer2では独自の中継役（renderShipperの再代入）は不要になった。 ════════ */
+  window.RENDER.onAfterShipper(function(){
     renderComparePanel();
-  };
+  });
 
-  const prevRenderDashboardForCompare = renderDashboard;
-  renderDashboard = function(){
-    prevRenderDashboardForCompare();
+  /* ════════ Version4 Phase5-5 Layer2：renderDashboardのHook移行（比較ミニパネル）════════
+     従来はrenderDashboardを直接モンキーパッチしていたが、
+     window.RENDER.onAfterDashboard() へのHook登録へ置き換えた。
+     Layer3（UIノイズ除去）が既にHook発火用の中継役を持っているため、
+     Layer2では独自の中継役（renderDashboardの再代入）は不要になった。
+     ここではHook登録のみを行う。 ════════ */
+  window.RENDER.onAfterDashboard(function(){
     renderDashboardCompareMini();
-  };
+  });
 })();
 
 /* ════════════════════════════════════════════════════════════════
@@ -1510,17 +1548,41 @@ function renderShipper() {
     setTimeout(cleanUiNoise, 0);
   };
 
+  /* ════════ Version4 Phase5-6 Layer3：renderShipperのHook移行（UIノイズ除去）════════
+     従来はrenderShipperを直接モンキーパッチしていたが、
+     window.RENDER.onAfterShipper() へのHook登録へ置き換えた。
+     Layer1（禁止対象・今回未変更）が保持する本来のrenderShipperを
+     直接ラップする、最小限の中継役だけをここに残している。 ════════ */
   const prevRenderShipperForClean = renderShipper;
   renderShipper = function(){
     prevRenderShipperForClean();
-    cleanUiNoise();
+    window.RENDER._afterShipperHooks.forEach(fn => {
+      try { fn(); } catch (e) { console.error('[RENDER.onAfterShipper]', e); }
+    });
   };
 
+  window.RENDER.onAfterShipper(function(){
+    cleanUiNoise();
+  });
+
+  /* ════════ Version4 Phase5-5 Layer3：renderDashboardのHook移行（UIノイズ除去）════════
+     従来はrenderDashboardを直接モンキーパッチしていたが、
+     window.RENDER.onAfterDashboard() へのHook登録へ置き換えた。
+     dashboard.js側のrenderDashboard本体は一切変更していないため、
+     「元の処理完了後にHook配列を発火する」という最小限の中継役だけを
+     ここに残している（Layer2・Layer1が未変換の間は、この中継が
+     Layer2・Layer1のロジックも合わせて実行する）。 ════════ */
   const prevRenderDashboardForClean = renderDashboard;
   renderDashboard = function(){
     prevRenderDashboardForClean();
-    cleanUiNoise();
+    window.RENDER._afterDashboardHooks.forEach(fn => {
+      try { fn(); } catch (e) { console.error('[RENDER.onAfterDashboard]', e); }
+    });
   };
+
+  window.RENDER.onAfterDashboard(function(){
+    cleanUiNoise();
+  });
 
   document.addEventListener('DOMContentLoaded', () => {
     cleanUiNoise();
