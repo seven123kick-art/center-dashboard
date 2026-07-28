@@ -1167,11 +1167,35 @@ function normalizeDatasetForDisplay(ds) {
   return out;
 }
 function datasetSourceKind(ds) {
-  if (!ds) return 'none';
-  if (ds.source === 'history') return 'history';
-  if (ds.type === 'daily') return 'daily';
-  if (ds.source === 'csv' || !ds.source) return 'confirmed';
-  return ds.type || ds.source || 'confirmed';
+  let existingResult;
+  if (!ds) existingResult = 'none';
+  else if (ds.source === 'history') existingResult = 'history';
+  else if (ds.type === 'daily') existingResult = 'daily';
+  else if (ds.source === 'csv' || !ds.source) existingResult = 'confirmed';
+  else existingResult = ds.type || ds.source || 'confirmed';
+
+  // ==== Version3移行確認用の一時的な安全装置（Phase3-3-9） ====
+  // Repository移行完了後に削除予定。
+  // DatasetRepositoryの内部ヘルパー _sourceKindOf（_internal経由で
+  // 参照可能、Phase3-3-3で公開済み）が利用可能な場合のみ比較し、
+  // 文字列として完全一致した場合だけRepository側の値を採用する。
+  if (window.Repository && window.Repository.Dataset && window.Repository.Dataset._internal && typeof window.Repository.Dataset._internal._sourceKindOf === 'function') {
+    try {
+      const repoResult = window.Repository.Dataset._internal._sourceKindOf(ds);
+      if (existingResult === repoResult) {
+        return repoResult;
+      }
+      console.warn(
+        '[Repository比較] datasetSourceKind() で既存処理とRepositoryの結果に差異があります。既存処理の結果を採用します。',
+        { dataset: ds, existing: existingResult, repository: repoResult }
+      );
+    } catch (e) {
+      console.warn('[Repository比較] datasetSourceKind() の比較中にエラーが発生しました。既存処理の結果を採用します。', e);
+    }
+  }
+  // ==== ここまで（比較処理はRepository移行完了後に削除予定） ====
+
+  return existingResult;
 }
 function datasetKindLabel(ds) {
   const kind = datasetSourceKind(ds);

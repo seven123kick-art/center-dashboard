@@ -1365,3 +1365,73 @@ GitHub投入可否：**GitHub投入可**
   理由：変更はapp.jsの1関数のみ、既存ロジック・戻り値は完全に維持されて
   おり、Node.js上の全14パターン＋動作確認5項目で一致・想定通りの
   フォールバックを確認済み。
+
+Version3 Phase3-3-9 (2026-07-25) datasetSourceKind()のRepository移行（読み取り系最終段階）
+変更ファイル：
+  - src/app.js（編集：datasetSourceKind()へRepository比較の安全装置を追加）
+  ※ src/core/repository/配下5ファイル・center.htmlは今回一切変更していない
+
+変更関数：datasetSourceKind(ds)（app.js 1169行）のみ
+
+事前調査結果：
+  ①既存実装：!ds→'none'、source==='history'→'history'、type==='daily'→'daily'、
+    source==='csv'||!source→'confirmed'、それ以外→type||source||'confirmed'
+  ②Repository._sourceKindOf()：Phase3-3-3で複製済み、_internal経由で
+    公開されている（dataset_repository.js 157-163行）。今回はこの既存の
+    _internalを利用するのみで、Repository側は一切変更していない
+  ③全呼び出し元：datasetKindLabel()（app.js、表示ラベル変換）、
+    datasetPriority()（Phase3-3-8で比較コード導入済み）、
+    isRealCsvDataset()の3箇所。いずれもapp.js内。他ファイルからの
+    直接呼び出しなし
+  ④〜⑪ 戻り値パターン：'confirmed'/'daily'/'history'/'none'の4種。
+    後述のテストケースで全パターンを確認
+
+比較方法：
+  const existingResult = 既存ロジックの計算値を保持
+  existingResult === repoResult による文字列の厳密等価比較
+  （JSON.stringifyは使用していない。文字列同士の比較のため===で十分と判断）
+  一致時のみrepoResultを返す。不一致・例外時はexistingResultへ
+  フォールバックし、console.warnで詳細を出力する。
+
+  コメントには「Version3移行確認用の一時的な安全装置」「Repository移行
+  完了後に削除予定」と明記済み。
+
+テストケース（12パターン、Node.js比較テスト実施）：
+  confirmed／daily／history／source欠損／type欠損／未知type／未知source／
+  null／undefined／空Object／history source／CSV source
+
+一致結果：全12パターンで新旧完全一致。通常ケースでのconsole.warn発生：0件
+
+console.warn件数：
+  通常テスト12ケース：0件
+  Repository未接続時：0件（比較自体スキップ）
+  Repository例外時：1件（想定通り、フォールバック確認用）
+  意図的差異発生時：1件（想定通り、フォールバック確認用）
+
+副作用：
+  なし。datasetKindLabel()・datasetPriority()・isRealCsvDataset()は
+  いずれもdatasetSourceKind()を経由して間接的に本比較の恩恵を受けるが、
+  これら3関数自体には一切手を加えていない。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はapp.jsの1関数のみ、既存ロジック・戻り値は完全に維持されて
+  おり、Node.js上の全12パターン＋動作確認3項目で一致・想定通りの
+  フォールバックを確認済み。
+
+次に最も安全にRepository化できる箇所：
+  findByKey利用箇所（app.js内でSTATE.datasetsを複合キー検索している
+  箇所）。DatasetRepository.findByKey()は既にPhase3-3-3で実装・検証
+  済みのため、比較コードの追加のみで対応できる見込み。
+
+【Version3 読み取り系Repository完成度】
+  getAll     ：既存コードからの比較利用は未実施（直接の既存関数対応なし。
+              STATE.datasets参照箇所は複数あるが単純な配列取得のため
+              個別対応が必要）
+  findByKey  ：既存コードからの比較利用は未実施（次点候補）
+  getActive  ：activeDatasets()経由で比較利用済み（Phase3-3-7）
+  priorityOf ：datasetPriority()経由で比較利用済み（Phase3-3-8）
+  sourceKindOf：datasetSourceKind()経由で比較利用済み（Phase3-3-9、今回）
+
+  ご認識の「読み取り系100%」に対しては、getAll/findByKeyの2点が
+  残っている状況です。次回以降でこの2点に着手することで、読み取り系
+  Repositoryの完全な比較利用完了となります。
