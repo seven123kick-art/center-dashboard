@@ -1237,51 +1237,24 @@ function datasetPriority(ds) {
   return existingResult;
 }
 function activeDatasets() {
-  // 表示・分析用：同じ年月に複数データがある場合は、CSV確定 > CSV速報 > 収支補完 の順で優先する
-  // 削除済みマーカーは、画面描画のたびに必ず適用する。
+  // ==== Phase4-2: Mutation / Pure Calculation 責務分離 ====
+  // ① Mutation：削除済みマーカーの適用（STATE.datasetsを実際に書き換える）。
+  //    既存ロジックは1文字も変更していない。
   applyDeletionTombstonesToState(STATE);
-  const map = {};
-  for (const d of STATE.datasets || []) {
-    if (!d || !d.ym) continue;
-    const current = map[d.ym];
-    if (!current) {
-      map[d.ym] = d;
-      continue;
-    }
-    const curPriority = datasetPriority(current);
-    const newPriority = datasetPriority(d);
-    if (newPriority > curPriority) {
-      map[d.ym] = d;
-    } else if (newPriority === curPriority && String(d.importedAt || '') > String(current.importedAt || '')) {
-      map[d.ym] = d;
-    }
-  }
-  const existingResult = Object.values(map).sort((a,b)=>a.ym.localeCompare(b.ym)).map(normalizeDatasetForDisplay);
 
-  // ==== TODO(V3): Repository移行完了後に削除予定 ====
-  // Version3 Phase3-3-7：開発中だけの安全装置。
-  // Repository.Dataset.getActive() が利用可能な場合のみ比較を行い、
-  // 既存処理と完全に一致した場合だけRepository側の結果を採用する。
-  // 一致しない場合は必ず既存処理の結果を返し、console.warnで差異を報告する。
-  if (window.Repository && window.Repository.Dataset && typeof window.Repository.Dataset.getActive === 'function') {
-    try {
-      const repoResult = window.Repository.Dataset.getActive();
-      const existingJSON = JSON.stringify(existingResult);
-      const repoJSON = JSON.stringify(repoResult);
-      if (existingJSON === repoJSON) {
-        return repoResult;
-      }
-      console.warn(
-        '[Repository比較] activeDatasets() で既存処理とRepositoryの結果に差異があります。既存処理の結果を採用します。',
-        { existing: existingResult, repository: repoResult }
-      );
-    } catch (e) {
-      console.warn('[Repository比較] activeDatasets() の比較中にエラーが発生しました。既存処理の結果を採用します。', e);
-    }
+  // ② Pure Calculation：ym毎の優先順位判定・ソート・表示正規化。
+  //    Repository.Dataset.getActive() が既にPureな実装として完成・
+  //    比較検証済み（Phase3-3-3〜3-3-7）のため、同じロジックを
+  //    ここで重複実装しない。Repositoryへ完全に委譲する。
+  //
+  //    正しいscript読込順（center.htmlでRepository関連ファイルが
+  //    src/app.jsより前に接続済み）であれば、window.Repository.Dataset
+  //    は必ず存在する。存在しない場合は設定・読込順の不備であるため、
+  //    CONFIG_UTILS（Phase3-3-4）と同じ方針で明示的に例外を投げる。
+  if (!window.Repository || !window.Repository.Dataset || typeof window.Repository.Dataset.getActive !== 'function') {
+    throw new Error('[activeDatasets] Repository.Dataset.getActive is required but not available. Check script load order (Repository must be connected before this function is called).');
   }
-  // ==== TODO(V3) ここまで（比較処理はRepository移行完了後に削除予定） ====
-
-  return existingResult;
+  return window.Repository.Dataset.getActive();
 }
 function activeDatasetByYM(ym) {
   const existingResult = activeDatasets().find(d => d.ym === ym) || null;

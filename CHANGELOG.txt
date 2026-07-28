@@ -1468,3 +1468,77 @@ Node.js比較テスト結果（8パターン）：
   単体としてのみ存在し、現時点でどこからも呼ばれていない）
 GitHub投入可否：投入可能（ただし現時点では未接続のためアプリの動作には
   影響しない。次フェーズでの接続時に改めて検証が必要）
+
+Version4 Phase4-2 (2026-07-25) activeDatasets() Mutation/Pure Separation（互換ラッパー化）
+変更ファイル：
+  - src/app.js（編集：activeDatasets()を責務分離、互換ラッパー化）
+  ※ src/core/repository/配下5ファイル・center.html・STORE・CLOUD・
+    SyncCoordinatorはいずれも今回一切変更していない
+  ※ datasetPriority() / datasetSourceKind() / activeDatasetByYM() の
+    Version3比較コードは無変更のまま維持
+
+変更内容：
+  activeDatasets()を以下の2ステップへ明確に分離した：
+    ① Mutation：applyDeletionTombstonesToState(STATE)
+       既存ロジックは1文字も変更していない
+    ② Pure Calculation：window.Repository.Dataset.getActive() へ完全委譲
+       ym毎の優先順位判定・ソート・表示正規化の重複実装（従来app.js内に
+       あった約20行のインラインロジック）を削除し、既に比較検証済みの
+       Repository実装をそのまま利用する形にした
+
+  【重要な仕様変更点】
+  Repository.Dataset.getActiveが利用できない場合、従来は「既存の
+  インライン計算にフォールバックする」という設計だったが、今回の
+  分離によりインライン計算そのものを削除したため、フォールバック先が
+  無くなった。そのため、Repositoryが利用できない場合は
+  CONFIG_UTILS（Phase3-3-4）と同じ方針で、明示的にErrorを投げる設計と
+  した。center.htmlでRepositoryが正しく接続されている通常の環境では、
+  この分岐に到達することはない。
+
+activeDatasets()の現在の構造：
+  function activeDatasets() {
+    applyDeletionTombstonesToState(STATE);           // ① Mutation
+    if (Repositoryが利用不可) throw new Error(...);   // 明示的エラー
+    return window.Repository.Dataset.getActive();     // ② Pure Calculation
+  }
+
+Repository.getActive()への移行率：
+  Pure Calculation部分は100%Repository委譲（重複実装ゼロ）。
+  Mutation部分（Tombstone適用）は今回もapp.js側に残置（Repository側の
+  責務範囲外、前回のDataset Flow Refactoring Designで整理した通り）。
+
+副作用の移動：
+  - Mutation（STATE.datasets書き換え）：app.js側にそのまま残置（今回は
+    Repositoryへ移していない）
+  - Pure Calculation：完全にRepository.Dataset.getActive()へ移動
+
+比較コード維持確認：
+  - datasetPriority() / datasetSourceKind() / activeDatasetByYM() の
+    3関数の比較コード（Phase3-3-8, 3-3-9, 3-3-5でそれぞれ追加）は
+    無変更のまま維持されている（grep確認：`Repository比較`という
+    文字列が6箇所、3関数×2箇所ずつで健在）
+  - ただし、activeDatasetByYM()は内部でactiveDatasets()を呼び出す
+    ため、今回の変更により「activeDatasetByYM内の比較」は、
+    実質的に「Repository.getActive()の結果 と Repository.getActive()の
+    結果を比較する」形になり、構造上常に一致する（トートロジー化）。
+    これはバグではないが、比較の実質的な意味は薄れている点を報告する
+
+検証結果（Node.js比較テスト、center.html実読込順シミュレーション）：
+  1. 通常CSV／daily／confirmed+daily混在／history／削除済みhistory／
+     空STATE／年度境界：全7パターンで、Phase4-2適用前の「真の旧実装」
+     （オリジナルのインライン計算ロジック）と完全一致
+  2. STATE未定義時：Mutation部分（applyDeletionTombstonesToState）で
+     従来と同一のエラーが発生することを確認（変化なし）
+  3. Repository未接続時：意図通り明示的なErrorが発生することを確認
+     （新しい仕様通りの挙動）
+  4. activeDatasetByYM()経由の呼び出し：正しい値を返し、比較コードは
+     警告を出さないことを確認（両経路が同じRepositoryを参照するため
+     常に一致する構造になったことによる）
+
+GitHub投入可否：**GitHub投入可**
+  理由：Pure Calculation部分は既に数多くのテストで検証済みの
+  Repository実装への委譲であり、Mutation部分は無変更。全テストケースで
+  真の旧実装と完全一致を確認済み。ただし「Repository未接続時に例外を
+  投げる」という新しい失敗モードが導入された点は、現状のcenter.html
+  構成（Repository常時接続）では発生しないものの、仕様変更として
+  明確に認識しておく必要がある。
