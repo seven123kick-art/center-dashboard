@@ -1435,3 +1435,36 @@ GitHub投入可否：**GitHub投入可**
   ご認識の「読み取り系100%」に対しては、getAll/findByKeyの2点が
   残っている状況です。次回以降でこの2点に着手することで、読み取り系
   Repositoryの完全な比較利用完了となります。
+
+Version4 Phase4-2 (2026-07-25) DatasetRepository upsert()/remove()実装（Repository単体のみ）
+変更ファイル：
+  - src/core/repository/dataset_repository.js（編集：upsert()/remove()を実装）
+  ※ app.js・center.html・他Repository4ファイル・store.js・cloud.js・
+    STATE定義はいずれも今回一切変更していない。app.jsからの接続、
+    比較コードの追加も行っていない（Repository単体の実装のみ）
+
+実装内容：
+  - upsert(dataset)：app.js upsertDataset()と同一の複合キー判定
+    （ym, type, source）・上書き/追加・ソートロジックを実装。
+    永続化（STORE.save等）は行わない設計を既存関数の挙動に合わせて踏襲
+  - remove(predicate)：predicateに一致するDatasetを収集→既存の
+    グローバル関数markDataDeleted()/dataDeleteKey()を呼びTombstoneを
+    記録→STATE.datasetsから除去、という手順で実装。ロジックの複製を
+    避けるため、Tombstone記録は既存グローバル関数をそのまま呼び出す
+    設計とした（CONFIG_UTILSと同じ方針）
+
+Node.js比較テスト結果（8パターン）：
+  1. upsert新規追加：一致
+  2. upsert同一キー上書き：一致
+  3. upsert daily/confirmed共存・ソート順：一致
+  4. remove単一削除＋tombstone記録確認：一致（記録キー・値とも正確）
+  5. remove該当なし：一致
+  6. remove（history除外の複合キー条件、既存deleteDataset()相当）：一致
+  7. STATE未定義時：upsert/removeとも例外を投げず安全に処理
+  8. predicateが関数でない場合：空配列を返し安全に処理
+
+一致可否：全8パターンで既存ロジックと完全一致
+副作用：なし（app.js・他Repository・STORE/CLOUD等は無変更、Repository
+  単体としてのみ存在し、現時点でどこからも呼ばれていない）
+GitHub投入可否：投入可能（ただし現時点では未接続のためアプリの動作には
+  影響しない。次フェーズでの接続時に改めて検証が必要）

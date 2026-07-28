@@ -52,8 +52,10 @@ Module
 更新日
     2026-07-25
 
-TODO(V3)
-    - upsert() / remove() を実装する（今回未実装）
+TODO(V3→V4)
+    - upsert() / remove() は Version4 Phase4-2 で実装済み（本ファイル）。
+      ただしapp.jsからの接続・比較コードの追加はまだ行っていない
+      （Repository単体としての実装完了のみ）
     - Dataset ID導入（_generateId）は別フェーズ
     - dataDeleteKey/isDeletedSinceについても、fiscalYearFromYMと同様に
       共通モジュール化するかどうかは別途要検討（今回はfiscalYearFromYMの
@@ -332,18 +334,76 @@ TODO(V3)
 
         /**
          * Datasetを追加・更新する。
-         * TODO(V3): 未実装（Phase3-3-3では読み取り系のみ実装）
+         * app.js upsertDataset()（790-808行）と同一ロジック：
+         * 複合キー（ym, type, source）で既存一致を検索し、あれば上書き、
+         * なければ追加。その後、ym→（daily優先）の順でソートする。
+         * ※ STORE.save() / IDB_CACHE / CLOUD 等の永続化・同期は行わない
+         *   （既存upsertDataset()自体も永続化を行わず、呼び出し元が
+         *   別途STORE.save()等を実行する設計になっているため、
+         *   これに完全に合わせている）。
          */
         upsert(dataset) {
-            // TODO(V3): 未実装
+            if (!window.STATE || !Array.isArray(window.STATE.datasets)) return;
+            if (!dataset) return;
+
+            const ds = dataset;
+            const type = ds.type || 'confirmed';
+            ds.type = type;
+
+            const sourceKey = ds.source === 'history' ? 'history' : 'csv';
+            const idx = window.STATE.datasets.findIndex(d =>
+                d.ym === ds.ym &&
+                (d.type || 'confirmed') === type &&
+                ((d.source === 'history' ? 'history' : 'csv') === sourceKey)
+            );
+            if (idx >= 0) {
+                window.STATE.datasets[idx] = ds;
+            } else {
+                window.STATE.datasets.push(ds);
+            }
+
+            window.STATE.datasets.sort((a, b) => {
+                const y = a.ym.localeCompare(b.ym);
+                if (y !== 0) return y;
+                const at = (a.type || 'confirmed') === 'daily' ? 0 : 1;
+                const bt = (b.type || 'confirmed') === 'daily' ? 0 : 1;
+                return at - bt;
+            });
         },
 
         /**
          * 条件に一致するDatasetを削除する。
-         * TODO(V3): 未実装（Phase3-3-3では読み取り系のみ実装）
+         * app.js deleteDataset() / supersedeDailyWithConfirmed() の
+         * 「STATE.datasets操作＋Tombstone記録」部分と同一ロジック：
+         *   1. predicateに一致するDatasetを削除前に収集する
+         *   2. 一致した各Datasetについて、既存のグローバル関数
+         *      markDataDeleted() / dataDeleteKey() を呼び、Tombstoneを記録する
+         *      （ロジックの二重管理を避けるため、CONFIG_UTILS.fiscalYearFromYMと
+         *      同じ方針で、実装を複製せず既存のグローバル関数を直接呼び出す）
+         *   3. STATE.datasetsから一致した要素を除去する
+         * ※ STORE.save() / IDB_CACHE.remove() / CLOUD.deleteFile() 等の
+         *   永続化・同期・Cloud削除は行わない（StorageRepository /
+         *   CloudRepository / SyncCoordinatorの責務であり、今回のスコープ外）。
+         *
+         * @param {function(Object): boolean} predicate 削除対象を判定する関数
+         * @returns {Array} 実際に削除されたDataset一覧（呼び出し元が
+         *   Storage/Cloud側の後処理に使えるように返す）
          */
         remove(predicate) {
-            // TODO(V3): 未実装
+            if (!window.STATE || !Array.isArray(window.STATE.datasets)) return [];
+            if (typeof predicate !== 'function') return [];
+
+            const removed = window.STATE.datasets.filter(predicate);
+
+            removed.forEach(ds => {
+                if (typeof window.markDataDeleted === 'function' && typeof window.dataDeleteKey === 'function') {
+                    window.markDataDeleted('datasets', window.dataDeleteKey(ds.ym, ds.type || 'confirmed'));
+                }
+            });
+
+            window.STATE.datasets = window.STATE.datasets.filter(d => !predicate(d));
+
+            return removed;
         },
 
         /**
