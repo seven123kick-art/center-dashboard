@@ -753,7 +753,18 @@ const CSV = {
       }
     }
     return Object.keys(plan).length > 0 ? plan : null;
-  },};
+  },
+
+  /* ════════ Hook API（Version4 Phase5-3：受け皿のみ、既存parseSKDL()等は無変更）
+     Version3のNAV.onAfterGo / CLOUD.onAfterApplyFullStateと同じ設計思想。
+     今回はまだ誰もこのHookへ登録しない。既存のモンキーパッチ
+     （shipper.js / field_core.jsによるCSV.parseSKDLの書き換え）も
+     今回は削除しない。 ════════ */
+  _afterParseHooks: [],
+  onAfterParse(fn) {
+    if (typeof fn === 'function') this._afterParseHooks.push(fn);
+  },
+};
 
 /* ════════ §6 PROCESS（CSV生データ→データセット） ══════════════ */
 function n(v) { return typeof v==='number' ? v : (parseFloat(v)||0); }
@@ -786,6 +797,19 @@ function processDataset(ym, type, rows) {
     pseudoLaborRate, variableRate, fixedRate, profitRate,
     laborCost, employeeLaborCost, subcontractTransportCost, pseudoLaborIncome, excludedConsignmentExpense, excludedConsignmentIncome, fixedCost, varCost, importedAt: new Date().toISOString() };
 }
+
+/* ════════ Hook API（Version4 Phase5-3：受け皿のみ、既存processDataset()は無変更）
+   Version3のNAV.onAfterGo / CLOUD.onAfterApplyFullStateと同じ設計思想。
+   今回はまだ誰もこのHookへ登録しない。既存のモンキーパッチ
+   （shipper.js / field_core.jsによるprocessDatasetの書き換え）も
+   今回は削除しない。window.DATASETは今回新設する名前空間であり、
+   既存のwindow.DATASET_REPOSITORY（Repository層）とは別物である。 ════════ */
+window.DATASET = {
+  _afterProcessHooks: [],
+  onAfterProcess(fn) {
+    if (typeof fn === 'function') this._afterProcessHooks.push(fn);
+  },
+};
 
 function upsertDataset(ds) {
   // 同じ年月でも「速報値」と「確定値」は別データとして保持する
@@ -1257,33 +1281,7 @@ function activeDatasets() {
   return window.Repository.Dataset.getActive();
 }
 function activeDatasetByYM(ym) {
-  const existingResult = activeDatasets().find(d => d.ym === ym) || null;
-
-  // ==== TODO(V3): Repository移行確認後に比較処理削除予定 ====
-  // Version3 Phase3-3-5：開発中だけの安全装置。
-  // Repository.Dataset.getActive() が利用可能な場合のみ比較を行い、
-  // 既存処理と完全に一致した場合だけRepository側の結果を採用する。
-  // 一致しない場合は必ず既存処理の結果を返し、console.warnで差異を報告する。
-  if (window.Repository && window.Repository.Dataset && typeof window.Repository.Dataset.getActive === 'function') {
-    try {
-      const repoActive = window.Repository.Dataset.getActive();
-      const repoResult = repoActive.find(d => d.ym === ym) || null;
-      const existingJSON = JSON.stringify(existingResult);
-      const repoJSON = JSON.stringify(repoResult);
-      if (existingJSON === repoJSON) {
-        return repoResult;
-      }
-      console.warn(
-        '[Repository比較] activeDatasetByYM(' + ym + ') で既存処理とRepositoryの結果に差異があります。既存処理の結果を採用します。',
-        { existing: existingResult, repository: repoResult }
-      );
-    } catch (e) {
-      console.warn('[Repository比較] activeDatasetByYM(' + ym + ') の比較中にエラーが発生しました。既存処理の結果を採用します。', e);
-    }
-  }
-  // ==== TODO(V3) ここまで（比較処理はRepository移行確認後に削除予定） ====
-
-  return existingResult;
+  return activeDatasets().find(d => d.ym === ym) || null;
 }
 function isRealCsvDataset(ds) {
   return !!ds && datasetSourceKind(ds) !== 'history';

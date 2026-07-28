@@ -1655,3 +1655,75 @@ Repository影響：
 GitHub投入可否：**GitHub投入可**
   理由：変更は1行のみ、Node.js実測で呼び出し回数削減と出力の完全一致を
   両方確認済み。Dashboard/Trend/Shipperには一切手を加えていない。
+
+Version4 Phase5-3 (2026-07-25) Rendering Hook Infrastructure（受け皿のみ追加）
+変更ファイル：
+  - src/app.js（編集：CSVオブジェクトへonAfterParse追加、window.DATASET新設）
+  - src/ui/render_hooks.js（新規：window.RENDER新設）
+  - center.html（編集：render_hooks.jsのscriptタグ1行追加のみ）
+  ※ renderDashboard() / renderTrend() / renderShipper() /
+    CSV.parseSKDL() / processDataset() 本体、および既存の全モンキーパッチ
+    （shipper.js・field_core.js）はいずれも1文字も変更していない
+
+追加したHook一覧：
+  - window.RENDER.onAfterDashboard(fn)
+  - window.RENDER.onAfterTrend(fn)
+  - window.RENDER.onAfterShipper(fn)
+  - CSV.onAfterParse(fn)（既存CSVオブジェクトへの追加メソッド）
+  - window.DATASET.onAfterProcess(fn)（新設オブジェクト）
+
+  いずれも内部でコールバック配列（_afterXxxHooks）を管理する、
+  Version3のNAV.onAfterGo/CLOUD.onAfterApplyFullStateと同一の設計・
+  同一の書き方（if (typeof fn === 'function') this._xxxHooks.push(fn);）
+  で実装した。
+
+既存コード変更箇所：
+  - src/app.js：CSVオブジェクトの末尾（既存メソッドの後）にHook APIを
+    追加。既存の各メソッド（read, parseLine, parseSKDL等）は1文字も
+    変更していない
+  - src/app.js：processDataset()の直後にwindow.DATASET（新設）を追加。
+    processDataset()自体は無変更
+  - center.html：render_hooks.jsのscriptタグを1行追加のみ
+    （src/ui/ui_helpers.jsの直後に配置）
+
+  【命名に関する注記】
+  window.DATASETという名前は、既存のwindow.DATASET_REPOSITORY
+  （Repository層）とは別物である。文字列としては類似しているため、
+  将来の混同を避けるよう、render_hooks.js・app.js双方のコメントに
+  明記した。
+
+既存Hookとの整合性：
+  Version3で導入したNAV.onAfterGo / CLOUD.onAfterApplyFullStateと、
+  設計思想・命名規則（onAfterXxx）・実装パターン（配列にpushするだけの
+  薄い登録メソッド）を完全に統一した。
+
+  今回のCSV.onAfterParse / DATASET.onAfterProcessは、Version3のHookとは
+  異なり「登録した関数が結果オブジェクトを直接書き換える」ことを想定した
+  設計である点をコメントに明記した（Phase5-2設計書で指摘済みの差異）。
+
+Repositoryへの影響：
+  なし。window.DATASETという新設オブジェクトは、Repository層
+  （window.DATASET_REPOSITORY, window.Repository.Dataset等）とは完全に
+  独立しており、相互参照・呼び出しは一切無い。
+
+画面への影響：
+  なし。今回追加したHookへは、まだどこからも登録（onAfterXxx呼び出し）
+  が行われていないため（登録0件）、既存の描画処理・CSV解析・Dataset生成の
+  実行結果には一切影響しない。
+
+検証結果（Node.js）：
+  - window.RENDER / CSV.onAfterParse / window.DATASETいずれも、
+    登録→配列push→forEachでの発火、という基本動作を確認
+  - window.DATASETとwindow.DATASET_REPOSITORYが別オブジェクトである
+    ことを確認（名前衝突なし）
+  - Phase4-4で作成したactiveDatasetByYM()の回帰テスト（CSV通常／history／
+    削除済みhistory／該当なし／Cloud同期相当／Repository未接続時／
+    console.warn非発生）を今回のapp.jsに対して再実行し、全て変更前と
+    同一の結果であることを確認（app.js全体の动作に影響がないことの
+    追加確認）
+  - 全JSファイルのnode --check構文検証：エラーなし
+  - center.htmlの全script参照が実在することを確認
+
+GitHub投入可否：**GitHub投入可**
+  理由：追加のみで、既存の関数・モンキーパッチ・Repositoryのいずれにも
+  変更がなく、回帰テストでも影響がないことを確認済み。
