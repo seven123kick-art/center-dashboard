@@ -1184,10 +1184,33 @@ function datasetPriority(ds) {
   // 同じ年月では、正式CSV確定 > CSV速報 > 収支補完 の順で表示・分析に使う。
   // 補完はCSV未登録月を埋めるための参考値であり、確定とは表示しない。
   const kind = datasetSourceKind(ds);
-  if (kind === 'confirmed') return 30;
-  if (kind === 'daily') return 20;
-  if (kind === 'history') return 10;
-  return 0;
+  let existingResult;
+  if (kind === 'confirmed') existingResult = 30;
+  else if (kind === 'daily') existingResult = 20;
+  else if (kind === 'history') existingResult = 10;
+  else existingResult = 0;
+
+  // ==== Version3移行確認用の一時的な安全装置（Phase3-3-8） ====
+  // Repository移行完了後に削除予定。
+  // Repository.Dataset.priorityOf() が利用可能な場合のみ比較し、
+  // 数値として完全一致した場合だけRepository側の値を採用する。
+  if (window.Repository && window.Repository.Dataset && typeof window.Repository.Dataset.priorityOf === 'function') {
+    try {
+      const repoResult = window.Repository.Dataset.priorityOf(ds);
+      if (Object.is(existingResult, repoResult)) {
+        return repoResult;
+      }
+      console.warn(
+        '[Repository比較] datasetPriority() で既存処理とRepositoryの結果に差異があります。既存処理の結果を採用します。',
+        { dataset: ds, existing: existingResult, repository: repoResult }
+      );
+    } catch (e) {
+      console.warn('[Repository比較] datasetPriority() の比較中にエラーが発生しました。既存処理の結果を採用します。', e);
+    }
+  }
+  // ==== ここまで（比較処理はRepository移行完了後に削除予定） ====
+
+  return existingResult;
 }
 function activeDatasets() {
   // 表示・分析用：同じ年月に複数データがある場合は、CSV確定 > CSV速報 > 収支補完 の順で優先する

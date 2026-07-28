@@ -1291,3 +1291,77 @@ GitHub投入可否：**GitHub投入可**
     確認済み
   ・純粋関数（引数のみに依存、副作用なし）のため、比較コードの実装・
     検証が activeDatasets() よりも単純
+
+Version3 Phase3-3-8 (2026-07-25) datasetPriority()のRepository移行
+Phase名：Version3 Phase3-3-8
+変更ファイル：
+  - src/app.js（編集：datasetPriority()へRepository比較の安全装置を追加）
+  ※ src/core/repository/配下5ファイル・center.htmlは今回一切変更していない
+
+変更関数：datasetPriority(ds)（app.js 1183行）のみ
+
+事前調査結果：
+  1. 既存実装：datasetSourceKind(ds)の判定結果に応じてconfirmed=30 /
+     daily=20 / history=10 / その他=0を返す純粋関数
+  2. datasetSourceKind()との関係：datasetPriorityは内部でdatasetSourceKind
+     を呼ぶのみ。今回はdatasetSourceKind自体には一切触れていない
+  3. 全呼び出し元：activeDatasets()内の2箇所（app.js 1204, 1205行）のみ。
+     他ファイルからの直接呼び出しは無し
+  4. Repository.Dataset.priorityOf()の実装：内部の_priorityOf→
+     _sourceKindOfが、app.jsのdatasetSourceKind()と1文字違わず一致して
+     いることを確認済み（Phase3-3-3実装時に複製、今回改めて突合）
+  5〜7. 不正値・source欠損・type欠損・矛盾パターン：後述のテストケースで
+     全14パターンを確認、新旧とも完全一致
+  8. Repository接続後の読込順：Phase3-3-6で確立済みの
+     format.js→dataset_repository.js→registry.jsの順を前提とし、
+     今回はこの順序を変更していない
+
+  → 調査の結果、既存ロジックとRepository実装の間に差異は見つからなかった。
+
+比較方法：
+  const existingResult = 既存ロジックによる計算値を保持
+  Object.is(existingResult, repoResult) による数値の厳密一致判定
+  （JSON.stringifyは使用していない。単一数値の比較のため、
+  Object.isによる直接比較の方が適切と判断した）
+  一致時のみrepoResultを返す。不一致・例外時はexistingResultへ
+  フォールバックし、console.warnで詳細を出力する。
+
+  コメントには「Version3移行確認用の一時的な安全装置」「Repository移行
+  完了後に削除予定」と明記済み。
+
+テストケース（14パターン、Node.js比較テスト実施）：
+  confirmed（source=csv,type=confirmed）／daily／history／
+  source='history'のみ／source='csv'のみ／source欠損／type欠損／
+  未知のtype／未知のsource／null／undefined／空オブジェクト／
+  importedAtのみ存在／typeとsourceが矛盾（source=history,type=daily）
+
+一致結果：全14パターンで新旧完全一致。通常ケースでのconsole.warn発生：0件
+
+フォールバック動作：
+  - Repository未接続時：比較自体がスキップされ、既存処理の結果
+    （30）がそのまま返ることを確認
+  - Repository呼び出し例外時：console.warnを出力した上で既存処理の
+    結果（30）にフォールバックすることを確認
+  - 意図的な差異発生時（Repository側が999を返すよう細工）：
+    console.warnを出力した上で既存処理の結果（30）を採用することを確認
+
+既存画面への影響：
+  なし。activeDatasets()経由での優先順位選択（同一年月にhistory/daily/
+  confirmedが混在するケース）でも、従来通りconfirmedが選択されることを
+  確認済み。
+
+比較処理の冗長性：
+  activeDatasets()は同一年月内の比較で datasetPriority() を最大2回
+  （current, d それぞれ）呼び出す。今回の変更により、その2回それぞれで
+  Repository.Dataset.priorityOf()への比較呼び出しが発生するため、
+  Repository側のメソッド呼び出し回数はDataset比較1回あたり最大2倍に
+  増加する。さらにactiveDatasets()自体も独自にRepository.Dataset.
+  getActive()を呼んで比較しているため（Phase3-3-7）、実行時の呼び出し
+  階層はやや重複した状態になっている。いずれも結果は一致する限り
+  副作用や戻り値には影響しないが、Version3の比較コード削除フェーズで
+  解消すべき冗長性として記録しておく。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はapp.jsの1関数のみ、既存ロジック・戻り値は完全に維持されて
+  おり、Node.js上の全14パターン＋動作確認5項目で一致・想定通りの
+  フォールバックを確認済み。
