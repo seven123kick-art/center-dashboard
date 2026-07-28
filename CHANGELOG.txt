@@ -1542,3 +1542,116 @@ GitHub投入可否：**GitHub投入可**
   投げる」という新しい失敗モードが導入された点は、現状のcenter.html
   構成（Repository常時接続）では発生しないものの、仕様変更として
   明確に認識しておく必要がある。
+
+Version4 Phase4-4 (2026-07-25) Repository Comparison Cleanup Step1（activeDatasetByYMのトートロジー削除）
+変更ファイル：
+  - src/app.js（編集：activeDatasetByYM()の比較コードを削除）
+  ※ datasetPriority() / datasetSourceKind() の比較コードは無変更のまま
+    維持。src/core/repository/配下5ファイル・center.htmlも今回一切
+    変更していない
+
+変更内容：
+  Phase4-3の棚卸しで「分類C：Repository同士の比較で実質無意味
+  （完全なトートロジー）」と判定した`activeDatasetByYM()`の比較コードを
+  削除した。
+
+  変更前：
+    function activeDatasetByYM(ym) {
+      const existingResult = activeDatasets().find(d => d.ym === ym) || null;
+      // ...Repository.Dataset.getActive()と比較し、一致すればRepository側、
+      // 不一致ならexistingResult、例外時もexistingResultを返す約20行...
+      return existingResult;
+    }
+
+  変更後：
+    function activeDatasetByYM(ym) {
+      return activeDatasets().find(d => d.ym === ym) || null;
+    }
+
+  Phase4-2により`activeDatasets()`自体が既に`Repository.Dataset.getActive()`
+  への100%委譲になっているため、削除前の比較コードは実質「Repositoryの
+  結果とRepositoryの結果を比較する」だけの状態であり、削除しても
+  戻り値・挙動に一切変化はない。
+
+削除した比較コード：
+  - `existingJSON === repoJSON`によるJSON.stringify完全一致判定
+  - 不一致時のconsole.warn（'[Repository比較] activeDatasetByYM(...)...'）
+  - 例外時のconsole.warn（'[Repository比較] activeDatasetByYM(...)の比較中に...'）
+
+残っている比較コード：
+  - `datasetPriority()`（分類B、一部有効だが重複あり）：無変更
+  - `datasetSourceKind()`（分類A、唯一の真に独立した比較）：無変更
+
+検証結果（Node.js、center.html実読込順シミュレーション）：
+  - CSV通常／history／削除済みhistory（tombstone）／該当なし：全て
+    Phase4-4適用前と同一の結果を返すことを確認
+  - Cloud同期相当（STATE.datasets丸ごと入替）：正しく新しい値を返すことを確認
+  - Repository未接続時：内部で呼ぶactiveDatasets()経由で、Phase4-2で
+    導入した明示的なErrorが発生することを確認（変化なし）
+  - 通常ケースでconsole.warnが一切発生しないことを確認（比較コード削除に
+    伴い、警告の発生源自体が無くなったため、当然の結果として0件）
+
+画面確認の観点：
+  CSV取込、history追加・削除、通常Dataset削除、Cloud同期のいずれも、
+  activeDatasetByYM()経由で呼ばれる画面（report_ui.js, shipper.js等）の
+  表示に影響しないことをNode.js比較テストで確認済み。
+
+GitHub投入可否：**GitHub投入可**
+  理由：削除したのは既にトートロジー化し実質的な検証価値を失っていた
+  比較コードのみ。戻り値・副作用とも変化なしを確認済み。
+
+Version4 Phase4-6 (2026-07-25) Indicators Dataset Flow Optimization
+変更ファイル：
+  - src/modules/indicators.js（編集：renderIndicators()内の二重計算解消）
+  ※ app.js・Repository配下5ファイル・center.htmlは今回一切変更していない
+  ※ Dashboard/Trend/Shipperは今回の対象外、無変更
+
+変更内容：
+  renderIndicators()内で発生していた、年度Datasetの二重計算を
+  一時変数の再利用で解消した。
+
+  変更前：
+    const fyList = datasetsForSelectedFiscalYear();
+    const ds = latestDatasetInSelectedFiscalYear();
+    // ↑ latestDatasetInSelectedFiscalYear()は内部で
+    //   datasetsForSelectedFiscalYear()をもう一度呼んでいた
+
+  変更後：
+    const fyList = datasetsForSelectedFiscalYear();
+    const ds = fyList.length ? fyList[fyList.length - 1] : null;
+    // ↑ 既存のlatestDatasetInSelectedFiscalYear()の内部実装
+    //   （list.length ? list[list.length-1] : null）と完全に同じ式を
+    //   fyListに対して直接適用するだけで、同じ結果を得られる
+
+  変更したのは1行のみ。外部から見た戻り値・画面表示は完全に同一。
+
+activeDatasets()理論呼び出し回数：
+  変更前：24回（fyList取得で12回＋latestDatasetInSelectedFiscalYear内部で
+           datasetsForSelectedFiscalYear()を再実行し、さらに12回）
+  変更後：12回（fyList取得の1回のみ。dsはfyListから導出するだけで
+           追加のactiveDatasets()呼び出しは発生しない）
+
+  Node.js上で実際にactiveDatasets()の呼び出し回数をカウントする
+  実測テストを実施し、変更前24回→変更後12回（50%削減）を確認した。
+  さらに、変更前後で実際にrenderIndicators()が生成するinnerHTML
+  （画面表示内容そのもの）が完全に一致することも確認済み。
+
+Repository影響：
+  なし。DatasetRepository・Repository Registry・center.htmlはいずれも
+  無変更。今回の変更はapp.js側の呼び出し方の整理であり、
+  Repository層の設計・実装には一切影響しない。
+
+確認結果（Node.js実測テスト）：
+  - activeDatasets()呼び出し回数：24回→12回（実測、半減を確認）
+  - renderIndicators()が生成するHTML内容：変更前後で完全一致
+  - 構文エラー：全JSファイルでnode --check通過
+
+画面確認の観点（実機での確認を推奨する操作）：
+  Indicators画面表示、CSV取込後の再表示、history追加後の再表示、
+  history削除後の再表示、Cloud同期後の再表示、年度変更、月変更。
+  いずれもfyList・dsの算出元データ（STATE.datasets経由）は変更前と
+  同一のため、表示内容に変化は生じない見込み。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更は1行のみ、Node.js実測で呼び出し回数削減と出力の完全一致を
+  両方確認済み。Dashboard/Trend/Shipperには一切手を加えていない。

@@ -47,7 +47,7 @@ function renderIndicators() {
   if (!view) return;
 
   const fyList = datasetsForSelectedFiscalYear();
-  const ds = latestDatasetInSelectedFiscalYear();
+  const ds = fyList.length ? fyList[fyList.length - 1] : null;
 
   if (!ds || !fyList.length) {
     view.innerHTML = '<div class="msg msg-info">選択年度のデータがありません</div>';
