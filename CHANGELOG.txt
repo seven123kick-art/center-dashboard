@@ -2049,3 +2049,72 @@ Dataset: 100%（shipper.js・field_core.js両方完了）
   Hook API方式を、描画層（RENDER）・CSV解析層・Dataset生成層へ展開する
   という当初のPhase5の目的を達成した。全ての変換においてNode.js比較で
   出力の完全一致を確認し、既存動作100%維持という方針を貫徹した。
+
+Version5 Phase1 (2026-07-25) StorageRepository Implementation（責務整理＋薄い委譲ラッパー）
+変更ファイル：
+  - src/core/repository/storage_repository.js（編集：4メソッドを薄い
+    委譲ラッパーとして実装）
+  ※ src/core/store.js・app.js内IDB_CACHE・他Repository3ファイル・
+    center.htmlはいずれも今回一切変更していない。既存の46箇所の
+    STORE.save()呼び出し元、2箇所のSTORE.load()呼び出し元、
+    IDB_CACHE利用5ファイルには一切触れていない
+
+事前調査（責務整理、詳細は別紙 storage_repository_design.md 参照）：
+  - STORE.save()：実呼び出し46箇所・11ファイル（コメント言及を除く）
+  - STORE.load()：実呼び出し2箇所のみ（BOOT処理、restoreAll()）
+  - IDB_CACHE：get/set/remove/hydrateState/persistStateSoonの5メソッドが
+    field_core.js/cloud.js/storage_audit.js/app.jsから利用されている
+  - 【重要な新発見】STOREを経由しない独立したlocalStorage直接アクセスが
+    5ファイル（report_ui.js, field_worker.js, app.js, core/cloud.js）に
+    存在する。OpenAI APIキー、選択中作業者名、デバッグフラグ、Cloud接続
+    設定、クライアントID、Push済みハッシュキャッシュ等、いずれも
+    「端末固有・Cloud同期対象外」という性質を持ち、業務データ
+    （Dataset等）とは扱いが異なることを確認した
+  - Supabaseが正本と言えるのはDataset本体・State同期対象のみで、
+    Cloud接続設定やクライアントID等はlocalStorageそのものが正本である
+    ことを明文化した
+
+実装内容（必要最小限、危険性を考慮し薄いラッパーのみ）：
+  - StorageRepository.save() → STORE.save()への薄い委譲
+  - StorageRepository.load() → STORE.load()への薄い委譲
+  - StorageRepository.getCached(kind, key) → IDB_CACHE.get()への薄い委譲
+  - StorageRepository.setCached(kind, key, value) → IDB_CACHE.set()への
+    薄い委譲
+  いずれも既存ロジックの複製・再実装は一切行わず、既存関数をそのまま
+  呼ぶだけ。Repository.Dataset側が利用できない場合に例外を投げる
+  設計（CONFIG_UTILS/activeDatasets等と同じ方針）とした。
+
+移設可能一覧・移設禁止一覧：storage_repository_design.md参照
+  可能：STORE.save/load・IDB_CACHE.get/setの呼び出し窓口（今回実施）
+  禁止：STORE.save/load本体のロジック、IDB_CACHE本体の実装、
+    STORE非経路のlocalStorage直接アクセス5ファイル分、
+    route_indexの非対称性修正（Phase4-0で発見済み、今回は対象外）
+
+検証結果（Node.js）：
+  - save()/load()/getCached()/setCached()の4メソッドとも、対応する
+    既存関数（STORE.save/load, IDB_CACHE.get/set）が正しく呼ばれ、
+    戻り値もそのまま返ることを確認
+  - STORE未接続時に明示的なErrorが発生することを確認
+  - 全JSファイルのnode --check構文検証：エラーなし
+  - 既存のSTORE/IDB_CACHE実装・呼び出し元は無変更であることをハッシュ
+    比較で確認
+
+Repository影響：
+  DatasetRepository・Repository Registry・CloudRepository・
+  SyncCoordinatorには一切影響しない。StorageRepository単体の変更のみ。
+
+GitHub投入可否：**GitHub投入可**
+  理由：追加のみで、既存のSTORE/IDB_CACHE実装・呼び出し元・他Repository
+  いずれにも変更がなく、Node.js検証でも委譲動作が正しいことを確認済み。
+  現時点では既存画面から未接続のため、アプリの実際の動作には一切
+  影響しない。
+
+移設率：StorageRepositoryが対象とすべき機能のうち、呼び出し窓口の実装
+  （委譲ラッパー4メソッド）は完了。実処理の移設（STORE.save/loadの
+  ロジック自体、IDB_CACHE本体の実装）はまだ0%。
+
+Repository完成率（4Repository全体、実装済み機能ベースの概算）：
+  DatasetRepository：読み取り系100%＋書き込み系100%（Version4 Phase4-2）
+  StorageRepository：委譲ラッパーのみ（実処理は未移設）
+  CloudRepository：骨格のみ（未着手）
+  SyncCoordinator：骨格のみ（未着手）
