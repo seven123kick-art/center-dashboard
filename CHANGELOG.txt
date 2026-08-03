@@ -1966,3 +1966,86 @@ Dataset（processDataset）: 0%（shipper.js・field_core.js両方とも未着�
 
   Phase5-1調査時点の総数12件のうち、8件が変換済み（dispatcher化または
   完全なHook登録化）、4件が未着手として残っている。
+
+Version4 Phase5-7 (2026-07-25) processDataset Hook Migration【Version4 Hook Migration完了】
+変更ファイル：
+  - src/modules/shipper.js（編集：processDatasetをdispatcher化＋Hook登録）
+  - src/field/field_core.js（編集：processDatasetをHook登録のみに変換）
+  ※ dashboard.js・trend.js・app.js・render_hooks.js・center.html、
+    render系（renderDashboard/renderTrend/renderShipper Layer2・3）、
+    CSV.parseSKDLはいずれも今回一切変更していない。renderShipper Layer1・
+    UI.updateTopbarも今回対象外（ご指示通りVersion5以降で検討）、無変更
+
+①shipper.js Hook登録化：
+  従来の「prevProcessDataset()呼出＋荷主関連プロパティ付与をハードコード」
+  という構造を、「prevProcessDataset()呼出＋
+  window.DATASET._afterProcessHooks発火」という汎用dispatcherに変換。
+  荷主関連プロパティ付与ロジックはwindow.DATASET.onAfterProcess()へ登録。
+  Node.js比較：Hook登録数1、生成されるDatasetオブジェクトの内容が
+  変更前と完全一致することを確認。
+
+②field_core.js Hook登録化：
+  従来のprocessDataset再代入（oldProcessDataset呼出＋確定伝票売上付与を
+  ハードコード）を完全に削除し、window.DATASET.onAfterProcess()への
+  登録のみに変更（shipper.js側のdispatcherが代わりに発火するため）。
+
+削除したモンキーパッチ：
+  - shipper.js：processDatasetの再代入構造は残るが、中身は
+    「ハードコードされた荷主ロジック」から「汎用Hook発火」へ変換
+  - field_core.js：processDatasetの再代入自体を完全に削除
+
+追加Hook：
+  window.DATASET.onAfterProcess × 2（shipper.js・field_core.js各1）
+
+Dataset比較（Node.js、両ファイルを組み合わせた完全なチェーン）：
+  旧来の二重モンキーパッチ方式（shipper.js→field_core.jsの順で
+  順次ラップ）と、新方式（shipper.jsが唯一のdispatcher、field_core.jsは
+  登録のみ）とで、生成されるDatasetオブジェクトの全プロパティ・全値が
+  完全一致することを確認した（shippers, shipperGroups, shipperContracts,
+  shipperTicketCount, shipperIncomeTotal, shipperTargetRows,
+  shipperSkippedNoCode, shipperSourceRule, shipperColumns, shipperError,
+  confirmedSlipSales, confirmedSlipSalesCount, confirmedSlipSalesIncome,
+  confirmedSlipSalesColumns, confirmedSlipSalesRule,
+  confirmedSlipSalesErrorの全プロパティで一致）。
+
+Node.js比較：
+  - Hook登録数：shipper.js単体1、field_core.js単体1、両方合わせて2
+  - 生成Datasetオブジェクトの完全一致：確認済み
+
+Repository影響：なし
+
+GitHub投入可否：**GitHub投入可**
+  理由：Node.js比較で生成Datasetオブジェクトの完全一致を確認済み。
+  render系・CSV.parseSKDL・renderShipper Layer1・UI.updateTopbarには
+  一切触れていない。
+
+=== 最終進捗（Version4 Hook Migration完了時点）===
+
+Infrastructure: 100%
+Trend: 100%
+Dashboard: 100%
+Shipper: 67%（Layer1は今回対象外、Version5以降で検討）
+CSV: 100%
+Dataset: 100%（shipper.js・field_core.js両方完了）
+
+残存Dispatcher（Hook発火専用の中継コード）：5件
+  - CSV.parseSKDL（shipper.js側）
+  - processDataset（shipper.js側）
+  - renderTrend
+  - renderShipper（Layer3）
+  - renderDashboard（Layer3）
+
+残存業務モンキーパッチ（ハードコードされた業務ロジックがそのまま
+  残っているもの）：2件
+  - renderShipper Layer1（本体、今回対象外）
+  - UI.updateTopbar（shipper.js側、今回対象外）
+
+  Phase5-1調査時点の総数12件のうち、10件が変換済み（Hook登録・
+  dispatcher化含む）。残る2件（renderShipper Layer1、UI.updateTopbar）は
+  ご指示通りVersion5以降で検討する。
+
+【Version4 Hook Migration 完了宣言】
+  Version3で確立したNAV.onAfterGo/CLOUD.onAfterApplyFullStateと同じ
+  Hook API方式を、描画層（RENDER）・CSV解析層・Dataset生成層へ展開する
+  という当初のPhase5の目的を達成した。全ての変換においてNode.js比較で
+  出力の完全一致を確認し、既存動作100%維持という方針を貫徹した。

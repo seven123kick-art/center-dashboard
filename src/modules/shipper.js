@@ -772,9 +772,23 @@ function renderShipper() {
     }
   });
 
+  /* ════════ Version4 Phase5-7：processDatasetのHook移行（shipper.js側）════════
+     従来はprocessDatasetを直接モンキーパッチしていたが、
+     window.DATASET.onAfterProcess() へのHook登録へ置き換えた。
+     processDataset本体（元の生成処理）は一切変更していない。
+     shipper.js側が最初に読み込まれるため、ここで唯一の中継役
+     （dispatcher）を持たせ、field_core.js側は登録のみとする
+     （CSV.parseSKDLのHook移行と同じ構成）。 ════════ */
   const prevProcessDataset = processDataset;
   processDataset = function(ym, type, rows){
     const ds = prevProcessDataset(ym, type, rows);
+    window.DATASET._afterProcessHooks.forEach(fn => {
+      try { fn(ds, ym, type, rows); } catch (e) { console.error('[DATASET.onAfterProcess]', e); }
+    });
+    return ds;
+  };
+
+  window.DATASET.onAfterProcess(function(ds, ym, type, rows){
     if (rows && rows._dashboardShippers) ds.shippers = rows._dashboardShippers;
     if (rows && rows._shipperGroups) ds.shipperGroups = rows._shipperGroups;
     if (rows && rows._shipperContracts) ds.shipperContracts = rows._shipperContracts;
@@ -785,8 +799,7 @@ function renderShipper() {
     if (rows && rows._shipperSourceRule) ds.shipperSourceRule = rows._shipperSourceRule;
     if (rows && rows._shipperColumns) ds.shipperColumns = rows._shipperColumns;
     if (rows && rows._shipperError) ds.shipperError = rows._shipperError;
-    return ds;
-  };
+  });
 
   function groupsOf(ds){
     if (ds && Array.isArray(ds.shipperGroups)) return ds.shipperGroups;

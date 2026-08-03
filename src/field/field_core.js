@@ -1443,9 +1443,13 @@ IMPORT.deleteFieldData = function(ym) {
       }
     });
 
-    const oldProcessDataset = processDataset;
-    processDataset = function(ym, type, rows){
-      const ds = oldProcessDataset(ym, type, rows);
+    /* ════════ Version4 Phase5-7：processDatasetのHook移行（field_core.js側）════════
+       従来はprocessDatasetを直接モンキーパッチしていたが、
+       window.DATASET.onAfterProcess() へのHook登録へ置き換えた
+       （shipper.js側は同フェーズで既にdispatcher化済みのため、
+       processDataset自体の再代入・中継役はshipper.js側の1箇所のみで
+       足りる）。processDataset本体は一切変更していない。 ════════ */
+    window.DATASET.onAfterProcess(function(ds, ym, type, rows){
       if (rows && rows._confirmedSlipSales) {
         ds.confirmedSlipSales = rows._confirmedSlipSales;
         ds.confirmedSlipSalesCount = rows._confirmedSlipSalesCount || 0;
@@ -1454,8 +1458,7 @@ IMPORT.deleteFieldData = function(ym) {
         ds.confirmedSlipSalesRule = rows._confirmedSlipSalesRule || '';
         ds.confirmedSlipSalesError = rows._confirmedSlipSalesError || '';
       }
-      return ds;
-    };
+    });
   })();
 
   window.setupFieldCommonSelectors = setupFieldCommonSelectors;
