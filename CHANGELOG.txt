@@ -2118,3 +2118,177 @@ Repository完成率（4Repository全体、実装済み機能ベースの概算�
   StorageRepository：委譲ラッパーのみ（実処理は未移設）
   CloudRepository：骨格のみ（未着手）
   SyncCoordinator：骨格のみ（未着手）
+
+Version5 Phase2 (2026-07-25) StorageRepository STORE.load Migration（検証・正式窓口化）
+変更ファイル：
+  - src/core/repository/storage_repository.js（編集：ヘッダーコメントの
+    更新のみ。load()メソッド本体のコードは1文字も変更していない）
+  ※ src/core/store.js（STORE.load()本体）・IDB_CACHE・app.js・
+    center.html・他Repository3ファイルはいずれも今回一切変更していない
+
+①STORE.load()調査結果：
+
+  ①呼び出し元一覧（実際にコードで確認）：
+    - app.js 2655行付近（BOOT処理内）：起動時に1回
+    - app.js 2453行（SIMPLE_STORE.restoreAll()）：手動データ復元機能から1回
+    呼び出し元は上記2箇所のみ（他ファイルからの呼び出しは無し）
+
+  ②戻り値：なし（undefined）。STATEへの直接的な副作用のみで機能する
+    設計
+
+  ③副作用：STATE上の15プロパティへの書き込み
+    （datasets, workerCsvData, productAddressData, routeData,
+    companyMaster, workerMaster, dailyRecords, fieldData, areaData,
+    capacity, planData, memos, library, reportKnowledge, deleted,
+    fiscalYear）。加えてsanitizePersonalDataState(STATE)・
+    applyDeletionTombstonesToState(STATE)という2つの追加処理も実行する
+
+  ④内部で呼ぶ関数：_g（localStorage読取）, _cleanupLargeLocalData
+    （大容量キーの削除）, normalizePlanData, normalizeReportKnowledge,
+    normalizeDeletedState, sanitizePersonalDataState,
+    applyDeletionTombstonesToState
+
+  ⑤localStorageアクセス順：routeData（退避用、削除前に読取）→
+    _cleanupLargeLocalData()実行（BIG_KEYS 6種を削除）→
+    companyMaster→workerMaster→dailyRecords→capacity→planData→
+    memos→library→reportKnowledge→deleted→fiscalYearの順で読み取り
+
+  ⑥IndexedDBとの関係：STORE.load()自体はIndexedDBに一切アクセスしない。
+    IDB_CACHE.hydrateState()は別途、BOOT処理内でSTORE.load()の直後に
+    呼ばれる（app.js側の順序、今回変更対象外）
+
+  ⑦Cloudとの関係：STORE.load()自体はCloud通信を一切行わない。
+    Cloud同期はBOOT処理内でSTORE.load()・IDB_CACHE.hydrateState()の
+    さらに後に実行される（今回変更対象外）
+
+②StorageRepository変更内容：
+  load()メソッドのコード自体はPhase1から変更していない（既に
+  STORE.load()への直接委譲になっており、変更の必要が無かったため）。
+  ヘッダーコメントに、今回の調査・検証内容を追記した（コードの動作には
+  影響しない）。
+
+③比較結果（Node.js、STORE.load()の全副作用を再現したテスト環境）：
+  - 直接STORE.load()を実行した場合のSTATE最終状態と、
+    StorageRepository.load()経由で実行した場合のSTATE最終状態を
+    JSON文字列化して比較し、完全一致することを確認
+  - BOOT相当シナリオ（旧routeDataの退避処理を含む）でも、
+    StorageRepository.load()経由で正しく同じ結果になることを確認
+  - STORE未接続時に明示的なErrorが発生することを確認（Phase1から
+    変更なしの既存挙動）
+
+④副作用有無：
+  StorageRepository.load()はSTORE.load()をそのまま呼ぶだけのため、
+  副作用は完全に同一（STATE 15プロパティへの書き込み＋
+  sanitizePersonalDataState＋applyDeletionTombstonesToStateの実行）。
+  今回の変更（ヘッダーコメントのみ）による副作用の変化は無い。
+
+Repository移行率：
+  StorageRepository.load()は「正式な窓口」として利用可能な状態にあるが、
+  既存の2箇所の呼び出し元（app.js）は今回も接続していない
+  （ご指示通りapp.js変更禁止のため）。実際の画面・BOOT動作は
+  STORE.load()を直接呼ぶ従来のコードパスのままであり、
+  今回の変更による実運用上の影響はゼロ。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はヘッダーコメントのみで、実行コードに変更は無い。
+  Node.js比較で完全一致を確認済み。
+
+次に移行すべき対象：
+  STORE.save()。ただしSTORE.load()と異なり46箇所という極めて多い
+  呼び出し元を持つため、移行時はapp.js側の呼び出し元を変更する
+  フェーズが別途必要になる（今回同様、まず窓口の検証を先に行い、
+  呼び出し元の切り替えはさらに別フェーズとして慎重に進めることを推奨）。
+
+Version5 Phase2-B (2026-07-25) STORE.load() 実利用接続
+変更ファイル：
+  - src/app.js（編集：STORE.load()の直接呼び出し2箇所を
+    Repository.Storage.load()へ置換）
+  - src/core/repository/storage_repository.js（編集：ヘッダーコメントの
+    事実訂正のみ。load()のコード本体は無変更）
+  ※ src/core/store.js（STORE.load()本体）・IDB_CACHE・Cloud・
+    center.html・他Repository3ファイルはいずれも今回一切変更していない
+
+事前確認結果：
+  1. center.htmlでRepository Registry（registry.js含む5ファイル）が
+     読み込まれていることを確認済み
+  2. storage_repository.jsはcenter.html上でSTORE（core/store.js）より
+     前に読み込まれるが、load()は関数定義のみでありSTORE参照は実行時
+     （BOOT完了後）にのみ発生するため、問題ないことを確認済み
+     （Version2以来の「script順序は定義時ではなく実行時に評価される」
+     という一貫した設計方針と合致）
+  3・4. BOOT時・restoreAll()実行時ともRepository.Storageが利用可能で
+     あることをNode.js比較テストで確認済み
+  5. STORE.load()の実呼び出しは、変更前時点でapp.js内2箇所のみで
+     あることを再確認済み（他ファイルからの呼び出しなし）
+
+②置き換えた呼び出し元2箇所：
+  - app.js 2453行：SIMPLE_STORE.restoreAll()
+    STORE.load(); → Repository.Storage.load();
+  - app.js 2655行：BOOT処理内
+    STORE.load(); → Repository.Storage.load();
+  いずれも前後の処理・順序・await有無・例外処理は一切変更していない
+  （置換した行そのもの以外は1文字も変更なし、diffで確認済み）。
+
+③変更前後の呼び出し構造：
+  変更前：app.js（2箇所）→ STORE.load()（直接）
+  変更後：app.js（2箇所）→ Repository.Storage.load()
+    → StorageRepository.load()（内部）→ STORE.load()（委譲、1箇所のみ）
+
+ヘッダーコメント整理（事実関係の訂正のみ、実行コードに影響なし）：
+  - 「現時点ではまだ何もリンクしていない」→「load()は実利用接続済み、
+    save()/getCached()/setCached()は引き続き未接続」へ訂正
+  - 「依存：現時点ではなし」→「load()はSTOREへの薄い委譲依存あり
+    （実利用中）」へ訂正
+  - 「公開API（将来使用予定、現時点では未呼び出し）」→
+    「load()は実利用中。他3メソッドは未接続」へ訂正
+  - TODO(V3) → TODO(V5)へ更新
+  - 「localStorageとIndexedDBの二重保存の実態（要確認）」→
+    「Phase4-0調査で役割分担確定済み：localStorage＝軽量索引・設定、
+    IndexedDB＝本体キャッシュ、Supabase＝業務データの正本。ただし
+    端末固有設定（Cloud接続情報・クライアントID・デバッグフラグ等）は
+    localStorageそのものが正本」へ訂正
+
+④STATE比較結果（Node.js、STORE.load()の全副作用を再現したテスト環境）：
+  - BOOT時のSTATE 15プロパティ：変更前後で完全一致
+  - sanitizePersonalDataState呼び出し回数：1回（変更前後とも一致）
+  - applyDeletionTombstonesToState呼び出し回数：1回（変更前後とも一致）
+  - routeData退避・復元：一致
+  - BIG_KEYS削除：一致（_cleanupLargeLocalData経由、無変更のため当然）
+  - fiscalYear：一致
+  - planData：一致
+  - deleted tombstone：一致
+  - restoreAll()後のSTATE：Repository.Storage.load()経由でも
+    STATE.datasets.lengthが正しく取得できることを確認
+
+⑤処理順比較結果：完全一致
+  （STORE.load()内部のlocalStorageアクセス順・STATE代入順は無変更のため）
+
+⑥STORE.load()の外部直接参照残数：**0件**（app.js内のgrep確認済み）
+
+⑦Repository.Storage.load()の実利用箇所数：**2件**
+  （restoreAll()、BOOT処理）
+
+⑧Repository未接続時の挙動：
+  フォールバックは追加していない。Repositoryオブジェクト自体が
+  存在しない場合、`Repository.Storage.load()`は
+  `Cannot read properties of undefined (reading 'Storage')`という
+  形で即座にエラーとなる（Repository自体の不在）。Repositoryは存在するが
+  STORAGE_REPOSITORY.load()内部でSTOREが見つからない場合は、
+  Phase1から維持されている明示的なError
+  （`[StorageRepository] STORE.load is required but not available...`）
+  が発生する。いずれも黙って処理を継続することはない。
+
+⑨既存画面・BOOT・復元への影響：
+  なし。Node.js比較でSTATE・呼び出し回数とも変更前と完全一致することを
+  確認済み。center.htmlでRepository Registryは既に接続済み
+  （Phase3-3-6）のため、実運用環境でRepositoryが存在しない状況は
+  想定されない。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更対象2箇所のみ、Node.js比較で完全一致を確認済み。
+  STORE.load()本体・IDB_CACHE・Cloud・center.html・他Repositoryは無変更。
+
+⑪STORE.load Migration完了判定：**完了**
+  app.jsからSTORE.load()を直接呼ぶ箇所が0件になり、2箇所とも
+  Repository.Storage.load()経由で、変更前と完全に同じSTATEを復元する
+  ことを確認した。次はSTORE.save()（46箇所）の移行を検討する。

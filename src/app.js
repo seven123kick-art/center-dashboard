@@ -2450,7 +2450,7 @@ const DATA_RESET = {
 };
 const SIMPLE_STORE = {
   debug() { console.log('STATE', STATE); console.log('STORE keys', STORE._p, Object.keys(localStorage).filter(k=>k.startsWith(STORE._p))); UI.toast('コンソールにSTATEをダンプしました'); },
-  restoreAll() { STORE.load(); return STATE.datasets.length; },
+  restoreAll() { Repository.Storage.load(); return STATE.datasets.length; },
 };
 const CLOUD_DEBUG = { run() { CLOUD.saveConfig(); } };
 const PUBLISH = { go() { UI.toast('GitHub Pages での公開はHTMLファイルを直接アップロードしてください'); } };
@@ -2652,7 +2652,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 1. localStorageから軽量設定だけ読込。CSV本体はDBから復元する。
-    STORE.load();
+    Repository.Storage.load();
 
     // 1.1 IndexedDBキャッシュを先に復元し、Supabase待ちの「データなし」ちらつきを防ぐ。
     if (window.APP_BOOT_STATE) APP_BOOT_STATE.cloudSyncPending = true;

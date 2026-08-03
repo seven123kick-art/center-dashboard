@@ -9,9 +9,10 @@ Module
     役割を、Version3で「Storage」という1つの責務としてまとめる際の
     置き換え先となる。
 
-    現時点ではまだ何もリンクしていない（既存画面からは一切呼ばれない）。
-    STORE.save() / STORE.load() / IDB_CACHE.* は本ファイル作成後も
-    一切変更せず、そのまま既存の場所に残っている。
+    現時点では load() が既存画面へ接続済み（Version5 Phase2-B、下記参照）。
+    save() / getCached() / setCached()は引き続き未接続（既存画面からは
+    呼ばれない）。STORE.save() / STORE.load() / IDB_CACHE.* は本ファイル
+    作成後も一切変更せず、そのまま既存の場所に残っている。
 
     【Version5 Phase1で実装済み】
     save()/load()/getCached()/setCached()の4メソッドを、既存の
@@ -20,13 +21,31 @@ Module
     既存ロジックの再実装・複製は一切行っていない。
     今回もどこからも呼ばれていない（未接続のまま）。
 
-依存
-    現時点ではなし。
-    将来的な移行時は STORE（core/store.js）・IDB_CACHE（app.js）を
-    参照する想定。
+    【Version5 Phase2でload()を検証・正式窓口として確定】
+    STORE.load()の呼び出し元（BOOT処理、restoreAll()の2箇所）・
+    副作用（STATE 15プロパティへの書き込み、sanitizePersonalDataState・
+    applyDeletionTombstonesToStateの呼び出し）を調査した上で、
+    StorageRepository.load()がSTORE.load()と完全に同一のSTATE結果を
+    生成することをNode.js比較で確認した（詳細はCHANGELOG参照）。
+    load()のコード自体はPhase1から1文字も変更していない
+    （既にSTORE.load()への直接委譲であり、変更の必要がなかったため）。
 
-公開API（将来使用予定。現時点では未呼び出し）
+    【Version5 Phase2-Bでload()を実利用へ接続】
+    app.js側の実呼び出し2箇所（BOOT処理、restoreAll()）を
+    STORE.load()からRepository.Storage.load()へ置き換えた。
+    これによりapp.jsからSTORE.load()を直接呼ぶ箇所は0件になり、
+    StorageRepository.load()内部からの委譲呼び出し1件のみが残っている。
+
+依存
+    load()：STORE（core/store.js）への薄い委譲依存あり（実利用中）。
+    save() / getCached() / setCached()：STORE（core/store.js）・
+    IDB_CACHE（app.js）への薄い委譲を実装済みだが、呼び出し元は
+    まだ接続していない。
+
+公開API
     window.STORAGE_REPOSITORY
+    （load()はRepository.Storage.load()として実利用中。
+    save()/getCached()/setCached()は実装済みだが未接続）
 
 互換API
     なし（新規追加のため）
@@ -34,13 +53,19 @@ Module
 更新日
     2026-07-25
 
-TODO(V3)
-    - STORE.save()/load() を本Repository経由に置き換える
+TODO(V5)
+    - STORE.save() を本Repository経由に置き換える（load()はPhase2-Bで
+      完了済み。save()は46箇所という多数の呼び出し元があるため、
+      別フェーズで慎重に進める）
     - IDB_CACHE（現在app.js内、field_core.js/store.js/cloud.jsが直接依存）を
       本Repositoryの内部実装として吸収し、正式な公開APIとして再整理する
-    - localStorageとIndexedDBの二重保存の実態（Phase4-4調査で「要確認」と
-      した点）を明確にした上で、本Repositoryが「どちらに何を保存するか」
-      の判断を一元的に持つようにする
+    - localStorage・IndexedDB・Supabaseの役割分担はPhase4-0調査で
+      既に確定済み：localStorage＝軽量索引・小規模設定値、
+      IndexedDB＝Dataset等本体の表示用キャッシュ、
+      Supabase＝業務データ（Dataset等）の正本。
+      ただしCloud接続設定・クライアントID・デバッグフラグ等の
+      端末固有設定はlocalStorageそのものが正本であり、Supabase側には
+      保存されない（Phase4-0で確認済み、混同しないよう注意）
 ==============================================================================
 */
 'use strict';
