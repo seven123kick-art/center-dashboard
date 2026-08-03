@@ -50,7 +50,7 @@
     for(const r of cleaned){ if(seen.has(r.companyCode)) throw new Error(`会社コード「${r.companyCode}」が重複しています。`); seen.add(r.companyCode); }
     STATE.companyMaster=cleaned;
     ensureDefaults();
-    STORE.save();
+    Repository.Storage.save();
     if(window.LEDGER?.invalidate) LEDGER.invalidate();
     return all();
   }

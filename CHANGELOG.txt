@@ -2292,3 +2292,74 @@ GitHub投入可否：**GitHub投入可**
   app.jsからSTORE.load()を直接呼ぶ箇所が0件になり、2箇所とも
   Repository.Storage.load()経由で、変更前と完全に同じSTATEを復元する
   ことを確認した。次はSTORE.save()（46箇所）の移行を検討する。
+
+Version5 Phase4 (2026-07-25) Master Save Migration（STORE.save初回実利用移行）
+変更ファイル：
+  - src/core/companies.js（編集：STORE.save()を1箇所置換）
+  - src/core/workers.js（編集：STORE.save()を1箇所置換）
+  ※ src/core/store.js（STORE.save()本体）・
+    src/core/repository/storage_repository.js（save()の委譲実装）・
+    Cloud・IDB_CACHE・Capacity・Dataset・Plan・Route関連ファイルは
+    いずれも今回一切変更していない。app.jsも今回は変更不要だった
+
+事前調査結果：
+
+  companies.js の save(records)：
+  - 保存対象：STATE.companyMaster（会社マスタ配列）
+  - STATE変更：records検証・正規化後にSTATE.companyMasterへ代入、
+    ensureDefaults()でデフォルト会社が無ければ追加
+  - Cloud有無：**なし**（このファイル単体ではCloud呼び出しをしない）
+  - IDB_CACHE：**なし**（このファイル単体では直接参照しない。
+    STORE.save()内部でIDB_CACHE.persistStateSoon()が呼ばれるのみ）
+  - 戻り値：all()の結果（正規化・ソート済みの会社マスタ全件）
+  - 副作用：LEDGER.invalidate()（存在する場合）
+
+  workers.js の save(records)：
+  - 保存対象：STATE.workerMaster（作業者マスタ配列）
+  - STATE変更：companies.jsと同一構造（検証・正規化・
+    ensureDefaults・代入）
+  - Cloud有無：**なし**
+  - IDB_CACHE：**なし**（同上、STORE.save()内部でのみ）
+  - 戻り値：all()の結果
+  - 副作用：LEDGER.invalidate()（存在する場合）
+
+  両ファイルとも構造が完全に同一（会社/作業者という対象の違いのみ）。
+
+実装内容：
+  companies.js：
+    STORE.save(); → Repository.Storage.save();（1箇所）
+  workers.js：
+    STORE.save(); → Repository.Storage.save();（1箇所、1行の
+    無名関数内）
+  StorageRepository.save()本体（Version5 Phase1実装）は今回も
+  変更していない（STORE.save()への薄い委譲を維持）。
+
+比較結果（Node.js、タイムスタンプを固定した上で実施）：
+  - companies.js：変更前後でSTATE.companyMasterの内容が完全一致、
+    save()の戻り値も完全一致
+  - workers.js：同様にSTATE.workerMasterの内容・戻り値とも完全一致
+  - STORE.save()の実行回数：Repository.Storage.save()経由でも
+    ちょうど1回のみ実行されることを確認（二重実行なし）
+  - LEDGER.invalidate()が変更前後とも同様に呼ばれることを確認
+
+副作用：
+  なし。STATE・戻り値・LEDGER呼び出しいずれも変更前と完全一致。
+
+Repository移行率：
+  StorageRepository.save()の実利用箇所：2/46（約4.3%）。
+  残る44箇所は引き続きSTORE.save()を直接呼んでいる。
+
+STORE.save()残件数：
+  実呼び出し44箇所（変更前46箇所からcompanies.js・workers.jsの
+  2箇所を除いた数）。加えてstorage_repository.js内の委譲呼び出し
+  1箇所（正規の内部委譲、カウント対象外）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更は2ファイル各1行のみ。Node.js比較でSTATE・戻り値の
+  完全一致を確認済み。46件の一括置換は行っておらず、Master保存の
+  2箇所のみに限定した。
+
+次に移行すべき保存：
+  Phase3の分類評価に基づき、⑤Plan保存（app.js、2箇所、Cloud非依存）
+  が次の低リスク候補。app.js側の変更が必要になる点は、今回のMaster
+  移行がapp.js無変更で完結したのとは異なる。

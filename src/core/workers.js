@@ -64,7 +64,7 @@
   function findByCode(workerCode){ensureDefaults();const r=list().find(x=>exact(x.workerCode)===exact(workerCode));return r?normalize(r):null;}
   function detectedNames(){const names=new Set();for(const m of(STATE.workerCsvData||[]))for(const w of Object.values(m?.workers||{})){const n=exact(w?.name);if(n)names.add(n);}for(const m of(STATE.routeData||[]))for(const r of(m?.routes||[])){const n=exact(r?.worker);if(n)names.add(n);}return[...names].sort((a,b)=>a.localeCompare(b,'ja'));}
   function unregisteredNames(){ensureDefaults();return detectedNames().filter(name=>!list().some(r=>exact(r.workerName)===name));}
-  function save(records){const cleaned=(Array.isArray(records)?records:[]).map(normalize).filter(r=>r.workerName);const codeSeen=new Set();for(const r of cleaned){if(r.workerCode&&codeSeen.has(r.workerCode))throw new Error(`作業者コード「${r.workerCode}」が重複しています。`);if(r.workerCode)codeSeen.add(r.workerCode);}STATE.workerMaster=cleaned;ensureDefaults();STORE.save();window.LEDGER?.invalidate?.();return all();}
+  function save(records){const cleaned=(Array.isArray(records)?records:[]).map(normalize).filter(r=>r.workerName);const codeSeen=new Set();for(const r of cleaned){if(r.workerCode&&codeSeen.has(r.workerCode))throw new Error(`作業者コード「${r.workerCode}」が重複しています。`);if(r.workerCode)codeSeen.add(r.workerCode);}STATE.workerMaster=cleaned;ensureDefaults();Repository.Storage.save();window.LEDGER?.invalidate?.();return all();}
 
   window.WORKERS={DEFAULTS,all,find,findByCode,detectedNames,unregisteredNames,save,ensureDefaults};
 
