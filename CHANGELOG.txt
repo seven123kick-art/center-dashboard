@@ -3082,3 +3082,90 @@ GitHub投入可否：**GitHub投入可**
   CloudRepositoryの公開API（全17メソッド）の実装が完了した。
   次はSyncCoordinatorの実装（Merge/Conflict判定/AUTO_SYNC制御）が
   残タスクとなる。
+
+Version6 Phase5 (2026-08-04) SyncCoordinator設計・実装
+変更ファイル：
+  - src/core/repository/sync_coordinator.js（編集：syncNormal/syncState/
+    syncAllを実装、syncLegacyは理由を明記した未実装のまま維持）
+  ※ CloudRepository・DatasetRepository・StorageRepository・
+    core/cloud.js（CLOUD）・app.js・core/auto_sync.jsはいずれも
+    今回一切変更していない
+
+実装した3メソッド：
+
+  syncNormal()（通常同期、Manifest単位）：
+    1. CLOUD_REPOSITORY.fetchManifest()でManifestを取得
+    2. Manifest内のdeletedを、既存のmergeDeletedStates()（app.js）で
+       STATE.deletedとマージ（削除は新しい方を優先）
+    3. Manifest内の各Datasetについて、DATASET_REPOSITORY.getActive()の
+       結果と突き合わせ、ローカルに無いかCloud側が新しい場合のみ
+       CLOUD_REPOSITORY.fetchDataset()で取得し、
+       DATASET_REPOSITORY.upsert()で反映（不要な取得はしない差分同期）
+    4. 変更があれば既存のapplyDeletionTombstonesToState()を再適用し、
+       STORAGE_REPOSITORY.save()で永続化
+    5. 全体をAUTO_SYNC.withoutSyncAsync()で抑制（利用不可時は素通し、
+       既存cloud.jsのsyncSmart()と同じフォールバック方針）
+
+  syncState()（State同期、Dataset以外の軽量データ）：
+    CloudRepositoryにfetchFullState()が無いため、fetchCapacity/
+    fetchPlan/fetchLibraryを個別取得し、既存のmergeFullState()
+    （app.js）へ渡せる形へ組み立ててからマージする。マージロジック
+    自体は一切再実装せず、既存関数をそのまま呼ぶのみ。
+    datasets/workerCsvData/productAddressDataは対象外という既存仕様を
+    踏襲。
+
+  syncAll()：
+    syncNormal() → syncState() の順で実行する統合窓口。
+
+syncLegacyを実装しなかった理由：
+  CloudRepositoryに旧shared_bundle形式を取得する公開APIが存在せず、
+  これを追加するには「CloudRepository変更禁止」というご指示に反する
+  ため。また全センター移行完了確認という別の前提条件も未充足のまま
+  （Phase4-0調査以来、状況変化なし）。理由を明記した上で
+  `{ ok: false, reason: 'not_implemented_cloud_repository_lacks_legacy_api' }`
+  を返す。
+
+責務の厳守：
+  - Cloudへの直接アクセス：一切なし。`grep -n "window\.CLOUD\b"`で
+    確認した結果、ヘッダーコメント内の説明文以外に該当箇所は無い。
+    全てCLOUD_REPOSITORY経由
+  - Merge：mergeFullState()/mergeDeletedStates()という既存の確立
+    済みロジックをそのまま呼ぶのみ、再実装していない
+  - Conflict判定：Dataset同期はimportedAtの新しさ比較、Tombstoneは
+    「新しい削除を優先」という既存ルールをそのまま踏襲
+  - AUTO_SYNC制御：syncNormal/syncStateとも、処理全体を
+    AUTO_SYNC.withoutSyncAsync()で抑制
+  - 同期順序：syncAll内でsyncNormal→syncStateの順を明示
+
+比較検証（Node.js、現実的なモックデータで実施）：
+  - syncNormal：Manifestに3件（同一・新規・削除マーカー）を含むテストで、
+    同一件は再取得されず、新規件のみfetchDataset→upsertされ、
+    削除マーカーが正しくマージされることを確認。AUTO_SYNC抑制の
+    開始・終了ログも正しい順序で発生することを確認
+  - syncState：capacity（Cloud優先）・library（Cloud非空優先）・
+    planData（ローカル+Cloudマージ）が、既存mergeFullState()の
+    仕様通りに反映されることを確認
+  - syncAll：syncNormal→syncStateの順序を、呼び出しログのインデックス
+    比較で確認
+  - syncLegacy：理由付きの未実装レスポンスを確認
+  - 【重要な確認】`window.CLOUD`が定義されていても（Cloud.pullが
+    呼ばれたら例外を投げる罠を仕掛けた状態で）syncAll()を実行し、
+    正常に完了することを確認。CloudRepository経由以外の経路で
+    Cloudへアクセスしていないことの実証
+
+副作用：なし。既存画面・既存処理からは今回も一切接続していない
+  （未接続のまま）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はsync_coordinator.js内のみ。CloudRepository・
+  DatasetRepository・StorageRepository・cloud.js・app.js・
+  auto_sync.jsは全てハッシュ比較で無変更を確認済み。Node.js検証で
+  Merge/Conflict判定/AUTO_SYNC制御/同期順序いずれも意図通りの動作を
+  確認済み。現時点では未接続のため、アプリの実際の動作には一切
+  影響しない。
+
+【Version6完了】
+  CloudRepository（全17メソッド）・SyncCoordinator（syncNormal/
+  syncState/syncAll）の実装が完了した。残るはsyncLegacy（前提条件
+  待ち）と、既存画面への接続（Version3〜5と同じ、比較検証を伴う
+  段階的接続が必要）。
