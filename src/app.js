@@ -2486,7 +2486,7 @@ const PLAN = {
       unit:'千円',
       mode:'full_replace'
     };
-    STORE.save();
+    Repository.Storage.save();
     const area = document.getElementById('plan-paste-area');
     if (area) area.value = '';
     const count = Object.keys(plan).length;
@@ -2505,7 +2505,7 @@ const PLAN = {
     markDataDeleted('planFiscalYears', fy);
     delete STATE.planData[fy];
     applyDeletionTombstonesToState(STATE);
-    STORE.save();
+    Repository.Storage.save();
     const msg = document.getElementById('plan-import-msg');
     if (msg) msg.textContent = `${fy}年度の計画データを削除しました`;
     renderImport();

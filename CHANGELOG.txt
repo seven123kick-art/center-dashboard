@@ -2363,3 +2363,73 @@ GitHub投入可否：**GitHub投入可**
   Phase3の分類評価に基づき、⑤Plan保存（app.js、2箇所、Cloud非依存）
   が次の低リスク候補。app.js側の変更が必要になる点は、今回のMaster
   移行がapp.js無変更で完結したのとは異なる。
+
+Version5 Phase5 (2026-07-25) Plan Save Migration
+変更ファイル：
+  - src/app.js（編集：Plan保存2箇所をRepository.Storage.save()へ置換）
+  ※ src/core/store.js・src/core/cloud.js・
+    src/core/repository/storage_repository.js・companies.js・
+    workers.js・Capacity/Dataset/SyncCoordinator関連ファイルは
+    いずれも今回一切変更していない
+
+事前調査結果：
+
+  ①計画データ貼り付け保存（app.js 2489行）：
+  - 保存対象：STATE.planData[fy]（貼付内容を年度単位で全入替）
+  - STATE変更：既存年度データの削除→clearDataDeleted→新規代入
+  - Cloud依存：**なし**（このハンドラ内でCloud呼び出しは無い。
+    Cloud反映は別途手動同期またはAUTO_SYNCの一般的な仕組みに依存する
+    設計であることを確認した）
+  - IDB_CACHE：**なし**（STORE.save()内部でのみ）
+  - 戻り値：なし（イベントハンドラ）
+  - 副作用：フォームクリア・トースト表示・renderImport()・NAV.refresh()
+
+  ②計画データ削除（app.js 2508行）：
+  - 保存対象：STATE.planData（該当年度を削除）、STATE.deleted
+    （Tombstone追加）
+  - STATE変更：markDataDeleted→delete→applyDeletionTombstonesToState
+  - Cloud依存：**なし**（同上、Cloud非依存を再確認した）
+  - IDB_CACHE：**なし**
+  - 戻り値：なし
+  - 副作用：メッセージ表示・renderImport()・NAV.refresh()
+
+  両箇所ともCloudへ直接依存しないことを確認済み（ご指示の再確認事項）。
+
+実装内容：
+  app.js内2箇所の STORE.save(); を Repository.Storage.save(); へ置換。
+  前後の処理・順序・変数名は一切変更していない（diffで確認：2行のみの
+  変更）。StorageRepository.save()本体（Phase1実装）も無変更。
+
+比較結果（Node.js、タイムスタンプを固定して実施）：
+  - ①貼り付け保存：STORE.save()呼び出し回数は変更前後とも1回
+    （Repository経由でも二重実行なし）。planData・deletedの内容が
+    完全一致
+  - ②削除：同様にSTORE.save()呼び出し回数1回、planData・deletedの
+    内容が完全一致
+  - 戻り値：両ハンドラともイベントハンドラのため戻り値なし
+    （変更前後で同一の"undefined"）
+  - 副作用：フォームクリア・トースト・renderImport・NAV.refresh
+    いずれも変更前と同一のタイミング・内容で実行される
+
+副作用：なし。STATE・呼び出し回数・後続処理いずれも変更前と完全一致。
+
+Repository移行率：
+  StorageRepository.save()の実利用箇所：4/46（約8.7%）
+  （Master保存2箇所＋Plan保存2箇所）
+
+STORE.save()残件数：
+  実呼び出し42箇所（変更前46箇所から今回までの累計4箇所を除いた数）。
+  加えてstorage_repository.js内の委譲呼び出し1箇所（カウント対象外）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はapp.js内2行のみ。Node.js比較でSTATE・呼び出し回数・
+  副作用の完全一致を確認済み。46件の一括置換は行わず、Plan保存の
+  2箇所のみに限定した。
+
+次に最も安全な移行候補：
+  Phase3分類の「先に移すべき」候補のうち、Master・Planが完了したため、
+  残るのは④Route保存（route_analysis.js、1箇所）。ただしRoute保存は
+  Cloud依存（pushAll）があるため、Cloud非依存のMaster/Planより
+  慎重な検証が必要になる。Cloud非依存という条件だけで絞るなら、
+  ⑩その他に分類された箇所のうち、past_library.js（ライブラリ保存、
+  4箇所中3箇所がCloud非依存）が次点候補として考えられる。
