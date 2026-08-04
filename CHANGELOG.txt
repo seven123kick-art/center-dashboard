@@ -2651,3 +2651,58 @@ GitHub投入可否：**GitHub投入可**
   - Repository.Dataset.getActive().length が 13 になること
   - Dashboard / Indicators / Trend / Shipper / Field / CSV管理画面が
     全て正常表示されること
+
+Version5 Phase8 (2026-08-04) Worker/Product Save Migration
+変更ファイル：
+  - src/field/field_core.js（編集：Worker保存・Product保存の
+    STORE.save() 2箇所をRepository.Storage.save()へ置換）
+  ※ CLOUD.pushMonth/pushAll・AUTO_SYNC・CloudRepository・
+    StorageRepository.save()本体・field_core.js内の他3箇所
+    （71,1363,1477行、今回対象外）はいずれも一切変更していない
+
+事前調査：
+  ①保存順序：importWorker()（711行〜）・importProduct()（同様の構造）
+    ともに「upsertByYm()でSTATE更新 → FIELD_DATA_ACCESS.invalidate() →
+    STORE.save() → AUTO_SYNC.cancelPending() → CLOUD.pushMonth/pushAll
+    （try-catchでエラー握り潰し）」という同一パターン
+  ②Cloud依存：あり（STORE.save()の直後、非同期でCLOUD.pushMonth/pushAll
+    を呼ぶ。ただしCloud呼び出し自体は今回変更していない）
+  ③IDB_CACHE依存：直接の依存なし（STORE.save()内部で
+    persistStateSoon()が呼ばれるのみ、field_core.js側では直接操作しない）
+  ④副作用：cloudMsg（ユーザー向けメッセージ）の生成、
+    refreshFieldAll()、msg()によるトースト表示
+  ⑤Repository経由でも完全一致か：Node.js比較で確認済み（後述）
+
+  upsertByYm()自体はSTATEのみを操作し、STORE.save()やIDB_CACHEへの
+  呼び出しは含まないことも確認済み（704-709行）。
+
+実装内容：
+  field_core.js 823行（Worker保存）・889行（Product保存）の
+  STORE.save(); を Repository.Storage.save(); へ置換したのみ。
+  CLOUD.pushMonth/pushAllの呼び出し内容・タイミング・エラーハンドリング
+  （try-catch）は一切変更していない。
+
+比較検証（Node.js）：
+  - 呼び出し順序：「invalidate → Repository.Storage.save（→STORE.save）
+    → AUTO_SYNC.cancelPending → CLOUD.pushMonth」という順序が
+    変更前と完全一致
+  - STORE.save()実行回数：Repository経由でも1回のみ（二重実行なし）
+  - STATE（workerCsvData/productAddressData）の内容：完全一致
+  - Product保存もWorker保存と同一構造のパターンであることをコード
+    レビューで確認済み
+
+副作用：
+  なし。Cloud呼び出しの回数・順序・引数、STATE内容、cloudMsg生成、
+  refreshFieldAll()呼び出しいずれも変更前と完全に同一。
+
+Repository移行率：
+  StorageRepository.save()の実利用箇所：19/46（約41.3%）
+  （Master2＋Plan2＋PastLibrary4＋Capacity9＋Worker1＋Product1）
+
+STORE.save()残件数：
+  実呼び出し27箇所（変更前29箇所から今回の2箇所を除いた数）。
+  加えてstorage_repository.js内の委譲呼び出し1箇所（カウント対象外）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はfield_core.js内2行のみ。Node.js比較でCloud呼び出し順・
+  STATE・副作用の完全一致を確認済み。

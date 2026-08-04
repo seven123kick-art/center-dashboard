@@ -820,7 +820,7 @@ IMPORT.deleteFieldData = function(ym) {
     if (typeof clearDataDeleted === 'function') { clearDataDeleted('workerMonths', ym); clearDataDeleted('fieldMonths', ym); }
     upsertByYm('workerCsvData', { ym, source:'worker_csv', importedAt:new Date().toISOString(), ...combined });
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-    STORE.save();
+    Repository.Storage.save();
     let cloudMsg = '';
     try {
       AUTO_SYNC?.cancelPending();
@@ -886,7 +886,7 @@ IMPORT.deleteFieldData = function(ym) {
     if (typeof clearDataDeleted === 'function') { clearDataDeleted('productMonths', ym); clearDataDeleted('fieldMonths', ym); }
     upsertByYm('productAddressData', record);
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-    STORE.save();
+    Repository.Storage.save();
     let cloudMsg = '';
     try {
       AUTO_SYNC?.cancelPending();
