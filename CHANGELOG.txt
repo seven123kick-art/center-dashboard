@@ -3016,3 +3016,69 @@ GitHub投入可否：**GitHub投入可**
   pushLibrary/pushManifest/fetchCapacity/fetchLibrary）を、
   今回追加したcapacityKey()/libraryKey()/putObject()を使って
   実装することが可能になった。
+
+Version6 Phase4 (2026-08-04) CloudRepository Completion（残り8メソッドの実装）
+変更ファイル：
+  - src/core/repository/cloud_repository.js（編集：8メソッドを実装、
+    ヘッダーコメント更新）
+  ※ src/core/cloud.js（CLOUD）を含む他の全ファイルは今回一切変更していない
+
+実装した8メソッド：
+  - pushDataset(ym, type, dataset) → CLOUD.putObject(CLOUD.datasetKey(ym, type), dataset)
+  - pushWorkerMonth(ym, record) → CLOUD.putObject(CLOUD.workerMonthKey(ym), record)
+  - pushProductMonth(ym, record) → CLOUD.putObject(CLOUD.productMonthKey(ym), record)
+  - pushPlan(planData) → CLOUD.putObject(CLOUD.planKey(), planData)
+  - pushLibrary(library) → CLOUD.putObject(CLOUD.libraryKey(), library)
+  - pushManifest(manifest) → CLOUD.putObject(CLOUD.manifestKey(), manifest)
+  - fetchCapacity() → CLOUD.downloadJSON(CLOUD.capacityKey())
+  - fetchLibrary() → CLOUD.downloadJSON(CLOUD.libraryKey())
+
+  これにより、Version6 CloudRepository API Designで設計した全17メソッド
+  （Step1実装済み9件＋今回実装8件）が全て実装完了した。
+
+公開APIだけで実装されている証拠：
+  - `grep -n "CLOUD\._" src/core/repository/cloud_repository.js`を実行し、
+    0件であることを確認した。CLOUDの非公開メンバー
+    （_capacityKey/_libraryKey/_uploadJSON等）への直接アクセスは
+    ファイル全体で1件も存在しない
+  - 使用しているCLOUDのメソッドは、いずれも既存の公開API
+    （datasetKey/workerMonthKey/productMonthKey/planKey/manifestKey/
+    downloadJSON/pushCapacity/uploadFile/deleteFile/createSignedUrl）
+    と、Phase3で追加した公開API（capacityKey/libraryKey/putObject）の
+    みである
+
+CloudRepositoryの責務厳守（今回変更していないことの確認）：
+  - 同期判断（いつ・どの組み合わせで呼ぶか）は一切実装していない
+    （1メソッド＝1回の通信、という設計方針を維持）
+  - AUTO_SYNCへの参照・呼び出しは一切ない
+  - Merge（複数データソースの統合）ロジックは一切ない
+  - Conflict判定ロジックは一切ない
+  - STATEへの直接書き込みは一切ない（全メソッドが通信結果を
+    そのまま返すのみ）
+
+不要になった内部ヘルパーの削除：
+  Step1で実装した`_notYetAvailable()`ヘルパー関数（未実装メソッドの
+  明示的エラー用）は、今回の実装により全メソッドが実装済みとなり
+  使用箇所がなくなったため削除した。既存の`_requireCloud()`ヘルパーは
+  そのまま維持している。
+
+比較検証（Node.js）：
+  - 実装した8メソッド全て：CLOUD側のモック関数への正しい委譲
+    （引数・キーの組み立て方含む）を、呼び出しログで確認
+  - Step1実装済みの9メソッド：今回の変更後も引き続き正常動作する
+    ことを回帰確認（fetchDataset/pushCapacity/uploadFile等）
+  - CLOUD未接続時：明示的なErrorが発生することを確認（変化なし）
+
+副作用：なし。既存画面・既存処理からは今回も一切接続していない
+  （未接続のまま、今後SyncCoordinator実装時に接続予定）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はcloud_repository.js内のみ。CLOUD（core/cloud.js）を
+  含む他の全ファイルには変更がなく、Node.js検証で全17メソッドの
+  委譲動作・既存動作の回帰確認を完了している。現時点では未接続の
+  ため、アプリの実際の動作には一切影響しない。
+
+【Version6 CloudRepository完成】
+  CloudRepositoryの公開API（全17メソッド）の実装が完了した。
+  次はSyncCoordinatorの実装（Merge/Conflict判定/AUTO_SYNC制御）が
+  残タスクとなる。

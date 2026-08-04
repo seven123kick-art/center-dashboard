@@ -23,60 +23,42 @@ Module
     （プロジェクト全体の設計方針：他ファイルから私有メンバーへ直接
     アクセスしない、を厳守）。
 
-公開API（Version6 Step1で実装。詳細はメソッドごとのコメント参照）
+公開API（Version6 Step1〜Phase4で全17メソッド実装完了）
     window.CLOUD_REPOSITORY
 
-    【実装済み（CLOUDの既存公開APIへ100%委譲）】
+    【実装済み・全17メソッド、CLOUDの公開APIへ100%委譲】
     fetchDataset() / fetchWorkerMonth() / fetchProductMonth() /
-    fetchPlan() / fetchManifest() / pushCapacity() /
+    fetchPlan() / fetchManifest() / fetchCapacity() / fetchLibrary() /
+    pushDataset() / pushWorkerMonth() / pushProductMonth() /
+    pushPlan() / pushLibrary() / pushManifest() / pushCapacity() /
     uploadFile() / deleteFile() / createSignedUrl()
 
-    【未実装（下記「実装できなかった理由」参照）】
-    pushDataset() / pushWorkerMonth() / pushProductMonth() /
-    pushPlan() / pushLibrary() / pushManifest() /
-    fetchCapacity() / fetchLibrary()
+Phase4での実装経緯
+    Step1時点で8メソッドが未実装だったのは、CLOUD（core/cloud.js）側に
+    対応する公開APIが存在しなかったため。Version6 Phase2の調査で
+    「capacityKey()・libraryKey()・putObject()の3つを追加すれば
+    全て解消できる」ことを確認し、Phase3でcloud.js側にこの3メソッドを
+    追加した。本Phase4では、その3メソッドを含む既存の公開APIのみを
+    使って、残る8メソッドを実装した。
 
-実装できなかった理由（Version6 Step1時点）
-    上記8メソッドは、CLOUD（core/cloud.js）側に対応する「1件だけを
-    通信する」公開メソッド、または対応するキー生成の公開メソッドが
-    存在しないため、既存コードへの100%委譲という条件を満たせなかった。
-
-    具体的には：
-    - pushDataset/pushWorkerMonth/pushProductMonth/pushPlan/
-      pushManifest：CLOUDには`pushMonth(ym)`（1ヶ月分のDataset・
-      作業者・商品住所をまとめてアップロードし、副作用でManifest・
-      FullStateも更新する）や`pushAll()`（全件アップロード）という
-      複合処理はあるが、「1件だけ」を通信する公開メソッドが存在しない
-    - pushLibrary/fetchLibrary：CLOUDには`libraryFileKey()`
-      （個々の添付ファイル用のキー）は公開されているが、
-      ライブラリ一覧（メタデータ）自体の保存キーを返す公開メソッドが
-      存在しない
-    - fetchCapacity：CLOUDにはキャパシティの保存キーを返す公開メソッドが
-      存在しない（`_capacityKey()`は非公開）
-
-    これらを実装するには、core/cloud.js側に新たな公開ラッパー
-    （例：`capacityKey()`, `libraryKey()`）を追加するか、CLOUDの非公開
-    メンバーへ直接アクセスする必要があるが、今回は「src/core/repository/
-    cloud_repository.jsのみ変更」というご指示のため、いずれも行っていない。
-    次フェーズでcore/cloud.js側に必要な公開ラッパーを追加することを
-    推奨する（datasetKey()等6メソッドをVersion2 Phase4-5で追加した際と
-    同じ手法）。
-
+    CLOUDの非公開メンバー（_capacityKey/_libraryKey/_uploadJSON等）へは
+    一切アクセスしていない。全て公開API（capacityKey/libraryKey/
+    putObject/datasetKey/workerMonthKey/productMonthKey/planKey/
+    manifestKey/downloadJSON）経由の委譲のみで実装している。
 互換API
     なし（新規追加のため）
 
 更新日
-    2026-08-04
+    2026-08-04（Phase4）
 
 TODO(V6)
-    - core/cloud.js側へ capacityKey() / libraryKey() の公開ラッパーを
-      追加した上で、fetchCapacity() / fetchLibrary() を実装する
-    - core/cloud.js側またはCloudRepository側に、1件だけをアップロードする
-      汎用の公開委譲経路を用意した上で、pushDataset() 等6メソッドを
-      実装する
     - 実装完了後、SyncCoordinator側でpushMonth()/pushAll()相当の
       オーケストレーションを、これらの個別pushメソッドの組み合わせで
-      再構築する
+      再構築する（本Repositoryの責務ではない）
+    - pushFullState()/fetchFullState()（State同期用）、pushMemos()/
+      fetchMemos()は、当初設計にあったが今回の実装対象には含めていない
+      （必要になった時点でfullStateKey()/memosKey()の公開ラッパー追加と
+      合わせて別途検討する）
 ==============================================================================
 */
 'use strict';
@@ -97,15 +79,6 @@ TODO(V6)
             throw new Error('[CloudRepository] CLOUD is required but not available. Check script load order.');
         }
         return window.CLOUD;
-    }
-
-    /**
-     * core/cloud.js側に対応する公開APIが存在しない場合の、
-     * 明示的な未実装エラー。黙って誤った動作をするより、
-     * 呼び出し元が気づける形にする（既存プロジェクトの一貫した方針）。
-     */
-    function _notYetAvailable(methodName, reason) {
-        throw new Error(`[CloudRepository] ${methodName}() is not yet available: ${reason}`);
     }
 
     /* ====================================================================
@@ -141,6 +114,16 @@ TODO(V6)
             return CLOUD.downloadJSON(CLOUD.manifestKey());
         },
 
+        async fetchCapacity() {
+            const CLOUD = _requireCloud();
+            return CLOUD.downloadJSON(CLOUD.capacityKey());
+        },
+
+        async fetchLibrary() {
+            const CLOUD = _requireCloud();
+            return CLOUD.downloadJSON(CLOUD.libraryKey());
+        },
+
         /* ---------- Push系：実装済み（1件のみ、既存の同名公開APIへ委譲） ---------- */
 
         /**
@@ -151,6 +134,61 @@ TODO(V6)
         async pushCapacity() {
             const CLOUD = _requireCloud();
             return CLOUD.pushCapacity();
+        },
+
+        /**
+         * 1件のDatasetをアップロードする。
+         * 内部で呼ぶ既存処理：CLOUD.datasetKey() + CLOUD.putObject()
+         */
+        async pushDataset(ym, type, dataset) {
+            const CLOUD = _requireCloud();
+            return CLOUD.putObject(CLOUD.datasetKey(ym, type), dataset);
+        },
+
+        /**
+         * 1ヶ月分の作業者CSVデータをアップロードする。
+         * 内部で呼ぶ既存処理：CLOUD.workerMonthKey() + CLOUD.putObject()
+         */
+        async pushWorkerMonth(ym, record) {
+            const CLOUD = _requireCloud();
+            return CLOUD.putObject(CLOUD.workerMonthKey(ym), record);
+        },
+
+        /**
+         * 1ヶ月分の商品住所CSVデータをアップロードする。
+         * 内部で呼ぶ既存処理：CLOUD.productMonthKey() + CLOUD.putObject()
+         */
+        async pushProductMonth(ym, record) {
+            const CLOUD = _requireCloud();
+            return CLOUD.putObject(CLOUD.productMonthKey(ym), record);
+        },
+
+        /**
+         * 計画データをアップロードする。
+         * 内部で呼ぶ既存処理：CLOUD.planKey() + CLOUD.putObject()
+         */
+        async pushPlan(planData) {
+            const CLOUD = _requireCloud();
+            return CLOUD.putObject(CLOUD.planKey(), planData);
+        },
+
+        /**
+         * ライブラリ一覧（メタデータ）をアップロードする。
+         * 添付ファイル本体は別途 uploadFile() を使うこと。
+         * 内部で呼ぶ既存処理：CLOUD.libraryKey() + CLOUD.putObject()
+         */
+        async pushLibrary(library) {
+            const CLOUD = _requireCloud();
+            return CLOUD.putObject(CLOUD.libraryKey(), library);
+        },
+
+        /**
+         * Manifestをアップロードする。
+         * 内部で呼ぶ既存処理：CLOUD.manifestKey() + CLOUD.putObject()
+         */
+        async pushManifest(manifest) {
+            const CLOUD = _requireCloud();
+            return CLOUD.putObject(CLOUD.manifestKey(), manifest);
         },
 
         /* ---------- ファイル系：実装済み（既存の同名公開APIへ委譲） ---------- */
@@ -168,40 +206,6 @@ TODO(V6)
         async createSignedUrl(key) {
             const CLOUD = _requireCloud();
             return CLOUD.createSignedUrl(key);
-        },
-
-        /* ---------- 未実装：core/cloud.js側に対応する公開APIが存在しない ---------- */
-
-        async pushDataset(ym, type, dataset) {
-            _notYetAvailable('pushDataset', 'CLOUDに1件だけDatasetをアップロードする公開メソッドが存在しない（pushMonth()は複合処理のため代用不可）');
-        },
-
-        async pushWorkerMonth(ym, record) {
-            _notYetAvailable('pushWorkerMonth', '同上（pushMonth()は複合処理のため代用不可）');
-        },
-
-        async pushProductMonth(ym, record) {
-            _notYetAvailable('pushProductMonth', '同上');
-        },
-
-        async pushPlan(planData) {
-            _notYetAvailable('pushPlan', 'CLOUDに計画データ単体をアップロードする公開メソッドが存在しない（pushAll()は複合処理のため代用不可）');
-        },
-
-        async pushLibrary(library) {
-            _notYetAvailable('pushLibrary', 'CLOUDにライブラリ一覧の保存キーを返す公開メソッド（libraryKey相当）が存在しない');
-        },
-
-        async pushManifest(manifest) {
-            _notYetAvailable('pushManifest', 'CLOUDにManifestを単体でアップロードする公開メソッドが存在しない（pushMonth/pushCapacity/pushAllの副作用としてのみ更新される）');
-        },
-
-        async fetchCapacity() {
-            _notYetAvailable('fetchCapacity', 'CLOUDにキャパシティの保存キーを返す公開メソッド（capacityKey相当）が存在しない');
-        },
-
-        async fetchLibrary() {
-            _notYetAvailable('fetchLibrary', 'CLOUDにライブラリ一覧の保存キーを返す公開メソッド（libraryKey相当）が存在しない');
         },
 
     };
