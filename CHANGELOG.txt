@@ -3367,3 +3367,179 @@ Node.js比較結果：
 GitHub投入可否：**GitHub投入可（CloudRepository完成、未接続状態）**
   今回の投入は「既存画面へ接続可能」という意味ではなく、
   「未接続状態でのRepository完成」を意味する。
+
+Version6 Phase8-D (2026-08-04) SyncCoordinator Repository化・未接続
+変更ファイル：
+  - src/core/repository/sync_coordinator.js（編集：複製ロジック4つを
+    削除し、CloudRepository経由へ置換。CloudRepositoryの新API
+    （fetchFullState/pushFullState/pushMemos/removeLegacyArtifacts等）
+    を使い、Phase8時点の未実装ステップを実装）
+  ※ CloudRepository・DatasetRepository・StorageRepository・cloud.js・
+    app.js・auto_sync.jsはいずれも今回一切変更していない。既存画面への
+    接続・AUTO_SYNC接続も一切行っていない
+
+削除した複製関数（4つ全て）：
+  - _buildManifestFromState() → CLOUD_REPOSITORY.buildManifest()
+  - _buildFullStateFromState() → CLOUD_REPOSITORY.buildFullState()
+  - _validWorkerMonthRecord() → CLOUD_REPOSITORY.validateWorkerMonthRecord()
+  - _validProductMonthRecord() → CLOUD_REPOSITORY.validateProductMonthRecord()
+  内部ヘルパー・_internal公開リストからも完全に削除した。
+
+CloudRepositoryへ置換した箇所一覧：
+  - syncFieldFiscalYear()：作業者/商品住所レコードの検証を
+    CR.validateWorkerMonthRecord()/CR.validateProductMonthRecord()へ置換
+  - syncBoot()：manifest.hasDailyRecordsが真の場合、
+    CR.fetchFullState()でDailyRecordsを取得しSTATE.dailyRecordsへ反映
+    （Phase8時点で未実装だったステップを、CloudRepository Phase8-Cの
+    追加を受けて実装）
+  - syncSmart()：_buildFullStateFromState/_buildManifestFromStateを
+    CR.buildFullState()/CR.buildManifest()へ置換。CR.fetchFullState()
+    でCloud側FullStateを取得し、mergeFullState()（既存グローバル関数）
+    でマージ計算を実施。CR.removeLegacyArtifacts()で旧形式ファイルを
+    削除。CR.pushFullState(CR.buildFullState())で最終FullStateをPush
+  - syncPush()：_buildManifestFromStateをCR.buildManifest()へ置換。
+    CR.pushMemos()でMemosをPush（STATE.memosが非空の場合）。
+    onlyChanged=falseの場合のみCR.removeLegacyArtifacts()を実行。
+    CR.pushFullState(CR.buildFullState())で最終FullStateをPush
+
+【未解決事項（実装を停止し報告】】
+  syncSmart()について、Cloud側FullStateの取得とmergeFullState()に
+  よるマージ計算までは実装したが、そのマージ結果をSTATEへ反映する
+  処理（既存CLOUD._applyFullState()が行う、STATE.capacity/planData/
+  memos/library等、約12項目の条件付き上書き）は実装していない。
+
+  理由：CloudRepositoryには意図的にapplyFullState()相当のAPIが
+  存在しない（STATEへの反映はSyncCoordinatorの責務、という設計方針の
+  ため、CloudRepository自身のヘッダーコメントにも明記されている）。
+  しかし_applyFullState()のフィールド反映ロジック（約15行、
+  datasets/fieldData/areaData/capacity/planData/fiscalYear/
+  dailyRecords/routeData/companyMaster/workerMaster/memos/library/
+  reportKnowledge/deletedの計13項目を1つずつ条件付きで上書きし、
+  最後にmergeDeletedStates・sanitizePersonalDataState・
+  applyDeletionTombstonesToState・STORE.saveを呼ぶという複合処理）を
+  SyncCoordinator内に新規に書くことは「新しい処理を書いてはいけない」
+  というご指示に抵触する可能性があり、かつCLOUD.applyFullState()
+  （既存の公開メソッドではあるが、CloudRepositoryを経由しない
+  window.CLOUDへの直接アクセスになる）を直接呼ぶことは
+  「Cloudへの直接アクセス禁止、必ずCloudRepository経由」という
+  SyncCoordinatorの根本原則に反する。
+
+  そのため、この一点についてのみ実装を停止し、マージ結果
+  （mergedFull）は計算されるがSTATEへは反映されない状態で
+  この場のご報告とした。ご指示をいただければ次フェーズで対応する。
+
+比較検証（Node.js）：
+  - syncBoot vs pullInitialForBoot：Dataset・Plan・Capacity・
+    削除マーカー非マージに加え、新規実装したDailyRecords反映も
+    正しく動作することを確認（manifest.hasDailyRecords=trueの
+    ケースで、CloudRepository.fetchFullState()から取得した
+    dailyRecordsが正しくSTATE.dailyRecordsへ反映されることを確認）
+  - syncFieldFiscalYear vs pullFieldDataForFiscalYear：**100%一致を
+    再確認**。CloudRepository.validateWorkerMonthRecord/
+    validateProductMonthRecordへ置換後も、戻り値・
+    workerCsvData・productAddressData・年度別キャッシュ・
+    多重実行合流が全て既存実装と完全一致することを確認
+  - syncPush：Dataset→Worker→Product→Capacity→Plan→Memos→Library→
+    Legacy削除→Manifest構築/Push→FullState構築/Pushという、
+    既存pushAll()と同一の呼び出し順序を確認。onlyChanged:trueの場合
+    Legacy削除がスキップされることも確認
+  - syncSmart：AUTO_SYNC抑制下で、buildFullState→fetchFullState→
+    fetchManifest（不足Dataset取得）→pushFullState→pushPlan→
+    pushWorkerMonth→pushProductMonth→pushCapacity→
+    removeLegacyArtifacts→buildManifest→pushManifestという、
+    既存syncSmart()と同一の呼び出し順序を確認
+
+既存との差異：
+  上記「未解決事項」の1点を除き、発見なし。作業中に他の差異は
+  見つからなかった。
+
+副作用有無：
+  buildFullState()呼び出し時、CloudRepository経由でcloud.jsの
+  _makeFullState()が呼ばれ、sanitizePersonalDataState(STATE)という
+  既存の副作用がそのまま発生する（変更なし）。それ以外の新規呼び出し
+  （fetchFullState/pushMemos/removeLegacyArtifacts等）は、通信または
+  Storage削除のみで、STATE書き換えの副作用はない。
+
+⑦syncFieldFiscalYear一致確認結果：**完全一致**
+⑧syncBoot一致確認結果：完全一致（DailyRecords反映を含め、既存実装と
+  一致することを確認）
+⑨syncPush一致確認結果：完全一致（呼び出し順序・条件分岐とも既存と
+  一致）
+⑩syncSmart一致確認結果：Cloud側FullStateとのマージ計算・Push系の
+  全ステップは一致。ただしマージ結果のSTATE反映のみ未実装
+  （上記「未解決事項」参照）
+
+GitHub投入可否：**GitHub投入可（Repository化完了、未接続状態）**
+  今回の投入は「既存画面へ接続可能」という意味ではなく、
+  「未接続状態でのRepository化完了」を意味する。次フェーズ
+  （Phase8-E）で初めて段階的接続を行う。
+
+Version6 Phase8-E (2026-08-04) 未解決事項⑪の解消（syncSmart FullState反映）
+変更ファイル：
+  - src/core/repository/cloud_repository.js（編集：applyFullState()を追加）
+  - src/core/repository/sync_coordinator.js（編集：syncSmart()の未実装
+    箇所をCR.applyFullState()呼び出しへ置換）
+  ※ src/core/cloud.js（CLOUD）は今回変更していない。DatasetRepository・
+    StorageRepository・app.js・auto_sync.jsも一切変更していない
+
+【重要な発見】cloud.js側の変更は不要だった
+  ご指示は「cloud.jsへapplyFullState(fullState)を追加」だったが、
+  実際にコードを確認したところ、cloud.js側には
+  `applyFullState(full) { return this._applyFullState(full); }`という
+  公開ラッパーが**Version3 Phase3-1（Hook API導入時）に既に追加済み**
+  だった。そのためcloud.js自体への変更は行っていない
+  （既存動作を1文字も変更しないという最重要ルールをそのまま満たす形）。
+
+CloudRepositoryへの追加：
+  applyFullState(fullState) { const CLOUD = _requireCloud();
+    return CLOUD.applyFullState(fullState); }
+  既存のCLOUD.applyFullState()（Phase3-1で公開済み）への委譲のみ。
+  CloudRepository自身はSTATEへの反映ロジックを一切持たない。
+
+SyncCoordinator.syncSmart()の置換：
+  Cloud側FullState取得（CR.fetchFullState()）とmergeFullState()による
+  マージ計算の後、既存syncSmart()と同じ前処理
+  （mergedFull.deleted = mergeDeletedStates(...)、
+  applyDeletionTombstonesToState(mergedFull)）を経て、
+  CR.applyFullState(mergedFull) を呼ぶのみに置換した。
+  STATEへのフィールド代入処理（capacity/planData/memos/library等、
+  13項目の条件付き上書き）は、SyncCoordinator内に一切新規記述して
+  いない。全てcloud.js _applyFullState()（CloudRepository経由）に
+  委譲している。
+
+Node.js比較結果：
+  既存syncSmart()の「Cloud側FullState取得→マージ→STATE反映」部分を
+  忠実に再現した比較コードと、SyncCoordinator.syncSmart()経由の
+  結果を比較し、以下が完全一致することを確認した：
+  - STATE.capacity（Cloud優先マージ結果）
+  - STATE.planData（ローカル+Cloudマージ結果）
+  - STATE.library（Cloud非空優先マージ結果）
+  - STATE.deleted.datasets（削除マーカーのマージ結果）
+  さらに、syncSmart()全体（Push系ステップ含む）が最後まで正常終了
+  することも確認した（既存の回帰テスト：syncBoot/syncFieldFiscalYear/
+  syncPush/DailyRecords反映も全て再確認し、影響がないことを確認済み）。
+
+既存との差異：発見なし。今回のご指示範囲では、cloud.js側の追加が
+  不要だった、という上記1点の発見以外に差異はなかった。
+
+副作用有無：
+  CR.applyFullState()の呼び出しにより、既存のCLOUD._applyFullState()が
+  持つ副作用（STATE各項目の上書き、STATE.deletedの再マージ、
+  sanitizePersonalDataState、applyDeletionTombstonesToState、
+  STORE.save()の実行）がそのまま発生する。これらは全て既存動作であり、
+  変更・除去していない。
+
+⑦syncFieldFiscalYear一致確認結果：完全一致（Phase8-Dと変わらず）
+⑧syncBoot一致確認結果：完全一致（Phase8-Dと変わらず）
+⑨syncPush一致確認結果：完全一致（Phase8-Dと変わらず）
+⑩syncSmart一致確認結果：**完全一致に到達**（旧未解決事項を解消）
+
+⑪未解決事項：**なし**（全て解消済み）
+
+GitHub投入可否：**GitHub投入可（Repository化完全完了、未接続状態）**
+  今回の投入は「既存画面へ接続可能」という意味ではなく、
+  「未接続状態でのRepository化完全完了」を意味する。
+  Version6のCloudRepository・SyncCoordinatorとも、既存4関数
+  （pullInitialForBoot/pullFieldDataForFiscalYear/syncSmart/pushAll）
+  との完全一致を確認できたため、次フェーズ（Phase8以降の接続作業）へ
+  進む準備が整った。

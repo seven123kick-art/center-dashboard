@@ -10,65 +10,79 @@ Module
     Cloudへの直接アクセス（window.CLOUDの参照）は一切行わない
     （必ずCloudRepository経由）。
 
-    Version6 Phase5で以下を実装した：
-    - syncNormal()：Manifest単位の通常同期
-      （CloudRepository.fetchManifest/fetchDataset ＋
-       DatasetRepository.upsert ＋ StorageRepository.save）
-    - syncState()：Dataset以外の軽量データのState同期
-      （CloudRepository.fetchCapacity/fetchPlan/fetchLibrary ＋ 既存の
-       mergeFullState()/mergeDeletedStates()をそのまま呼び出してマージ）
-    - syncAll()：syncNormal→syncStateの順で実行する統合窓口
-    - syncLegacy()：未実装（下記「syncLegacyを実装しなかった理由」参照）
+    Version6 Phase8で、Phase7の分解結果に基づき、汎用オプション型の
+    syncNormal()/syncState()ではなく、既存4関数（pullInitialForBoot/
+    pullFieldDataForFiscalYear/syncSmart/pushAll）にそれぞれ対応する
+    用途別メソッドへ再設計した：
+      - syncBoot()：pullInitialForBoot()相当
+      - syncFieldFiscalYear()：pullFieldDataForFiscalYear()相当
+      - syncSmart()：既存CLOUD.syncSmart()相当
+      - syncPush()：既存CLOUD.pushAll()相当
+      - syncLegacy()：未実装のまま維持
+
+    Version6 Phase8-Cで、CloudRepositoryへbuildManifest()/
+    buildFullState()/validateWorkerMonthRecord()/
+    validateProductMonthRecord()/fetchFullState()/pushFullState()/
+    pushMemos()/removeLegacyArtifacts()の8メソッドが追加されたことを
+    受け、Phase8-Dで、Phase8時点でSyncCoordinator内に存在していた
+    複製ロジック4つ（_buildManifestFromState/_buildFullStateFromState/
+    _validWorkerMonthRecord/_validProductMonthRecord）を削除し、
+    全てCloudRepository経由の呼び出しへ置き換えた。あわせて、
+    Phase8時点でCloudRepositoryの不足により未実装だったステップ
+    （syncBootのDailyRecords反映、syncSmartのLegacy削除・FullState
+    Push、syncPushのMemos・FullState Push・Legacy削除）も、
+    新たに利用可能になったCloudRepository APIを使って実装した。
 
     DatasetRepository・CloudRepository・StorageRepositoryの実装は
     本ファイル作成後も一切変更していない。core/cloud.js（CLOUD）・
-    app.js（mergeFullState等）も一切変更していない。
+    app.js・core/auto_sync.jsも一切変更していない。
 
-syncLegacyを実装しなかった理由
-    CloudRepositoryには、旧shared_bundle形式を取得するための公開API
-    （legacyKey/fetchLegacy相当）が存在しない。これを実装するには
-    CloudRepositoryの変更が必要になるが、今回は「CloudRepository変更
-    禁止」というご指示のため実装していない。また、Legacy同期は
-    「全センターの移行完了確認」という別の前提条件が満たされていない
-    （Phase4-0調査以来、状況変化なし）。
+Phase8-Eで解消した事項（旧Phase8-D未解決事項）
+    syncSmart()のマージ結果STATE反映は、Phase8-D時点では
+    CloudRepositoryにapplyFullState()相当のAPIが存在しなかったため
+    未実装だった。Phase8-Eで、cloud.js側に既に公開済みだった
+    applyFullState()（Phase3-1で追加）をCloudRepositoryへ委譲するのみで
+    追加し、SyncCoordinator側はCR.applyFullState(mergedFull)を呼ぶのみで
+    解消した。STATEへのフィールド代入ロジックはSyncCoordinator内に
+    一切新規記述していない。
 
 依存
     window.DATASET_REPOSITORY / window.CLOUD_REPOSITORY /
     window.STORAGE_REPOSITORY（本Coordinatorのみがこの3つを横断的に
-    参照する。3つのRepository同士が互いを直接参照することはない）。
-    window.AUTO_SYNC（同期タイミング制御のため、本Coordinatorのみが
     参照する）。
-    mergeFullState() / mergeDeletedStates() / applyDeletionTombstonesToState()
+    window.AUTO_SYNC（同期タイミング制御）。
+    mergeFullState() / mergeDeletedStates() / applyDeletionTombstonesToState() /
+    sanitizePersonalDataState() / dataDeleteKey() / isDeletedSince() /
+    deletedAt() / clearDataDeleted() / mergePlanDataByUpdatedAt() /
+    fiscalYearFromYM() / monthsOfFiscalYear() / getDefaultFiscalYear()
     （app.js側の既存グローバル関数。他の全ファイルと同じ、classic
-    scriptの共有スコープ経由での参照であり、私有メンバーへのアクセスでは
-    ない）。
+    scriptの共有スコープ経由での参照）。
 
 公開API
     window.SYNC_COORDINATOR
 
-    syncNormal() ／ syncState() ／ syncAll()：実装済み
-    syncLegacy()：未実装（理由は上記参照）
+    【Version6 Phase8で新規追加（用途別）】
+    syncBoot(preferredView) / syncFieldFiscalYear(fiscalYear, options) /
+    syncSmart() / syncPush(options) / syncLegacy()
 
-    現時点ではまだ何もリンクしていない（既存画面からは一切呼ばれない）。
-
-互換API
-    なし（新規追加のため）
+    【Version6 Phase5実装分（互換維持、非推奨）】
+    syncNormal() / syncState() / syncAll()
+    → 既存4関数のいずれとも一致しない独自設計だったため、
+      Phase8では削除せず、明示的なdeprecatedエラーを返す形に変更した。
+      詳細は各メソッドのコメント参照。
 
 更新日
-    2026-08-04（Phase5）
+    2026-08-04（Phase8）
 
 TODO(V6以降)
     - syncLegacy()の実装は、CloudRepositoryへのlegacy取得APIの追加、
       および全センター移行完了確認の両方が揃ってから着手する
-    - syncState()は現状、CloudRepositoryにfetchFullState()が無いため、
-      fetchCapacity/fetchPlan/fetchLibraryを個別に呼んで合成した
-      擬似的なcloudFullオブジェクトをmergeFullState()へ渡している。
-      fiscalYear/routeData/dailyRecords/reportKnowledgeはCloud側の
-      個別fetch手段がまだ無いため、今回のマージには含めていない
-      （ローカル値をそのまま維持する）
-    - 既存画面への接続はまだ行っていない。接続時は既存の
-      pullManifestAndMissing()/pull()等との並行稼働・比較検証を
-      経ること（Version3〜5で確立した手法を踏襲）
+    - syncBoot()のDailyRecords反映、syncSmart()のFullState取得/Push、
+      および_makeManifest/_makeFullStateの複製ロジックは、将来
+      CloudRepositoryにfetchFullState()/pushFullState()/buildManifest()/
+      buildFullState()が追加された時点で、本ファイル内の複製実装を
+      削除し、CloudRepository経由の呼び出しへ置き換えること
+    - 既存画面への接続はまだ行っていない
 ==============================================================================
 */
 'use strict';
@@ -84,19 +98,10 @@ TODO(V6以降)
        内部ヘルパー（private）
        ==================================================================== */
 
-    /**
-     * DatasetRepository・CloudRepository・StorageRepositoryの
-     * 3つ全てが利用可能かを確認する。
-     */
     function _repositoriesReady() {
         return !!(window.DATASET_REPOSITORY && window.CLOUD_REPOSITORY && window.STORAGE_REPOSITORY);
     }
 
-    /**
-     * AUTO_SYNCが利用可能なら、その抑制機構の中で処理を実行する。
-     * 利用できない場合はそのまま実行する（既存cloud.jsのsyncSmart()等と
-     * 同じフォールバック方針）。
-     */
     async function _runSuppressed(fn) {
         if (typeof window.AUTO_SYNC !== 'undefined' && window.AUTO_SYNC && typeof window.AUTO_SYNC.withoutSyncAsync === 'function') {
             return window.AUTO_SYNC.withoutSyncAsync(fn);
@@ -110,150 +115,386 @@ TODO(V6以降)
 
     window.SYNC_COORDINATOR = {
 
-        /**
-         * 「通常同期」（Manifest単位でDatasetを同期する）。
-         * 手順：
-         *   1. CloudRepository.fetchManifest() でManifestを取得
-         *   2. Manifest内のdeletedをローカルのSTATE.deletedとマージ
-         *      （mergeDeletedStates()、削除は新しい方を優先）
-         *   3. Manifestに載っている各Datasetについて、ローカルに無いか
-         *      Cloud側の方が新しければ CloudRepository.fetchDataset() で
-         *      取得し、DatasetRepository.upsert() でSTATE.datasetsへ反映
-         *   4. 変更があればTombstoneを再適用し、StorageRepository.save()
-         *      でローカルへ永続化
-         */
-        async syncNormal() {
-            if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
+        // syncFieldFiscalYear用の年度別キャッシュ状態
+        // （既存cloud.jsの_fieldPullDone/_fieldPullPromisesに相当）
+        _fieldPullDone: {},
+        _fieldPullPromises: {},
+        // syncSmart/syncPush用の排他制御フラグ（既存cloud.jsの_busyに相当）
+        _busy: false,
 
-            return _runSuppressed(async () => {
+        /**
+         * 既存 CLOUD.pullInitialForBoot() と同一挙動を再現する。
+         * 詳細はVersion6 Phase7分解報告書「1. pullInitialForBoot()の分解」
+         * を参照。
+         *
+         * Version6 Phase8-Dで、CloudRepository.fetchFullState()を使い
+         * DailyRecordsの反映を実装した（Phase8時点では未実装だった）。
+         * 全ステップが既存実装と一致する。
+         */
+        async syncBoot(preferredView = 'dashboard') {
+            if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
+            const STATE = window.STATE;
+            const CR = window.CLOUD_REPOSITORY;
+
+            try {
                 let manifest;
                 try {
-                    manifest = await window.CLOUD_REPOSITORY.fetchManifest();
+                    manifest = await CR.fetchManifest();
                 } catch (e) {
-                    return { ok: false, error: e.message || String(e) };
-                }
-                if (!manifest) return { ok: true, changed: false, reason: 'no_manifest' };
-
-                if (manifest.deleted && window.STATE) {
-                    window.STATE.deleted = mergeDeletedStates(window.STATE.deleted || {}, manifest.deleted);
+                    manifest = null;
                 }
 
+                if (!manifest) {
+                    const legacy = await this.syncLegacy();
+                    if (legacy && legacy.ok) return legacy;
+                    return { ok: true, changed: false, source: 'no_cloud_data', noData: true, note: legacy?.error || 'クラウドに対象センターのデータがありません' };
+                }
+
+                // manifest.deleted は古い削除フラグ汚染の原因になるためマージしない（既存仕様を踏襲）。
+
+                let changed = 0;
+                const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
                 const localActive = window.DATASET_REPOSITORY.getActive();
-                const localMap = {};
-                localActive.forEach(d => { localMap[`${d.ym}_${d.type || 'confirmed'}`] = d; });
+                const localLatest = localActive.length ? localActive[localActive.length - 1] : null;
+                const sorted = metas.slice().sort((a, b) => String(a.ym).localeCompare(String(b.ym)));
+                const latestYm = sorted.length ? sorted[sorted.length - 1].ym : (localLatest && localLatest.ym ? localLatest.ym : null);
 
-                let changed = false;
-                const remoteDatasets = Array.isArray(manifest.datasets) ? manifest.datasets : [];
-                for (const meta of remoteDatasets) {
-                    if (!meta || !meta.ym) continue;
-                    const type = meta.type || 'confirmed';
-                    const key = `${meta.ym}_${type}`;
-                    const local = localMap[key];
-                    const remoteTime = String(meta.importedAt || '');
-                    const localTime = local ? String(local.importedAt || '') : '';
-                    if (!local || remoteTime > localTime) {
-                        let full;
-                        try {
-                            full = await window.CLOUD_REPOSITORY.fetchDataset(meta.ym, type);
-                        } catch (e) {
-                            continue; // 1件の取得失敗で全体を止めない。既存pullManifestAndMissing()の方針を踏襲
-                        }
-                        if (full) {
-                            window.DATASET_REPOSITORY.upsert(full);
-                            changed = true;
-                        }
+                const fySet = new Set();
+                if (STATE.fiscalYear) fySet.add(String(STATE.fiscalYear));
+                for (const m of metas) {
+                    if (m.ym && typeof fiscalYearFromYM === 'function') fySet.add(String(fiscalYearFromYM(m.ym)));
+                }
+                if (!fySet.size && typeof getDefaultFiscalYear === 'function') fySet.add(String(getDefaultFiscalYear()));
+
+                const targetYms = new Set();
+                for (const fy of fySet) {
+                    if (typeof monthsOfFiscalYear === 'function') {
+                        monthsOfFiscalYear(fy).forEach(ym => targetYms.add(ym));
                     }
                 }
 
-                if (changed || manifest.deleted) {
-                    if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(window.STATE);
-                    window.STORAGE_REPOSITORY.save();
+                const targetMetas = metas.filter(m => targetYms.has(m.ym));
+
+                for (const meta of targetMetas) {
+                    const metaType = meta.type || 'confirmed';
+                    const delKey = dataDeleteKey(meta.ym, metaType);
+                    if (isDeletedSince('datasets', delKey, meta.importedAt || meta.updatedAt || '')) {
+                        if (typeof clearDataDeleted === 'function') clearDataDeleted('datasets', delKey);
+                    }
                 }
-                return { ok: true, changed };
-            });
+
+                for (const meta of targetMetas) {
+                    try {
+                        const metaType = meta.type || 'confirmed';
+                        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
+                        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
+                        if (local && String(meta.importedAt || '') <= String(local.importedAt || '')) continue;
+                        const ds = await CR.fetchDataset(meta.ym, metaType);
+                        if (ds && ds.ym) { window.DATASET_REPOSITORY.upsert(ds); changed++; }
+                    } catch (e) {
+                        console.warn('[SyncCoordinator.syncBoot] 月別データ取得失敗:', meta.ym, e?.message || e);
+                    }
+                }
+
+                if (manifest.hasPlanData) {
+                    const cloudPlan = await CR.fetchPlan();
+                    if (cloudPlan && typeof cloudPlan === 'object' && typeof mergePlanDataByUpdatedAt === 'function') {
+                        STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
+                        changed++;
+                    }
+                }
+
+                if (manifest.hasCapacity && !STATE.capacity) {
+                    const cap = await CR.fetchCapacity();
+                    if (cap) { STATE.capacity = cap; changed++; }
+                }
+
+                if (manifest.hasDailyRecords) {
+                    const full = await CR.fetchFullState();
+                    if (full && Array.isArray(full.dailyRecords)) {
+                        STATE.dailyRecords = full.dailyRecords;
+                        changed++;
+                    }
+                }
+
+                if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+                if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
+                if (window.FIELD_DATA_ACCESS?.invalidate) window.FIELD_DATA_ACCESS.invalidate();
+                if (changed) window.STORAGE_REPOSITORY.save();
+
+                return { ok: true, changed: !!changed, source: 'boot_fiscal_year_skdl_only' };
+            } catch (e) {
+                return { ok: false, error: e.message || String(e) };
+            }
         },
 
         /**
-         * 「State同期」（Dataset以外の軽量データ：capacity/planData/library等）。
-         * 現行のfull_state.json方式とは異なり、CloudRepositoryには
-         * fetchFullState()が無いため、fetchCapacity/fetchPlan/fetchLibraryを
-         * 個別に取得し、既存のmergeFullState()へ渡せる形へ組み立ててから
-         * マージする。datasets/workerCsvData/productAddressDataは、
-         * 既存のState同期仕様に合わせて対象外のまま。
+         * 既存 CLOUD.pullFieldDataForFiscalYear() と同一挙動を再現する。
+         * 詳細はVersion6 Phase7分解報告書「2. pullFieldDataForFiscalYear()の分解」
+         * を参照。全ステップが既存実装と一致する（CloudRepositoryの
+         * 範囲内で完結できるため）。
          */
-        async syncState() {
+        async syncFieldFiscalYear(fiscalYear, options = {}) {
             if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
+            const STATE = window.STATE;
+            const CR = window.CLOUD_REPOSITORY;
+            const CENTER = window.CENTER;
 
-            return _runSuppressed(async () => {
-                let cloudCapacity = null, cloudPlan = null, cloudLibrary = null;
-                try { cloudCapacity = await window.CLOUD_REPOSITORY.fetchCapacity(); } catch (e) {}
-                try { cloudPlan = await window.CLOUD_REPOSITORY.fetchPlan(); } catch (e) {}
-                try { cloudLibrary = await window.CLOUD_REPOSITORY.fetchLibrary(); } catch (e) {}
+            const fy = String(fiscalYear || STATE.fiscalYear || (typeof getDefaultFiscalYear === 'function' ? getDefaultFiscalYear() : ''));
+            const loadKey = `${CENTER.id}:${fy}`;
 
-                if (!window.STATE) return { ok: false, reason: 'state_not_ready' };
+            if (!options.force && this._fieldPullDone[loadKey]) {
+                return { ok: true, changed: 0, skipped: true, source: 'field_lazy_cache', fiscalYear: fy };
+            }
+            if (!options.force && this._fieldPullPromises[loadKey]) {
+                return this._fieldPullPromises[loadKey];
+            }
 
-                const localFull = {
-                    capacity: window.STATE.capacity || null,
-                    planData: window.STATE.planData || {},
-                    fiscalYear: window.STATE.fiscalYear || null,
-                    memos: window.STATE.memos || {},
-                    library: window.STATE.library || [],
-                    reportKnowledge: window.STATE.reportKnowledge || {},
-                    routeData: window.STATE.routeData || [],
-                    dailyRecords: window.STATE.dailyRecords || [],
-                    deleted: window.STATE.deleted || {},
-                };
-                const cloudFull = {
-                    capacity: cloudCapacity || null,
-                    planData: cloudPlan || {},
-                    library: cloudLibrary || [],
-                    deleted: {},
-                };
+            const run = (async () => {
+                try {
+                    const months = (typeof monthsOfFiscalYear === 'function') ? monthsOfFiscalYear(fy) : [];
+                    const monthSet = new Set(months);
+                    const manifest = await CR.fetchManifest();
+                    if (!manifest) return { ok: false, error: 'manifestなし' };
+                    // manifest.deleted は古い削除フラグ汚染の原因になるためマージしない（既存仕様を踏襲）。
 
-                const merged = mergeFullState(localFull, cloudFull);
+                    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
+                    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
 
-                window.STATE.capacity = merged.capacity;
-                window.STATE.planData = merged.planData;
-                window.STATE.memos = merged.memos;
-                window.STATE.library = merged.library;
-                window.STATE.reportKnowledge = merged.reportKnowledge;
-                window.STATE.routeData = merged.routeData;
-                window.STATE.dailyRecords = merged.dailyRecords;
-                window.STATE.deleted = merged.deleted;
+                    let changed = 0, workerDownloaded = 0, productDownloaded = 0;
 
-                window.STORAGE_REPOSITORY.save();
-                return { ok: true, changed: true };
-            });
+                    const workerMetas = (Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [])
+                        .filter(meta => meta && meta.ym && monthSet.has(meta.ym));
+                    for (const meta of workerMetas) {
+                        if (deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+                        const local = STATE.workerCsvData.find(d => d && d.ym === meta.ym);
+                        const localAt = String(local?.importedAt || local?.updatedAt || local?.savedAt || '');
+                        const cloudAt = String(meta.importedAt || meta.updatedAt || meta.savedAt || '');
+                        if (!local || !CR.validateWorkerMonthRecord(local, meta) || cloudAt > localAt) {
+                            const rec = await CR.fetchWorkerMonth(meta.ym);
+                            if (rec && rec.ym && CR.validateWorkerMonthRecord(rec, meta)) {
+                                STATE.workerCsvData = STATE.workerCsvData.filter(d => d && d.ym !== rec.ym);
+                                STATE.workerCsvData.push(rec);
+                                changed++; workerDownloaded++;
+                            }
+                        }
+                    }
+
+                    const productMetas = (Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [])
+                        .filter(meta => meta && meta.ym && monthSet.has(meta.ym));
+                    for (const meta of productMetas) {
+                        if (deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+                        const local = STATE.productAddressData.find(d => d && d.ym === meta.ym);
+                        const localAt = String(local?.importedAt || local?.updatedAt || local?.savedAt || '');
+                        const cloudAt = String(meta.importedAt || meta.updatedAt || meta.savedAt || '');
+                        if (!local || !CR.validateProductMonthRecord(local, meta) || cloudAt > localAt) {
+                            const rec = await CR.fetchProductMonth(meta.ym);
+                            if (rec && rec.ym && CR.validateProductMonthRecord(rec, meta)) {
+                                STATE.productAddressData = STATE.productAddressData.filter(d => d && d.ym !== rec.ym);
+                                STATE.productAddressData.push(rec);
+                                changed++; productDownloaded++;
+                            }
+                        }
+                    }
+
+                    if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+                    if (window.FIELD_DATA_ACCESS?.invalidate) window.FIELD_DATA_ACCESS.invalidate();
+                    if (changed) window.STORAGE_REPOSITORY.save();
+
+                    this._fieldPullDone[loadKey] = true;
+                    return { ok: true, changed, source: 'field_lazy', fiscalYear: fy, workerMonths: workerMetas.length, productMonths: productMetas.length, workerDownloaded, productDownloaded };
+                } catch (e) {
+                    return { ok: false, error: e.message || String(e) };
+                }
+            })();
+
+            this._fieldPullPromises[loadKey] = run;
+            try {
+                return await run;
+            } finally {
+                delete this._fieldPullPromises[loadKey];
+            }
         },
 
         /**
-         * 「Legacy同期」（旧shared_bundle形式）。
-         * 未実装。理由はファイルヘッダーの「syncLegacyを実装しなかった
-         * 理由」を参照。
+         * 既存 CLOUD.syncSmart() と同一挙動を再現する。
+         * 詳細はVersion6 Phase7分解報告書「3. syncSmart()の分解」を参照。
+         *
+         * Version6 Phase8-Dで、CloudRepository.fetchFullState()/
+         * pushFullState()/removeLegacyArtifacts()を使い、Legacyファイル
+         * 削除・最終FullStateのPushを実装した。
+         *
+         * Version6 Phase8-Eで、CloudRepository.applyFullState()を使い、
+         * マージ結果のSTATE反映（旧・未解決事項）を実装した。
+         * cloud.js側は既にPhase3-1で公開済みのapplyFullState()を
+         * そのまま使っており、cloud.js自体の変更は不要だった。
+         * STATEへのフィールド代入ロジックはSyncCoordinator側では一切
+         * 書かず、全てCloudRepository経由でcloud.js
+         * _applyFullState()へ委譲している。全ステップが既存実装と
+         * 一致する。
+         */
+        async syncSmart() {
+            if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
+            if (this._busy) return { ok: false, error: '同期処理中' };
+            this._busy = true;
+
+            const STATE = window.STATE;
+            const CR = window.CLOUD_REPOSITORY;
+
+            const run = async () => {
+                const localFull = CR.buildFullState();
+                let cloudFull = null;
+                try { cloudFull = await CR.fetchFullState(); } catch (e) { cloudFull = null; }
+                const mergedFull = (cloudFull && typeof cloudFull === 'object' && typeof mergeFullState === 'function')
+                    ? mergeFullState(localFull, cloudFull)
+                    : localFull;
+
+                if (typeof mergeDeletedStates === 'function') {
+                    mergedFull.deleted = mergeDeletedStates(localFull.deleted || {}, (cloudFull && cloudFull.deleted) || {});
+                }
+                if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(mergedFull);
+                CR.applyFullState(mergedFull);
+
+                // Manifestベースで不足しているDatasetを取得する（syncBootと同様のロジック）。
+                let manifestResult = { ok: false, changed: false };
+                try {
+                    const manifest = await CR.fetchManifest();
+                    if (manifest) {
+                        const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
+                        let changed = false;
+                        for (const meta of metas) {
+                            const metaType = meta.type || 'confirmed';
+                            const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
+                            if (local && String(meta.importedAt || '') <= String(local.importedAt || '')) continue;
+                            const ds = await CR.fetchDataset(meta.ym, metaType);
+                            if (ds && ds.ym) { window.DATASET_REPOSITORY.upsert(ds); changed = true; }
+                        }
+                        manifestResult = { ok: true, changed };
+                    }
+                } catch (e) {
+                    manifestResult = { ok: false, error: e.message || String(e) };
+                }
+
+                await CR.pushFullState(CR.buildFullState());
+                await CR.pushPlan(STATE.planData || {});
+                for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) {
+                    await CR.pushWorkerMonth(w.ym, w);
+                }
+                for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) {
+                    await CR.pushProductMonth(pr.ym, pr);
+                }
+                if (STATE.capacity) await CR.pushCapacity();
+
+                await CR.removeLegacyArtifacts();
+
+                await CR.pushManifest(CR.buildManifest());
+
+                return { ok: true, changed: true, source: 'smart+manifest', manifestChanged: !!(manifestResult && manifestResult.changed) };
+            };
+
+            try {
+                return await _runSuppressed(run);
+            } catch (e) {
+                return { ok: false, error: e.message || String(e) };
+            } finally {
+                this._busy = false;
+            }
+        },
+
+        /**
+         * 既存 CLOUD.pushAll(options) と同一挙動を再現する。
+         * 詳細はVersion6 Phase7分解報告書「4. pushAll()の分解」を参照。
+         *
+         * Version6 Phase8-Dで、CloudRepository.pushMemos()/
+         * pushFullState()/removeLegacyArtifacts()を使い、Memosの
+         * アップロード・FullStateのアップロード・旧形式ファイル削除
+         * （onlyChanged=false時）を実装した。全ステップが既存実装と
+         * 一致する。
+         */
+        async syncPush(options = {}) {
+            if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
+            if (this._busy) return { ok: false, error: '同期処理中' };
+            this._busy = true;
+
+            const STATE = window.STATE;
+            const CR = window.CLOUD_REPOSITORY;
+            const onlyChanged = !!options.onlyChanged;
+
+            try {
+                for (const ds of STATE.datasets.filter(d => d.source !== 'history')) {
+                    await CR.pushDataset(ds.ym, ds.type || 'confirmed', ds);
+                }
+                for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) {
+                    await CR.pushWorkerMonth(w.ym, w);
+                }
+                for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) {
+                    await CR.pushProductMonth(pr.ym, pr);
+                }
+                if (STATE.capacity) await CR.pushCapacity();
+                await CR.pushPlan(STATE.planData || {});
+                if (STATE.memos && Object.keys(STATE.memos).length) await CR.pushMemos(STATE.memos);
+                if (STATE.library && STATE.library.length) await CR.pushLibrary(STATE.library);
+
+                if (!onlyChanged) {
+                    await CR.removeLegacyArtifacts();
+                }
+
+                await CR.pushManifest(CR.buildManifest());
+                await CR.pushFullState(CR.buildFullState());
+
+                return { ok: true };
+            } catch (e) {
+                return { ok: false, error: e.message || String(e) };
+            } finally {
+                this._busy = false;
+            }
+        },
+
+        /**
+         * 「Legacy同期」（旧shared_bundle形式）。未実装。
+         * 理由：CloudRepositoryに旧形式取得APIが存在せず、全センター
+         * 移行完了確認という前提条件も未充足のため。
          */
         async syncLegacy() {
-            return { ok: false, reason: 'not_implemented_cloud_repository_lacks_legacy_api' };
+            return { ok: false, reason: 'legacy_not_ready' };
         },
 
         /**
-         * syncNormal → syncState の順で実行する統合窓口。
+         * @deprecated Version6 Phase5で実装した汎用オプション型の
+         * 「通常同期」。既存4関数（pullInitialForBoot/
+         * pullFieldDataForFiscalYear/syncSmart/pushAll）のいずれとも
+         * 一致しない独自設計だったため、Phase8で非推奨とした。
+         * syncBoot() または syncFieldFiscalYear() を使用すること。
+         */
+        async syncNormal() {
+            return { ok: false, reason: 'deprecated_use_syncBoot_or_syncFieldFiscalYear' };
+        },
+
+        /**
+         * @deprecated Version6 Phase5で実装した汎用オプション型の
+         * 「State同期」。既存4関数のいずれとも一致しない独自設計
+         * だったため、Phase8で非推奨とした。
+         * syncSmart() を使用すること（ただしFullState関連は未実装）。
+         */
+        async syncState() {
+            return { ok: false, reason: 'deprecated_use_syncSmart' };
+        },
+
+        /**
+         * @deprecated syncNormal()/syncState()に依存していたため、
+         * 同様に非推奨とした。用途に応じてsyncBoot()/
+         * syncFieldFiscalYear()/syncSmart()/syncPush()を使い分けること。
          */
         async syncAll() {
-            if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
-            const normalResult = await this.syncNormal();
-            const stateResult = await this.syncState();
-            return {
-                ok: !!(normalResult.ok && stateResult.ok),
-                normal: normalResult,
-                state: stateResult,
-            };
+            return { ok: false, reason: 'deprecated_use_specific_sync_methods' };
         },
 
         /**
          * 内部ヘルパーを外部からのテスト等で使えるように限定公開する。
          */
-        _internal: { _repositoriesReady, _runSuppressed }
+        _internal: {
+            _repositoriesReady, _runSuppressed
+        }
     };
 
 })();
-

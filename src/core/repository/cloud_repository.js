@@ -23,13 +23,13 @@ Module
     （プロジェクト全体の設計方針：他ファイルから私有メンバーへ直接
     アクセスしない、を厳守）。
 
-公開API（Version6 Step1〜Phase8-Cで全25メソッド実装完了）
+公開API（Version6 Step1〜Phase8-Eで全26メソッド実装完了）
     window.CLOUD_REPOSITORY
 
-    【実装済み・全25メソッド、CLOUDの公開APIへ100%委譲】
+    【実装済み・全26メソッド、CLOUDの公開APIへ100%委譲】
     fetchDataset() / fetchWorkerMonth() / fetchProductMonth() /
     fetchPlan() / fetchManifest() / fetchCapacity() / fetchLibrary() /
-    fetchFullState() /
+    fetchFullState() / applyFullState() /
     pushDataset() / pushWorkerMonth() / pushProductMonth() /
     pushPlan() / pushLibrary() / pushManifest() / pushCapacity() /
     pushFullState() / pushMemos() /
@@ -37,6 +37,12 @@ Module
     validateWorkerMonthRecord() / validateProductMonthRecord() /
     removeLegacyArtifacts() /
     uploadFile() / deleteFile() / createSignedUrl()
+
+Phase8-Eでの追加
+    applyFullState(fullState)を追加した。cloud.js側は既にPhase3-1で
+    `applyFullState(full) { return this._applyFullState(full); }`という
+    公開ラッパーが追加済みだったため、cloud.js側の変更は不要だった。
+    CloudRepository側は、この既存公開APIへの委譲のみで実装している。
 
 Phase8-Cでの追加（Phase8-Bの設計レビューに基づく）
     fetchFullState()/pushFullState()/pushMemos()/buildManifest()/
@@ -220,6 +226,19 @@ TODO(V6)
         },
 
         /* ---------- Version6 Phase8-Cで追加 ---------- */
+
+        /**
+         * マージ済みFullStateをSTATEへ反映する。
+         * 既存CLOUD.applyFullState()（Phase3-1で公開済み）への
+         * 委譲のみ。STATEへの反映ロジック自体はcloud.js
+         * _applyFullState()側にあり、CloudRepositoryは一切
+         * ロジックを持たない。
+         * 内部で呼ぶ既存処理：CLOUD.applyFullState()
+         */
+        applyFullState(fullState) {
+            const CLOUD = _requireCloud();
+            return CLOUD.applyFullState(fullState);
+        },
 
         /**
          * State同期用の軽量フルステートを取得する。
