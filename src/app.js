@@ -926,10 +926,10 @@ const IMPORT = {
       } catch(e) { UI.toast(`${f.name}: ${e.message}`,'error'); }
     }
     if (imported > 0) {
-      STORE.save();
+      Repository.Storage.save();
       // 確定CSVが入った月は速報を残さず削除する
       if (importType === 'confirmed') {
-        try { await supersedeDailyWithConfirmed(ym); STORE.save(); } catch(e) {}
+        try { await supersedeDailyWithConfirmed(ym); Repository.Storage.save(); } catch(e) {}
       }
       // 単体取込では従来通り取込月だけ同期する。
       // 一括取込では opt.awaitCloud === false を指定し、ループ後に pushAll() を1回だけ実行する。
@@ -1023,7 +1023,7 @@ const IMPORT = {
       STATE.capacity.mapping = STATE.capacity.mapping || CAPACITY_UI.defaultMapping();
       STATE.capacity.calendar = STATE.capacity.calendar || {};
 
-      STORE.save();
+      Repository.Storage.save();
       CLOUD.pushCapacity().catch(()=>{});
       NAV.refresh();
       UI.toast(`キャパ取込完了: ${Object.keys(areas).length}地区 / ${rowCount}行`);
@@ -1049,7 +1049,7 @@ ${ds.fileName || 'ファイル名なし'}
     markDataDeleted('datasets', dataDeleteKey(ym, type));
     STATE.datasets = STATE.datasets.filter(d=>!(d.ym===ym && (d.type || 'confirmed') === type && d.source !== 'history'));
     applyDeletionTombstonesToState(STATE);
-    STORE.save();
+    Repository.Storage.save();
     try {
       if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('dataset', `${ym}_${type}`);
     } catch(e) {}
@@ -1091,7 +1091,7 @@ ${ds.fileName || 'ファイル名なし'}
   clearAll() {
     if (!confirm('全データを削除します。よろしいですか？')) return;
     STATE.datasets = []; STATE.workerCsvData = []; STATE.productAddressData = []; STATE.fieldData = []; STATE.capacity = null;
-    STORE.save();
+    Repository.Storage.save();
     NAV.refresh();
     UI.toast('全データを削除しました');
   },
@@ -1965,7 +1965,7 @@ const MEMO = {
     const ym = sel.value;
     if (!ym) return;
     STATE.memos[ym] = { text: text.value, savedAt: new Date().toISOString() };
-    STORE.save();
+    Repository.Storage.save();
     if (saved) saved.textContent = '保存済み: '+new Date().toLocaleString('ja-JP');
     this.renderList();
   },
@@ -2448,7 +2448,7 @@ const DATA_RESET = {
     STATE.productAddressData = [];
     STATE.fieldData = [];
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
-    STORE.save();
+    Repository.Storage.save();
     try {
       if (CLOUD?.pushAll) await CLOUD.pushAll();
     } catch(e) {
@@ -2576,7 +2576,7 @@ const TSV_IMPORT = {
         imported++;
       }
     }
-    STORE.save();
+    Repository.Storage.save();
     NAV.refresh();
     if (msg) msg.textContent = `${fy}年度 完全入替完了: ${imported}ヶ月`;
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>UI.toast('収支補完は保存しましたが、クラウド同期に失敗しました', 'warn'));
@@ -2591,7 +2591,7 @@ const TSV_IMPORT = {
     markDataDeleted('historyFiscalYears', fy);
     STATE.datasets = STATE.datasets.filter(d => !(d.source === 'history' && String(d.fiscalYear || fiscalYearFromYM(d.ym)) === String(fy)));
     applyDeletionTombstonesToState(STATE);
-    STORE.save();
+    Repository.Storage.save();
     const deleted = before - STATE.datasets.length;
     renderImport();
     NAV.refresh();

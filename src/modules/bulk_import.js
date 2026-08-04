@@ -146,7 +146,7 @@ window.BULK_IMPORT = {
       try { await supersedeDailyWithConfirmed(ym); } catch(e) {}
     }
 
-    STORE.save();
+    Repository.Storage.save();
 
     // 一括取込では月ごとの pushMonth を行わない。
     // _busy 競合を避けるため、handleFiles の全ループ完了後に pushAll() を1回だけ実行する。
@@ -247,7 +247,7 @@ window.BULK_IMPORT = {
       STATE.selYM = latest;
     }
 
-    STORE.save();
+    Repository.Storage.save();
     AUTO_SYNC?.cancelPending();
     if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
 

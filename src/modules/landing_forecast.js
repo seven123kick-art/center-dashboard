@@ -226,7 +226,7 @@
           logs.push(`NG ${f.name}：${e.message}`);
         }
       }
-      STORE.save();
+      Repository.Storage.save();
       if (CLOUD?.pushAll) CLOUD.pushAll({ onlyChanged:true }).catch(()=>{});
       this.renderImportPanel();
       this.render();
@@ -236,7 +236,7 @@
     deleteYM(ym){
       if (!confirm(`${ymLabelLocal(ym)}の日別実績を削除しますか？`)) return;
       STATE.dailyRecords = (STATE.dailyRecords || []).filter(r=>r.ym !== ym);
-      STORE.save();
+      Repository.Storage.save();
       if (CLOUD?.pushAll) CLOUD.pushAll({ onlyChanged:true }).catch(()=>{});
       this.renderImportPanel();
       this.render();

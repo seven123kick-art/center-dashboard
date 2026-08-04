@@ -68,7 +68,7 @@ function renderFieldDataList2() {
 // IMPORT.deleteFieldData 追加
 IMPORT.deleteFieldData = function(ym) {
   STATE.fieldData = STATE.fieldData.filter(d=>d.ym!==ym);
-  STORE.save();
+  Repository.Storage.save();
   renderFieldDataList2();
   UI.toast('現場データを削除しました');
 };
@@ -1360,7 +1360,7 @@ IMPORT.deleteFieldData = function(ym) {
     STATE.fieldData = safeArray(STATE.fieldData).filter(d => d.ym !== ym);
     STATE.areaData = safeArray(STATE.areaData).filter(d => d.ym !== ym);
     if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
-    STORE.save();
+    Repository.Storage.save();
     try {
       if (CLOUD?.pushAll) await CLOUD.pushAll();
     } catch(e) {
@@ -1474,7 +1474,7 @@ IMPORT.deleteFieldData = function(ym) {
     STATE.fieldData = [];
     STATE.areaData = [];
     if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
-    STORE.save();
+    Repository.Storage.save();
     if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
     refreshFieldAll();
     msg('現場明細データを全削除しました', 'warn');

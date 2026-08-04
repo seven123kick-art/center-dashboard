@@ -2778,3 +2778,115 @@ GitHub投入可否：**GitHub投入可**
   「これまでundefinedだったwindow.CENTERが正しく動作するようになる」
   という点に限定される。事前調査により、window.CENTERを不整合に
   書き換える既存コードが無いことを確認済みであり、リスクは極めて低い。
+
+Version5 StorageRepository Migration 一括実施 (2026-08-04)
+責務単位での一括移行（Master/Plan/PastLibrary/Capacity/Worker/Productに続く、Category A/B全件）
+
+変更ファイル：
+  - src/app.js（9箇所）
+  - src/field/field_core.js（3箇所）
+  - src/modules/landing_forecast.js（2箇所）
+  - src/modules/bulk_import.js（2箇所）
+  - src/field/route_analysis.js（1箇所）
+  合計17箇所。いずれもSTORE.save(); → Repository.Storage.save(); の
+  置換のみ。前後の処理・順序・await・例外処理・Cloud呼び出し内容は
+  一切変更していない。
+
+■①STORE.save()棚卸し（変更前27箇所の全件分類）
+
+  分類A（完全に安全、Cloud非依存）：3箇所
+    - app.js 1094行：clearAll（全データ削除）
+    - app.js 1968行：メモ保存
+    - field_core.js 71行：現場データ個別削除
+
+  分類B（Cloudが絡むが、STORE.save()だけ置換可能）：14箇所
+    - app.js 929行：CSV確定/速報取込（CLOUD.pushMonth後続）
+    - app.js 932行：確定取込後の速報削除（supersedeDailyWithConfirmed内、
+      インライン記述）
+    - app.js 1026行：Capacity保存（CLOUD.pushCapacity後続）
+    - app.js 1052行：Dataset個別削除（IDB_CACHE.remove→
+      CLOUD.deleteFile→CLOUD.pushAll後続）
+    - app.js 2451行：現場データ全削除（CLOUD.pushAll後続）
+    - app.js 2579行：history一括取込（NAV.refresh後にCLOUD.pushAll）
+    - app.js 2594行：history年度削除（同上）
+    - landing_forecast.js 229行：日別実績取込（CLOUD.pushAll後続）
+    - landing_forecast.js 239行：日別実績削除（同上）
+    - bulk_import.js 149行：一括取込・確定処理内（AUTO_SYNC.cancelPending
+      後続、Cloud反映は呼び出し元でループ後に別途実行）
+    - bulk_import.js 250行：一括取込・全体完了後（AUTO_SYNC.cancelPending
+      →invalidate→CLOUD.pushAll→AUTO_SYNC.resume（finally）という
+      複雑な順序）
+    - field_core.js 1363行：現場データtype別削除（CLOUD.pushAll後続）
+    - field_core.js 1477行：現場データ全削除（CLOUD.pushAll後続）
+    - route_analysis.js 92行：配送PDF取込（CLOUD.pushAll後続）
+
+  分類C（Cloud同期・SyncCoordinator設計待ち、変更禁止）：10箇所
+    - cloud.js 全8箇所（_applyFullState、Push処理、Legacy適用等、
+      Cloud同期の中核処理そのもの）
+    - storage_audit.js 330行：loadField（CLOUD.pullFieldDataForFiscalYear
+      取得結果の反映という、Cloud同期フローの一部）
+    - storage_audit.js 346行：_syncAfterDelete（関数名の通り、
+      削除後同期処理というCloud同期ワークフローの一部）
+
+  分類A+B合計17箇所を今回一括置換。分類Cの10箇所は一切変更していない。
+
+■②③実装内容
+  分類A・分類Bとも、責務単位（Dataset保存系、Capacity保存系、現場データ
+  削除系等）でまとめて、5ファイルへ一括で適用した。1件ずつの個別GitHub
+  投入は行わず、本レポートの一括報告のみで完結させた。
+
+■Repository設計レビュー
+  ①window.STATE問題と同じパターンの再検索：
+    プロジェクト全体で参照されている56個のwindow.XXX識別子を機械的に
+    再チェックした。JP_ZIP_LOADER/JP_ZIP_MASTER/JP_ZIP_PARTS/
+    SUPABASE_CONFIGの4つが「代入箇所なし」として検出されたが、
+    詳細調査の結果、いずれもsrc/配下ではなくassets/data/やconfig/
+    配下のファイルで正しくwindow.X = ...という形で宣言されている
+    ことを確認した（検索範囲がsrc/限定だったための誤検出）。XLSXは
+    外部CDNライブラリ（SheetJS）自身がwindow.XLSXを設定するため対象外。
+    結論：window.STATE・window.CENTER以外に、同じバグパターンを持つ
+    識別子は見つからなかった。
+
+  ②Repository層のwindow.x依存の再確認：
+    DatasetRepository・StorageRepository・CloudRepository・
+    SyncCoordinatorが依存するwindow.STATE・window.CENTER（field_core.js
+    等経由）はいずれも修正済み。window.CONFIG_UTILS・window.STORE・
+    window.CLOUD・window.IDB_CACHEはいずれも元から正しく宣言されている
+    ことを確認済み（今回の再チェックでも変化なし）。
+
+  ③教訓のまとめ：
+    - Repositoryから参照するグローバルオブジェクトは、`const X = {...}`
+      という宣言だけでなく、必ず`window.X = X`（または直接
+      `window.X = {...}`）という明示的なwindow紐付けとセットで管理する
+      必要がある
+    - window公開ルール：新規グローバルオブジェクトを追加する際は、
+      STORE/CLOUD/AUTO_SYNC（`var X = window.X = {...}`）や
+      NAV/UI（`window.X = {...}`直接代入）のいずれかのパターンに
+      統一し、bareなconst宣言だけで済ませない
+    - Repository追加時の設計ルール：新しいRepositoryファイルが
+      `window.XXX`という形で外部オブジェクトを参照する場合、実装時に
+      「そのXXXが実際にwindowへ紐付いているか」をgrepで確認する
+      チェックを、Repository実装のレビュー工程に組み込むことが望ましい
+
+■Node比較（変更した全ファイルについて、代表パターンをNode.jsで検証）：
+  - 分類A代表（メモ保存）：Repository.Storage.save→STORE.save、
+    Cloud関与なしのみの単純な呼び出し順を確認
+  - 分類B代表（Capacity保存）：save→pushCapacityの順序を確認
+  - 分類B代表（Dataset個別削除）：save→IDB_CACHE.remove→deleteFile→
+    pushAll→NAV.refreshという6段階の順序を完全一致で確認
+  - 分類B代表（bulk_import.js、AUTO_SYNC込み）：
+    save→cancelPending→invalidate→pushAll→resume（finally）という
+    複雑な順序を完全一致で確認
+  全代表パターンにおいて、STATE内容・呼び出し順序・戻り値・副作用・
+  呼び出し回数（STORE.save実行が常に1回のみ）のいずれも差分ゼロを確認。
+
+■構文チェック：全JSファイルでnode --check通過。
+
+■最終確認：
+  - 全プロジェクトのSTORE.save()実呼び出し残数：10箇所
+    （cloud.js 8箇所＋storage_audit.js 2箇所、いずれも分類C）
+  - StorageRepository内部の正規委譲呼び出し：1箇所（変化なし）
+  - 他の全ファイル（STORE本体、CLOUD、AUTO_SYNC、他Repository3ファイル、
+    center.html、companies.js、workers.js、capacity.js、
+    past_library.js、storage_repository.js）：ハッシュ比較にて無変更を
+    確認済み
