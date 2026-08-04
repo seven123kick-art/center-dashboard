@@ -2499,3 +2499,155 @@ STORE.save()残件数：
 GitHub投入可否：**GitHub投入可**
   理由：変更はpast_library.js内4行のみ。Node.js比較でCloud呼び出し順・
   STATE・副作用の完全一致を確認済み。
+
+Version5 Phase7 (2026-07-25) Capacity Save Migration
+変更ファイル：
+  - src/modules/capacity.js（編集：STORE.save() 9箇所を
+    Repository.Storage.save()へ置換）
+  ※ CLOUD.pushCapacity・CloudRepository・StorageRepository.save()本体・
+    Dataset/Route関連ファイル・app.js・center.htmlはいずれも今回一切
+    変更していない
+
+【件数についての訂正】
+  ご指示は「capacity.js内10箇所」でしたが、実際にコードを確認したところ
+  capacity.js内のSTORE.save()実呼び出しは**9箇所**でした。10箇所目は
+  app.js側（1015行、STATE.capacity更新後のCLOUD.pushCapacity呼び出しを
+  含む処理）にあり、Phase3の分類調査時点でも「app.js:1015 + capacity.js
+  9箇所 = ⑥Capacity保存 合計10件」としてカウントしていたものと一致する。
+  今回はご指示通り「capacity.jsのみ」を対象とし、app.js側の1箇所は
+  対象外のまま維持した。
+
+事前調査：9箇所の分類
+
+  【グループ1：Cloud非依存、同一パターン】5箇所
+    (1435行, 1462行, 1472行, 1568行, 1602行)
+    パターン：STATE.capacity.xxxを更新 → STORE.save() → this.render()
+    内容：カレンダー編集×2、グループ属性編集×1、エリア編集×1、
+      エリア/グループ全クリア×1
+    Cloud呼び出し：なし
+    IDB_CACHE：STORE.save()内部でのみ（persistStateSoon経由）
+
+  【グループ2：Cloud依存、同一パターン】4箇所
+    (1508行, 1518行, 1530行, 1546行)
+    パターン：STATE.capacity.capacityGroupsを更新 → STORE.save() →
+      CLOUD.pushCapacity().catch(()=>{}) → this.render()（または
+      UI.toast）
+    内容：キャパ区分追加、削除、属性編集、キャパ数値編集
+    Cloud呼び出し：あり（STORE.save()の直後、非同期・エラー握り潰し）
+    IDB_CACHE：同上
+
+  2グループとも「STORE.save()」の前後関係・処理内容は完全に同一
+  パターンであったため、まとめて置換した（ご指示の「同一パターンは
+  まとめて置換して構いません」に基づく）。
+
+実装内容：
+  9箇所とも、STORE.save(); を Repository.Storage.save(); へ置換したのみ。
+  グループ2（Cloud依存4箇所）についても、CLOUD.pushCapacity()の呼び出し
+  内容・タイミング・エラーハンドリング（.catch(()=>{})）は一切変更して
+  いない。STORE.save()がCLOUD.pushCapacity()より前に位置するという
+  順序も維持した。
+
+比較検証（Node.js）：
+  - グループ1（カレンダー編集）：STATE.capacity.calendarの内容が
+    変更前後で完全一致。CLOUD.pushCapacityが呼ばれないことも確認
+  - グループ2（キャパ区分追加）：呼び出し順序が
+    「Repository.Storage.save（→STORE.save）→ pushCapacity」という、
+    「保存が先、Cloud反映が後」の関係を維持していることを確認
+  - STORE.save()実行回数：Repository経由でも各操作につき1回のみ
+    （二重実行なし）
+
+副作用：
+  なし。STATE.capacity・呼び出し順序・UI再描画（this.render()）・
+  Cloud反映タイミングいずれも変更前と完全に同一。
+
+Repository移行率：
+  StorageRepository.save()の実利用箇所：17/46（約37.0%）
+  （Master2＋Plan2＋PastLibrary4＋Capacity9）
+
+STORE.save()残件数：
+  実呼び出し29箇所（変更前38箇所から今回の9箇所を除いた数）。
+  加えてstorage_repository.js内の委譲呼び出し1箇所（カウント対象外）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はcapacity.js内9行のみ。Node.js比較でSTATE・呼び出し順序・
+  Cloud非干渉の完全一致を確認済み。
+
+次に最も安全な移行候補：
+  残る29箇所の内訳は、Dataset保存（app.js/bulk_import.js計7箇所）、
+  Cloud同期系（cloud.js/storage_audit.js計10箇所、SyncCoordinator実装
+  まで移設禁止）、Worker/Product/Route保存（各1箇所、field_core.js/
+  route_analysis.js）、その他（app.js/field_core.js/landing_forecast.js
+  計10箇所）。次点としては、Worker保存・Product保存（field_core.js、
+  各1箇所、Cloud非依存ではないがMaster保存と同程度の小規模・単純な構造）
+  が候補として考えられる。
+
+Version5 緊急修正 (2026-08-04) window.STATE未定義バグの修正
+変更ファイル：
+  - src/app.js（編集：STATE宣言の直後に window.STATE = STATE; を1行追加）
+  ※ 他の全ファイルは今回一切変更していない
+
+【発見の経緯】
+  Dashboard/Indicators/Trend等の画面でDatasetが「未登録」と表示される
+  不具合の調査（実機コンソールでの検証を含む複数ラウンドの調査）の結果、
+  以下が確定した：
+  - STATE.datasets.length（裸のSTATE） = 13（正しくデータが存在）
+  - window.STATE = undefined
+  - window.STATE === STATE → false
+  - Repository.Dataset.getActive()内部は`window.STATE`を参照する設計の
+    ため、window.STATEがundefinedである結果、早期returnで空配列[]を
+    返していた
+
+  原因：app.js内でSTATEは`const STATE = {...}`として宣言されており、
+  `window.STATE = STATE`という明示的な代入がプロジェクト全体のどこにも
+  存在しなかった。ブラウザのclassic script（type="module"でない
+  <script>タグ）において、トップレベルのconst/let宣言は「スクリプト
+  スコープ」に束縛されるが、windowオブジェクトのプロパティには自動的に
+  ならない、というJavaScript／ブラウザ仕様の挙動が根本原因。
+
+  影響範囲：DatasetRepository.getActive()に加え、window.STATEを参照する
+  以下4ファイルの一部処理も同様の影響を受けていたことをコード確認済み：
+  field_core.js（958行）、field_area.js（98,283,312,460,461,882,883,
+  966,986行）、field_content.js（27行）、field_product.js（110,138,
+  601,607行）。特にfield_area.js/field_product.jsの
+  「if (window.STATE) { STATE.fiscalYear = ...; }」という形の条件分岐は、
+  window.STATEが常にfalsyだったため、これらのブロックが一度も
+  実行されていなかった（現場画面での年度・月選択保存が機能していな
+  かった可能性）。
+
+  他の主要オブジェクト（CONFIG/CSV/IMPORT/MODAL等）も同様に裸のconst
+  宣言だが、window.CONFIG／window.CSV等という形で参照しているコードは
+  プロジェクト全体でSTATE以外に存在しないことを確認済み（実害はSTATEの
+  みに限定される）。STORE/CLOUD/AUTO_SYNC/NAV/UI/IDB_CACHEは、いずれも
+  既に`var X = window.X = {...}`または`window.X = {...}`という正しい
+  二重代入パターンで宣言されており、この問題の対象外であることも確認済み。
+
+事前確認（今回のご指示に基づく安全確認）：
+  実装前に、プロジェクト全体を以下の観点で検索し、いずれも該当なしを
+  確認した：
+  - window.STATE = への既存の代入：0件
+  - delete window.STATE：0件
+  - Object.defineProperty(window, 'STATE', ...)：0件
+  - window['STATE'] 等の動的代入：0件
+  他にwindow.STATEを書き換えるコードが存在しないことを確認した上で、
+  1行のみを追加した。
+
+修正内容：
+  const STATE = { ... };
+  window.STATE = STATE;  // ← 追加した1行（コメント除く）
+
+  オブジェクト代入は参照渡しのため、この1行は「コピー」ではなく
+  「同一オブジェクトへの別名付け」である。app.js内で今後も使われ続ける
+  裸のSTATEへの書き込みは、そのままwindow.STATE側からも見える
+  （Node.jsでの参照等価性テストにより確認済み）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：既存の全STATE書き込み・参照ロジックには一切触れておらず、
+  影響は「これまでundefinedだったwindow.STATEが正しく動作するようになる」
+  という点に限定される。事前調査により、window.STATEを不整合に書き換える
+  既存コードが無いことを確認済みであり、リスクは極めて低いと判断する。
+
+確認事項（実機でのご確認をお願いする項目）：
+  - console.log(window.STATE === STATE) が true になること
+  - Repository.Dataset.getActive().length が 13 になること
+  - Dashboard / Indicators / Trend / Shipper / Field / CSV管理画面が
+    全て正常表示されること

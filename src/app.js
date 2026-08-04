@@ -365,6 +365,13 @@ const STATE = {
   shipperMode: 'group',
   _charts:   {},    // {id: ChartInstance}
 };
+window.STATE = STATE; // STATEはconst宣言のためwindowへ自動的に紐付かない。
+                      // Repository層（window.STATEを参照する設計）および
+                      // field_core.js/field_area.js/field_content.js/
+                      // field_product.js（同様にwindow.STATEを参照）が
+                      // 正しく動作するために必要な、参照渡しの別名付け。
+                      // オブジェクトのコピーではなく、STATEとwindow.STATEは
+                      // 常に同一のオブジェクトを指す。
 
 
 
