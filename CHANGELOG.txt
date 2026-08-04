@@ -2706,3 +2706,75 @@ STORE.save()残件数：
 GitHub投入可否：**GitHub投入可**
   理由：変更はfield_core.js内2行のみ。Node.js比較でCloud呼び出し順・
   STATE・副作用の完全一致を確認済み。
+
+Version5 緊急修正2 (2026-08-04) window.CENTER未定義バグの修正
+変更ファイル：
+  - src/app.js（編集：CENTER宣言の直後に window.CENTER = CENTER; を1行追加）
+  ※ 他の全ファイル（field_worker.js含む）は今回一切変更していない
+
+【背景】
+  Repository設計レビュー（window.STATE問題の再発防止チェック）にて、
+  window.STATEと全く同じパターンのバグがwindow.CENTERにも存在することが
+  判明した。CENTERはapp.js 334行で`const CENTER = (() => {...})();`と
+  宣言されており、window.CENTER = CENTERという代入がプロジェクト全体の
+  どこにも存在しなかった。field_worker.js 16-17行の
+  `(window.CENTER && CENTER.id) ? CENTER.id : 'default'`という判定が、
+  window.CENTERが常にundefinedのため常にfalseとなり、保存キーが
+  常に'default'にフォールバックしていた。
+
+事前確認：
+  実装前に、プロジェクト全体を以下の観点で検索し、いずれも該当なしを
+  確認した：
+  - window.CENTER = への既存の代入：0件
+  - window['CENTER'] = / window["CENTER"] = ：0件
+  - delete window.CENTER：0件
+  - Object.defineProperty(window, 'CENTER', ...)：0件
+  - const/let/var CENTER = の宣言：app.js 334行の1箇所のみ
+    （再代入・別インスタンス生成なし）
+
+追加した1行：
+  const CENTER = (() => { ... })();
+  window.CENTER = CENTER;  // ← 追加した1行（コメント除く）
+
+  既存のCENTER宣言・URLパラメータ判定（?c=/?center=）・
+  CONFIG.CENTERSからのセンター選択ロジックは1文字も変更していない。
+  STATEの修正時と同一のパターン（参照渡しの別名付け、コピーではない）。
+
+検証結果（Node.js）：
+  1. window.CENTER === CENTER：true
+  2. window.CENTER.id === CENTER.id：true（実際の値：kitasaitama等、
+     URLパラメータに応じて変化することを確認）
+  3. ?c=kitasaitama指定時：保存キーが
+     center-dashboard:kitasaitama:field-worker になることを確認
+  4. 別センターID（?c=toda）指定時：保存キーが
+     center-dashboard:toda:field-worker に正しく変わることを確認
+  5. URLパラメータなし時：文字列'kitasaitama'がCONFIG.CENTERSに
+     ヒットする場合はそれが使われ、ヒットしない場合はCONFIG.CENTERS[0]に
+     フォールバックする（既存仕様、今回変更なし）。今回のテスト環境では
+     CONFIG.CENTERS[0]のidが'kitasaitama'だったため、結果として
+     CONFIG.CENTERS[0]と一致することを確認
+  6. CENTERオブジェクトへのプロパティ追加が、window.CENTER側にも
+     即座に反映されることを確認（コピーではなく同一参照であることの証明）
+  7. Dashboard・CSV管理・現場画面：ロジック上、今回の変更は
+     field_worker.jsの保存キー生成にのみ影響し、他の画面・処理には
+     影響しない
+  8. Console Error：構文チェック・Node.js検証とも異常なし
+
+既存defaultキーへの影響：
+  ご指示通り、既存の center-dashboard:default:field-worker から
+  新しいセンター別キーへの自動移行処理は追加していない。既存のdefault
+  キーはそのまま残存する。実害は「最後に選択した作業者名が初回だけ
+  引き継がれない」可能性に留まり、業務データ本体（Dataset等）には
+  影響しない。
+
+他画面への影響：
+  なし。今回の変更はwindow.CENTERという参照を有効にするのみであり、
+  実際にwindow.CENTERを参照しているのはfield_worker.jsの1箇所のみ
+  （事前調査で確認済み）。Dashboard・CSV管理・Repository層等は
+  window.CENTERを参照していないため、影響を受けない。
+
+GitHub投入可否：**GitHub投入可**
+  理由：既存のCENTER宣言・選択ロジックには一切触れておらず、影響は
+  「これまでundefinedだったwindow.CENTERが正しく動作するようになる」
+  という点に限定される。事前調査により、window.CENTERを不整合に
+  書き換える既存コードが無いことを確認済みであり、リスクは極めて低い。

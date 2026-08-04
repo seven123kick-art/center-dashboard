@@ -336,6 +336,10 @@ const CENTER = (() => {
   const id = (p.get('c') || p.get('center') || 'kitasaitama').toLowerCase();
   return CONFIG.CENTERS.find(c => c.id === id) || CONFIG.CENTERS[0];
 })();
+window.CENTER = CENTER; // CENTERはconst宣言のためwindowへ自動的に紐付かない。
+                        // field_worker.js等がwindow.CENTERを参照する箇所が
+                        // 正しく動作するために必要な、参照渡しの別名付け
+                        // （window.STATE修正と同一パターン）。
 
 /* ════════════════════════════════════════════════════════════════
    03. Global State
