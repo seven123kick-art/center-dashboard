@@ -2947,3 +2947,72 @@ GitHub投入可否：**GitHub投入可**
   一切変更がない。Node.js検証で実装済み9メソッドの委譲動作・
   未実装8メソッドの明示的エラーを確認済み。現時点では未接続のため、
   アプリの実際の動作には一切影響しない。
+
+Version6 Phase3 (2026-08-04) cloud.js 公開API追加（capacityKey/libraryKey/putObject）
+変更ファイル：
+  - src/core/cloud.js（編集：3つの公開APIを追加）
+  ※ src/core/repository/cloud_repository.js（Step1実装分）を含む
+    他の全ファイルは今回一切変更していない。今回はcloud.js側の
+    公開API追加のみに限定した
+
+追加した公開API：
+  - capacityKey() { return this._capacityKey(); }
+  - libraryKey() { return this._libraryKey(); }
+  - async putObject(key, value, options = {}) { return this._uploadJSON(key, value, options); }
+
+  【命名についてのご指示への対応】
+  ご指示通り、`uploadJSON()`という内部実装名（_uploadJSON）をそのまま
+  公開する名前は採用せず、「通信責務を表す名前」として`putObject`を
+  採用した（ご提示いただいた候補`putObject`/`sendObject`のうち、
+  `putObject`を選定）。
+
+  選定理由：
+  - 既存の`downloadJSON()`が「読み取り」を表す動詞+対象、`dbGetState()`/
+    `dbStateKey()`が「DB操作」を明示する命名であるのに対し、
+    `putObject`はオブジェクトストレージ操作における一般的な語彙
+    （put/get）と一致し、「何を格納するか」という通信責務を素直に
+    表現できる
+  - 内部実装（_uploadJSON、チャンク分割・差分スキップ等のロジック）を
+    一切連想させない、独立した公開契約として設計できる
+
+内部実装は一切変更していない：
+  `_capacityKey()`/`_libraryKey()`/`_uploadJSON()`本体のロジックは
+  1文字も変更していない。3つの新規メソッドはいずれも既存の非公開
+  メンバーをそのまま呼び出すだけの薄いラッパーであり、
+  Version2 Phase4-5で確立した既存6メソッドと完全に同じパターン。
+
+比較検証（Node.js）：
+  - capacityKey()：期待通りのキー文字列（`{center}/capacity/master.json`）
+    を返すことを確認
+  - libraryKey()：期待通りのキー文字列（`{center}/library/data.json`）
+    を返すことを確認
+  - putObject()：`_uploadJSON()`へ、key・value・optionsの全引数が
+    正しくそのまま渡されることを確認（委譲の完全性を確認）
+
+既存APIとの整合性：
+  命名規則は、既存の「`_`を除いた同名メソッド」パターン
+  （capacityKey/libraryKey）と、「通信責務を表す新規命名」パターン
+  （putObject）の2種類が公開API内に混在することになる。ただし
+  putObjectについては、内部実装名を意図的に隠すという明確な設計判断に
+  基づくものであり、既存の`downloadJSON`（読み取り）との対比で
+  `putObject`（書き込み）という組み合わせも自然であるため、
+  整合性の面で問題はないと判断する。
+
+影響範囲：
+  追加のみであり、既存の`_capacityKey`/`_libraryKey`/`_uploadJSON`の
+  呼び出し元（pushCapacity/pushAll/syncSmart等）には一切影響しない。
+  今回追加した3メソッドは、現時点ではCloudRepository（Step1実装分）
+  からもまだ呼ばれていない（cloud_repository.jsは今回変更対象外の
+  ため、Step1の8未実装メソッドはまだ明示的エラーを投げる状態のまま）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：既存の全ロジックには変更がなく、追加した3メソッドも
+  Node.js検証で正しい委譲動作を確認済み。既存の呼び出し元・動作に
+  一切影響しない。
+
+次のステップ：
+  cloud_repository.js側の8つの未実装メソッド
+  （pushDataset/pushWorkerMonth/pushProductMonth/pushPlan/
+  pushLibrary/pushManifest/fetchCapacity/fetchLibrary）を、
+  今回追加したcapacityKey()/libraryKey()/putObject()を使って
+  実装することが可能になった。

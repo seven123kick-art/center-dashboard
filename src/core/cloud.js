@@ -1320,7 +1320,16 @@ var CLOUD = window.CLOUD = {
   manifestKey() { return this._manifestKey(); },
   planKey() { return this._planKey(); },
   libraryFileKey(fileName, fy) { return this._libraryFileKey(fileName, fy); },
+  capacityKey() { return this._capacityKey(); },
+  libraryKey() { return this._libraryKey(); },
   async downloadJSON(key) { return this._downloadJSON(key); },
+  /**
+   * 指定キーへJSONをアップロードする（通信責務を表す名前として意図的に
+   * putObjectと命名。内部実装名_uploadJSON()はそのまま公開しない
+   * ―― Version6 Phase3の設計判断）。
+   * 内部実装（チャンク分割・差分スキップ等）は一切変更していない。
+   */
+  async putObject(key, value, options = {}) { return this._uploadJSON(key, value, options); },
   async dbGetState(stateKey) { return this._dbGetState(stateKey); },
   dbStateKey(key) { return this._dbStateKey(key); },
   applyFullState(full) { return this._applyFullState(full); },
