@@ -66,7 +66,7 @@ window.PAST_LIBRARY = {
     }
 
     if (saved) {
-      STORE.save();
+      Repository.Storage.save();
       this.renderList();
       UI.toast(`${saved}件の過去資料を保存しました`);
     }
@@ -136,7 +136,7 @@ window.PAST_LIBRARY = {
       savedAt: new Date().toISOString()
     });
 
-    STORE.save();
+    Repository.Storage.save();
     this.renderList();
     UI.toast('過去資料を保存しました');
     this.clearForm();
@@ -196,7 +196,7 @@ window.PAST_LIBRARY = {
     }
 
     STATE.library=STATE.library.filter(i=>i.id!==id);
-    STORE.save();
+    Repository.Storage.save();
     this.renderList();
   },
 
@@ -207,7 +207,7 @@ window.PAST_LIBRARY = {
       const paths = (STATE.library || []).map(i=>i.storagePath).filter(Boolean);
       paths.forEach(p => CLOUD.deleteFile(p).catch(()=>{}));
       STATE.library=[];
-      STORE.save();
+      Repository.Storage.save();
       this.renderList();
     }
   },

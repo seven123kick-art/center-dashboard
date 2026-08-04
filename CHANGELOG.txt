@@ -2433,3 +2433,69 @@ GitHub投入可否：**GitHub投入可**
   慎重な検証が必要になる。Cloud非依存という条件だけで絞るなら、
   ⑩その他に分類された箇所のうち、past_library.js（ライブラリ保存、
   4箇所中3箇所がCloud非依存）が次点候補として考えられる。
+
+Version5 Phase6 (2026-07-25) Past Library Save Migration（方針修正：Cloud有無に関わらず4箇所全て対象）
+変更ファイル：
+  - src/modules/past_library.js（編集：STORE.save() 4箇所全てを
+    Repository.Storage.save()へ置換）
+  ※ CLOUD.uploadFile/deleteFile・CloudRepository・StorageRepository.save()
+    本体・app.js・center.htmlはいずれも今回一切変更していない
+
+【方針修正の経緯】
+  当初のご指示では「Cloud非依存の3箇所のみ対象、全削除処理（Cloud依存）は
+  対象外」という前提だったが、事前調査の結果、4箇所全て（新規追加、
+  保存、個別削除、全削除）が何らかの形でCloud呼び出し
+  （CLOUD.uploadFile/CLOUD.deleteFile）を含んでいることが判明したため、
+  一旦実装を停止して報告した。
+  その後のご指示により、「STORE.save()の置き換えのみを対象とし、
+  Cloud呼び出しの有無は対象判定に影響しない」という方針に修正され、
+  4箇所全てを今回の対象として実装した。
+
+事前調査で判明したCloud依存の実態：
+  - saveBulkSelected()（69行）：ループ内で毎回CLOUD.uploadFile()を
+    無条件に呼ぶ
+  - save()（139行）：this._selectedFileが設定されている場合のみ
+    CLOUD.uploadFile()を呼ぶ（条件付き）
+  - delete(id)（199行）：item.storagePathが存在する場合のみ
+    CLOUD.deleteFile()を呼ぶ（条件付き）
+  - clearAll()（210行）：各項目のstoragePathに対しCLOUD.deleteFile()を
+    呼ぶ
+
+実装内容：
+  4箇所とも、STORE.save(); を Repository.Storage.save(); へ置換した
+  のみ。Cloud呼び出し（CLOUD.uploadFile/deleteFile）の呼び出し内容・
+  タイミング・await順序は一切変更していない。STORE.save()はいずれの
+  箇所でもCloud呼び出しの「後」に位置しており、この前後関係も
+  変更していない。
+
+比較検証（Node.js、タイムスタンプを固定して実施）：
+  ①save()（ファイル添付あり）：
+    - 呼び出し順：CLOUD.uploadFile → Repository.Storage.save
+      （→内部でSTORE.save）という順序が変更前後で完全一致
+    - STATE.library：完全一致（fileName/storagePath等のメタデータ含む）
+    - STORE.save()実行回数：変更前後とも1回
+
+  ②delete(id)（storagePathあり）：
+    - 呼び出し順：CLOUD.deleteFile → Repository.Storage.save
+      という順序が変更前後で完全一致
+    - STATE.library：完全一致（削除後の配列内容）
+
+  saveBulkSelected()・clearAll()についても同一の構造的パターン
+  （Cloud呼び出し→STORE.save()という順序）であり、置換した行は
+  他2箇所と同じ性質のものであることをコードレビューで確認した。
+
+副作用：
+  なし。Cloud呼び出しの回数・順序・引数、STATE.libraryの内容、
+  renderList()等の後続処理は変更前と完全に同一。
+
+Repository移行率：
+  StorageRepository.save()の実利用箇所：8/46（約17.4%）
+  （Master保存2箇所＋Plan保存2箇所＋Past Library保存4箇所）
+
+STORE.save()残件数：
+  実呼び出し38箇所（変更前42箇所から今回の4箇所を除いた数）。
+  加えてstorage_repository.js内の委譲呼び出し1箇所（カウント対象外）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はpast_library.js内4行のみ。Node.js比較でCloud呼び出し順・
+  STATE・副作用の完全一致を確認済み。
