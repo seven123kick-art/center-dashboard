@@ -23,15 +23,43 @@ Module
     （プロジェクト全体の設計方針：他ファイルから私有メンバーへ直接
     アクセスしない、を厳守）。
 
-公開API（Version6 Step1〜Phase4で全17メソッド実装完了）
+公開API（Version6 Step1〜Phase8-Cで全25メソッド実装完了）
     window.CLOUD_REPOSITORY
 
-    【実装済み・全17メソッド、CLOUDの公開APIへ100%委譲】
+    【実装済み・全25メソッド、CLOUDの公開APIへ100%委譲】
     fetchDataset() / fetchWorkerMonth() / fetchProductMonth() /
     fetchPlan() / fetchManifest() / fetchCapacity() / fetchLibrary() /
+    fetchFullState() /
     pushDataset() / pushWorkerMonth() / pushProductMonth() /
     pushPlan() / pushLibrary() / pushManifest() / pushCapacity() /
+    pushFullState() / pushMemos() /
+    buildManifest() / buildFullState() /
+    validateWorkerMonthRecord() / validateProductMonthRecord() /
+    removeLegacyArtifacts() /
     uploadFile() / deleteFile() / createSignedUrl()
+
+Phase8-Cでの追加（Phase8-Bの設計レビューに基づく）
+    fetchFullState()/pushFullState()/pushMemos()/buildManifest()/
+    buildFullState()/validateWorkerMonthRecord()/
+    validateProductMonthRecord()/removeLegacyArtifacts()の8メソッドを
+    追加した。いずれもcloud.js側にPhase8-Cで追加した公開API
+    （fullStateKey/memosKey/legacyKey/fieldKey/buildManifest/
+    buildFullState/validateWorkerMonthRecord/validateProductMonthRecord/
+    removeStorageObjects）への委譲のみで実装しており、
+    CloudRepository自身は一切ロジックを持たない。
+
+    buildFullState()は、CLOUD.buildFullState()（内部で_makeFullState()を
+    呼ぶ）が持つ「sanitizePersonalDataState(STATE)を呼びSTATEを直接
+    書き換える」という既存の副作用を、変更・除去せずそのまま継承する。
+
+    validateWorkerMonthRecord()/validateProductMonthRecord()は、
+    既存の_validWorkerMonthRecord()/_validProductMonthRecord()と同じ
+    (record, meta)という2引数シグネチャをそのまま踏襲している
+    （ymではない）。
+
+    removeLegacyArtifacts()は、CLOUD.legacyKey()/CLOUD.fieldKey()/
+    CLOUD.removeStorageObjects()の3つの委譲呼び出しの組み合わせのみで
+    実装しており、Supabase Storage SDKを直接扱うコードは一切含まない。
 
 Phase4での実装経緯
     Step1時点で8メソッドが未実装だったのは、CLOUD（core/cloud.js）側に
@@ -189,6 +217,86 @@ TODO(V6)
         async pushManifest(manifest) {
             const CLOUD = _requireCloud();
             return CLOUD.putObject(CLOUD.manifestKey(), manifest);
+        },
+
+        /* ---------- Version6 Phase8-Cで追加 ---------- */
+
+        /**
+         * State同期用の軽量フルステートを取得する。
+         * 内部で呼ぶ既存処理：CLOUD.fullStateKey() + CLOUD.downloadJSON()
+         */
+        async fetchFullState() {
+            const CLOUD = _requireCloud();
+            return CLOUD.downloadJSON(CLOUD.fullStateKey());
+        },
+
+        /**
+         * State同期用の軽量フルステートをアップロードする。
+         * 内部で呼ぶ既存処理：CLOUD.fullStateKey() + CLOUD.putObject()
+         */
+        async pushFullState(fullState) {
+            const CLOUD = _requireCloud();
+            return CLOUD.putObject(CLOUD.fullStateKey(), fullState);
+        },
+
+        /**
+         * メモデータをアップロードする。
+         * 内部で呼ぶ既存処理：CLOUD.memosKey() + CLOUD.putObject()
+         */
+        async pushMemos(memos) {
+            const CLOUD = _requireCloud();
+            return CLOUD.putObject(CLOUD.memosKey(), memos);
+        },
+
+        /**
+         * 現在のSTATEからManifestを構築する（通信を伴わない）。
+         * 内部で呼ぶ既存処理：CLOUD.buildManifest()
+         */
+        buildManifest() {
+            const CLOUD = _requireCloud();
+            return CLOUD.buildManifest();
+        },
+
+        /**
+         * 現在のSTATEから軽量フルステートを構築する（通信を伴わない）。
+         * 【注記】CLOUD.buildFullState()は内部でSTATEへの副作用
+         * （sanitizePersonalDataStateによる個人情報除去）を持つ。
+         * この副作用は既存動作の一部であり、本メソッドは一切変更・
+         * 除去せずそのまま委譲する。
+         * 内部で呼ぶ既存処理：CLOUD.buildFullState()
+         */
+        buildFullState() {
+            const CLOUD = _requireCloud();
+            return CLOUD.buildFullState();
+        },
+
+        /**
+         * 作業者月別レコードの妥当性を検証する。
+         * 内部で呼ぶ既存処理：CLOUD.validateWorkerMonthRecord()
+         */
+        validateWorkerMonthRecord(record, meta) {
+            const CLOUD = _requireCloud();
+            return CLOUD.validateWorkerMonthRecord(record, meta);
+        },
+
+        /**
+         * 商品住所月別レコードの妥当性を検証する。
+         * 内部で呼ぶ既存処理：CLOUD.validateProductMonthRecord()
+         */
+        validateProductMonthRecord(record, meta) {
+            const CLOUD = _requireCloud();
+            return CLOUD.validateProductMonthRecord(record, meta);
+        },
+
+        /**
+         * 旧形式のストレージオブジェクト（data_v5.json、field/data.json）を
+         * 削除する。
+         * 内部で呼ぶ既存処理：CLOUD.legacyKey() + CLOUD.fieldKey() +
+         * CLOUD.removeStorageObjects()
+         */
+        async removeLegacyArtifacts() {
+            const CLOUD = _requireCloud();
+            return CLOUD.removeStorageObjects([CLOUD.legacyKey(), CLOUD.fieldKey()]);
         },
 
         /* ---------- ファイル系：実装済み（既存の同名公開APIへ委譲） ---------- */

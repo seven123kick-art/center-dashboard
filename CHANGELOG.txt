@@ -3169,3 +3169,201 @@ GitHub投入可否：**GitHub投入可**
   syncState/syncAll）の実装が完了した。残るはsyncLegacy（前提条件
   待ち）と、既存画面への接続（Version3〜5と同じ、比較検証を伴う
   段階的接続が必要）。
+
+Version6 Phase8 (2026-08-04) SyncCoordinator 再設計・実装（用途別API）
+変更ファイル：
+  - src/core/repository/sync_coordinator.js（全面書き換え：用途別APIへ再設計）
+  ※ CloudRepository・DatasetRepository・StorageRepository・cloud.js・
+    app.js・auto_sync.jsはいずれも今回一切変更していない
+
+追加・変更した公開API：
+  - syncBoot(preferredView)：新規追加。pullInitialForBoot()相当
+  - syncFieldFiscalYear(fiscalYear, options)：新規追加。
+    pullFieldDataForFiscalYear()相当
+  - syncSmart()：既存メソッド名を維持しつつ、CLOUD.syncSmart()相当の
+    実装に全面差し替え（Phase5時点は未実装スタブだった）
+  - syncPush(options)：新規追加。pushAll()相当
+  - syncLegacy()：{ ok:false, reason:'legacy_not_ready' } を返す
+    明示的スタブ（変更なし、理由を明記）
+  - syncNormal() / syncState() / syncAll()：Phase5実装分。既存4関数の
+    いずれとも一致しない独自設計だったため、削除はせず、明示的な
+    deprecatedエラーを返す形に変更（@deprecatedコメント付き）
+
+既存4関数との一致表：
+
+  【syncBoot() vs pullInitialForBoot()】
+  一致：Manifest取得、年度スコープ絞り込み(targetYms)、削除マーカーを
+    マージしない仕様、古い削除フラグの自動クリア、Dataset取得条件
+    （削除済み除外・ローカルより新しいもののみ）、Plan取得と
+    updatedAtマージ、Capacity取得条件（ローカル未設定時のみ）、
+    Tombstone再適用、個人情報サニタイズ、FIELD_DATA_ACCESS.invalidate、
+    changed時のみ永続化、戻り値構造(source:'boot_fiscal_year_skdl_only')、
+    Legacyフォールバック
+  不一致：DailyRecordsの反映（CloudRepositoryにfetchFullState()が
+    無いため未実装）
+
+  【syncFieldFiscalYear() vs pullFieldDataForFiscalYear()】
+  **完全一致**。年度別キャッシュ、多重実行の合流、削除マーカー非マージ、
+    対象年度絞り込み、Worker/Product妥当性検証、取得条件、
+    Tombstone再適用、FIELD_DATA_ACCESS.invalidate、条件付き永続化、
+    戻り値構造の全てが一致。CloudRepositoryの範囲内で完全に
+    実装できたため、不一致箇所なし。
+
+  【syncSmart() vs CLOUD.syncSmart()】
+  一致：busy排他制御、AUTO_SYNC.withoutSyncAsync、Manifestベースの
+    不足Dataset取得、Plan/Worker/Product/CapacityのPush、
+    Manifestの再構築とPush、戻り値構造(source:'smart+manifest')
+  不一致：Cloud側FullStateの取得・mergeFullState()によるマージ
+    （CloudRepositoryにfetchFullState()が無いため、ローカル状態を
+    そのまま使用）、最終FullStateのPush（pushFullState()が無いため
+    未実装）、旧形式ファイル削除（Storage.remove()相当のAPIが無いため
+    未実装）
+
+  【syncPush() vs pushAll()】
+  一致：busy排他制御、Dataset（history除外）・Worker・Product・
+    Capacity・PlanのPush、Libraryの条件付きPush、Manifestの
+    再構築とPush、STATE非変更、ローカル保存なし
+  不一致：Memosのアップロード（CloudRepositoryにpushMemos()が無いため
+    未実装）、FullStateのアップロード（pushFullState()が無いため
+    未実装）、onlyChanged=false時の旧形式ファイル削除
+    （Storage.remove()相当のAPIが無いため未実装）
+
+一致しなかった箇所の共通原因：
+  全てCloudRepositoryに以下のAPIが存在しないことに起因する：
+  fetchFullState() / pushFullState() / pushMemos() /
+  Storage.remove()相当の削除API。これらは「CloudRepository変更禁止」
+  というご指示のため、今回は追加していない。
+
+CloudRepositoryに存在しない機能への対応（既存仕様の忠実な複製）：
+  Manifest構築（_makeManifest相当）、FullState構築（_makeFullState相当）、
+  作業者/商品住所レコードの妥当性検証（_validWorkerMonthRecord/
+  _validProductMonthRecord相当）は、cloud.js側の非公開メンバーへ直接
+  アクセスせず、sync_coordinator.js内に忠実な複製（ロジック変更なし）
+  として実装した。
+
+未実装で残したもの：
+  - syncLegacy()：CloudRepositoryにLegacy取得APIが無く、全センター
+    移行完了確認も未充足のため
+  - syncBoot()のDailyRecords反映、syncSmart()のFullState関連2箇所、
+    syncPush()のMemos・FullState・旧形式削除：いずれもCloudRepositoryの
+    現在のAPIでは実装不可能な部分
+
+Node比較結果（モック環境、Node.jsで実施）：
+  - syncBoot vs pullInitialForBoot：戻り値・取得Dataset(年度スコープ
+    絞り込み含む)・planData・capacity・deleted（マージされないこと）が
+    完全一致することを確認
+  - syncFieldFiscalYear vs pullFieldDataForFiscalYear：戻り値・
+    workerCsvData・productAddressDataが完全一致。年度別キャッシュ・
+    多重実行合流も期待通り動作することを確認
+  - syncPush：history除外・Push順序（Manifestが最後）・STATE非変更・
+    busy制御を確認
+  - syncSmart：AUTO_SYNC抑制下での実行、呼び出し順序を確認
+  - 非推奨メソッド3件・syncLegacy：それぞれ期待通りのレスポンスを確認
+
+既存コードへの影響：なし。CloudRepository・DatasetRepository・
+  StorageRepository・cloud.js・app.js・auto_sync.jsは全てハッシュ
+  比較で無変更を確認済み。既存画面への接続も行っていない
+  （未接続のまま）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：変更はsync_coordinator.js内のみ。他の全ファイルに変更はなく、
+  Node.js比較で既存4関数のうち3.5個相当（syncFieldFiscalYearは完全
+  一致、syncBoot/syncSmart/syncPushはFullState関連を除き一致）の
+  忠実な再現を確認済み。現時点では未接続のため、アプリの実際の動作
+  には一切影響しない。
+
+次に安全に実接続できる入口：
+  syncFieldFiscalYear()が既存実装と完全一致（一致しない箇所が0件）の
+  ため、現時点で最も安全に接続できる候補である。ただし接続には
+  app.js側の変更が必要になるため、今回のご指示（他ファイル変更禁止）
+  の範囲では実施していない。
+
+Version6 Phase8-C (2026-08-04) CloudRepository依存解消 実装
+変更ファイル：
+  - src/core/cloud.js（編集：Step1・Step2の公開API 9個を追加）
+  - src/core/repository/cloud_repository.js（編集：Step3の8メソッドを追加）
+  ※ SyncCoordinator・DatasetRepository・StorageRepository・app.js・
+    auto_sync.jsはいずれも今回一切変更していない。SyncCoordinator側の
+    複製ロジックの置換・既存画面への接続・AUTO_SYNC接続は今回一切
+    行っていない
+
+Step1：cloud.jsへ薄いラッパー8個を追加
+  fullStateKey() / memosKey() / legacyKey() / fieldKey() /
+  buildManifest() / buildFullState() / validateWorkerMonthRecord(record, meta) /
+  validateProductMonthRecord(record, meta)
+  いずれも既存の非公開メンバー（_fullStateKey/_memosKey/_legacyKey/
+  _fieldKey/_makeManifest/_makeFullState/_validWorkerMonthRecord/
+  _validProductMonthRecord）をそのまま呼ぶだけ。新しいロジックは
+  一切追加していない。
+
+Step2：cloud.jsへremoveStorageObjects(keys)を新規追加
+  pushAll()/syncSmart()/purgePersonalData()の3箇所に重複して存在した
+  「_client()取得→storage.from(bucket).remove(keys)」という削除処理を、
+  汎用の1メソッドへ抽出した。既存の3箇所（pushAll/syncSmart/
+  purgePersonalData）のインラインコード自体は一切変更していない
+  （新設メソッドを追加しただけで、既存呼び出し元をこのメソッド経由に
+  置き換える作業は今回行っていない）。_client()/_bucket()は本メソッド
+  内部でのみ使用し、他へは公開していない。
+
+Step3：CloudRepositoryへ8メソッドを追加
+  fetchFullState() / pushFullState(fullState) / pushMemos(memos) /
+  buildManifest() / buildFullState() /
+  validateWorkerMonthRecord(record, meta) /
+  validateProductMonthRecord(record, meta) / removeLegacyArtifacts()
+  全てcloud.js側の公開API（Step1・Step2で追加した9個、および既存の
+  putObject/downloadJSON）への委譲のみで実装。CloudRepository自身は
+  ロジックを一切持たない。
+
+既存コードとの差分：
+  cloud.js：Step1・Step2の追加箇所以外、1文字も変更していない
+  （既存の_makeManifest/_makeFullState/_validWorkerMonthRecord/
+  _validProductMonthRecord/pushAll/syncSmart/purgePersonalData等の
+  ロジックは無変更）。
+  CloudRepository：既存17メソッドは無変更、8メソッドを追加。
+
+副作用有無：
+  buildFullState()（cloud.js・CloudRepositoryとも）は、既存の
+  _makeFullState()が持つ「sanitizePersonalDataState(STATE)を呼び
+  STATEを直接書き換える」という副作用を、そのまま継承している。
+  この副作用は変更・除去していない（ご指示通り）。
+  それ以外の7メソッドには副作用なし（fetchFullState/pushMemos/
+  pushFullStateは通信のみ、buildManifest/validateWorkerMonthRecord/
+  validateProductMonthRecordは純粋関数、removeLegacyArtifactsは
+  Storage削除という既存同様の副作用のみ）。
+
+validate系のシグネチャについて：
+  ご指摘・設計書の通り、(record, ym)ではなく既存と同じ
+  (record, meta)という2引数構成で実装した。既存の
+  _validWorkerMonthRecord/_validProductMonthRecordのシグネチャは
+  変更していない。
+
+Node.js比較結果：
+  - Step1の8ラッパー：fullStateKey/memosKey/legacyKey/fieldKeyが
+    正しいキー文字列を返すことを確認。buildManifest()が既存構造
+    （version/center/savedAt/datasets等）を返すことを確認。
+    buildFullState()実行時にsanitizePersonalDataStateが呼ばれる
+    （副作用が保持されている）ことを確認。validateWorkerMonthRecord/
+    validateProductMonthRecordが、不正データでfalse相当
+    （既存の戻り値の型・quirksも含め）、正常データでtrueを返す
+    ことを確認
+  - Step2のremoveStorageObjects：正常時・Supabase未設定時・例外時の
+    3パターンで、既存のtry-catch握り潰しパターンと一致する挙動を確認
+  - Step3の8メソッド：全てcloud.js側の公開APIへ正しく委譲されている
+    ことを、呼び出しログで確認。removeLegacyArtifacts()が
+    legacyKey()/fieldKey()の両方を正しくremoveStorageObjects()へ
+    渡すことを確認
+  - 既存17メソッド（fetchDataset等）：今回変更していないため、
+    回帰確認として動作継続を確認
+
+既存動作への影響：
+  なし。cloud.jsの既存インライン処理（pushAll/syncSmart/
+  purgePersonalData内の削除処理含む）は一切変更していない。
+  CloudRepositoryの既存17メソッドも無変更。今回追加した17個の
+  新規メソッド（cloud.js 9個＋CloudRepository 8個）は、既存の
+  どの呼び出し元からも呼ばれていない（未接続のまま）。
+  SyncCoordinatorの複製ロジック置換・既存画面への接続・AUTO_SYNC接続は
+  一切行っていない。
+
+GitHub投入可否：**GitHub投入可（CloudRepository完成、未接続状態）**
+  今回の投入は「既存画面へ接続可能」という意味ではなく、
+  「未接続状態でのRepository完成」を意味する。

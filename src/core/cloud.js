@@ -1322,6 +1322,35 @@ var CLOUD = window.CLOUD = {
   libraryFileKey(fileName, fy) { return this._libraryFileKey(fileName, fy); },
   capacityKey() { return this._capacityKey(); },
   libraryKey() { return this._libraryKey(); },
+  fullStateKey() { return this._fullStateKey(); },
+  memosKey() { return this._memosKey(); },
+  legacyKey() { return this._legacyKey(); },
+  fieldKey() { return this._fieldKey(); },
+  buildManifest() { return this._makeManifest(); },
+  /**
+   * 【重要】_makeFullState()は内部で sanitizePersonalDataState(STATE) を
+   * 呼び、STATEを直接書き換える副作用を持つ。この副作用は既存動作の
+   * 一部であり、本ラッパーは一切変更・除去せずそのまま呼び出す。
+   */
+  buildFullState() { return this._makeFullState(); },
+  validateWorkerMonthRecord(record, meta) { return this._validWorkerMonthRecord(record, meta); },
+  validateProductMonthRecord(record, meta) { return this._validProductMonthRecord(record, meta); },
+  /**
+   * Supabase Storageから指定キー群を削除する（pushAll()/syncSmart()/
+   * purgePersonalData()内に重複して存在した削除処理を、汎用の1メソッドへ
+   * 抽出したもの。既存の削除処理自体（_client()→storage.from(bucket).remove()
+   * という手順）は一切変更していない。_client()/_bucket()は本メソッド内部
+   * でのみ使用し、他へは公開しない。
+   */
+  async removeStorageObjects(keys) {
+    try {
+      const sb = await this._client();
+      if (sb) await sb.storage.from(this._bucket()).remove(keys);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
   async downloadJSON(key) { return this._downloadJSON(key); },
   /**
    * 指定キーへJSONをアップロードする（通信責務を表す名前として意図的に
