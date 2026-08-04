@@ -2890,3 +2890,60 @@ Version5 StorageRepository Migration 一括実施 (2026-08-04)
     center.html、companies.js、workers.js、capacity.js、
     past_library.js、storage_repository.js）：ハッシュ比較にて無変更を
     確認済み
+
+Version6 Step1 (2026-08-04) CloudRepository Skeleton（設計APIの実装）
+変更ファイル：
+  - src/core/repository/cloud_repository.js（編集：設計した公開APIを実装）
+  ※ src/core/cloud.js（CLOUD）を含む他の全ファイルは今回一切変更していない
+
+実装内容：
+  Version6 CloudRepository API Design（前回レビュー）で設計した17メソッド
+  のうち、CLOUDの既存公開APIへ100%委譲できる9メソッドを実装し、
+  残る8メソッドは「なぜ実装できないか」を明記した上で、明示的な
+  エラーを投げるスタブとして実装した。
+
+  【実装済み（9メソッド、CLOUDの既存公開APIへの薄い委譲）】
+  - fetchDataset(ym, type) → CLOUD.downloadJSON(CLOUD.datasetKey(ym, type))
+  - fetchWorkerMonth(ym) → CLOUD.downloadJSON(CLOUD.workerMonthKey(ym))
+  - fetchProductMonth(ym) → CLOUD.downloadJSON(CLOUD.productMonthKey(ym))
+  - fetchPlan() → CLOUD.downloadJSON(CLOUD.planKey())
+  - fetchManifest() → CLOUD.downloadJSON(CLOUD.manifestKey())
+  - pushCapacity() → CLOUD.pushCapacity()
+  - uploadFile(key, file) → CLOUD.uploadFile(key, file)
+  - deleteFile(key) → CLOUD.deleteFile(key)
+  - createSignedUrl(key) → CLOUD.createSignedUrl(key)
+
+  【未実装（8メソッド、明示的エラーを投げるスタブ）】
+  - pushDataset() / pushWorkerMonth() / pushProductMonth() /
+    pushPlan() / pushManifest()：CLOUD側に「1件だけ」を通信する
+    公開メソッドが存在しない（pushMonth()/pushAll()は複合処理のため
+    代用不可）
+  - pushLibrary() / fetchLibrary()：CLOUD側にライブラリ一覧の保存キーを
+    返す公開メソッド（libraryKey相当）が存在しない
+    （libraryFileKey()は個別添付ファイル用の別物）
+  - fetchCapacity()：CLOUD側にキャパシティの保存キーを返す公開メソッド
+    （capacityKey相当）が存在しない
+
+  【重要な設計判断】上記8メソッドは、CLOUDの非公開メンバー
+  （_capacityKey/_libraryKey/_uploadJSON等）へ直接アクセスすれば
+  技術的には実装できたが、「他ファイルの非公開メンバーへ直接
+  アクセスしない」というプロジェクト全体の設計方針、および
+  「cloud_repository.jsのみ変更」というご指示を踏まえ、あえて
+  実装せず、理由を明記したエラーを投げる形にとどめた。
+
+比較検証（Node.js）：
+  - 実装済み9メソッド：それぞれ想定通りCLOUD側の公開メソッドへ
+    正しい引数で委譲されることを確認（呼び出しログで全経路を確認）
+  - 未実装8メソッド：いずれも「なぜ利用できないか」を含む明示的な
+    Errorを投げることを確認（黙って誤った動作をしないことを確認）
+  - CLOUD未接続時：明示的なErrorが発生することを確認
+    （他のRepositoryファイルと同じ方針）
+
+副作用：なし。既存画面・既存処理からは今回も一切接続していない
+  （未接続のまま）。
+
+GitHub投入可否：**GitHub投入可**
+  理由：追加のみで、CLOUD（core/cloud.js）を含む既存の全ファイルには
+  一切変更がない。Node.js検証で実装済み9メソッドの委譲動作・
+  未実装8メソッドの明示的エラーを確認済み。現時点では未接続のため、
+  アプリの実際の動作には一切影響しない。
