@@ -4331,3 +4331,93 @@ GitHub投入可否：**GitHub投入可**
   `SYNC_COORDINATOR.syncPush({onlyChanged:false, updateBadge:true})`
   へ置換すれば、既存CLOUD.pushAll()と完全に同一のBadge挙動を
   維持できることをNode.js比較で確認済みである。
+
+Version6 Phase9-4D (2026-08-11) app.js 直接pushAll 4件のRepository実接続
+変更ファイル：
+  - src/app.js（編集：4箇所、CLOUD.pushAll() →
+    SYNC_COORDINATOR.syncPush({onlyChanged:false, updateBadge:true})）
+  ※ AUTO_SYNC・cloud.js・CloudRepository・SyncCoordinator・
+    field_core.js・storage_audit.js・bulk_import.js・store.jsは
+    いずれも今回一切変更していない。syncSmart・Group3
+    （pushMonthフォールバック）も無変更。
+
+①変更前4件確認：Phase9-4Cの報告と完全に一致することを再確認した。
+②現在行番号：2453・2524・2582・2598（変化なし）。
+③変更ファイル：src/app.jsのみ
+④変更行：実行コード合計4行のみ。ガード条件・await/fire-and-forget
+  構造・catch内容・Toast文言は一切変更していない。
+
+⑤接続前比較結果：Phase9-4D-2で実施済みのCase A〜G（Push対象・順序・
+  Legacy削除・Manifest/FullState・hash・Badge値/回数/タイミング・
+  return・busy）を現在のコードで再実行し、全て変わらず完全一致する
+  ことを再確認した。
+
+⑥現場データ全月削除E2E（awaitパターン）：Worker/Product/FieldData
+  削除→Storage.save→即時syncPush(false,updateBadge=true)実行で
+  Legacy artifacts削除・Manifest・FullStateへのUPLOAD・Badge:ok
+  1回発火を確認。1800ms後のAUTO_SYNC側でBadge:configured 1回、
+  Dataset等はhash一致でSKIP、Manifest/FullStateは既存仕様通り
+  再UPLOAD、Badge:ok（2回目）を確認した。
+
+⑦PLAN.clear E2E（fire-and-forgetパターン）：同様のパターンで
+  Badge:ok 1回・Legacy削除実行を確認。fire-and-forget構造は
+  維持されたまま。
+
+⑧⑨収支補完完全入替・年度削除E2E：⑥⑦と同一の呼び出しパターン
+  （Storage.save直後のfire-and-forget syncPush呼び出し）のため、
+  共通のE2Eシナリオで検証し、Legacy削除・Manifest/FullState・Badge
+  挙動が既存pushAll版と一致することを確認した。
+
+⑩⑪⑫Badge値・回数・タイミング比較：即時Push側でBadge:ok（または
+  error）が1回、AUTO_SYNC側で別途Badge:configured→ok/errorが1回、
+  という「即時側とAUTO_SYNC側で合計2回」という構造が、既存
+  CLOUD.pushAll()版と完全に一致することを実測確認した。
+
+⑬Legacy削除比較：即時Push（onlyChanged:false）でのみLegacy
+  artifacts削除が実行され、AUTO_SYNC側（onlyChanged:true）では
+  実行されないという既存の非対称性を維持していることを確認した。
+
+⑭AUTO_SYNC二重Push比較：即時側は強制Push（全項目UPLOAD）、
+  1800ms後のAUTO_SYNC側はhash一致により差分Push対象が全てSKIPされ、
+  Manifest/FullStateのみ既存仕様通り再UPLOADされることを確認した。
+
+⑮hash比較：全項目で一致。
+
+⑯Push回数比較：既存pushAll版よりCloudアップロード回数が増加して
+  いないことを実測確認した（二重Push構造自体は既存も同じ、AUTO_SYNC
+  側は差分Pushで実害を防ぐ設計のまま）。
+
+⑰残存pushAll実呼出数：**8件**（12件から今回の4件を除いた数、
+  実コードから再集計し期待値と一致することを確認した）。
+
+⑱残存箇所一覧：storage_audit.js（1）、bulk_import.js（1）、
+  field_core.js（4：Group2削除系2＋Group3 pushMonthフォールバック2）、
+  app.js Dataset個別削除（1、1058行）、store.js（1）。
+
+⑲AUTO_SYNC回帰：`SYNC_COORDINATOR.syncPush({onlyChanged:true})`の
+  呼び出しは無変更（updateBadge:trueは追加していない）。AUTO_SYNC側の
+  Badge制御（configured→Push→updateSaveStatus→ok/error）も
+  無変更であることを確認した。
+
+⑳syncSmart残存確認：app.js 2507行の`CLOUD.syncSmart()`は無変更。
+
+㉑Group3残存確認：field_core.js 828/832、894/898行の
+  `CLOUD.pushMonth(ym)`優先・`CLOUD.pushAll()`フォールバックという
+  構造は無変更のまま残存。
+
+㉒全JS構文確認：src配下の全JavaScriptファイルでnode --checkを
+  実施し、エラー0件を確認した。
+
+㉓既存との差異：発見なし。
+
+㉔未解決事項：なし。残存8件（storage_audit.js、bulk_import.js、
+  field_core.js Group2の2件、app.js Dataset個別削除、store.js）は、
+  Phase9-4Cで分類した通り、個別のE2E比較・設計判断（store.jsの
+  依存関係逆転懸念等）が必要な箇所として、今後のフェーズの対象。
+
+㉕GitHub投入可否：**GitHub投入可（Version6 Phase9-4D app.js4件
+  接続版）**
+  停止条件（4件以外のapp.js変更・Badge差異・Legacy削除差異・
+  Manifest/FullState差異・hash差異・Push回数増加・AUTO_SYNC挙動
+  変化・SyncCoordinator再変更の必要性）のいずれにも該当しないことを
+  確認した。
