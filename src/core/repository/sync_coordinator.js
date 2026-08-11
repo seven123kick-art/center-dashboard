@@ -20,6 +20,16 @@ Module
       - syncPush()：既存CLOUD.pushAll()相当
       - syncLegacy()：未実装のまま維持
 
+    Version6 Phase9-4I-2で、syncMonth(ym)を追加した。既存
+    CLOUD.pushMonth(ym)（field_core.jsのimportWorker/importProduct内
+    のfallback構造で使われている、対象月のDataset/Worker/Product・
+    Manifest/FullStateをまとめてPushする既存メソッド）への薄い
+    委譲のみ。CloudRepository.pushMonth()経由で委譲される。
+    busy制御・Badge処理・対象抽出ロジック・Manifest/FullState構築は
+    一切複製していない。field_core.js側の接続、および既存fallback
+    構造（pushMonth API不存在時のみpushAllへ切替という判断）は
+    今回対象外とし、変更していない。
+
     Version6 Phase8-Cで、CloudRepositoryへbuildManifest()/
     buildFullState()/validateWorkerMonthRecord()/
     validateProductMonthRecord()/fetchFullState()/pushFullState()/
@@ -509,6 +519,29 @@ TODO(V6以降)
         async syncLegacy(options = {}) {
             if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
             return window.CLOUD_REPOSITORY.pullLegacy(options);
+        },
+
+        /**
+         * 対象月のDataset/Worker/Product、およびManifest/FullStateを
+         * まとめてアップロードする（Version9-4I-1調査で確認した既存
+         * CLOUD.pushMonth(ym)相当。CloudRepository.pushMonth()経由で
+         * 既存CLOUD.pushMonth()へ委譲されるのみ）。
+         *
+         * 【重要】busy制御・Badge処理・Dataset/Worker/Product抽出
+         * ロジック・Manifest/FullState構築処理は、いずれも
+         * SyncCoordinatorへ複製していない。既存CLOUD.pushMonth()の
+         * 戻り値・副作用をそのまま返す。
+         *
+         * 【重要】pushMonth APIが利用できない場合のpushAllへの
+         * fallback判断は、今回もSyncCoordinator側へ移動していない。
+         * field_core.js側の既存ガード
+         * （if (CLOUD?.pushMonth) { ... } else if (CLOUD?.pushAll) { ... }）
+         * をそのまま維持する方針のため、syncMonth()自身には
+         * fallbackロジックを一切持たせていない。
+         */
+        async syncMonth(ym) {
+            if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
+            return window.CLOUD_REPOSITORY.pushMonth(ym);
         },
 
         /**

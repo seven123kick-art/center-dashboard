@@ -23,20 +23,30 @@ Module
     （プロジェクト全体の設計方針：他ファイルから私有メンバーへ直接
     アクセスしない、を厳守）。
 
-公開API（Version6 Step1〜Phase9-2Cで全28メソッド実装完了）
+公開API（Version6 Step1〜Phase9-4I-2で全29メソッド実装完了）
     window.CLOUD_REPOSITORY
 
-    【実装済み・全28メソッド、CLOUDの公開APIへ100%委譲】
+    【実装済み・全29メソッド、CLOUDの公開APIへ100%委譲】
     fetchDataset() / fetchWorkerMonth() / fetchProductMonth() /
     fetchPlan() / fetchManifest() / fetchManifestWithDbFallback() /
     fetchCapacity() / fetchLibrary() / fetchFullState() / applyFullState() /
     pushDataset() / pushWorkerMonth() / pushProductMonth() /
     pushPlan() / pushLibrary() / pushManifest() / pushCapacity() /
-    pushFullState() / pushMemos() /
+    pushFullState() / pushMemos() / pushMonth() /
     buildManifest() / buildFullState() /
     validateWorkerMonthRecord() / validateProductMonthRecord() /
     removeLegacyArtifacts() / pullLegacy() /
     uploadFile() / deleteFile() / createSignedUrl()
+
+Phase9-4I-2での追加
+    pushMonth(ym)を追加した。cloud.js側は既にCLOUD.pushMonth(ym)という
+    公開メソッド（`_`プレフィックスなし）が存在していたため、cloud.js
+    側の変更は不要だった。Dataset/Worker/Product抽出ロジック・busy
+    制御・Badge処理・Manifest/FullState構築処理は、いずれもCloud
+    Repositoryへ複製していない（既存CLOUD.pushMonth()の内部処理を
+    そのまま利用する）。field_core.js側の接続、および既存fallback
+    構造（pushMonth API不存在時のみpushAllへ切替）はPhase9-4I-2の
+    対象外とし、変更していない。
 
 Phase8-Eでの追加
     applyFullState(fullState)を追加した。cloud.js側は既にPhase3-1で
@@ -414,6 +424,22 @@ TODO(V6)
         async pullLegacy(options = {}) {
             const CLOUD = _requireCloud();
             return CLOUD.pullLegacy(options);
+        },
+
+        /**
+         * 対象月のDataset/Worker/Product、およびManifest/FullStateを
+         * まとめてアップロードする（Version9-4I-1調査で確認した既存
+         * CLOUD.pushMonth(ym)への薄い委譲のみ）。
+         *
+         * 【重要】Dataset/Worker/Product抽出ロジック・busy制御・
+         * Badge処理・Manifest/FullState構築処理は、いずれもCloud
+         * Repositoryへ複製していない。全て既存のCLOUD.pushMonth()
+         * （cloud.js側、既に`_`プレフィックスなしで公開済み）の
+         * 内部処理としてそのまま実行される。
+         */
+        async pushMonth(ym) {
+            const CLOUD = _requireCloud();
+            return CLOUD.pushMonth(ym);
         },
 
         /* ---------- ファイル系：実装済み（既存の同名公開APIへ委譲） ---------- */

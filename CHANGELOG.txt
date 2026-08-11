@@ -4813,3 +4813,115 @@ Version6 Phase9-4H-2 (2026-08-11) bulk_import.js 残存pushAll 1件のRepository
 ㉜次Phaseへ進めるか：残る2種（field_core.js Group3のpushMonth
   フォールバック設計、store.jsの依存関係逆転懸念）は、それぞれ
   個別の設計判断が必要なため、次フェーズでのご指示をお願いする。
+
+Version6 Phase9-4I-2 (2026-08-11) pushMonth Repository経路追加＋Group3接続準備
+変更ファイル：
+  - src/core/repository/cloud_repository.js（編集：pushMonth(ym)を
+    1メソッド追加）
+  - src/core/repository/sync_coordinator.js（編集：syncMonth(ym)を
+    1メソッド追加）
+  ※ cloud.js・field_core.js・store.js・auto_sync.js・app.jsは
+    いずれも今回一切変更していない。field_core.jsの実接続、および
+    既存fallback構造の移動は今回行っていない。
+
+①CLOUD.pushMonth公開性：`_`プレフィックスなしで既に公開されており、
+  field_core.js側（828/894行）から実際に外部呼び出しされていることを
+  確認した。
+
+②cloud.js変更要否：不要（既に公開APIのため）。
+
+③変更ファイル：cloud_repository.js・sync_coordinator.jsの2ファイル
+
+④CloudRepository.pushMonth内容：
+  async pushMonth(ym) { const CLOUD = _requireCloud();
+    return CLOUD.pushMonth(ym); }
+  既存CLOUD.pushMonth()（cloud.js側、既に公開済み）への薄い委譲のみ。
+
+⑤SyncCoordinator.syncMonth内容：
+  async syncMonth(ym) { if (!_repositoriesReady()) return {...};
+    return window.CLOUD_REPOSITORY.pushMonth(ym); }
+  busy制御・Badge処理・try/catchによる変換・Dataset/Worker/Product
+  処理・Manifest/FullState処理は一切追加していない。既存
+  CLOUD.pushMonth()の戻り値・副作用をそのまま返す。
+
+⑥新規ロジック有無：**なし**。Dataset/Worker/Product抽出ロジック・
+  busy制御・Badge処理・Manifest/FullState構築処理は、いずれも
+  CloudRepository・SyncCoordinatorへ複製していない。
+
+⑦return Case A〜H結果（Node.js比較）：
+  Case A（正常）：完全一致
+  Case B（busy）：{ok:false,error:'同期処理中'}で完全一致
+  Case C（Dataset Push失敗）：完全一致
+  Case D（Worker Push失敗）：完全一致
+  Case E（Product Push失敗）：完全一致
+  Case F（Manifest失敗）：完全一致
+  Case G（FullState失敗）：完全一致
+  Case H（ymデータなし）：{ok:false,error:'対象月データなし'}で完全一致
+
+⑧⑨⑩⑪⑫⑬⑭Push対象・順序・Dataset・Worker・Product・Manifest・
+  FullState比較：全Case共通で、Push対象・件数・順序・key・valueが
+  既存CLOUD.pushMonth()と完全一致することを確認した。
+
+⑮Badge比較：成功時Badge:ok・失敗時Badge:error、いずれも既存版と
+  完全一致。CloudRepository/SyncCoordinator側で追加のBadge呼び出しは
+  発生していない。
+
+⑯busy比較：Case Bで確認済み、完全一致。
+
+⑰hash比較：全Caseでhashストアの最終状態が既存版と完全一致することを
+  確認した。pushMonthはskipIfUnchangedを渡さないため常に強制Push
+  される既存仕様も維持されている。
+
+⑱AUTO_SYNC cancelPending組合せ比較：実際のAUTO_SYNC.install()フックを
+  使い、Repository.Storage.save()直後に_timerがセットされ、
+  AUTO_SYNC.cancelPending()で即座にクリアされること、その後の
+  syncMonth()実行が1回のみのPush・Badgeで完結し、60ms（1800ms相当）
+  待機後もAUTO_SYNC側の追加Push（Badge:configured）が発生しない
+  ことを実測確認した。既存CLOUD.pushMonth()経路と完全に一致する。
+
+⑲fallbackをCoordinatorへ入れていない確認：syncMonth()自身に
+  pushAllへのfallbackロジックは一切実装していない。実際に
+  CLOUD.pushMonthが存在しない状態でsyncMonth()を直接呼んだ場合、
+  fallbackは発動せず「CLOUD.pushMonth is not a function」という
+  エラーになることをNode.jsで確認した（設計通りの挙動）。
+  fallback判断は引き続きfield_core.js側の既存ガード
+  （if (CLOUD?.pushMonth) {...} else if (CLOUD?.pushAll) {...}）に
+  委ねる。
+
+⑳field_core無変更：diff比較（最も厳密な検証方法）により、変更前
+  バックアップと完全に一致することを確認した。importWorker/
+  importProduct・CLOUD.pushMonth・CLOUD.pushAll fallback・
+  AUTO_SYNC.cancelPending・Storage.save・Toast・refreshFieldAllは
+  いずれも無変更。
+
+㉑store.js無変更：ハッシュ比較で無変更を確認した。残存pushAll 1件は
+  そのまま。
+
+㉒AUTO_SYNC無変更：ハッシュ比較で無変更を確認した。
+
+㉓syncPush無変更：sync_coordinator.js内のsyncPush()自体のロジックは
+  今回変更していない（syncMonth追加のみ）。
+
+㉔syncSmart無変更：app.js 2507行、無変更を確認した。
+
+㉕全JS構文：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+
+㉖既存との差異：発見なし。
+
+㉗未解決事項：field_core.js側の実接続（Group3の2件をsyncMonth経由へ
+  切り替える作業）は今回対象外のまま。
+
+㉘GitHub投入可否：**GitHub投入可（Version6 Phase9-4I-2
+  pushMonth Repository経路追加版・field_core未接続）**
+  CLOUD.pushMonthへの薄い委譲のみ・pushMonthロジック複製0件・
+  return/Push対象/Push順序/Badge/busy/hash完全一致・field_core未変更・
+  fallback未変更・store.js未変更・全JS構文エラー0件、を全て確認した。
+
+㉙次にGroup3実接続へ進めるか：**進められる。** 今回追加した
+  SYNC_COORDINATOR.syncMonth(ym)は、既存CLOUD.pushMonth(ym)との
+  完全な互換性をNode.js比較で確認済みである。次フェーズでは、
+  field_core.js側の既存ガード構造
+  （if (CLOUD?.pushMonth) { CLOUD.pushMonth(ym) } else if (CLOUD?.pushAll) { CLOUD.pushAll() }）
+  のpushMonth呼び出し部分だけをSYNC_COORDINATOR.syncMonth(ym)へ
+  置換する、という最小変更が可能と考える。
