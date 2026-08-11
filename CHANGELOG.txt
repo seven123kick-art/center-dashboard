@@ -3919,3 +3919,61 @@ Version6 Phase9-2D (2026-08-11) syncBoot実接続版
   起動時のCloud同期が、初めてSyncCoordinator/CloudRepository経由で
   実行されるようになった。残る未接続機能はsyncPush・syncSmart・
   AUTO_SYNCの自動同期先。
+
+Version6 Phase9-2E (2026-08-11) Phase9-2C実行コード投入漏れ修復
+背景：
+  GitHub上の最新コードを再監査した結果、Version6 Phase9-2Cの
+  実行コード2ファイル（cloud_repository.js / sync_coordinator.js）が
+  投入されていないことが判明した。CHANGELOGにはPhase9-2Cの内容が
+  既に記載されていたため、CHANGELOGと実コードが不一致になっていた。
+  Phase9-2D（app.js側のsyncBoot実接続）は正しく投入されていたため、
+  「app.jsは既にSYNC_COORDINATOR.syncBoot()へ接続済みだが、その
+  syncBoot自体の中身がPhase9-2A相当のまま（Legacy未対応・
+  Badge未対応）」という不整合な状態になっていた。
+
+対応内容：
+  Phase9-2Cで既に完全検証済みだった内容を、新規変更を一切加えずに
+  再度反映した。
+
+変更ファイル：
+  - src/core/repository/cloud_repository.js（Phase9-2C確定版へ復旧：
+    pullLegacy(options)の追加）
+  - src/core/repository/sync_coordinator.js（Phase9-2C確定版へ復旧：
+    syncLegacy()の実委譲化、syncBoot()へのUI.updateCloudBadge呼び出し
+    3箇所の追加）
+  - CHANGELOG.txt（本追記のみ。既存のPhase9-2A〜9-2Dの履歴は
+    一切変更・削除していない）
+  ※ src/app.js（Phase9-2Dのsyncboot接続）・cloud.js・auto_sync.jsは
+    今回変更していない。app.jsは既にSYNC_COORDINATOR.syncBoot()へ
+    接続された状態を維持している（旧CLOUD.pullInitialForBoot()へは
+    戻していない）。
+
+新規仕様変更：なし。Phase9-2Cで確定した内容の再反映のみ。
+
+Case A〜N再確認結果：
+  全て一致することを再確認した（Phase9-2C・Phase9-2Dで実施した
+  Node.js比較テストを再実行し、結果が変わらないことを確認）。
+  さらに今回、app.jsのBOOTシーケンス全体
+  （_bootRender→AUTO_SYNC.withoutSyncAsync→SYNC_COORDINATOR.syncBoot→
+  Boot後処理）を通したCase L/M/N相当の検証も再実施し、UI先行表示順序・
+  AUTO_SYNC抑制解除・Storage副作用がいずれも既存動作と一致することを
+  確認した。
+
+Phase9更新全体の再監査結果（grep確認）：
+  - syncFieldFiscalYear：SYNC_COORDINATOR接続済み（app.js/
+    storage_audit.jsの2箇所）
+  - syncBoot：SYNC_COORDINATOR接続済み（app.js 1箇所）
+  - CloudRepository.pullLegacy：存在確認済み
+  - syncLegacy：スタブではなく実委譲であることを確認済み
+  - fetchManifestWithDbFallback：存在確認済み
+  - syncPush/syncSmart：未接続（呼び出し箇所0件）を確認済み
+  - AUTO_SYNC：CLOUD.pushAll({onlyChanged:true})のまま、変更なし
+  - CloudRepository・SyncCoordinator内でのCLOUD._直接参照：
+    両ファイルとも0件
+
+全JS構文チェック：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラーなしを確認した。
+
+GitHub投入可否：**GitHub投入可（Version6 Phase9-2C投入漏れ修復＋
+  Phase9-2D最終完成版）**
+  Phase9-2EをGitHubへ投入・再確認するまで、Phase9-3Aへは進まない。

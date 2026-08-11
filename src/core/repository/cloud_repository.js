@@ -23,19 +23,19 @@ Module
     （プロジェクト全体の設計方針：他ファイルから私有メンバーへ直接
     アクセスしない、を厳守）。
 
-公開API（Version6 Step1〜Phase8-Eで全26メソッド実装完了）
+公開API（Version6 Step1〜Phase9-2Cで全28メソッド実装完了）
     window.CLOUD_REPOSITORY
 
-    【実装済み・全26メソッド、CLOUDの公開APIへ100%委譲】
+    【実装済み・全28メソッド、CLOUDの公開APIへ100%委譲】
     fetchDataset() / fetchWorkerMonth() / fetchProductMonth() /
-    fetchPlan() / fetchManifest() / fetchCapacity() / fetchLibrary() /
-    fetchFullState() / applyFullState() /
+    fetchPlan() / fetchManifest() / fetchManifestWithDbFallback() /
+    fetchCapacity() / fetchLibrary() / fetchFullState() / applyFullState() /
     pushDataset() / pushWorkerMonth() / pushProductMonth() /
     pushPlan() / pushLibrary() / pushManifest() / pushCapacity() /
     pushFullState() / pushMemos() /
     buildManifest() / buildFullState() /
     validateWorkerMonthRecord() / validateProductMonthRecord() /
-    removeLegacyArtifacts() /
+    removeLegacyArtifacts() / pullLegacy() /
     uploadFile() / deleteFile() / createSignedUrl()
 
 Phase8-Eでの追加
@@ -43,6 +43,22 @@ Phase8-Eでの追加
     `applyFullState(full) { return this._applyFullState(full); }`という
     公開ラッパーが追加済みだったため、cloud.js側の変更は不要だった。
     CloudRepository側は、この既存公開APIへの委譲のみで実装している。
+
+Phase9-2Aでの追加
+    fetchManifestWithDbFallback()を追加した。cloud.js側へ
+    loadManifestOrBuildFromDb()（_loadManifestOrBuildFromDb()への
+    薄い委譲）を新規追加した上で、CloudRepositoryはそれへ委譲している。
+
+Phase9-2Cでの追加・責務定義の明確化
+    pullLegacy(options)を追加した。cloud.js側は既にCLOUD.pullLegacy()
+    という公開メソッド（`_`プレフィックスなし）が存在していたため、
+    cloud.js側の変更は不要だった。
+
+    【CloudRepositoryの責務定義（Phase9-2Cで確定）】
+    CloudRepository自身にSTATE変更ロジックを書かない。ただし既存
+    cloud.js公開APIがSTATE変更・STORE.save等を含む場合、既存動作100%
+    維持のため、その公開APIへ薄く委譲することは許可する
+    （applyFullState()・pullLegacy()がこの原則の実例）。
 
 Phase8-Cでの追加（Phase8-Bの設計レビューに基づく）
     fetchFullState()/pushFullState()/pushMemos()/buildManifest()/
@@ -327,6 +343,32 @@ TODO(V6)
         async removeLegacyArtifacts() {
             const CLOUD = _requireCloud();
             return CLOUD.removeStorageObjects([CLOUD.legacyKey(), CLOUD.fieldKey()]);
+        },
+
+        /**
+         * 旧DB一括保存（shared_bundle）からの復元。
+         * 既存CLOUD.pullLegacy()（cloud.js側で既に公開済みのメソッド、
+         * `_`プレフィックスなし）への薄い委譲のみ。
+         *
+         * 【重要】この処理は単純な取得（fetch）ではない。既存の
+         * CLOUD.pullLegacy()自体が、STATEへの直接反映（11項目）・
+         * STORE.save()の直接呼び出し・migrateオプション（デフォルト
+         * true）による大量のPush処理・UI.updateCloudBadge()の呼び出しを
+         * 全て内包している。CloudRepositoryはこれらのロジックを一切
+         * 複製・記述せず、既存メソッドへそのまま委譲することで、
+         * 既存動作100%維持を実現する（Version6 Phase9-2Cで確定した
+         * 責務定義：「CloudRepository自身にSTATE変更ロジックを
+         * 書かない。ただし既存cloud.js公開APIがSTATE変更・STORE.save等を
+         * 含む場合、既存動作100%維持のため、その公開APIへ薄く委譲する
+         * ことは許可する」に基づく）。
+         *
+         * 命名について：fetchLegacy()という名前は「読み取り専用」と
+         * 誤解させるため採用せず、既存と同じpullLegacy()という名前を
+         * そのまま使用している。
+         */
+        async pullLegacy(options = {}) {
+            const CLOUD = _requireCloud();
+            return CLOUD.pullLegacy(options);
         },
 
         /* ---------- ファイル系：実装済み（既存の同名公開APIへ委譲） ---------- */

@@ -139,8 +139,21 @@ TODO(V6以降)
          * 欠落していた。Phase9-2Aで、CloudRepository.
          * fetchManifestWithDbFallback()（cloud.js
          * loadManifestOrBuildFromDb()への委譲のみ）へ置換し、解消した。
+         *
+         * Version6 Phase9-2Cで、以下を追加で解消した：
+         * - Manifest/DB全滅時のLegacyフォールバックを、
+         *   syncLegacy()（CloudRepository.pullLegacy()経由）へ接続した
+         * - UI.updateCloudBadge('ok')を、既存と同じ2箇所
+         *   （no_cloud_dataパス、正常終了時）に追加した
+         * - UI.updateCloudBadge('error')を例外時に追加した
+         * - 既存pullInitialForBoot()のcatch節にある
+         *   fy/perfStart未定義変数参照（確認済みのReferenceErrorバグ、
+         *   詳細はCHANGELOG参照）は、Repository版へ新規コピーしていない。
+         *   catch節は「UI.updateCloudBadge('error')を呼び、
+         *   {ok:false, error:e.message}を返す」という、バグを除いた
+         *   本来の正常設計のみを実装している。
          * 【重要】この時点ではまだ既存画面へ接続していない
-         * （Case A〜Hの比較検証結果は別途報告）。
+         * （Case A〜Nの比較検証結果は別途報告）。
          */
         async syncBoot(preferredView = 'dashboard') {
             if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
@@ -158,6 +171,7 @@ TODO(V6以降)
                 if (!manifest) {
                     const legacy = await this.syncLegacy();
                     if (legacy && legacy.ok) return legacy;
+                    if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('ok');
                     return { ok: true, changed: false, source: 'no_cloud_data', noData: true, note: legacy?.error || 'クラウドに対象センターのデータがありません' };
                 }
 
@@ -233,8 +247,10 @@ TODO(V6以降)
                 if (window.FIELD_DATA_ACCESS?.invalidate) window.FIELD_DATA_ACCESS.invalidate();
                 if (changed) window.STORAGE_REPOSITORY.save();
 
+                if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('ok');
                 return { ok: true, changed: !!changed, source: 'boot_fiscal_year_skdl_only' };
             } catch (e) {
+                if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('error');
                 return { ok: false, error: e.message || String(e) };
             }
         },
@@ -462,12 +478,20 @@ TODO(V6以降)
         },
 
         /**
-         * 「Legacy同期」（旧shared_bundle形式）。未実装。
-         * 理由：CloudRepositoryに旧形式取得APIが存在せず、全センター
-         * 移行完了確認という前提条件も未充足のため。
+         * 「Legacy同期」（旧shared_bundle形式）。
+         * Version9-2Cで、CloudRepository.pullLegacy()（既存
+         * CLOUD.pullLegacy()への委譲）へ接続した。SyncCoordinator自身は
+         * Legacy復元ロジックを一切持たない。STATE反映・STORE.save・
+         * migrate（デフォルトtrue、既存仕様を維持）・
+         * UI.updateCloudBadge()は全てCloud側の既存処理としてそのまま
+         * 発生する（migrate成功時にBadgeが2回呼ばれる既存挙動も、
+         * この委譲によって自然に再現される。SyncCoordinator側で
+         * 「2回呼ぶ」ロジックを新規記述してはいけないという方針の通り、
+         * 何も追加していない）。
          */
-        async syncLegacy() {
-            return { ok: false, reason: 'legacy_not_ready' };
+        async syncLegacy(options = {}) {
+            if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
+            return window.CLOUD_REPOSITORY.pullLegacy(options);
         },
 
         /**
