@@ -432,11 +432,14 @@ TODO(V6以降)
          * 既存 CLOUD.pushAll(options) と同一挙動を再現する。
          * 詳細はVersion6 Phase7分解報告書「4. pushAll()の分解」を参照。
          *
-         * Version6 Phase8-Dで、CloudRepository.pushMemos()/
-         * pushFullState()/removeLegacyArtifacts()を使い、Memosの
-         * アップロード・FullStateのアップロード・旧形式ファイル削除
-         * （onlyChanged=false時）を実装した。全ステップが既存実装と
-         * 一致する。
+         * Version6 Phase9-3Bで、既存pushAll()と同じ
+         * skipIfUnchangedをDataset/Worker/Product/Capacity/Plan/
+         * Memos/Libraryへ伝播するよう修正した（Phase9-3A調査で
+         * この伝播が欠落していたことが判明したため）。Manifest/
+         * FullStateへはskipIfUnchangedを渡さない（既存pushAll()と
+         * 同じく、常に無条件Push）。UI.updateCloudBadge()は今回も
+         * 追加していない（AUTO_SYNC.flush()側の責務として維持する
+         * 方針のため）。
          */
         async syncPush(options = {}) {
             if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
@@ -446,21 +449,22 @@ TODO(V6以降)
             const STATE = window.STATE;
             const CR = window.CLOUD_REPOSITORY;
             const onlyChanged = !!options.onlyChanged;
+            const pushOptions = { skipIfUnchanged: onlyChanged };
 
             try {
                 for (const ds of STATE.datasets.filter(d => d.source !== 'history')) {
-                    await CR.pushDataset(ds.ym, ds.type || 'confirmed', ds);
+                    await CR.pushDataset(ds.ym, ds.type || 'confirmed', ds, pushOptions);
                 }
                 for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) {
-                    await CR.pushWorkerMonth(w.ym, w);
+                    await CR.pushWorkerMonth(w.ym, w, pushOptions);
                 }
                 for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) {
-                    await CR.pushProductMonth(pr.ym, pr);
+                    await CR.pushProductMonth(pr.ym, pr, pushOptions);
                 }
-                if (STATE.capacity) await CR.pushCapacity();
-                await CR.pushPlan(STATE.planData || {});
-                if (STATE.memos && Object.keys(STATE.memos).length) await CR.pushMemos(STATE.memos);
-                if (STATE.library && STATE.library.length) await CR.pushLibrary(STATE.library);
+                if (STATE.capacity) await CR.pushCapacity(STATE.capacity, pushOptions);
+                await CR.pushPlan(STATE.planData || {}, pushOptions);
+                if (STATE.memos && Object.keys(STATE.memos).length) await CR.pushMemos(STATE.memos, pushOptions);
+                if (STATE.library && STATE.library.length) await CR.pushLibrary(STATE.library, pushOptions);
 
                 if (!onlyChanged) {
                     await CR.removeLegacyArtifacts();
@@ -474,6 +478,7 @@ TODO(V6以降)
                 return { ok: false, error: e.message || String(e) };
             } finally {
                 this._busy = false;
+
             }
         },
 

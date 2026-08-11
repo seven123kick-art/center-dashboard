@@ -60,6 +60,32 @@ Phase9-2Cでの追加・責務定義の明確化
     維持のため、その公開APIへ薄く委譲することは許可する
     （applyFullState()・pullLegacy()がこの原則の実例）。
 
+Phase9-3Bでの変更（syncPush onlyChanged完全互換化のための準備）
+    pushDataset()/pushWorkerMonth()/pushProductMonth()/pushPlan()/
+    pushMemos()/pushLibrary()へoptions引数を追加し、
+    CLOUD.putObject()（元々options対応済み、cloud.js側の変更は
+    不要だった）へ正しく伝播できるようにした。これにより、既存
+    CLOUD.pushAll({onlyChanged:true})が持つ「前回Pushと内容が同じ
+    キーはアップロードを省略する」というハッシュベースの差分Push
+    機構を、Repository経由でも利用可能にした。新しい差分判定ロジックは
+    一切書いておらず、既存のCLOUD.putObject()→_uploadJSON()→
+    skipIfUnchangedという既存機構への委譲のみ。
+
+    pushCapacity()は、既存CLOUD.pushCapacity()が
+    （1）skipIfUnchangedを渡さない（常に無条件Push）
+    （2）Manifest/FullStateも一緒にPushしてしまう
+    という、pushAll()内のCapacity処理とは異なる副作用を持つことが
+    実コード比較で判明したため、CLOUD.pushCapacity()への委譲を廃止し、
+    pushAll()内のCapacity処理と同じプリミティブ（putObject+
+    capacityKey）を組み合わせる方式へ変更した。これに伴い、
+    引数なし呼び出しから`pushCapacity(capacity, options={})`という
+    シグネチャへ変更した（他のpushXxxメソッドと同じ「値を引数で
+    受け取る」パターンに統一）。
+
+    pushManifest()/pushFullState()は、既存pushAll()がこの2つへ
+    skipIfUnchangedを渡さない（常に無条件Push）ため、意図的に
+    options引数を追加していない。
+
 Phase8-Cでの追加（Phase8-Bの設計レビューに基づく）
     fetchFullState()/pushFullState()/pushMemos()/buildManifest()/
     buildFullState()/validateWorkerMonthRecord()/
@@ -188,49 +214,66 @@ TODO(V6)
         /* ---------- Push系：実装済み（1件のみ、既存の同名公開APIへ委譲） ---------- */
 
         /**
-         * 【注記】CLOUD.pushCapacity()は引数を取らず、内部でSTATE.capacityを
-         * 直接参照する設計のため、本メソッドも同様に引数なしとしている
-         * （既存動作を変更しないための委譲）。
+         * 【Version6 Phase9-3Bで変更】CLOUD.pushCapacity()は
+         * skipIfUnchangedを渡さず（常に無条件Push）、かつManifest/
+         * FullStateも一緒にPushしてしまうため、pushAll()内のCapacity
+         * 処理とは異なる副作用を持つ（実コード比較で確認済み）。
+         * そのため、既存のpushAll()内Capacity処理と同じプリミティブ
+         * （putObject + capacityKey）を組み合わせる方式に変更した。
+         * 新しい差分判定ロジックは書いておらず、既存putObject()への
+         * 委譲のみ。
          */
-        async pushCapacity() {
+        /**
+         * 【重要な後方互換対応】既存syncSmart()（今回変更禁止）は
+         * CR.pushCapacity()を引数なしで呼んでいる（実コード確認済み）。
+         * このメソッドのシグネチャをpushDataset等と同じ「値を引数で
+         * 受け取る」方式へ変更したことで、syncSmart()側のこの呼び出しが
+         * 壊れないよう、capacityが未指定（undefined）の場合のみ
+         * window.STATE.capacityへフォールバックする。既存
+         * CLOUD.pushCapacity()自体も内部でSTATE.capacityを直接参照する
+         * 設計だったため、この後方互換フォールバックは既存動作からの
+         * 逸脱ではない。
+         */
+        async pushCapacity(capacity, options = {}) {
             const CLOUD = _requireCloud();
-            return CLOUD.pushCapacity();
+            const value = (capacity !== undefined) ? capacity : window.STATE.capacity;
+            return CLOUD.putObject(CLOUD.capacityKey(), value, options);
         },
 
         /**
          * 1件のDatasetをアップロードする。
          * 内部で呼ぶ既存処理：CLOUD.datasetKey() + CLOUD.putObject()
          */
-        async pushDataset(ym, type, dataset) {
+        async pushDataset(ym, type, dataset, options = {}) {
             const CLOUD = _requireCloud();
-            return CLOUD.putObject(CLOUD.datasetKey(ym, type), dataset);
+            return CLOUD.putObject(CLOUD.datasetKey(ym, type), dataset, options);
         },
 
         /**
          * 1ヶ月分の作業者CSVデータをアップロードする。
          * 内部で呼ぶ既存処理：CLOUD.workerMonthKey() + CLOUD.putObject()
          */
-        async pushWorkerMonth(ym, record) {
+        async pushWorkerMonth(ym, record, options = {}) {
             const CLOUD = _requireCloud();
-            return CLOUD.putObject(CLOUD.workerMonthKey(ym), record);
+            return CLOUD.putObject(CLOUD.workerMonthKey(ym), record, options);
         },
 
         /**
          * 1ヶ月分の商品住所CSVデータをアップロードする。
          * 内部で呼ぶ既存処理：CLOUD.productMonthKey() + CLOUD.putObject()
          */
-        async pushProductMonth(ym, record) {
+        async pushProductMonth(ym, record, options = {}) {
             const CLOUD = _requireCloud();
-            return CLOUD.putObject(CLOUD.productMonthKey(ym), record);
+            return CLOUD.putObject(CLOUD.productMonthKey(ym), record, options);
         },
 
         /**
          * 計画データをアップロードする。
          * 内部で呼ぶ既存処理：CLOUD.planKey() + CLOUD.putObject()
          */
-        async pushPlan(planData) {
+        async pushPlan(planData, options = {}) {
             const CLOUD = _requireCloud();
-            return CLOUD.putObject(CLOUD.planKey(), planData);
+            return CLOUD.putObject(CLOUD.planKey(), planData, options);
         },
 
         /**
@@ -238,13 +281,15 @@ TODO(V6)
          * 添付ファイル本体は別途 uploadFile() を使うこと。
          * 内部で呼ぶ既存処理：CLOUD.libraryKey() + CLOUD.putObject()
          */
-        async pushLibrary(library) {
+        async pushLibrary(library, options = {}) {
             const CLOUD = _requireCloud();
-            return CLOUD.putObject(CLOUD.libraryKey(), library);
+            return CLOUD.putObject(CLOUD.libraryKey(), library, options);
         },
 
         /**
          * Manifestをアップロードする。
+         * 【注記】既存pushAll()はManifestへskipIfUnchangedを渡さない
+         * （常に無条件Push）ため、本メソッドもoptionsを受け取らない。
          * 内部で呼ぶ既存処理：CLOUD.manifestKey() + CLOUD.putObject()
          */
         async pushManifest(manifest) {
@@ -289,9 +334,9 @@ TODO(V6)
          * メモデータをアップロードする。
          * 内部で呼ぶ既存処理：CLOUD.memosKey() + CLOUD.putObject()
          */
-        async pushMemos(memos) {
+        async pushMemos(memos, options = {}) {
             const CLOUD = _requireCloud();
-            return CLOUD.putObject(CLOUD.memosKey(), memos);
+            return CLOUD.putObject(CLOUD.memosKey(), memos, options);
         },
 
         /**

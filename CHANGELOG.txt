@@ -3977,3 +3977,111 @@ Phase9更新全体の再監査結果（grep確認）：
 GitHub投入可否：**GitHub投入可（Version6 Phase9-2C投入漏れ修復＋
   Phase9-2D最終完成版）**
   Phase9-2EをGitHubへ投入・再確認するまで、Phase9-3Aへは進まない。
+
+Version6 Phase9-3B (2026-08-11) syncPush onlyChanged完全互換化（AUTO_SYNC未接続）
+変更ファイル：
+  - src/core/repository/cloud_repository.js（編集：pushDataset/
+    pushWorkerMonth/pushProductMonth/pushPlan/pushMemos/pushLibraryへ
+    options引数を追加、pushCapacityの実装方式を変更）
+  - src/core/repository/sync_coordinator.js（編集：syncPush()が
+    onlyChangedを各Push呼び出しへ正しく伝播するよう修正）
+  ※ src/app.js・src/core/auto_sync.js・src/core/cloud.js・
+    src/field/route_analysis.js・src/modules/landing_forecast.js・
+    syncBoot()・syncFieldFiscalYear()・syncSmart()（呼び出しコード）は
+    いずれも今回一切変更していない。AUTO_SYNCへの実接続も行っていない。
+
+①putObject調査結果：
+  CLOUD.putObject(key, value, options={})は既にoptionsを受け取り、
+  _uploadJSON(key, value, options)へそのまま伝播する実装だった
+  （Phase3で実装済み）。cloud.js側の変更は不要と判明した。
+
+②cloud.js変更要否：不要（putObject自体が既にoptions対応済みのため）
+
+③変更ファイル一覧：cloud_repository.js・sync_coordinator.jsの2ファイル
+
+④CloudRepository options対応一覧：
+  pushDataset/pushWorkerMonth/pushProductMonth/pushPlan/pushMemos/
+  pushLibraryへoptions引数を追加し、putObject()へ伝播するようにした。
+  pushManifest/pushFullStateは、既存pushAll()がこの2つへ
+  skipIfUnchangedを渡さない（常に無条件Push）ため、意図的にoptions
+  引数を追加していない。
+
+⑤Capacity比較結果：
+  既存CLOUD.pushCapacity()は(1)skipIfUnchangedを渡さない
+  (2)Manifest/FullStateも一緒にPushする、という点でpushAll()内の
+  Capacity処理と異なることを実コード比較で確認した。CLOUD.
+  pushCapacity()への委譲を廃止し、pushAll()内Capacity処理と同じ
+  プリミティブ（putObject+capacityKey）を組み合わせる方式へ変更した。
+
+  【追加で発見・対応した事項】この変更に伴い
+  pushCapacity(capacity, options={})という「値を引数で受け取る」
+  シグネチャへ変更したところ、既存syncSmart()（今回変更禁止）が
+  CR.pushCapacity()を引数なしで呼んでいることが判明し、このままでは
+  syncSmart()のCapacity Pushが破壊される状態になっていた。syncSmart()
+  自体には触れず、CloudRepository.pushCapacity()側に
+  「capacityが未指定の場合のみwindow.STATE.capacityへフォールバックする」
+  という後方互換処理を追加することで解消した。
+
+⑥syncPush変更内容：
+  onlyChangedから{skipIfUnchanged: onlyChanged}を構築し、
+  Dataset/Worker/Product/Capacity/Plan/Memos/Libraryの各Push呼び出しへ
+  渡すよう修正した。Manifest/FullStateへは渡していない（既存pushAll()
+  と同じ）。UI.updateCloudBadge()は今回も追加していない
+  （AUTO_SYNC.flush()側の責務として維持する方針のため）。
+
+⑦onlyChanged伝播一覧：
+  伝播する：Dataset・Worker・Product・Capacity・Plan・Memos・Library
+  伝播しない：Manifest・FullState（既存仕様通り、常に無条件Push）
+
+⑧Case A〜M結果（Node.js、既存pushAll()を忠実に再現した比較コードで実施）：
+  Case A（全データ初回Push）：完全一致
+  Case B（内容変更なし2回目）：完全一致（全項目SKIP、Manifest/
+    FullStateのみ再UPLOAD）
+  Case C（Dataset1件変更）：完全一致（該当Datasetのみ再UPLOAD）
+  Case D（Worker1か月変更）：完全一致
+  Case E（Product1か月変更）：完全一致
+  Case F（Capacityだけ変更）：完全一致
+  Case G（Planだけ変更）：完全一致
+  Case H（Memosだけ変更）：完全一致
+  Case I（Libraryだけ変更）：完全一致
+  Case J/K（Manifest/FullState）：既存・新規とも2回目呼び出しでも
+    毎回UPLOADされることを確認（差分判定なしの仕様が維持されている）
+  Case L（onlyChanged=false）：完全一致（Legacy削除を含む）
+  Case M（途中Push失敗）：完全一致（失敗位置・後続停止・成功済み
+    ハッシュの状態まで一致）
+
+⑨hash比較結果：
+  全Case A〜Mにおいて、_pushedHashes相当のハッシュストアの最終状態が
+  既存pushAll()と完全一致することを確認した。Repository側から
+  ハッシュストアを直接操作するコードは一切書いておらず、既存の
+  _uploadJSON()内部処理の結果として自然に一致している。
+
+⑩onlyChanged=false比較：
+  Case Lで実施。Legacy artifacts削除・Manifest・FullState・各Push・
+  hash・戻り値の全てが既存pushAll({onlyChanged:false})と完全一致する
+  ことを確認した。
+
+⑪既存pushAllとの差異：発見なし（Capacityのシグネチャ変更に伴う
+  syncSmart互換性の問題は、後方互換フォールバックで解消済み）。
+
+⑫回帰試験結果：
+  syncBoot()/syncFieldFiscalYear()/syncSmart()/syncLegacy()の
+  各メソッド定義は今回一切変更していないことをgrep確認した。
+  pushCapacity()の後方互換フォールバックにより、syncSmart()からの
+  引数なし呼び出しが正しくSTATE.capacityへフォールバックすることを
+  Node.jsで確認した。
+
+⑬AUTO_SYNC未変更確認：src/core/auto_sync.jsのハッシュに変化なし。
+
+⑭直接pushAll 3箇所未変更確認：src/field/route_analysis.js・
+  src/modules/landing_forecast.jsのハッシュに変化なし。
+
+⑮未解決事項：なし。
+
+⑯GitHub投入可否：**GitHub投入可**
+  Case A〜M・hash比較で既存pushAll()との差異が無いことを確認した。
+
+⑰次にAUTO_SYNC実接続へ進めるか：
+  **syncPush Push処理一致。AUTO_SYNC接続前提が整った。**
+  ただし今回はAUTO_SYNC自体への接続は行っていない
+  （ご指示通り、次フェーズで判断する）。
