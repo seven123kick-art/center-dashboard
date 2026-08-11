@@ -4721,3 +4721,95 @@ Version6 Phase9-4G (2026-08-11) app.js Dataset個別削除の残存pushAll Repos
 ㉜次Phaseへ進めるか：残る3種（bulk_import.js、field_core.js Group3、
   store.js）は、それぞれ個別の設計判断が必要な複合処理のため、
   次フェーズでのご指示が必要と考える。
+
+Version6 Phase9-4H-2 (2026-08-11) bulk_import.js 残存pushAll 1件のRepository実接続
+変更ファイル：
+  - src/modules/bulk_import.js（編集：1箇所、handleFiles()内の
+    CLOUD.pushAll() → SYNC_COORDINATOR.syncPush({onlyChanged:false,
+    updateBadge:true})）
+  ※ AUTO_SYNC.suppress/resume・cancelPending・pushMonth
+    monkeypatch・Repository.Storage.save・r.ok判定・
+    _verifyCloudSaved・cloudSummary構築・_msg・try/catch/finallyは
+    いずれも一切変更していない。app.js・cloud.js・CloudRepository・
+    SyncCoordinator・field_core.js・store.js・auto_sync.jsも無変更。
+
+①変更前行番号：258行（変化なし）。
+②handleFiles経路：Phase9-4H-1の調査結果と現在コードで完全に一致
+  することを再確認した。
+③AUTO_SYNC suppress確認：202行、無変更。
+④cancelPending確認：153行・251行の2箇所、無変更。
+⑤pushMonth monkeypatch確認：197-199行（no-op化）・240行（復元）、
+  無変更。
+
+⑥変更ファイル：src/modules/bulk_import.jsのみ
+⑦変更行：1行のみ（258行、diff確認済み）。ガード条件
+  （257行、if(!CLOUD?.pushAll)throw...）は変更していない
+  （AUTO_SYNC接続時と同じ考え方：SYNC_COORDINATORも最終的に同じ
+  CLOUDへアクセスするため）。
+
+⑧⑨return比較・r.ok判定比較：Phase9-4H-1で検証済みのCase A〜G
+  （Push対象・順序・Legacy削除・Manifest/FullState・hash・Badge・
+  return・error・busy）を現在のコードで再実行し、全て変わらず
+  完全一致することを再確認した。
+
+⑩正常E2E：suppress→取込→Storage.save→cancelPending→
+  syncPush(false,true)→r.ok=true→verify→cloudSummary=OK→resumeという
+  順序を実測確認した。
+
+⑪Push途中失敗（Case A）：r.ok=false、cloudSummary=NG、
+  verify未実行、resume実行を確認。
+⑫Manifest失敗（Case B）：同様にcloudSummary=NG、resume実行を確認。
+⑬FullState失敗（Case C）：同様にcloudSummary=NG、resume実行を確認。
+⑭Legacy削除失敗：処理継続、verify実行、cloudSummary=OK、resume実行
+  という既存挙動を維持することを確認した。
+⑮busy：r.ok=false、Badge 0回、verify未実行、cloudSummary=NG、
+  resume実行を確認した。
+⑯verify失敗：Push自体はBadge:ok、その後verify失敗でcloudSummary=NG
+  となる既存挙動を維持することを確認した。
+
+⑰Badge比較：直接Pushとして成功時Badge:ok 1回、失敗時Badge:error
+  1回、busy時Badge 0回、既存pushAll版と完全一致することを確認した。
+
+⑱⑲⑳AUTO_SYNC抑制の実測確認（最重要）：実際のAUTO_SYNC.install()
+  フックを使い、suppress()中にRepository.Storage.saveを複数回実行
+  しても_timerが一切セットされず（queueが発火しない）、明示的な
+  syncPush()のみが実行され、resume()後も_timerが再セットされない
+  （キュー再予約なし）ことを実測確認した。resume後100ms待機しても
+  追加のPush・Badgeが一切発生しないことも確認し、「Cloud Pushは
+  明示的Push1回のみ」という既存設計が完全に維持されていることを
+  確定的に確認した。
+
+㉑_verifyCloudSaved無変更確認：CLOUD.downloadJSON/datasetKey/
+  workerMonthKey/productMonthKeyを直接利用する既存実装のまま、
+  一切変更していないことを確認した。
+
+㉒回帰確認：app.js・auto_sync.js・cloud.js・CloudRepository・
+  SyncCoordinator・field_core.js・store.jsについて、変更前バックアップ
+  とのdiff比較（最も厳密な検証方法）により、実質的な差分が0件で
+  あることを確認した。
+
+㉓残存pushAll実呼出数：**3件**（4件から今回の1件を除いた数、実コード
+  から再集計し期待値と一致することを確認した）。
+
+㉔残存一覧：field_core.js Group3（2、pushMonthフォールバック）、
+  store.js（1、バックアップ復元後）。
+
+㉕Group3無変更：field_core.js 828/832・894/898行、無変更を確認。
+㉖store.js無変更：185行、無変更を確認。
+㉗syncSmart無変更：app.js 2507行、無変更を確認。
+
+㉘全JS構文：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+
+㉙既存との差異：発見なし。
+
+㉚未解決事項：なし。残存3件（field_core.js Group3、store.js）は、
+  Phase9-4Cで分類した通り、個別の設計判断が必要な箇所として
+  今後のフェーズの対象。
+
+㉛GitHub投入可否：**GitHub投入可（Version6 Phase9-4H-2 bulk_import.js
+  接続版）**
+
+㉜次Phaseへ進めるか：残る2種（field_core.js Group3のpushMonth
+  フォールバック設計、store.jsの依存関係逆転懸念）は、それぞれ
+  個別の設計判断が必要なため、次フェーズでのご指示をお願いする。

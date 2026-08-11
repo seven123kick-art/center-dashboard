@@ -255,7 +255,7 @@ window.BULK_IMPORT = {
     try {
       this._msg([`一括取込完了：${done}件`, ...logs, '', 'クラウドへ一括保存中…'].join('\n'), 'info');
       if (!CLOUD?.pushAll) throw new Error('CLOUD.pushAll が未読込です');
-      const r = await CLOUD.pushAll();
+      const r = await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true });
       if (!r || !r.ok) throw new Error(r?.error || 'クラウド一括保存に失敗しました');
 
       // 保存後にDBから再取得できるかを確認する。確認失敗時はOK扱いにしない。
