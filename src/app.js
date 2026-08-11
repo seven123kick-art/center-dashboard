@@ -1055,7 +1055,7 @@ ${ds.fileName || 'ファイル名なし'}
     } catch(e) {}
     try {
       if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD.datasetKey(ym, type));
-      if (CLOUD?.pushAll) await CLOUD.pushAll();
+      if (CLOUD?.pushAll) await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true });
     } catch(e) {
       UI.toast('ローカル削除は完了しましたが、クラウド同期に失敗しました: ' + e.message, 'warn');
     }

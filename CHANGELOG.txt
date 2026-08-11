@@ -4614,3 +4614,110 @@ Version6 Phase9-4F (2026-08-11) storage_audit.js 残存pushAll 1件のRepository
 
 ㉝GitHub投入可否：**GitHub投入可（Version6 Phase9-4F storage_audit.js
   接続版）**
+
+Version6 Phase9-4G (2026-08-11) app.js Dataset個別削除の残存pushAll Repository接続
+変更ファイル：
+  - src/app.js（編集：1箇所、deleteDataset(ym,type)内のCLOUD.pushAll() →
+    SYNC_COORDINATOR.syncPush({onlyChanged:false, updateBadge:true})）
+  ※ CLOUD.deleteFile()・DatasetRepository・STATE変更処理・
+    Storage.save・IDB_CACHE・AUTO_SYNC・CloudRepository・
+    SyncCoordinator・cloud.js・field_core.js・bulk_import.js・
+    store.js・storage_audit.jsはいずれも今回一切変更していない。
+    Phase9-4Dで既に接続済みの他4件（2453/2524/2582/2598）も無変更。
+
+①変更前Dataset削除経路確認：関数名`deleteDataset(ym,type)`。
+  DatasetRepositoryは利用されておらず、直接STATE.datasetsをfilterする
+  実装であることを確認した。Phase9-4Cの過去調査と矛盾する点はなかった。
+
+②現在行番号：1058行（変化なし）。
+
+③deleteFile実装調査：CLOUD.deleteFile(key)は、DB本体
+  （center_realtime_state）とSupabase Storage添付ファイルの両方を
+  削除するが、Manifest/FullStateは一切更新しない設計であることを
+  確認した。これが、deleteFile実行後に必ずpushAll（新版では
+  syncPush）を呼ぶ理由である（既に削除済みのSTATE.datasetsを元に
+  Manifestを再構築し、Cloud側のManifestからも該当エントリを除去する
+  ため）。deleteFile自体は内部で全ての例外を握り潰し、例外を
+  投げない設計であることも確認した。
+
+④削除順序：STATE.datasets filter → applyDeletionTombstonesToState →
+  Repository.Storage.save() → （try-catch1）await IDB_CACHE.remove →
+  （try-catch2）await CLOUD.deleteFile → await CLOUD.pushAll（変更対象）
+  → NAV.refresh()。この順序は一切変更していない。
+
+⑤接続前比較：Phase9-4D-2で検証済みのCase A〜Gを現在のコードで
+  再実行し、全て変わらず完全一致することを再確認した。1件も差異なし。
+
+⑥deleteFile+syncPush組合せ比較：Node.js比較により、deleteFile成功
+  →syncPush実行という組み合わせで、削除対象Datasetのみが
+  Manifestから除外され、他Datasetは維持されることを確認した。
+
+⑦正常E2E（Case A）：202601のみ削除され202602は維持、IDB_CACHE→
+  deleteFile→syncPushの順序維持、Legacy削除実行、Badge:ok 1回、
+  NAV.refresh実行、Toastなし、を確認した。
+
+⑧deleteFile失敗E2E（Case B）：既存コードはdeleteFile失敗を判定する
+  if文を持たず、deleteFileとpushAll（syncPush）が同一try節で
+  無条件に連続実行される構造であることを実コードで確認した。
+  この構造は変更せず、deleteFile失敗後もsyncPushが実行されることを
+  確認した（deleteFile自体が例外を投げず{ok:false}を返すだけの
+  設計のため）。
+
+⑨Push失敗E2E（Case C）：Toast発生せずBadge:error 1回、NAV.refresh
+  継続実行を確認（syncPushが例外を投げず{ok:false,error}を返す
+  設計のため、既存pushAll版と同一の挙動）。
+
+⑩Manifest失敗E2E（Case D）：Badge:error 1回を確認。
+⑪FullState失敗E2E（Case E）：Badge:error 1回を確認。
+⑫Legacy削除失敗E2E（Case F）：処理継続、最終Badge:ok 1回を確認
+  （初回テストでモックの実装不備を発見し、実際のcloud.js
+  removeStorageObjects()と同じtry-catch構造へ修正した上で
+  再検証し、既存動作との一致を確認した）。
+
+⑬busy比較（Case G）：Badge 0回、NAV.refresh継続実行を確認。
+
+⑭AUTO_SYNC二重Push比較（Case H）：即時Push（Badge:ok 1回）→
+  1800ms後のAUTO_SYNC（Badge:configured 1回、hash一致項目SKIP、
+  Manifest/FullStateは既存仕様通り再UPLOAD）という既存と同一の
+  二重Push構造を確認した。
+
+⑮hash比較：全項目で一致。
+⑯Badge比較：全ケースで既存pushAll版と一致。
+⑰Toast比較：既存文言・発生条件とも変更なし。
+⑱Cloud最終状態比較：削除対象Datasetのみ除外されたManifestが
+  正しく構築されることを確認した。
+
+⑲変更ファイル：src/app.jsのみ
+⑳実変更行：1行のみ（diff確認済み）
+
+㉑app.js他処理無変更確認：Phase9-4Dで接続済みの4件（2453/2524/2582/
+  2598）は無変更のまま維持されていることを確認した。
+
+㉒残存pushAll実呼出数：**4件**（5件から今回の1件を除いた数、実コード
+  から再集計し期待値と一致することを確認した）。
+
+㉓残存一覧：bulk_import.js（1）、field_core.js Group3
+  （2、pushMonthフォールバック）、store.js（1）。
+
+㉔Group3無変更：field_core.js 828/832・894/898行、無変更を確認。
+㉕bulk_import無変更：ハッシュ比較で無変更を確認。
+㉖store.js無変更：ハッシュ比較で無変更を確認。
+㉗syncSmart無変更：app.js 2507行、無変更を確認。
+
+㉘全JS構文結果：src配下の全JavaScriptファイルでnode --checkを
+  実施し、エラー0件を確認した。
+
+㉙既存との差異：発見なし。
+
+㉚未解決事項：なし。残存4件（bulk_import.js、field_core.js Group3、
+  store.js）は、Phase9-4Cで分類した通り、個別の設計判断
+  （bulk_importの検証処理との整合性、store.jsの依存関係逆転懸念、
+  Group3のpushMonthフォールバック設計）が必要な箇所として今後の
+  フェーズの対象。
+
+㉛GitHub投入可否：**GitHub投入可（Version6 Phase9-4G app.js Dataset
+  個別削除接続版）**
+
+㉜次Phaseへ進めるか：残る3種（bulk_import.js、field_core.js Group3、
+  store.js）は、それぞれ個別の設計判断が必要な複合処理のため、
+  次フェーズでのご指示が必要と考える。
