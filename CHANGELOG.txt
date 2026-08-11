@@ -3702,3 +3702,220 @@ Version6 Phase9-2A (2026-08-11) Boot Manifestフォールバック差異の解�
   syncBootは引き続きapp.jsのBOOT処理からは呼ばれておらず
   （CLOUD.pullInitialForBoot()が直接呼ばれたまま）、既存動作への
   影響はゼロである。
+
+Version6 Phase9-2C (2026-08-11) syncBoot正常仕様完全一致版（未接続）
+変更ファイル：
+  - src/core/repository/cloud_repository.js（編集：pullLegacy(options)を
+    1メソッド追加、ヘッダーコメント更新）
+  - src/core/repository/sync_coordinator.js（編集：syncLegacy()を
+    スタブから実委譲へ変更、syncBoot()へUI.updateCloudBadge呼び出しを
+    3箇所追加）
+  ※ src/core/cloud.js・src/app.js・src/core/auto_sync.js・
+    DatasetRepository・StorageRepositoryはいずれも今回一切変更して
+    いない。既存画面への接続は今回も行っていない（Bootは引き続き
+    未接続）
+
+①CloudRepositoryへ追加したLegacy API：
+  async pullLegacy(options = {}) { const CLOUD = _requireCloud();
+    return CLOUD.pullLegacy(options); }
+  既存CLOUD.pullLegacy()（cloud.js側で既に公開済み、`_`プレフィックス
+  なし）への薄い委譲のみ。命名は「fetchLegacy」ではなく既存と同じ
+  「pullLegacy」を採用した（STATE反映・STORE.save・migrate・Badge更新を
+  含む複合処理であり、「fetch」という名前は読み取り専用と誤解させる
+  ため）。
+
+②cloud.js無変更確認：
+  ハッシュ比較・grep確認により、cloud.js側は一切変更していないことを
+  確認済み。CLOUD.pullLegacy()は元々`_`プレフィックスなしで定義されて
+  おり、既に公開メソッドだったため、新規追加は不要だった。
+
+③syncLegacy変更内容：
+  変更前：常に{ok:false, reason:'legacy_not_ready'}を返す未実装スタブ
+  変更後：
+    async syncLegacy(options = {}) {
+      if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
+      return window.CLOUD_REPOSITORY.pullLegacy(options);
+    }
+  SyncCoordinator自身はLegacy復元ロジックを一切持たない。STATE反映・
+  STORE.save・migrate（デフォルトtrue、既存仕様を維持）・
+  UI.updateCloudBadge()は全てCloud側の既存処理としてそのまま発生する。
+
+④syncBoot変更内容：
+  - Manifest/DB全滅かつLegacyも失敗した場合（no_cloud_dataパス）に
+    UI.updateCloudBadge('ok')を追加（既存と同じタイミング）
+  - 正常終了時（changed true/false問わず）にUI.updateCloudBadge('ok')を
+    追加（既存と同じタイミング、STORAGE_REPOSITORY.saveの後）
+  - catch節にUI.updateCloudBadge('error')を追加。
+    既存pullInitialForBoot()のcatch節にある`window.__mgmtPerfLog(...fy...perfStart...)`
+    という、確認済みのReferenceErrorバグを含む行は、Repository版へ
+    新規コピーしていない。catch節は「UI.updateCloudBadge('error')を
+    呼び、{ok:false, error:e.message}を返す」という、バグを除いた
+    本来の正常設計のみを実装した。
+  - Manifest取得成功時の後続処理・年度スコープ絞り込み等のロジックは
+    今回一切変更していない（Phase9-2Aから無変更）。
+
+⑤UI.updateCloudBadge実装箇所：
+  syncBoot()内3箇所（no_cloud_dataパス、正常終了時、catch節）。
+  Legacy成功時のBadge呼び出しはCloudRepository.pullLegacy()経由で
+  既存CLOUD.pullLegacy()自身が行うため、SyncCoordinator側では一切
+  追加していない（migrate成功時に既存挙動として2回呼ばれる場合も、
+  この委譲によって自然に再現される）。
+
+⑥変更ファイル一覧：上記2ファイル
+
+⑦Case A〜H結果（Phase9-2Aの再実行）：全8ケースで一致を再確認。
+
+⑧Case I〜M結果（Node.js、モックのCLOUD_REPOSITORY.pullLegacyで実施）：
+  Case I（Legacyあり・migrate成功）：legacy.okが真のため、
+    syncLegacyの結果がそのまま返る。Badge呼び出しはSyncCoordinator側
+    では発生しない（CLOUD側の責務のため、モック上は空。本番では
+    CLOUD.pullLegacy()自身がBadge更新する）
+  Case J（Legacyあり・migrate失敗）：同様にlegacy.okが真のため
+    そのまま返る。migrationErrorも保持されたまま返ることを確認
+  Case K（Legacyなし）：{ok:true, changed:false, source:'no_cloud_data'}
+    かつBadge=['ok']を確認
+  Case L（通常Boot成功changed=true）：既存呼び出し順序
+    （fetchManifestWithDbFallback→fetchDataset→upsert→invalidate→
+    STORAGE_REPOSITORY.save）＋Badge=['ok']を確認
+  Case M（changed=false）：Badge=['ok']を確認
+
+⑨Case N正常仕様部分の比較結果：
+  Boot内部で意図的な例外を発生させ、戻り値が
+  {ok:false, error:'意図的な内部例外'}（ReferenceErrorを含まない）、
+  かつBadge=['error']であることを確認した。既存の
+  fy/perfStart ReferenceErrorバグそのものを再現する実装は行っておらず、
+  「正常仕様部分（Badge更新＋本来のエラーメッセージでの復帰）が一致」
+  という合格条件を満たすことを確認した。
+
+⑩Legacy STATE11項目比較：
+  CloudRepository.pullLegacy()は既存CLOUD.pullLegacy()への完全な
+  委譲のみのため、STATE11項目（datasets/workerCsvData/
+  productAddressData/fieldData/areaData/capacity/planData/memos/
+  library/reportKnowledge/deleted）への反映は、既存の
+  _applyLegacyBundle()がそのまま行う。Repository層でのSTATE代入は
+  一切追加していない。
+
+⑪STORE.save/migrate/Push比較：
+  既存CLOUD.pullLegacy()内のSTORE.save()直接呼び出し・
+  migrateLegacySharedBundle()による大量Push処理は、全て既存コードの
+  ままCloudRepository経由で発生する。Repository層での複製・再実装は
+  一切行っていない。
+
+⑫Badge回数・タイミング比較：
+  Legacy成功＋migrate成功時の「Badge=ok が2回呼ばれる」という既存挙動
+  は、既存CLOUD.pullLegacy()への完全委譲によって自然に再現される
+  設計とした（SyncCoordinator側で「2回呼ぶ」ロジックは新規記述して
+  いない）。
+
+⑬syncFieldFiscalYear回帰結果：影響なし。fetchManifest()の呼び出しは
+  変更前と同じままであることをNode.js比較で再確認した。Phase9-1で
+  実接続済みのapp.js/storage_audit.js側の呼び出しコードも今回一切
+  変更していない。
+
+⑭syncPush/syncSmart/AUTO_SYNC未接続確認：
+  syncSmart()のfetchManifest()呼び出しは変更していないため影響なし
+  （Node.js比較で確認）。syncPush()はManifest/Legacyに関与しないため
+  無関係（正常終了を確認）。AUTO_SYNCの同期先はapp.js側で一切変更して
+  いない（grep確認：AUTO_SYNC.withoutSyncAsyncは既存通りCLOUDを
+  ラップしたまま）。
+
+⑮既存固有バグ・未解決事項：
+  既存CLOUD.pullInitialForBoot()のcatch節にある
+  fy/perfStart未定義変数参照は、確認済みの既存バグとして今回も
+  修正していない（cloud.js変更禁止のご指示通り）。Repository版
+  （syncBoot）にはこのバグを新規コピーしていない。この差異は
+  「仕様差」ではなく「既存コード固有の確認済みバグを再現しない」
+  という意図的な設計判断であり、未解決事項ではない。
+
+⑯GitHub投入可否：**GitHub投入可（syncBoot正常仕様完全一致版・
+  未接続）**
+  Case A〜M完全一致、Case Nは既存fy/perfStartバグを除いた正常仕様
+  部分が一致することを確認した。Legacy処理は既存CLOUD.pullLegacy()
+  への委譲のみで、新規Legacyロジックは一切追加していない。
+  app.jsのBoot呼び出しはCLOUD.pullInitialForBoot()のままであり、
+  今回の投入は「Bootを既存画面へ接続可能」という意味ではない。
+
+Version6 Phase9-2D (2026-08-11) syncBoot実接続版
+変更ファイル：
+  - src/app.js（編集：1行、CLOUD.pullInitialForBoot(_lastView) →
+    SYNC_COORDINATOR.syncBoot(_lastView)）
+  ※ cloud.js・CloudRepository・SyncCoordinator・auto_sync.js・
+    syncFieldFiscalYear/syncPush/syncSmartの接続状態はいずれも
+    今回一切変更していない
+
+①最新Boot呼出箇所：
+  src/app.js 2729行の1箇所のみ（前回調査から変化なし）。
+
+②③変更ファイル・実変更行：
+  src/app.js 2729行のみ：
+    AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullInitialForBoot(_lastView))
+    → AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView))
+  diffで確認：この1行以外は1文字も変更していない。追加変更なしで
+  接続が完了した。
+
+④外側Boot制御が無変更であること：
+  _bootRender・AUTO_SYNC.withoutSyncAsync・try/catch・
+  IDB_CACHE.persistStateSoon・NAV.refresh・Toast・awaitのいずれも、
+  変更前と1文字も変わっていないことをdiffで確認済み。
+
+⑤Case A〜M比較結果：
+  Phase9-2Cで実施済みのCase A〜Mを再確認し、全て一致することを
+  維持していることを確認した（sync_coordinator.js自体は今回変更
+  していないため、ロジック面での差分は発生しない）。
+
+⑥Case N正常仕様比較：
+  Boot内部例外シナリオを、app.jsのBOOTシーケンス全体
+  （_bootRender→AUTO_SYNC.withoutSyncAsync→SYNC_COORDINATOR.syncBoot→
+  Boot完了後処理）を通して再現し、以下を確認した：
+  - Badge='error'が正しく呼ばれる
+  - 戻り値にReferenceErrorが含まれない（正常仕様部分のみ）
+  - AUTO_SYNC.withoutSyncAsyncが例外時も正しく抑制解除される
+  - 例外がBOOT全体を落とさず、外側のtry-catchで正しく捕捉される
+
+⑦UI先行表示順序比較：
+  実際のapp.jsのBOOTシーケンスを模したNode.js比較で、
+  「_bootRender（画面先行表示）→ AUTO_SYNC抑制開始 → Cloud同期
+  （SYNC_COORDINATOR.syncBoot） → AUTO_SYNC抑制終了 →
+  （ok時のみ）IDB_CACHE.persistStateSoon → NAV.refresh」という
+  既存の順序が変わっていないことを確認した。
+
+⑧Storage/Cache副作用比較：
+  - STORAGE_REPOSITORY.save：changed時のみ、syncBoot内部で1回
+    （既存動作を維持、Phase9-2Cから変更なし）
+  - IDB_CACHE.persistStateSoon：pullResult.okの場合に1回
+    （既存のBOOTシーケンス側の処理、今回変更していない）
+  - Repository化を理由とした保存回数の増減は無いことを確認した。
+
+⑨AUTO_SYNC抑制・解除比較：
+  Boot中は抑制（withoutSyncAsyncでラップ）、Boot終了後（正常時・
+  エラー時とも）は解除されることを確認した。AUTO_SYNC.install()・
+  抑制カウンタ・通常保存時の同期先（auto_sync.js側）はいずれも
+  今回一切変更していない。
+
+⑩syncFieldFiscalYear回帰結果：
+  影響なし。app.js/storage_audit.js側のSYNC_COORDINATOR.syncFieldFiscalYear
+  呼び出しは今回変更していない（grep確認済み）。
+
+⑪syncPush/syncSmart/AUTO_SYNC未接続確認：
+  grep確認の結果、SYNC_COORDINATOR.syncPush・SYNC_COORDINATOR.syncSmartは
+  app.js/storage_audit.jsのいずれからも呼ばれていない（未接続のまま）。
+  AUTO_SYNCの通常同期先（保存時の自動Push等）も変更していない。
+
+⑫既存との差異：発見なし。
+
+⑬未解決事項：
+  sync_coordinator.js冒頭の「syncLegacy()：未実装のまま維持」という
+  古いコメントが残っている点は認識しているが、ご指示通り今回は
+  Boot接続以外の変更を混ぜないため、修正していない（最終整理フェーズで
+  対応予定）。
+
+⑭GitHub投入可否：**GitHub投入可（Version6 Phase9-2D syncBoot実接続版）**
+  実変更はBoot呼出先の1行のみ。Case A〜M完全一致、Case N正常仕様一致、
+  UI先行表示順序一致、Storage/Cache副作用一致、AUTO_SYNC抑制・解除一致、
+  syncFieldFiscalYear回帰なし、syncPush/syncSmart/AUTO_SYNC同期先は
+  未接続のまま、を全て確認した。
+
+【Version6 Boot接続完了】
+  起動時のCloud同期が、初めてSyncCoordinator/CloudRepository経由で
+  実行されるようになった。残る未接続機能はsyncPush・syncSmart・
+  AUTO_SYNCの自動同期先。

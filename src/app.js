@@ -2726,7 +2726,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 初回表示に必要な収支・計画・キャパだけを先に取得する。
     let pullResult = null;
     try {
-      pullResult = await AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullInitialForBoot(_lastView));
+      pullResult = await AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView));
     } catch(e) {
       console.warn('[BOOT] Supabase軽量読込失敗:', e?.message || e);
       pullResult = { ok:false, error:e };
