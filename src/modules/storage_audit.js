@@ -345,7 +345,7 @@ window.DATA_STORAGE_TABLE = {
   async _syncAfterDelete(label){
     STORE.save();
     try {
-      if (CLOUD?.pushAll) await CLOUD.pushAll();
+      if (CLOUD?.pushAll) await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true });
     } catch(e) {
       UI.toast(`${label}はローカル削除済みですが、クラウド同期に失敗しました: ${e.message}`, 'warn');
     }
