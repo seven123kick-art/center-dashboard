@@ -129,7 +129,18 @@ TODO(V6以降)
          *
          * Version6 Phase8-Dで、CloudRepository.fetchFullState()を使い
          * DailyRecordsの反映を実装した（Phase8時点では未実装だった）。
-         * 全ステップが既存実装と一致する。
+         *
+         * Version6 Phase9-2で発見された差異への対応：
+         * 既存pullInitialForBoot()はManifest取得に
+         * _loadManifestOrBuildFromDb()（manifest.json取得不能・破損時に
+         * DB本体から台帳を再構築するフォールバックを含む）を使用して
+         * いたが、Phase8時点ではCR.fetchManifest()（単純な
+         * downloadJSON）を使っており、このフォールバック機構が
+         * 欠落していた。Phase9-2Aで、CloudRepository.
+         * fetchManifestWithDbFallback()（cloud.js
+         * loadManifestOrBuildFromDb()への委譲のみ）へ置換し、解消した。
+         * 【重要】この時点ではまだ既存画面へ接続していない
+         * （Case A〜Hの比較検証結果は別途報告）。
          */
         async syncBoot(preferredView = 'dashboard') {
             if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
@@ -139,7 +150,7 @@ TODO(V6以降)
             try {
                 let manifest;
                 try {
-                    manifest = await CR.fetchManifest();
+                    manifest = await CR.fetchManifestWithDbFallback();
                 } catch (e) {
                     manifest = null;
                 }

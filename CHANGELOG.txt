@@ -3609,3 +3609,96 @@ GitHub投入可否：**GitHub投入可**
   - 未接続機能への影響なし：syncBoot/syncPush/syncSmart/AUTO_SYNCは
     今回一切接続しておらず、影響なし
   全条件を満たしたため投入可と判断する。
+
+Version6 Phase9-2A (2026-08-11) Boot Manifestフォールバック差異の解消（未接続）
+変更ファイル：
+  - src/core/cloud.js（編集：loadManifestOrBuildFromDb()を1メソッド追加）
+  - src/core/repository/cloud_repository.js（編集：
+    fetchManifestWithDbFallback()を1メソッド追加）
+  - src/core/repository/sync_coordinator.js（編集：syncBoot()内の
+    Manifest取得1箇所のみをfetchManifestWithDbFallback()へ置換）
+  ※ app.js・auto_sync.js・DatasetRepository・StorageRepositoryは
+    いずれも今回一切変更していない。既存画面への接続は今回も
+    行っていない（syncBootは引き続き未接続）
+
+①_loadManifestOrBuildFromDb()実コード調査結果：
+  引数なし、async関数、副作用なし（console.warnのみ）、
+  内部の_downloadJSON/_dbListStatesの失敗はいずれもtry-catchで
+  握り潰され例外を外へ投げない設計。manifest.json正常時も必ず
+  7 prefix（skdl/field-worker/field-product/plan/capacity/memos/
+  library）のDB一覧取得を行い、取得できたDB行由来の派生Manifestと
+  マージする。manifest.jsonが無い・破損・取得失敗のいずれの場合も
+  DB本体からの再構成へフォールバックする。全prefix取得が失敗し
+  DB行0件かつmanifestもnullの場合のみnullを返す（通信異常として
+  上位へ伝播）。deleted情報はmergeDeletedStates()でマージされる。
+
+②既存公開ラッパーの有無：
+  存在しなかった（_loadManifestOrBuildFromDb/_dbListStates/
+  _metaFromDbRowsいずれも非公開のまま、公開ラッパーは1つもなかった）。
+
+③変更ファイル一覧：上記3ファイル
+
+④追加したcloud.js API：
+  async loadManifestOrBuildFromDb() { return this._loadManifestOrBuildFromDb(); }
+  既存ロジックの移動・複製・変更は一切行っていない、薄い委譲のみ。
+
+⑤追加したCloudRepository API：
+  async fetchManifestWithDbFallback() { const CLOUD = _requireCloud();
+    return CLOUD.loadManifestOrBuildFromDb(); }
+  7 prefix取得・DB一覧取得・metaFromDbRows・Manifestマージ・
+  deletedマージ等のロジックはCloudRepository内に一切書いていない、
+  cloud.js公開APIへの委譲のみ。
+
+⑥syncBootの変更箇所：
+  syncBoot()内、Manifest取得の1箇所のみを
+  `CR.fetchManifest()` → `CR.fetchManifestWithDbFallback()` へ置換。
+  syncFieldFiscalYear()・syncSmart()内の各fetchManifest()呼び出し
+  （合計2箇所）は変更していない（機械的な一括置換は行っていない）。
+
+⑦Case A〜H比較結果（Node.js、_loadManifestOrBuildFromDb()を忠実に
+  再現した比較コードで実施）：
+  Case A（manifest正常+DB正常）：一致
+  Case B（manifestなし+DBにデータあり）：一致
+  Case C（manifest取得失敗+DBにデータあり）：一致
+  Case D（manifest正常+DB側に新規キーあり）：一致
+  Case E（一部prefix取得失敗+他prefix成功）：一致
+  Case F（manifestなし+全prefix取得失敗）：一致
+  Case G（deleted情報あり）：一致
+  Case H（worker/productデータあり）：一致
+  全8ケースで、直接呼び出しと公開ラッパー経由の結果が完全一致
+  することを確認した（ラッパーが単純delegationのため当然の結果だが、
+  実測で検証済み）。
+  さらに、Case B相当（manifestなし・DB再構成）のシナリオを
+  SYNC_COORDINATOR.syncBoot()全体に通し、
+  fetchManifestWithDbFallback()が正しく呼ばれ、DB由来のDatasetが
+  正しくDATASET_REPOSITORY.upsert()・STORAGE_REPOSITORY.save()まで
+  反映されることをエンドツーエンドで確認した。
+
+⑧既存Bootとの差異：発見なし（今回の調査・実装範囲では）。
+
+⑨副作用・Storage・非同期順序比較：
+  loadManifestOrBuildFromDb()自体はSTATEへの副作用を持たない
+  （console.warnのみ）。syncBoot()全体としての副作用
+  （STORAGE_REPOSITORY.save()の呼出タイミング等）は、Manifest取得元が
+  変わっただけで、それ以降のロジック・順序は無変更のため影響なし。
+
+⑩syncFieldFiscalYear回帰結果：影響なし（fetchManifest()は変更前と
+  同じまま、Node.js比較で確認済み）。Phase9-1で実接続済みの
+  app.js/storage_audit.js側の呼び出しコードも今回一切変更していない。
+
+⑪syncPush/syncSmartへの影響：
+  syncSmart()のfetchManifest()呼び出しは変更していないため影響なし
+  （Node.js比較で確認済み）。syncPush()はManifest取得自体を行わないため
+  無関係（正常終了を確認済み）。
+
+⑫未解決事項：
+  なし（今回の目的であったManifest DBフォールバック差異は解消した）。
+  ただし、syncBootはまだ既存画面へ接続していない。接続には別途
+  Phase9-2（本来の接続フェーズ）でのCase A〜Hを含む再比較が必要。
+
+⑬GitHub投入可否：**投入可（Boot Manifestフォールバック差異解消版・
+  未接続）**
+  この投入可否は「Bootを既存画面へ接続可能」という意味ではない。
+  syncBootは引き続きapp.jsのBOOT処理からは呼ばれておらず
+  （CLOUD.pullInitialForBoot()が直接呼ばれたまま）、既存動作への
+  影響はゼロである。

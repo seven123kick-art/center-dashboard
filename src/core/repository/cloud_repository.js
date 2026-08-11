@@ -148,6 +148,17 @@ TODO(V6)
             return CLOUD.downloadJSON(CLOUD.manifestKey());
         },
 
+        /**
+         * manifest.jsonが取得不能・破損等の場合に、DB本体から
+         * Manifest相当を再構築するフォールバックを含むManifest取得。
+         * 内部ロジックは一切持たず、CLOUD.loadManifestOrBuildFromDb()
+         * への委譲のみ（Version6 Phase9-2Aで追加）。
+         */
+        async fetchManifestWithDbFallback() {
+            const CLOUD = _requireCloud();
+            return CLOUD.loadManifestOrBuildFromDb();
+        },
+
         async fetchCapacity() {
             const CLOUD = _requireCloud();
             return CLOUD.downloadJSON(CLOUD.capacityKey());

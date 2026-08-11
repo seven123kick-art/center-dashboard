@@ -1328,6 +1328,15 @@ var CLOUD = window.CLOUD = {
   fieldKey() { return this._fieldKey(); },
   buildManifest() { return this._makeManifest(); },
   /**
+   * manifest.jsonが取得不能・破損等の場合にDB本体からManifest相当を
+   * 再構築するフォールバック処理を含む、既存のManifest取得窓口。
+   * 内部ロジック（7 prefix取得・DB一覧取得・metaFromDbRows・
+   * Manifestマージ・deletedマージ）は一切変更・複製せず、
+   * 既存の_loadManifestOrBuildFromDb()をそのまま呼ぶだけ
+   * （Version6 Phase9-2Aで追加）。
+   */
+  async loadManifestOrBuildFromDb() { return this._loadManifestOrBuildFromDb(); },
+  /**
    * 【重要】_makeFullState()は内部で sanitizePersonalDataState(STATE) を
    * 呼び、STATEを直接書き換える副作用を持つ。この副作用は既存動作の
    * 一部であり、本ラッパーは一切変更・除去せずそのまま呼び出す。
