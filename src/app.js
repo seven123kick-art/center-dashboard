@@ -2148,7 +2148,7 @@ function renderFieldViewAfterCloud(view, renderFn) {
   }
 
   if (!FIELD_CLOUD_LOAD.promises[key]) {
-    FIELD_CLOUD_LOAD.promises[key] = AUTO_SYNC.withoutSyncAsync(async () => CLOUD.pullFieldDataForFiscalYear(fy))
+    FIELD_CLOUD_LOAD.promises[key] = AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncFieldFiscalYear(fy))
       .then(r => {
         FIELD_CLOUD_LOAD.done[key] = true;
         return r;

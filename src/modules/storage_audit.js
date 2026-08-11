@@ -325,7 +325,7 @@ window.DATA_STORAGE_AUDIT = {
     const fy = this._fy();
     const el = document.getElementById('storage-audit-result');
     if (el) el.innerHTML = `${esc(fy)}年度の現場データをDBから再読込中...`;
-    const r = await CLOUD.pullFieldDataForFiscalYear(fy);
+    const r = await SYNC_COORDINATOR.syncFieldFiscalYear(fy);
     if (r && r.ok) {
       STORE.save();
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();

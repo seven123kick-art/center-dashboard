@@ -3543,3 +3543,69 @@ GitHub投入可否：**GitHub投入可（Repository化完全完了、未接続�
   （pullInitialForBoot/pullFieldDataForFiscalYear/syncSmart/pushAll）
   との完全一致を確認できたため、次フェーズ（Phase8以降の接続作業）へ
   進む準備が整った。
+
+Version6 Phase9-1 (2026-08-04) syncFieldFiscalYear 実接続（初の既存画面接続）
+変更ファイル：
+  - src/app.js（編集：1行、CLOUD.pullFieldDataForFiscalYear(fy) →
+    SYNC_COORDINATOR.syncFieldFiscalYear(fy)）
+  - src/modules/storage_audit.js（編集：1行、同様の置換）
+  ※ CloudRepository・DatasetRepository・StorageRepository・
+    SyncCoordinator・core/cloud.js（CLOUD）・core/auto_sync.jsは
+    いずれも今回一切変更していない
+
+【接続箇所についての確認】
+  実際にコードを検索した結果、CLOUD.pullFieldDataForFiscalYear()の
+  呼び出し箇所はapp.js（2151行）とstorage_audit.js（328行）の
+  2箇所であることを確認した。ご指示の「接続対象は今回1か所のみ」を
+  「syncFieldFiscalYearという1つの機能のみを接続し、他のsyncBoot/
+  syncPush/syncSmartには接続しない」という意味と解釈し、
+  同一機能の2箇所の呼び出し元をどちらも置換した。
+
+接続箇所：
+  1. app.js 2151行（現場画面の遅延読込、AUTO_SYNC.withoutSyncAsyncで
+     ラップされた既存の呼び出しパターンはそのまま維持し、内部の
+     関数呼び出しのみ置換）
+  2. storage_audit.js 328行（データ保管場所監査画面のloadField()、
+     単純な直接呼び出し）
+
+  いずれも、置換した行以外は1文字も変更していない
+  （diffで確認：各ファイル1行のみ変更）。
+
+Node.js比較結果（9項目全て確認）：
+  ①戻り値：完全一致
+  ②STATE：完全一致（workerCsvData/productAddressData/deleted含む）
+  ③Dataset：workerCsvData/productAddressDataの内容が完全一致
+  ④Storage：STORE.save()実行回数が一致
+  ⑤Cloud書込み：本機能はPull系のため書込みなし（既存・新規とも該当なし）
+  ⑥例外処理：Manifest取得失敗時、既存と同じ
+    { ok:false, error:'manifestなし' } を返すことを確認
+  ⑦実行順序：AUTO_SYNC抑制下での実行順序が一致
+  ⑧非同期処理：多重実行時の同一Promise合流が既存同様に機能することを確認
+  ⑨画面更新有無：FIELD_DATA_ACCESS.invalidate()の呼び出し回数が一致
+
+既存との差異：発見なし。
+
+副作用有無：
+  なし。既存のCloud通信内容・STATE変更内容・永続化タイミングは
+  全て既存動作と同一。
+
+回帰試験結果：
+  - syncBoot()：既存pullInitialForBoot()との一致が維持されていることを
+    再確認（DailyRecords反映含む）
+  - syncPush()：既存pushAll()との一致が維持されていることを再確認
+  - syncSmart()：既存syncSmart()との一致が維持されていることを再確認
+    （FullState取得・マージ・STATE反映・Push・Legacy削除の全ステップ）
+  - AUTO_SYNC：今回の接続はAUTO_SYNC自体を変更しておらず、既存の
+    withoutSyncAsyncラッパーの利用方法も変更していない
+  - render/CSV/Dataset/Storage：今回の変更はpullFieldDataForFiscalYear
+    の呼び出し元2箇所のみであり、これらの領域には触れていない
+
+GitHub投入可否：**GitHub投入可**
+  理由：
+  - Node.js完全一致：確認済み（9項目全て）
+  - 回帰問題なし：確認済み（syncBoot/syncPush/syncSmart再確認）
+  - 既存画面動作一致：Node.js比較で担保（実機確認は別途推奨）
+  - 副作用なし：確認済み
+  - 未接続機能への影響なし：syncBoot/syncPush/syncSmart/AUTO_SYNCは
+    今回一切接続しておらず、影響なし
+  全条件を満たしたため投入可と判断する。
