@@ -227,7 +227,7 @@
         }
       }
       Repository.Storage.save();
-      if (CLOUD?.pushAll) CLOUD.pushAll({ onlyChanged:true }).catch(()=>{});
+      if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:true }).catch(()=>{});
       this.renderImportPanel();
       this.render();
       if (msg) msg.innerHTML = `<div style="white-space:pre-wrap;font-size:12px;font-weight:700;color:#065f46">${escLocal(`日別実績取込：${imported}日分\n` + logs.join('\n'))}</div>`;
@@ -237,7 +237,7 @@
       if (!confirm(`${ymLabelLocal(ym)}の日別実績を削除しますか？`)) return;
       STATE.dailyRecords = (STATE.dailyRecords || []).filter(r=>r.ym !== ym);
       Repository.Storage.save();
-      if (CLOUD?.pushAll) CLOUD.pushAll({ onlyChanged:true }).catch(()=>{});
+      if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:true }).catch(()=>{});
       this.renderImportPanel();
       this.render();
       UI.toast(`${ymLabelLocal(ym)}の日別実績を削除しました`);

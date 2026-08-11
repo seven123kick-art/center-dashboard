@@ -90,7 +90,7 @@
       }
       STATE.routeData.sort((a,b)=>a.ym.localeCompare(b.ym));
       Repository.Storage.save();
-      if(window.CLOUD?.pushAll) CLOUD.pushAll({onlyChanged:true}).catch(()=>{});
+      if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(()=>{});
       if (!parsedRouteCount) {
         if(msg) msg.innerHTML='<span style="color:#991b1b;font-weight:700">PDFは読み込みましたが、配達日・ヘッド番号を取得できませんでした。対象が「配達持出リスト」か確認してください。</span>';
         return;

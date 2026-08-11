@@ -4179,3 +4179,77 @@ Version6 Phase9-3C (2026-08-11) AUTO_SYNC → SyncCoordinator実接続
   AUTO_SYNC外側制御完全維持・E2E Case A/B/D/E/F/G/J一致・UI順序一致・
   hash/skip一致・suppress一致・Cloud未設定時一致・変更実行コードが
   1箇所のみ・回帰問題なし・Node.jsエラー0件、を全て確認した。
+
+Version6 Phase9-4B (2026-08-11) Group1 直接pushAll 3箇所のRepository接続
+変更ファイル：
+  - src/modules/landing_forecast.js（編集：2箇所、
+    CLOUD.pushAll({onlyChanged:true}) → SYNC_COORDINATOR.syncPush({onlyChanged:true})）
+  - src/field/route_analysis.js（編集：1箇所、同様の置換）
+  ※ field_core.js・app.js・store.js・storage_audit.js・bulk_import.js・
+    AUTO_SYNC・CloudRepository・SyncCoordinator・cloud.jsはいずれも
+    今回一切変更していない。syncSmart・pushMonthフォールバックも未変更。
+
+①変更前3箇所確認：Phase9-4Aの報告と完全に一致することを再確認した
+  （landing_forecast.js 230/240行、route_analysis.js 93行、いずれも
+  `Repository.Storage.save()`直後の`{onlyChanged:true}`fire-and-forget
+  パターン）。
+
+②変更ファイル一覧：上記2ファイル
+
+③変更行：実行コード合計3行のみ（landing_forecast.js 2行、
+  route_analysis.js 1行）。既存のガード条件（`if (CLOUD?.pushAll)`）・
+  `.catch(()=>{})`・fire-and-forget構造・直前のRepository.Storage.save()
+  は一切変更していない（呼び出し関数名部分のみの置換）。
+
+④接続前比較結果：Phase9-3B完成状態（syncPushのonlyChanged伝播、
+  Legacy削除条件、Manifest/FullState無条件Push等）がそのまま維持
+  されていることを再確認した。1項目の不一致もなし。
+
+⑤Case A〜C結果：3箇所とも同一の呼び出しパターンのため、共通の
+  E2Eシナリオ（Repository.Storage.save→即時syncPush→1800ms後
+  AUTO_SYNC）で検証した。実際のタイムライン：
+    STORAGE_REPOSITORY.save → STORE.save(orig)（AUTO_SYNC.queue同時発火）
+    → UPLOAD:plan → UPLOAD:manifest → UPLOAD:fullstate（即時syncPush）
+    → （1800ms後）Badge:configured → SKIP:plan（hash一致で正しくSKIP）
+    → UPLOAD:manifest → UPLOAD:fullstate（既存仕様通り毎回UPLOAD）
+    → updateSaveStatus → Badge:ok
+  という順序を実測確認した。
+
+⑥AUTO_SYNC二重Push比較：即時syncPush実行後、1800ms後のAUTO_SYNC側で
+  差分Push対象（Plan等）は正しくhash一致によりSKIPされ、既存より
+  アップロード回数が増加しないことを確認した。「CLOUD.pushAll直接
+  呼出」という文字列が検証ログに一度も出現せず、旧pushAll()が
+  直接呼ばれていないことも確認済み。
+
+⑦hash skip確認：⑤⑥の通り、2回目のPushでPlan等がSKIPされることを
+  実測確認した。
+
+⑧回帰試験結果：AUTO_SYNC→syncPush・syncBoot・syncFieldFiscalYear・
+  syncLegacy・syncSmartはいずれも今回変更していない（grep/ハッシュ
+  確認済み）。
+
+⑨残存pushAll実呼出数：**12件**（15件から今回の3件を除いた数、
+  実コードから再集計し期待値と一致することを確認した）。
+
+⑩残存引数なしpushAll数：12件（全て`CLOUD.pushAll()`引数なしのまま）。
+
+⑪field_core pushMonthフォールバック未変更確認：828/832行・894/898行
+  （pushMonth優先、pushAllフォールバック）とも無変更であることを
+  確認した。
+
+⑫syncSmart未変更確認：app.js 2507行の`CLOUD.syncSmart()`呼び出しは
+  無変更であることを確認した。
+
+⑬全JS Node.js結果：src配下の全JavaScriptファイルでnode --checkを
+  実施し、エラー0件を確認した。
+
+⑭既存との差異：発見なし。
+
+⑮未解決事項：なし。残存12件（Group2: 11件、Group3: 2件<field_core.js
+  のpushMonthフォールバック>との重複を除く）は、Phase9-4Aで分類した
+  通り、今後の個別フェーズでの対応が必要。
+
+⑯GitHub投入可否：**GitHub投入可（Version6 Phase9-4B Group1接続版）**
+  変更はGroup1の3箇所のみ・Case A〜C一致・hash skip一致・AUTO_SYNC
+  二重Push挙動一致・引数なしpushAll未変更・pushMonth未変更・syncSmart
+  未変更・Node.jsエラー0件、を全て確認した。
