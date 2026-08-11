@@ -1362,7 +1362,7 @@ IMPORT.deleteFieldData = function(ym) {
     if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
     Repository.Storage.save();
     try {
-      if (CLOUD?.pushAll) await CLOUD.pushAll();
+      if (CLOUD?.pushAll) await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true });
     } catch(e) {
       msg(`${ymText(ym)} の${label}はローカル削除済みですが、クラウド同期に失敗しました`, 'warn');
     }
@@ -1475,7 +1475,7 @@ IMPORT.deleteFieldData = function(ym) {
     STATE.areaData = [];
     if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
     Repository.Storage.save();
-    if (CLOUD?.pushAll) CLOUD.pushAll().catch(()=>{});
+    if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).catch(()=>{});
     refreshFieldAll();
     msg('現場明細データを全削除しました', 'warn');
   };

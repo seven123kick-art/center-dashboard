@@ -4421,3 +4421,91 @@ Version6 Phase9-4D (2026-08-11) app.js 直接pushAll 4件のRepository実接続
   Manifest/FullState差異・hash差異・Push回数増加・AUTO_SYNC挙動
   変化・SyncCoordinator再変更の必要性）のいずれにも該当しないことを
   確認した。
+
+Version6 Phase9-4E (2026-08-11) field_core.js Group2削除系2件のRepository実接続
+変更ファイル：
+  - src/field/field_core.js（編集：2箇所、CLOUD.pushAll() →
+    SYNC_COORDINATOR.syncPush({onlyChanged:false, updateBadge:true})）
+    - deleteMonthType(ym,type)：1365行
+    - DATA_RESET.clearFieldAll：1478行
+  ※ Group3（importWorker/importProduct内のCLOUD.pushMonth優先＋
+    pushAllフォールバック、831-832/897-898行）は今回一切変更していない。
+    app.js・auto_sync.js・cloud.js・CloudRepository・SyncCoordinator・
+    storage_audit.js・bulk_import.js・store.jsもいずれも無変更。
+
+①変更前対象2件確認：Phase9-4Cの報告と完全一致。
+②現在行番号：1365・1478（変化なし）。
+③Group3位置確認：831-832・897-898行、importWorker/importProduct内の
+  CLOUD.pushMonth優先＋pushAllフォールバック構造であることを確認し、
+  対象2件と明確に区別した。文字列一括置換ではなく行番号ベースの
+  精密な置換を行った。
+④変更ファイル：src/field/field_core.jsのみ
+⑤実変更行：2行のみ（diff確認済み）
+
+⑥接続前互換比較：Phase9-4D-2で検証済みのCase A〜Gを現在のコードで
+  再実行し、Push対象・順序・Legacy削除・Manifest/FullState・hash・
+  Badge値/回数/タイミング・return・busy、全て変わらず完全一致する
+  ことを再確認した。
+
+⑦deleteMonthType Worker E2E：削除対象月（202601）のみが
+  STATE.workerCsvDataから消え、他月（202602）は維持されることを
+  確認。IDB_CACHE.remove('worker',ym)がCloud Pushより前に実行される
+  順序を維持していることを確認した。
+
+⑧deleteMonthType Product E2E：同様に、STATE.productAddressDataの
+  削除対象月のみが消え、他月は維持。IDB_CACHE.remove('product',ym)の
+  実行順序も維持されていることを確認した。
+
+⑨clearFieldAll E2E：STATE.workerCsvData/productAddressData/
+  fieldData/areaDataの4項目が全て空になることを確認（実コードから
+  確認した削除対象のみ、推測での追加なし）。
+
+⑩IDB_CACHE比較：Cloud Pushより前に実行される既存順序を維持。
+⑪Storage比較：Repository.Storage.save()のタイミング・回数とも
+  既存と一致。
+⑫Legacy削除比較：即時Push（onlyChanged:false）でのみ実行、
+  AUTO_SYNC側（onlyChanged:true）では実行されない既存の非対称性を
+  維持。
+⑬⑭Manifest/FullState比較：即時Push・AUTO_SYNC側とも既存仕様通り
+  毎回UPLOADされることを確認。
+⑮⑯⑰Badge値・回数・タイミング比較：即時Push側でBadge:ok（または
+  error）1回、1800ms後のAUTO_SYNC側でBadge:configured→ok/errorが
+  別途1回、という構造が既存pushAll版と完全一致することを実測確認。
+⑱AUTO_SYNC二重Push比較：即時側は強制Push＋Legacy削除、AUTO_SYNC側は
+  hash一致項目をSKIP、Manifest/FullStateのみ既存仕様通り再UPLOAD
+  されることを確認。
+⑲hash比較：全項目で一致。
+⑳Push回数比較：既存pushAll版よりアップロード回数が増加していない
+  ことを確認。
+
+㉑Group3無変更確認：831-832・897-898行のCLOUD.pushMonth優先＋
+  pushAllフォールバック構造が完全に無変更であることを確認した。
+
+㉒残存pushAll実呼出数：**6件**（8件から今回の2件を除いた数、実コード
+  から再集計し期待値と一致することを確認した）。
+
+㉓残存箇所一覧：storage_audit.js（1）、bulk_import.js（1）、
+  field_core.js Group3 pushMonthフォールバック（2）、app.js
+  Dataset個別削除（1）、store.js（1）。
+
+㉔app.js Dataset個別削除無変更確認：CLOUD.deleteFile()+
+  CLOUD.pushAll()の複合経路（1058行）が無変更であることを確認した。
+㉕㉖㉗storage_audit.js・bulk_import.js・store.js無変更確認：
+  いずれもハッシュ比較で無変更を確認した。
+㉘syncSmart無変更確認：app.js 2507行のCLOUD.syncSmart()は無変更。
+
+㉙全JS構文確認：src配下の全JavaScriptファイルでnode --checkを
+  実施し、エラー0件を確認した。
+
+㉚既存との差異：発見なし。
+
+㉛未解決事項：なし。残存6件は、Phase9-4Cで分類した通り、個別の
+  設計判断・E2E比較が必要な箇所として今後のフェーズの対象。
+
+㉜GitHub投入可否：**GitHub投入可（Version6 Phase9-4E field_core.js
+  Group2削除系接続版）**
+  停止条件（Group3への変更要否・対象2件以外の実行コード変更要否・
+  pushAllとsyncPush互換モードの差異・IDB_CACHE/Storage/Legacy削除
+  処理の差異・Badge差異・Manifest/FullState差異・hash差異・Push回数
+  増加・AUTO_SYNC挙動変化・SyncCoordinator再変更要否・新規Cloud API
+  要否）のいずれにも該当しないことを確認した。
