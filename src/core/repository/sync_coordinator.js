@@ -437,9 +437,18 @@ TODO(V6以降)
          * Memos/Libraryへ伝播するよう修正した（Phase9-3A調査で
          * この伝播が欠落していたことが判明したため）。Manifest/
          * FullStateへはskipIfUnchangedを渡さない（既存pushAll()と
-         * 同じく、常に無条件Push）。UI.updateCloudBadge()は今回も
-         * 追加していない（AUTO_SYNC.flush()側の責務として維持する
-         * 方針のため）。
+         * 同じく、常に無条件Push）。
+         *
+         * Version6 Phase9-4D-2で、updateBadgeオプションを追加した。
+         * デフォルトは必ずfalse（既存AUTO_SYNC.flush()経由の呼び出し
+         * `syncPush({onlyChanged:true})`が現在と全く同じ動作を維持
+         * するため）。updateBadge:trueを指定した場合のみ、既存
+         * CLOUD.pushAll()と同じタイミング・同じ条件でUI.updateCloudBadge
+         * を呼ぶ（busy早期return時は呼ばない、Legacy削除失敗時は
+         * 呼ばない＝処理継続、正常終了時のみ'ok'、catch節でのみ
+         * 'error'）。直接CLOUD.pushAll()を呼んでいる既存箇所を
+         * 将来Repository経由へ置換する際、Badge互換性を保つために
+         * 使用する想定（今回はまだ接続していない）。
          */
         async syncPush(options = {}) {
             if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
@@ -449,6 +458,7 @@ TODO(V6以降)
             const STATE = window.STATE;
             const CR = window.CLOUD_REPOSITORY;
             const onlyChanged = !!options.onlyChanged;
+            const updateBadge = !!options.updateBadge;
             const pushOptions = { skipIfUnchanged: onlyChanged };
 
             try {
@@ -473,8 +483,10 @@ TODO(V6以降)
                 await CR.pushManifest(CR.buildManifest());
                 await CR.pushFullState(CR.buildFullState());
 
+                if (updateBadge) UI.updateCloudBadge('ok');
                 return { ok: true };
             } catch (e) {
+                if (updateBadge) UI.updateCloudBadge('error');
                 return { ok: false, error: e.message || String(e) };
             } finally {
                 this._busy = false;

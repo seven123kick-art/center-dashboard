@@ -4253,3 +4253,81 @@ Version6 Phase9-4B (2026-08-11) Group1 直接pushAll 3箇所のRepository接続
   変更はGroup1の3箇所のみ・Case A〜C一致・hash skip一致・AUTO_SYNC
   二重Push挙動一致・引数なしpushAll未変更・pushMonth未変更・syncSmart
   未変更・Node.jsエラー0件、を全て確認した。
+
+Version6 Phase9-4D-2 (2026-08-11) syncPush Badge互換オプション実装
+変更ファイル：
+  - src/core/repository/sync_coordinator.js（編集：syncPush()へ
+    updateBadgeオプションを追加）
+  ※ AUTO_SYNC・cloud.js・CloudRepository・app.js・field_core.js・
+    storage_audit.js・bulk_import.js・store.js・syncBoot・
+    syncFieldFiscalYear・syncLegacy・syncSmartはいずれも今回一切
+    変更していない。直接pushAll接続は今回未実施。
+
+実装内容：
+  syncPush(options={})へ`const updateBadge = !!options.updateBadge;`を
+  追加。デフォルトは必ずfalse。既存AUTO_SYNC.flush()経由の呼び出し
+  `SYNC_COORDINATOR.syncPush({onlyChanged:true})`はupdateBadgeを
+  指定していないため、現在と全く同じ動作（Badge非依存）を維持する。
+
+  updateBadge:trueを指定した場合のみ、既存CLOUD.pushAll()と同じ
+  タイミング・同じ条件でUI.updateCloudBadgeを呼ぶよう実装した：
+  - 正常終了時（return直前）：UI.updateCloudBadge('ok')
+  - catch節（return直前）：UI.updateCloudBadge('error')
+  - busy早期return時：Badge更新なし（既存pushAll()と同じ、変更していない）
+  - Legacy削除失敗時：Badge:errorにしない（CloudRepository.
+    removeLegacyArtifacts()が内部で例外を握り潰す設計のため、
+    既にsyncPush()側でも「処理継続」という既存挙動が保たれている
+    ことをPhase8-Cの実装内容から確認済み。CloudRepository変更は
+    不要だった）
+  - UI存在確認：既存pushAll()と同じく、UIの存在確認（if(window.UI?...)
+    等）を追加していない。既存仕様を忠実に維持した。
+
+Node.js比較結果：
+  Case A（onlyChanged=false成功）：return・Badge・Push順序・hash、
+    全て完全一致
+  Case B（onlyChanged=false Push失敗）：失敗位置・Badge:error・
+    return、完全一致
+  Case C（onlyChanged=true成功、Badge互換モード）：完全一致
+  Case D（Manifest失敗）：Badge:error 1回、完全一致
+  Case E（FullState失敗）：Badge:error 1回、完全一致
+  Case F（Legacy削除失敗）：処理継続、最終Badge:ok 1回、完全一致
+  Case G（busy）：両方ともBadge 0回、return完全一致
+  updateBadge=false比較（Phase9-3C版との一致）：Badge 0回を確認
+  AUTO_SYNC E2E：STORE.save→queue→flush→syncPush({onlyChanged:true})
+    という実際のフックを通し、Badgeログが正確に
+    ['configured','ok']の2回のみであることを実測確認した。
+    syncPush内部からのBadge重複発生なし（updateBadge省略時は
+    falseとして扱われるため）。
+
+回帰試験：AUTO_SYNC・cloud.js・CloudRepository・app.js・field_core.js・
+  storage_audit.js・bulk_import.js・store.jsは全てハッシュ比較で
+  無変更を確認した。syncBoot・syncFieldFiscalYear・syncLegacyの
+  定義も無変更。
+
+残存pushAll実呼出数：12件（変化なし。正確な関数呼び出し行のみを
+  再集計し、ガード条件のみの行・既に置換済みの行を除外して確認した）。
+
+全JS構文結果：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+
+既存との差異：発見なし。
+
+未解決事項：なし（Phase9-4D-1で指摘した「呼出元でのBadge追加時の
+  fire-and-forget構造への影響」は、今回updateBadgeオプション方式を
+  採用したことで解消される見込み。次フェーズ（app.js4件接続）で
+  `SYNC_COORDINATOR.syncPush({onlyChanged:false, updateBadge:true})`
+  を使えば、既存のfire-and-forget/await構造を一切変えずにBadge
+  互換性を得られることを確認済み）。
+
+GitHub投入可否：**GitHub投入可**
+  停止条件（AUTO_SYNCのBadge回数変化・pushAll互換モードでのBadge
+  差異・Push内容/順序の差異・Legacy削除挙動の差異・hash差異・
+  busy挙動の差異・syncPush以外の実行コード変更の必要性・
+  CloudRepository変更の必要性）のいずれにも該当しないことを確認した。
+
+次にPhase9-4D app.js4件接続へ進めるか：
+  **進められる。** 今回実装したupdateBadge:trueオプションにより、
+  app.jsの4件（2453/2524/2582/2598）を
+  `SYNC_COORDINATOR.syncPush({onlyChanged:false, updateBadge:true})`
+  へ置換すれば、既存CLOUD.pushAll()と完全に同一のBadge挙動を
+  維持できることをNode.js比較で確認済みである。
