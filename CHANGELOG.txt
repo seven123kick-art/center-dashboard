@@ -4925,3 +4925,136 @@ Version6 Phase9-4I-2 (2026-08-11) pushMonth Repository経路追加＋Group3接�
   （if (CLOUD?.pushMonth) { CLOUD.pushMonth(ym) } else if (CLOUD?.pushAll) { CLOUD.pushAll() }）
   のpushMonth呼び出し部分だけをSYNC_COORDINATOR.syncMonth(ym)へ
   置換する、という最小変更が可能と考える。
+
+Version6 Phase9-4I-3 (2026-08-11) field_core Group3実接続
+変更ファイル：
+  - src/field/field_core.js（編集：4箇所、
+    importWorker/importProductそれぞれのpushMonth呼出を
+    SYNC_COORDINATOR.syncMonth(ym)へ、pushAll fallback呼出を
+    SYNC_COORDINATOR.syncPush({onlyChanged:false,updateBadge:true})へ
+    接続）
+  ※ cloud.js・cloud_repository.js・sync_coordinator.js・auto_sync.js・
+    bulk_import.js・app.js・storage_audit.js・store.jsはいずれも
+    今回一切変更していない。
+
+①最新Group3行番号：828/832行（importWorker）、894/898行
+  （importProduct）、変化なし。
+
+②③importWorker/importProduct現在構造：Phase9-4I-1報告と完全に
+  一致することを再確認した。
+
+④Phase9-4I-2 API存在確認：CLOUD_REPOSITORY.pushMonth・
+  SYNC_COORDINATOR.syncMonthとも存在し、薄い委譲構造が維持されて
+  いることを確認した。
+
+⑤変更ファイル：src/field/field_core.jsのみ
+⑥実変更箇所：4箇所（828, 832, 894, 898行）のみ。ガード条件・
+  r.ok判定・throw文言・try/catch・Toast・Storage.save・
+  AUTO_SYNC.cancelPending・IDB_CACHE・STATE変更・refreshFieldAll・
+  msgは一切変更していない（diff確認済み）。
+
+⑦pushMonth側比較結果：現在コードでCase A〜H（正常・busy・Dataset/
+  Worker/Product Push失敗・Manifest失敗・FullState失敗・ymデータ
+  なし）を再実行し、既存CLOUD.pushMonth()との完全一致を再確認した。
+
+⑧fallback側比較結果：現在コードでCase A〜G（onlyChanged=false成功/
+  失敗・Manifest/FullState失敗・Legacy削除失敗・busy）を再実行し、
+  既存CLOUD.pushAll()との完全一致を再確認した。
+
+⑨Worker正常E2E：Repository.Storage.save→AUTO_SYNC.queue(timer検知)
+  →cancelPending→SYNC_COORDINATOR.syncMonth(ym)→
+  CLOUD_REPOSITORY.pushMonth(ym)→CLOUD.pushMonth(ym)という順序で、
+  Dataset/Worker/Product/Manifest/FullState全てPush、Badge:ok 1回、
+  Toastなしを確認した。
+
+⑩Product正常E2E：Worker取込時と構造が完全に同一であることを確認。
+
+⑪AUTO_SYNC cancelPending結果：Storage.save直後に_timerがセットされ、
+  cancelPending()で即座にクリアされることを実測確認した。
+
+⑫1800ms後追加Push有無：60ms待機後もAUTO_SYNC側の追加Push
+  （Badge:configured等）は一切発生せず、明示的Push1回のみで
+  完結することを確認した。
+
+⑬〜⑱失敗系Case結果：Dataset失敗・Worker失敗・Product失敗・
+  Manifest失敗・FullState失敗・busyの全てで、既存通り
+  throw→外側catchへ進み、fallback（pushAll/syncPush）は一切
+  発動しないことを確認した。
+
+  【busyケースのテストハーネス不備について】検証中、
+  SYNC_COORDINATOR._busyを設定した誤ったテストで一時的に
+  予期しない結果が出たが、これは既存コードとの差異ではなく
+  テストの設定ミスであった。busy制御はsyncMonth()自身には
+  実装されておらず（Phase9-4I-2の設計通り）、既存
+  CLOUD.pushMonth()内部のthis._busyがそのまま使われる。
+  CLOUD._busyを正しく設定して再検証し、既存版との完全一致
+  （throw='同期処理中'、Badge回数0）を確認した。
+
+⑲pushMonth不存在fallback：CLOUD.pushMonthが存在しない場合、
+  既存ガード条件により正しくelse if(CLOUD?.pushAll)分岐へ進み、
+  SYNC_COORDINATOR.syncPush({onlyChanged:false,updateBadge:true})が
+  実行され、全月Push・Legacy削除・Manifest/FullState・Badge:okが
+  既存pushAll fallbackと完全一致することを確認した。
+
+⑳pushMonth throw時fallback非発動：pushMonth自体が例外を投げても、
+  pushAll/syncPushへのfallbackは発動せず、既存通り外側catchへ
+  進むことを確認した。
+
+㉑pushMonth ok:false時fallback非発動：同様にfallbackは発動せず、
+  throw→catchへ進むことを確認した。
+
+㉒CLOUD不存在：CLOUDがundefinedの場合、pushMonth分岐・pushAll分岐
+  どちらにも入らず、cloudMsgが空のまま処理が継続する既存挙動を
+  維持していることを確認した（Coordinatorを無条件で呼んでいない）。
+
+㉓hash比較：pushMonth経路は常に強制UPLOAD（skipIfUnchangedなし）、
+  fallback経路はonlyChanged=falseで強制UPLOAD+Legacy削除あり、
+  いずれも既存仕様と完全一致することを確認した。
+
+㉔Badge比較：pushMonth正常時ok 1回、失敗時error 1回、busy時0回、
+  fallback正常時ok 1回、失敗時error 1回、いずれもCoordinator化に
+  よる追加・欠落なく既存版と完全一致することを確認した。
+
+㉕Worker/Product相互影響：既存pushMonth仕様通り、対象月に存在する
+  Dataset/Worker/Product全種を対象とする既存仕様を維持しており、
+  「Worker取込だからWorkerだけ」という最適化は一切行っていない
+  ことを確認した（Phase9-4I-2で確認済みの仕様がそのまま反映される）。
+
+㉖残存CLOUD.pushAll実呼出数：**1件**（store.js、期待値通り）。
+
+㉗残存CLOUD.pushMonth業務コード直接呼出数：
+  **field_core.js内は0件になった**が、今回の再集計で
+  **src/app.js内に別途2箇所（938行・942行）存在することが
+  新たに判明した**。これは単体CSV取込処理（opt.awaitCloudに
+  応じたpushMonth呼び出し）であり、field_core.jsのGroup3とは
+  別の箇所である。Phase9-4I-1の調査はfield_core.jsに限定して
+  いたため、この2箇所は今回の調査で初めて発見した。今回の
+  指示範囲（field_core.jsのimportWorker/importProductのみ）を
+  超えるため、一切変更していない。CloudRepository内部の正式な
+  委譲（`return CLOUD.pushMonth(ym)`）はこれとは別に、
+  意図通り残存している。
+
+㉘store.js無変更：diff比較（最も厳密な検証方法）で完全一致を確認。
+㉙syncSmart無変更：app.js 2507行、無変更を確認した。
+
+㉚全JS構文：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+
+㉛既存との差異：field_core.js接続部分については発見なし。ただし
+  ㉗の通り、app.js内に未接続のCLOUD.pushMonth直接呼出2箇所が
+  新たに発見された（今回のスコープ外のため変更せず報告のみ）。
+
+㉜未解決事項：app.js内のpushMonth直接呼出2箇所（938行・942行）への
+  対応方針は次フェーズでのご判断が必要。
+
+㉝GitHub投入可否：**GitHub投入可（Version6 Phase9-4I-3
+  field_core Group3実接続版）**
+  field_core以外の実行コード変更なし・Group3の呼出先以外のロジック
+  変更なし・pushMonth正常/失敗動作完全一致・fallback条件/動作完全
+  一致・r.ok判定完全一致・AUTO_SYNC.cancelPending完全一致・Badge
+  完全一致・hash完全一致・1800ms後追加Pushなし・残存直接pushAllが
+  期待値1件・全JS構文エラー0件、を全て確認した。
+
+㉞次にstore.jsへ進めるか：進められると考えるが、その前に㉗で
+  発見したapp.js内のpushMonth直接呼出2箇所（単体CSV取込処理）に
+  ついても、Group3と同様の調査・接続を検討する必要があると考える。

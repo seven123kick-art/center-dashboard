@@ -825,11 +825,11 @@ IMPORT.deleteFieldData = function(ym) {
     try {
       AUTO_SYNC?.cancelPending();
       if (CLOUD?.pushMonth) {
-        const r = await CLOUD.pushMonth(ym);
+        const r = await SYNC_COORDINATOR.syncMonth(ym);
         if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
         cloudMsg = ' / クラウド保存済';
       } else if (CLOUD?.pushAll) {
-        const r = await CLOUD.pushAll();
+        const r = await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true });
         if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
         cloudMsg = ' / クラウド保存済';
       }
@@ -891,11 +891,11 @@ IMPORT.deleteFieldData = function(ym) {
     try {
       AUTO_SYNC?.cancelPending();
       if (CLOUD?.pushMonth) {
-        const r = await CLOUD.pushMonth(ym);
+        const r = await SYNC_COORDINATOR.syncMonth(ym);
         if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
         cloudMsg = ' / クラウド保存済';
       } else if (CLOUD?.pushAll) {
-        const r = await CLOUD.pushAll();
+        const r = await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true });
         if (!r || !r.ok) throw new Error(r?.error || '同期失敗');
         cloudMsg = ' / クラウド保存済';
       }
