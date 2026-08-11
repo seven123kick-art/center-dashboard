@@ -5058,3 +5058,114 @@ Version6 Phase9-4I-3 (2026-08-11) field_core Group3実接続
 ㉞次にstore.jsへ進めるか：進められると考えるが、その前に㉗で
   発見したapp.js内のpushMonth直接呼出2箇所（単体CSV取込処理）に
   ついても、Group3と同様の調査・接続を検討する必要があると考える。
+
+Version6 Phase9-4J-2 (2026-08-11) app.js 残存pushMonth 2件の実接続
+変更ファイル：
+  - src/app.js（編集：2箇所、processCSV()内の
+    CLOUD.pushMonth直接呼出2件をSYNC_COORDINATOR.syncMonthへ接続）
+  ※ cloud.js・cloud_repository.js・sync_coordinator.js・auto_sync.js・
+    bulk_import.js・store.jsはいずれも今回一切変更していない。
+
+①②変更前/変更後行番号：938行（await側）、942行（fire-and-forget側）、
+  行番号自体は変化なし。
+
+③変更ファイル：src/app.jsのみ
+④実変更行数：2行のみ（diff確認済み）。`if (CLOUD?.pushMonth)`ガード・
+  `opt.awaitCloud`分岐・r.ok判定・throw文言・`.catch(()=>{})`・
+  STATE.datasets・Storage.save・supersedeDailyWithConfirmed・
+  NAV.refresh・Toast・returnは一切変更していない。
+
+⑤await側比較結果：Case A（正常）〜G（throw）の全てで、既存
+  CLOUD.pushMonth()版とSYNC_COORDINATOR.syncMonth()版の
+  エラーメッセージ・return値が完全一致することを確認した。
+
+⑥fire-and-forget側比較結果：await化されていないこと（呼び出し直後は
+  同期的に処理が継続し、Pushは非同期に完了する）を実測確認した。
+
+⑦{ok:false}時比較：既存版・新版とも.catch()は発火せず、失敗が
+  無視されるという既存の特殊仕様を維持していることを確認した。
+
+⑧throw時比較：既存版・新版とも.catch()が正しく発火し、例外が
+  握り潰されることを確認した。
+
+⑨ガード無し特殊ケース比較（重要な発見）：
+  「CLOUD自体が未定義」または「CLOUD.pushMonthメソッドが
+  存在しない」という極端な異常系において、以下の差異を発見した。
+  - 旧版（CLOUD.pushMonth(ym).catch(()=>{})）：この行自体が
+    同期的にTypeErrorを投げ、.catch()に到達せず、例外が
+    processCSV関数の外側（呼出元）まで伝播する
+  - 新版（SYNC_COORDINATOR.syncMonth(ym).catch(()=>{})）：
+    syncMonth()がasync関数であるため、同じ理由による内部エラーも
+    常にPromiseのrejectとして非同期的に扱われ、.catch(()=>{})が
+    正しく機能し、例外は外部へ伝播しない
+  これはasync関数の言語仕様上の副次的な差異であり、fire-and-forget
+  構造の変更やr.ok判定の追加ではない。
+
+⑩通常環境での互換性：CLOUD/CLOUD_REPOSITORY/SYNC_COORDINATORが
+  正常にロードされている通常のアプリ実行環境では、CLOUD.pushMonthは
+  常に存在するため（Phase9-4I-3で確認済み）、⑨の差異は発生しない。
+  通常環境での既存動作には一切影響しない、特殊な異常系限定の差異
+  として報告する。
+
+⑪AUTO_SYNC二重Push比較：この関数（processCSV）にはAUTO_SYNC抑制策が
+  一切なく、Storage.save後に_timerが正しくセットされ、明示的な
+  syncMonth実行後も1800ms後にAUTO_SYNCの自動Pushが別途発生する
+  という既存の真の二重Push構造（Phase9-4J-1で確認済み）が、
+  接続後も維持されていることを確認した。
+
+⑫hash比較：syncMonth経由でも既存pushMonth仕様通り強制Push・
+  hash更新が行われ、その後のAUTO_SYNCで差分Push対象が正しくSKIP
+  されることを確認した。
+
+⑬Badge比較：明示syncMonth→Badge:ok、AUTO_SYNC→Badge:configured→
+  Badge:okという既存の順序・回数を維持していることを確認した。
+
+⑭bulk_import monkeypatch確認（最重要回帰項目）：CLOUD.pushMonthを
+  一時的にno-op化するbulk_import.jsのmonkeypatch（197-199行、
+  240行）が、SYNC_COORDINATOR.syncMonth→CloudRepository.pushMonth→
+  CLOUD.pushMonthという薄い委譲経路全体に正しく反映されることを
+  実測確認した。CloudRepository.pushMonth()が毎回_requireCloud()
+  経由でwindow.CLOUDを動的取得する構造のため、monkeypatchの
+  適用・復元とも正しく機能する。
+
+⑮awaitCloud:false一括取込確認：monkeypatch中はSYNC_COORDINATOR.
+  syncMonth経由でも本物のCLOUD.pushMonthが呼ばれず、
+  {ok:true,bulkSuppressed:true}が返ることを確認した。ループ中に
+  本物のCloud Pushが発生せず、最終的な一括syncPushのみでCloud
+  反映されるというPhase9-4Hの既存仕様が壊れていないことを確認した。
+
+⑯残存CLOUD.pushMonth実呼出数：業務コードからの直接呼出は**0件**
+  （bulk_import.jsのmonkeypatch関連4箇所、CloudRepository内部の
+  正式な委譲1箇所を除く）。
+
+⑰業務コード直接pushMonth数：**0件**（⑯と同義）。
+
+⑱残存CLOUD.pushAll数：**1件**（store.js、期待値通り、変化なし）。
+
+⑲store.js無変更：ハッシュ比較で無変更を確認した。
+⑳syncSmart無変更：app.js 2507行、無変更を確認した。
+
+㉑全JS構文結果：src配下の全JavaScriptファイルでnode --checkを
+  実施し、エラー0件を確認した。
+
+㉒既存との差異：⑨に記載の「CLOUD/CLOUD.pushMonth不存在という
+  極端な異常系限定の差異」以外は発見なし。この差異は通常環境での
+  既存動作には影響しない。
+
+㉓未解決事項：なし。
+
+㉔GitHub投入可否：**GitHub投入可（Version6 Phase9-4J-2 app.js
+  pushMonth 2件接続版）**
+  通常環境でのsyncMonthとpushMonthの完全一致・fire-and-forget
+  非await化維持・{ok:false}処理維持・AUTO_SYNC二重Push構造維持・
+  bulk_import monkeypatch互換性維持・Push対象/順序/Badge回数・順序/
+  hash挙動の完全一致・app.js以外の実行コード無変更・store.js無変更・
+  syncSmart無変更・構文エラー0件、を全て確認した。⑨の異常系限定の
+  差異は通常環境での動作に影響しないため、投入可の判断を妨げない
+  と判断する。
+
+㉕次にstore.js最終1件へ進めるか：進められると考える。store.jsの
+  バックアップ復元後pushAllは、Phase9-4Cで指摘した「STORE自身の
+  メソッドからSYNC_COORDINATORという上位層を呼ぶことによる依存
+  関係逆転」の懸念が残っているため、次フェーズではまずこの
+  アーキテクチャ上の懸念について方針確認から始めることを推奨する。

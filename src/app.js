@@ -935,11 +935,11 @@ const IMPORT = {
       // 一括取込では opt.awaitCloud === false を指定し、ループ後に pushAll() を1回だけ実行する。
       if (opt.awaitCloud === true) {
         if (CLOUD?.pushMonth) {
-          const r = await CLOUD.pushMonth(ym);
+          const r = await SYNC_COORDINATOR.syncMonth(ym);
           if (!r || !r.ok) throw new Error(r?.error || 'クラウド保存に失敗しました');
         }
       } else if (opt.awaitCloud !== false) {
-        CLOUD.pushMonth(ym).catch(()=>{}); // 取込月だけ自動同期
+        SYNC_COORDINATOR.syncMonth(ym).catch(()=>{}); // 取込月だけ自動同期
       }
       NAV.refresh();
       UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`);
