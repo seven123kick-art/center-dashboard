@@ -61,7 +61,7 @@ var AUTO_SYNC = window.AUTO_SYNC = {
 
     try {
       UI.updateCloudBadge && UI.updateCloudBadge('configured');
-      const r = await CLOUD.pushAll({ onlyChanged:true });
+      const r = await SYNC_COORDINATOR.syncPush({ onlyChanged:true });
       if (r && r.ok) {
         UI.updateSaveStatus && UI.updateSaveStatus();
         UI.updateCloudBadge && UI.updateCloudBadge('ok');

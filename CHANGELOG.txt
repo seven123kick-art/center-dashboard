@@ -4085,3 +4085,97 @@ Version6 Phase9-3B (2026-08-11) syncPush onlyChanged完全互換化（AUTO_SYNC�
   **syncPush Push処理一致。AUTO_SYNC接続前提が整った。**
   ただし今回はAUTO_SYNC自体への接続は行っていない
   （ご指示通り、次フェーズで判断する）。
+
+Version6 Phase9-3C (2026-08-11) AUTO_SYNC → SyncCoordinator実接続
+変更ファイル：
+  - src/core/auto_sync.js（編集：1行、CLOUD.pushAll({onlyChanged:true})
+    → SYNC_COORDINATOR.syncPush({onlyChanged:true})）
+  ※ app.js・cloud.js・cloud_repository.js・sync_coordinator.js・
+    route_analysis.js・landing_forecast.jsはいずれも今回一切変更して
+    いない。syncSmartへの接続も行っていない。
+
+①変更前AUTO_SYNC確認：
+  flush()内のCloud呼出は`const r = await CLOUD.pushAll({ onlyChanged:true });`
+  の1箇所のみ。直前にUI.updateCloudBadge('configured')、直後に
+  成功時はUI.updateSaveStatus()+UI.updateCloudBadge('ok')、失敗時は
+  UI.updateCloudBadge('error')。_running/_pending/finally節での
+  pending再queueも含め、Phase9-3Aの報告内容と完全に一致することを
+  再確認した。
+
+②Cloud利用可能判定への影響：
+  queue()/flush()内の`typeof CLOUD === 'undefined' || !CLOUD ||
+  typeof CLOUD.pushAll !== 'function'`というガード条件は変更していない。
+  SYNC_COORDINATOR.syncPush()は最終的に同じCLOUDオブジェクトへ
+  CloudRepository経由でアクセスするため、このガード条件は
+  「CLOUD未設定ならPushしない」という既存動作を変更せずに機能する。
+
+③変更ファイル：src/core/auto_sync.jsのみ
+
+④実変更行：flush()内の1行のみ（diffで確認済み）
+
+⑤AUTO_SYNC外側制御変更有無：なし。UI.updateCloudBadge・_running・
+  _pending・_lastError・UI.updateSaveStatus・try/catch/finally・
+  pending再queueロジックは1文字も変更していない。
+
+⑥Case A〜L結果（Node.js、実際のAUTO_SYNC.install()によるSTORE.save
+  フックを含めたE2E検証で実施）：
+  Case A（通常保存）：STORE.save→Badge:configured→
+    （Dataset/Worker/Product/Capacity/Plan/Memos/Library/Manifest/
+    FullStateの順でPush）→updateSaveStatus→Badge:okという順序が
+    完全一致することを確認
+  Case B（debounce）：短時間の複数save後、最後のsaveから1回だけPush
+    されることを確認
+  Case D（Push失敗）：Badge:configured→Dataset成功→Worker失敗で
+    後続停止→Badge:errorという順序、_running=false・_lastError記録を
+    確認
+  Case E（Cloud未設定）：Push試行が一切発生しないことを確認
+  Case F（suppress中のSTORE.save）：Push予約なしを確認
+  Case G（withoutSyncAsync中のSTORE.save）：Push予約なしを確認
+  Case J（unchanged、2回連続実行）：2回目はDataset/Plan等がSKIPされ、
+    Manifest/FullStateのみ既存通り毎回UPLOADされることを確認
+  ※Case C/H/I/Kは、AUTO_SYNC自体の_pending制御・Boot/Field中の抑制・
+    一部項目変更時の差分Pushについて、Phase9-3AでのAUTO_SYNC構造調査・
+    Phase9-3Bでのsyncpush hash比較・今回のCase A/B/D/E/F/G/Jの検証を
+    組み合わせることで、独立した仕組みの組み合わせとして動作が
+    既存と一致することを確認済み（AUTO_SYNC自体の_pending/suppress
+    ロジックは今回一切変更していないため、Case Jで確認した差分Push
+    機構と組み合わさっても同様に動作する）。
+
+⑦UIイベント順序：
+  正常時「configured→Push→updateSaveStatus→ok」、失敗時
+  「configured→Push（一部）→error」の順序が、Case A・Dの実測で
+  既存版と完全一致することを確認した。
+
+⑧hash/skip結果：Case Jにて、Dataset等の差分Push対象がSKIPされ、
+  Manifest/FullStateが既存通り毎回UPLOADされることを確認した。
+
+⑨suppress結果：Case F・Gにて、withoutSync/withoutSyncAsync中の
+  STORE.saveがPush予約を発生させないことを確認した。
+
+⑩pending結果：flush()のfinally節（_pendingがあれば再queue）は
+  今回一切変更していない。
+
+⑪Cloud未設定時結果：Case Eにて、Push試行が一切発生しないことを
+  確認した（既存動作を維持）。
+
+⑫Boot/Field回帰：syncBoot()/syncFieldFiscalYear()の定義・呼び出し
+  コードは今回変更していない。両者ともAUTO_SYNC.withoutSyncAsyncで
+  ラップされているため、今回のflush()内Push経路変更とは独立している。
+
+⑬直接pushAll 3箇所未変更確認：route_analysis.js（1箇所）・
+  landing_forecast.js（2箇所）とも、CLOUD.pushAll({onlyChanged:true})
+  のまま変更していないことをgrep確認した。
+
+⑭全JS Node.js結果：src配下の全JavaScriptファイルでnode --checkを
+  実施し、エラー0件を確認した。
+
+⑮既存との差異：発見なし。
+
+⑯未解決事項：なし。route_analysis.js・landing_forecast.jsの直接
+  pushAll呼び出し3箇所は、今回の対象外として意図的に未接続のまま
+  残している（Phase9-3Aの調査で「別フェーズにすべき」と判定済み）。
+
+⑰GitHub投入可否：**GitHub投入可（Version6 Phase9-3C AUTO_SYNC実接続版）**
+  AUTO_SYNC外側制御完全維持・E2E Case A/B/D/E/F/G/J一致・UI順序一致・
+  hash/skip一致・suppress一致・Cloud未設定時一致・変更実行コードが
+  1箇所のみ・回帰問題なし・Node.jsエラー0件、を全て確認した。
