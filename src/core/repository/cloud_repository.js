@@ -23,20 +23,27 @@ Module
     （プロジェクト全体の設計方針：他ファイルから私有メンバーへ直接
     アクセスしない、を厳守）。
 
-公開API（Version6 Step1〜Phase9-4I-2で全29メソッド実装完了）
+公開API（Version6 Step1〜Phase9-4M-1で全30メソッド実装完了）
     window.CLOUD_REPOSITORY
 
-    【実装済み・全29メソッド、CLOUDの公開APIへ100%委譲】
+    【実装済み・全30メソッド、CLOUDの公開APIへ100%委譲】
     fetchDataset() / fetchWorkerMonth() / fetchProductMonth() /
     fetchPlan() / fetchManifest() / fetchManifestWithDbFallback() /
     fetchCapacity() / fetchLibrary() / fetchFullState() / applyFullState() /
     pushDataset() / pushWorkerMonth() / pushProductMonth() /
     pushPlan() / pushLibrary() / pushManifest() / pushCapacity() /
-    pushFullState() / pushMemos() / pushMonth() /
+    pushFullState() / pushMemos() / pushMonth() / pushCapacityFull() /
     buildManifest() / buildFullState() /
     validateWorkerMonthRecord() / validateProductMonthRecord() /
     removeLegacyArtifacts() / pullLegacy() /
     uploadFile() / deleteFile() / createSignedUrl()
+
+Phase9-4M-1での追加
+    pushCapacityFull()を追加した。既存CLOUD.pushCapacity()（Capacity+
+    Manifest+FullStateを常に強制Pushする複合公開API）への完全な
+    薄い委譲のみ。既存のpushCapacity(capacity,options)（Capacity単体
+    Pushプリミティブ、syncPush/syncSmartが使用）とは別用途のため、
+    別名称とし、既存pushCapacity()は一切変更していない。
 
 Phase9-4I-2での追加
     pushMonth(ym)を追加した。cloud.js側は既にCLOUD.pushMonth(ym)という
@@ -440,6 +447,26 @@ TODO(V6)
         async pushMonth(ym) {
             const CLOUD = _requireCloud();
             return CLOUD.pushMonth(ym);
+        },
+
+        /**
+         * 既存CLOUD.pushCapacity()（Capacity+Manifest+FullStateを
+         * 常に強制Pushする複合公開API、busy制御・Badge処理・
+         * Capacityなし判定を全て内包する）への完全な薄い委譲。
+         *
+         * 【重要】このメソッドと、既存のpushCapacity(capacity,options)
+         * （Capacity単体Pushプリミティブ、syncPush/syncSmartが使用）は
+         * 全く別の用途を持つ。名前の混同を避けるため
+         * pushCapacityFull()という名称にしている。
+         *
+         * busy制御・Badge処理・Manifest/FullState構築処理・
+         * Capacityなし判定は、いずれもCloudRepositoryへ複製していない。
+         * 全て既存CLOUD.pushCapacity()の内部処理としてそのまま実行
+         * される（Version9-4M-1）。
+         */
+        async pushCapacityFull() {
+            const CLOUD = _requireCloud();
+            return CLOUD.pushCapacity();
         },
 
         /* ---------- ファイル系：実装済み（既存の同名公開APIへ委譲） ---------- */

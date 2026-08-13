@@ -5283,3 +5283,119 @@ Version6 Phase9-4K-2 (2026-08-11) store.js 最終pushAll のSyncCoordinator接�
   「Cloud同期Repository化全体の完了」ではない。次Phaseでは、この
   syncSmart残存1件を単独で完全追跡してから、最終接続可否を判断する
   ことを推奨する。
+
+Version6 Phase9-4M-1 (2026-08-13) CLOUD.pushCapacity完全互換の薄いRepository/Coordinator経路追加
+変更ファイル：
+  - src/core/repository/cloud_repository.js（編集：
+    pushCapacityFull()を1メソッド追加）
+  - src/core/repository/sync_coordinator.js（編集：
+    syncCapacity()を1メソッド追加）
+  ※ cloud.js・app.js・capacity.js・auto_sync.jsはいずれも今回一切
+    変更していない。既存CloudRepository.pushCapacity(capacity,
+    options)も一切変更していない。業務コード5箇所（app.js 1件、
+    capacity.js 4件）は今回未接続のまま。
+
+①CLOUD.pushCapacity公開性：`_`プレフィックスなしで既に公開されて
+  おり、app.js・capacity.jsから実際に外部呼び出しされていることを
+  再確認した（Phase9-4L-2報告と完全一致）。
+
+②cloud.js変更要否：不要（既に公開APIのため）。
+
+③変更ファイル：cloud_repository.js・sync_coordinator.jsの2ファイル
+
+④既存CloudRepository.pushCapacity無変更確認：
+  `async pushCapacity(capacity, options = {})`のシグネチャ・実装とも
+  無変更であることを確認した。syncSmart（引数なし呼出）・syncPush
+  （引数あり呼出）とも既存動作のまま正常に機能することをNode.jsで
+  確認した。
+
+⑤新pushCapacityFull内容：
+  async pushCapacityFull() { const CLOUD = _requireCloud();
+    return CLOUD.pushCapacity(); }
+  既存CLOUD.pushCapacity()への完全な薄い委譲のみ。
+
+⑥新syncCapacity内容：
+  async syncCapacity() { if (!_repositoriesReady()) return {...};
+    return window.CLOUD_REPOSITORY.pushCapacityFull(); }
+  busy制御・Badge処理・Capacity取得・Manifest/FullState構築・
+  try/catchによるreturn変換は一切追加していない。
+
+⑦新規ロジック有無：**なし**。Capacity取得・busy制御・Badge処理・
+  Manifest/FullState構築処理は、いずれもCloudRepository・
+  SyncCoordinatorへ複製していない。
+
+⑧return Case A〜G結果（Node.js比較）：
+  Case A（正常）：完全一致
+  Case B（STATE.capacityなし）：{ok:false,error:'キャパデータなし'}
+    で完全一致
+  Case C（busy）：{ok:false,error:'同期処理中'}で完全一致
+  Case D（Capacity Upload失敗）：完全一致
+  Case E（Manifest失敗）：完全一致
+  Case F（FullState失敗）：完全一致
+  Case G（CLOUD.pushCapacity throw）：完全一致
+
+⑨⑩⑪⑫⑬Push対象・順序・Capacity・Manifest・FullState比較：
+  全Case共通で、Push対象・件数・順序・key・valueが既存
+  CLOUD.pushCapacity()と完全一致することを確認した。
+
+⑭busy比較：Case Cで確認済み、Push 0件・Badge 0件で完全一致。
+  busyをCoordinator/Repository側で二重管理していないことを確認した。
+
+⑮Capacityなし比較：Case Bで確認済み、既存の
+  {ok:false,error:'キャパデータなし'}という挙動をそのまま継承し、
+  Repository/Coordinator側で独自判定を追加していないことを確認した。
+
+⑯Badge比較：全Caseで既存版と完全一致（正常=ok、失敗=error、
+  busy/Capacityなし=更新なし）。Coordinator/Repositoryによる
+  追加Badgeは発生していない。
+
+⑰hash比較：全Caseでhashストアの最終状態が既存版と完全一致する
+  ことを確認した。既存CloudRepository.pushCapacity側のoptions機構
+  とは独立して、pushCapacityFull経由では既存のCLOUD.pushCapacity()
+  の強制Push仕様がそのまま維持されることを確認した。
+
+⑱AUTO_SYNC組合せ比較：実際のAUTO_SYNC.install()フックを使い、
+  STORE.save直後の_timerセット→明示的syncCapacity実行
+  （Capacity/Manifest/FullState即座に更新、Badge:ok 1回）→60ms後の
+  AUTO_SYNC自動発火（Badge:configured、Capacityはhash一致でSKIP、
+  Manifest/FullStateは既存仕様通り再UPLOAD、Badge:ok）という、
+  既存CLOUD.pushCapacity()版と完全に同一の二重Push構造を実測
+  確認した。
+
+⑲既存pushCapacity回帰：CLOUD.pushCapacity()本体は無変更
+  （cloud.js自体を今回一切変更していないため）。
+
+⑳syncPush回帰：Capacity処理を含め、Phase9-3B以降の主要Caseに
+  影響がないことを確認した（syncPush自体を今回変更していないため）。
+
+㉑syncSmart無変更確認：app.js 2507行・sync_coordinator.js内の
+  syncSmart実装とも無変更であることを確認した。
+
+㉒業務コード5件未接続確認：app.js:1027、capacity.js:1509/1519/
+  1531/1547、いずれも実呼出のまま無変更であることを確認した。
+
+㉓その他CLOUD.*無変更：deleteFile・downloadJSON・各種key API・
+  dbGetState・renderForm・saveConfig・onAfterApplyFullStateは
+  いずれも無変更。
+
+㉔全JS構文：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+
+㉕既存との差異：発見なし。
+
+㉖未解決事項：なし。業務コード5箇所の接続は次フェーズの対象。
+
+㉗GitHub投入可否：**GitHub投入可（Version6 Phase9-4M-1
+  pushCapacity Repository経路追加版・業務コード未接続）**
+  cloud.js変更不要・既存CloudRepository.pushCapacity無変更・
+  pushCapacityFullは薄い委譲のみ・syncCapacityへのロジック追加なし・
+  return/Push対象/Push順序/busy/Capacityなし/Badge/hash完全一致・
+  AUTO_SYNC組合せ一致・既存pushCapacity/syncPush回帰なし・予定外
+  ファイル変更なしを全て確認した。
+
+㉘次に5件実接続へ進めるか：進められると考える。今回追加した
+  SYNC_COORDINATOR.syncCapacity()は既存CLOUD.pushCapacity()との
+  完全な互換性をNode.js比較で確認済みである。次フェーズでは、
+  app.js:1027・capacity.js:1509/1519/1531/1547の計5箇所について、
+  CLOUD.pushCapacity() を SYNC_COORDINATOR.syncCapacity() へ
+  接続する作業を検討できる。

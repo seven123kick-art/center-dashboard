@@ -30,6 +30,16 @@ Module
     構造（pushMonth API不存在時のみpushAllへ切替という判断）は
     今回対象外とし、変更していない。
 
+    Version6 Phase9-4M-1で、syncCapacity()を追加した。既存
+    CLOUD.pushCapacity()（Capacity+Manifest+FullStateを常に強制
+    Pushする複合公開API、busy制御・Badge処理・Capacityなし判定を
+    内包する）への薄い委譲のみ。CloudRepository.pushCapacityFull()
+    経由で委譲される。既存のCloudRepository.pushCapacity(capacity,
+    options)（Capacity単体Pushプリミティブ、syncPush/syncSmartが
+    使用）とは全く別用途のため、既存メソッドは一切変更していない。
+    app.js/capacity.js側の業務コード5箇所の接続は今回対象外とし、
+    変更していない。
+
     Version6 Phase8-Cで、CloudRepositoryへbuildManifest()/
     buildFullState()/validateWorkerMonthRecord()/
     validateProductMonthRecord()/fetchFullState()/pushFullState()/
@@ -542,6 +552,22 @@ TODO(V6以降)
         async syncMonth(ym) {
             if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
             return window.CLOUD_REPOSITORY.pushMonth(ym);
+        },
+
+        /**
+         * 既存CLOUD.pushCapacity()（Capacity+Manifest+FullStateを
+         * 常に強制Pushする複合公開API）相当。
+         * CloudRepository.pushCapacityFull()経由で既存
+         * CLOUD.pushCapacity()へ委譲されるのみ。
+         *
+         * 【重要】busy制御・Badge処理・Capacity取得・Manifest/
+         * FullState構築処理・try/catchによるreturn変換は、いずれも
+         * SyncCoordinatorへ複製していない。既存CLOUD.pushCapacity()の
+         * 戻り値・副作用をそのまま返す。
+         */
+        async syncCapacity() {
+            if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
+            return window.CLOUD_REPOSITORY.pushCapacityFull();
         },
 
         /**
