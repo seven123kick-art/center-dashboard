@@ -43,7 +43,7 @@ window.PAST_LIBRARY = {
     for (const file of this._bulkFiles) {
       try {
         const storagePath = CLOUD.libraryFileKey(file.name, fy);
-        await CLOUD.uploadFile(storagePath, file);
+        await CLOUD_REPOSITORY.uploadFile(storagePath, file);
 
         STATE.library.push({
           id: Date.now() + saved,
@@ -111,7 +111,7 @@ window.PAST_LIBRARY = {
       try {
         const file = this._selectedFile;
         const storagePath = CLOUD.libraryFileKey(file.name, fy);
-        await CLOUD.uploadFile(storagePath, file);
+        await CLOUD_REPOSITORY.uploadFile(storagePath, file);
         fileMeta = {
           fileName: file.name,
           fileSize: file.size,
@@ -180,7 +180,7 @@ window.PAST_LIBRARY = {
     const item = STATE.library.find(i => i.id === id);
     if (!item || !item.storagePath) { UI.toast('ファイル本体がありません','warn'); return; }
 
-    const url = await CLOUD.createSignedUrl(item.storagePath);
+    const url = await CLOUD_REPOSITORY.createSignedUrl(item.storagePath);
     if (!url) { UI.toast('ファイルURLを作成できませんでした','error'); return; }
     window.open(url, '_blank');
   },

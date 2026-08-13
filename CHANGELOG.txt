@@ -5399,3 +5399,246 @@ Version6 Phase9-4M-1 (2026-08-13) CLOUD.pushCapacity完全互換の薄いReposit
   app.js:1027・capacity.js:1509/1519/1531/1547の計5箇所について、
   CLOUD.pushCapacity() を SYNC_COORDINATOR.syncCapacity() へ
   接続する作業を検討できる。
+
+Version6 Phase9-4M-2 (2026-08-13) CLOUD.pushCapacity業務コード直接呼出5件のCoordinator実接続
+変更ファイル：
+  - src/app.js（編集：1箇所、IMPORT.importCapacityExcel内の
+    CLOUD.pushCapacity() → SYNC_COORDINATOR.syncCapacity()）
+  - src/modules/capacity.js（編集：4箇所、キャパ区分追加/削除/
+    フィールド編集/容量値編集の各イベントハンドラ内の
+    CLOUD.pushCapacity() → SYNC_COORDINATOR.syncCapacity()）
+  ※ cloud.js・cloud_repository.js・sync_coordinator.js・
+    auto_sync.jsはいずれも今回一切変更していない（diff直接比較で
+    確認済み）。既存CloudRepository.pushCapacity(capacity,options)も
+    無変更。
+
+①最新CLOUD.pushCapacity実呼出数：業務コード5件（変化なし、行番号も
+  Phase9-4M-1時点と完全一致）。
+
+②対象5件行番号：app.js 1027行、capacity.js 1509/1519/1531/1547行。
+
+③各5件所属処理：app.js=IMPORT.importCapacityExcel(file)（キャパ
+  Excel取込）、capacity.js=capacityGroups追加/削除/フィールド編集/
+  容量値編集の各イベントハンドラ。5件を実コードから個別に全文追跡
+  した結果、C（削除）・D（フィールド編集）・E（容量値編集）には
+  既存Toastが存在しない（B・Aとは異なる既存の意図的な設計差異）
+  ことを確認し、この差異は一切変更していない。
+
+④Phase9-4M-1 API確認：SYNC_COORDINATOR.syncCapacity()→
+  CLOUD_REPOSITORY.pushCapacityFull()→CLOUD.pushCapacity()という
+  薄い委譲構造が維持されていることを再確認した。
+
+⑤変更ファイル：src/app.js・src/modules/capacity.jsの2ファイル
+⑥実変更箇所数：5箇所（app.js 1・capacity.js 4）、diff確認済み
+
+⑦app.js変更内容：1027行の呼出先のみ置換。ガード条件・
+  Repository.Storage.save・NAV.refresh・Toast・CAPACITY_UI.render・
+  STATE.capacity処理は一切変更していない。
+
+⑧capacity.js変更内容：1509/1519/1531/1547行の呼出先のみ置換。
+  STORE.save・this.render()・各イベントハンドラの構造・
+  STATE.capacity.capacityGroups操作は一切変更していない。
+
+⑨fire-and-forget比較：CLOUD自体が未定義、またはCLOUD.pushCapacity
+  メソッドが存在しないという極端な異常系において、旧版
+  （同期的TypeError、.catchに到達せず例外が呼出元まで伝播）と
+  新版（syncCapacity()がasync関数のため常にPromiseのrejectとして
+  非同期的に扱われ、.catch(()=>{})が正しく機能する）に差異がある
+  ことを確認した。これはPhase9-4J-2で発見済みの既知のパターンと
+  同一であり、通常のアプリ実行環境（CLOUD/CLOUD_REPOSITORY/
+  SYNC_COORDINATORが正常にロードされている状態）では
+  CLOUD.pushCapacityは常に存在するため、この差異は発生しない。
+  特殊異常系限定の差異として報告し、ガードは追加していない。
+
+⑩正常E2E（app.js）：Storage.save→（fire-and-forgetのため）
+  NAV.refresh→Toast→CAPACITY_UI.renderという同期処理が先に完了し、
+  その後非同期的にCapacity/Manifest/FullState Push→Badge:okが
+  完了するという順序を確認した。この「同期処理が先、非同期Pushが
+  後」という順序は、既存CLOUD.pushCapacity()版でも全く同じである
+  ことを直接比較で確認した（fire-and-forgetの言語仕様上の性質で
+  あり、差異ではない）。
+
+⑪⑫⑬⑭capacityGroups追加/削除/フィールド編集/容量値編集の各E2E：
+  4経路それぞれ個別に検証し、STORE.save→Push（Capacity/Manifest/
+  FullState）→this.render()という既存順序、Toast有無の既存差異
+  （追加のみToastあり）を維持していることを確認した。
+
+⑮AUTO_SYNC二重Push：実際のAUTO_SYNC.install()フックを使い、
+  明示的syncCapacity実行（Capacity/Manifest/FullState即座に更新、
+  Badge:ok 1回）→AUTO_SYNC自動発火（Badge:configured、Capacityは
+  hash一致でSKIP、Manifest/FullStateは既存仕様通り再UPLOAD、
+  Badge:ok）という既存の二重Push構造を完全に維持していることを
+  実測確認した。
+
+⑯Capacityなし：capacity.js側の4イベントハンドラはSTATE.capacity.
+  capacityGroupsを直接操作する前提のため、STATE.capacity自体が
+  nullの状態は通常運用では発生しない設計であることを確認した
+  （app.js側は自己初期化するため該当なし）。
+
+⑰busy：Push 0件・Badge 0件、Toast/render等の後続処理は既存通り
+  継続することを確認した。
+
+⑱⑲⑳Capacity/Manifest/FullState失敗：各Case（Capacity Upload
+  失敗、Manifest失敗、FullState失敗）で、Badge:errorと後続処理
+  （Toast/render/NAV.refresh）の継続が既存版と一致することを
+  確認した。
+
+㉑throw：CLOUD.pushCapacity自体が例外を投げても、内部でcatchされ
+  外部へは伝播せず、後続処理が既存通り継続することを確認した。
+
+㉒Badge：全Caseで既存版と完全一致、Coordinator/Repositoryによる
+  追加Badgeは発生していない。
+
+㉓hash：明示的syncCapacityでは既存同様の強制Push、その後の
+  AUTO_SYNCではCapacityがhash一致でSKIPされることを確認した。
+
+㉔直接CLOUD.pushCapacity残存数：**業務コード0件**（app.js・
+  capacity.jsとも実装後の再集計で確認）。
+
+㉕pushAll残存：業務コード直接呼出0件を維持（回帰確認済み）。
+㉖pushMonth残存：業務コード直接呼出0件を維持（回帰確認済み）。
+
+㉗syncSmart無変更確認：app.js 2507行、無変更を確認した。
+
+㉘既存CloudRepository.pushCapacity回帰：diff直接比較により、
+  cloud_repository.js・sync_coordinator.jsとも完全に無変更である
+  ことを確認した。syncSmart（引数なし呼出）・syncPush（引数あり
+  呼出）とも既存動作のまま影響を受けていない。
+
+㉙その他CLOUD.*無変更：deleteFile・downloadJSON・各種key API・
+  dbGetState・renderForm・saveConfig・onAfterApplyFullStateは
+  いずれも今回対象外、変更していない。
+
+㉚全JS構文：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+
+㉛既存との差異：⑨に記載の「CLOUD/CLOUD.pushCapacity不存在という
+  極端な異常系限定の差異」以外は発見なし。この差異は通常環境での
+  既存動作には影響しない。
+
+㉜未解決事項：なし。
+
+㉝GitHub投入可否：**GitHub投入可（Version6 Phase9-4M-2
+  pushCapacity業務コード5件接続版）**
+  対象5件の呼出先のみ変更・既存処理順序維持・AUTO_SYNC二重Push
+  維持・Capacity/Manifest/FullState維持・busy/Badge/return維持・
+  CloudRepository/SyncCoordinator/cloud.js変更なし・syncSmart変更
+  なし、を全て確認した。
+
+㉞次Phaseへ進めるか：Capacity同期の業務コード5経路について、
+  CLOUD.pushCapacity()という直接呼出は0件になった。残る
+  CLOUD.*業務コード直接利用（deleteFile・各種key API・
+  downloadJSON・renderForm・saveConfig・onAfterApplyFullState・
+  syncSmart等）については、次フェーズで個別に調査・判断が必要。
+
+Version6 Phase9-4N-3 (2026-08-13) past_library Storage API 第1段接続
+変更ファイル：
+  - src/modules/past_library.js（編集：3箇所、
+    CLOUD.uploadFile() → CLOUD_REPOSITORY.uploadFile()（saveBulkSelected/
+    save内、2箇所）、
+    CLOUD.createSignedUrl() → CLOUD_REPOSITORY.createSignedUrl()
+    （openFile内、1箇所））
+  ※ cloud.js・cloud_repository.js・sync_coordinator.js・auto_sync.js・
+    app.js・storage_audit.jsはいずれも今回一切変更していない。
+    past_library.js内のCLOUD.deleteFile()（2箇所）・
+    CLOUD.libraryFileKey()（2箇所）・clearAll()のfire-and-forget構造は
+    一切変更していない。
+
+①変更前uploadFile件数：2件（変化なし）
+②変更前createSignedUrl件数：1件（変化なし）
+③対象関数3件：saveBulkSelected()内uploadFile、save()内uploadFile、
+  openFile()内createSignedUrl。Phase9-4N-2調査時点と完全一致することを
+  再確認した。
+
+④変更ファイル：src/modules/past_library.jsのみ
+⑤実変更箇所数：3箇所のみ（diff確認済み）
+⑥diff内容：46行・114行（uploadFile呼出先）、183行（createSignedUrl
+  呼出先）のみ。CLOUD.deleteFile・CLOUD.libraryFileKey・clearAll・
+  STATE.library・Repository.Storage.save・Toast・renderList・
+  try/catch・await構造・fileMetaは一切diffに含まれていないことを
+  確認した。
+
+⑦⑧接続前後E2E結果：Case A〜I（saveBulkSelected正常/1件失敗/複数中
+  一部失敗、save正常/失敗、openFile正常/null、createSignedUrl内部
+  失敗、uploadFile throw）を旧版（CLOUD直接）・新版
+  （CLOUD_REPOSITORY経由）の両方で実行し、呼出順序・key・file・
+  STATE.library・Storage.save回数・Toast・renderList・return・
+  throw/rejectが全て完全一致することを確認した。
+
+⑨saveBulkSelected正常結果：1件保存、Storage.save→renderList→成功
+  Toastという既存順序を維持。
+
+⑩saveBulkSelected一部失敗結果（重点確認）：3件中1件（bad.pdf）が
+  失敗しても、成功した2件（good1.pdf, good2.pdf）のみが正しく
+  STATE.libraryへ登録され、失敗ファイルのToastと成功件数Toastの両方が
+  既存通り表示されることを確認した。
+
+⑪save正常結果：STATE.library登録→Storage.save→renderListという
+  既存順序を維持。
+
+⑫save失敗結果（重点確認）：アップロード失敗時、catch節で失敗Toast
+  表示後に即座にreturnし、STATE.library.push・Repository.Storage.save・
+  renderListのいずれにも到達しない既存挙動を維持していることを
+  確認した。
+
+⑬openFile正常結果：URL文字列を正しく取得し、window.openが実行される
+  既存動作を維持。
+
+⑭openFile null結果（重点確認）：CLOUD_REPOSITORY.createSignedUrl()が
+  nullを返した場合、if(!url)による既存の判定ロジックがそのまま機能し、
+  「ファイルURLを作成できませんでした」というToastが表示される
+  ことを確認した。catchは追加していない。
+
+⑮throw/reject比較：uploadFileのthrow、createSignedUrlのnull返却、
+  いずれも既存仕様のまま維持されることを確認した。
+
+⑯STATE.library比較：全Caseで既存版と完全一致。
+
+⑰Storage.save比較：全Caseで既存版と完全一致（呼出回数・タイミング）。
+
+⑱Toast比較：全Caseで既存の文言・タイミングと完全一致。
+
+⑲render比較：renderList呼出のタイミングが既存版と完全一致。
+
+⑳特殊異常系差異：CLOUD_REPOSITORY自体が未定義という、通常環境では
+  発生しない異常系（CloudRepositoryスクリプト自体が未ロードの場合）
+  において、saveBulkSelected/save関数内の既存try-catch構造がそのまま
+  正しく機能し、失敗Toast表示という安全な挙動になることを確認した。
+  一方、openFile()にはtry-catchが存在しないため、この極端な異常系
+  では例外が呼出元まで伝播する可能性があるが、これも通常環境では
+  発生しない特殊異常系限定の事項として報告する。ガードは追加して
+  いない。
+
+㉑deleteFile未変更確認：past_library.js 195行・208行、いずれも
+  CLOUD.deleteFile()のまま無変更であることを確認した。
+
+㉒clearAll未変更確認：`paths.forEach(p => CLOUD.deleteFile(p).catch(()=>{}))`
+  という既存のfire-and-forget構造を一切変更していないことを確認した。
+
+㉓libraryFileKey未変更確認：CLOUD.libraryFileKey()の2箇所（45行・
+  113行）とも無変更であることを確認した。
+
+㉔他ファイル無変更確認：app.js・storage_audit.js・cloud.js・
+  cloud_repository.js・sync_coordinator.js・auto_sync.jsについて、
+  diff直接比較およびハッシュ比較により、全て無変更であることを
+  確認した。
+
+㉕CLOUD.uploadFile残存実呼出数：**0件**
+㉖CLOUD.createSignedUrl残存実呼出数：**0件**
+㉗CLOUD.deleteFile残存実呼出数：**2件**（意図的に残存、past_library.js）
+
+㉘全JS構文結果：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+
+㉙差異・未解決事項：⑳に記載の特殊異常系限定の差異（CLOUD_REPOSITORY
+  自体未定義時のopenFile()の例外伝播）以外は発見なし。通常環境での
+  動作には一切影響しない。
+
+㉚GitHub投入可否：**GitHub投入可（Version6 Phase9-4N-3
+  past_library Storage API第1段接続版）**
+
+㉛次Phaseへ進めるか：uploadFile・createSignedUrlの接続が完了した。
+  次はdeleteFile 6件（past_library.js 2件含む）の接続を検討できるが、
+  特にpast_library.jsのclearAll()（await無し・並列fire-and-forget
+  という特殊構造）については、Phase9-4N-2で判定C（要注意）とした
+  通り、個別の追加検証が必要と考える。
