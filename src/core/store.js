@@ -182,7 +182,7 @@ var STORE = window.STORE = {
       sanitizePersonalDataState(STATE);
       applyDeletionTombstonesToState(STATE);
       this.save();
-      if (CLOUD?.pushAll) await CLOUD.pushAll().catch(()=>{});
+      if (CLOUD?.pushAll) await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).catch(()=>{});
       NAV.refresh();
       UI.toast('バックアップを復元しました');
     } catch(e) { UI.toast('読込エラー: '+e.message, 'error'); }

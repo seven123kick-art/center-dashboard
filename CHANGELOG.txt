@@ -5169,3 +5169,117 @@ Version6 Phase9-4J-2 (2026-08-11) app.js 残存pushMonth 2件の実接続
   メソッドからSYNC_COORDINATORという上位層を呼ぶことによる依存
   関係逆転」の懸念が残っているため、次フェーズではまずこの
   アーキテクチャ上の懸念について方針確認から始めることを推奨する。
+
+Version6 Phase9-4K-2 (2026-08-11) store.js 最終pushAll のSyncCoordinator接続
+変更ファイル：
+  - src/core/store.js（編集：1箇所、restoreJSON()内の
+    CLOUD.pushAll()直接呼出をSYNC_COORDINATOR.syncPush({onlyChanged:false,
+    updateBadge:true})へ接続）
+  ※ app.js・cloud.js・cloud_repository.js・sync_coordinator.js・
+    auto_sync.js・field_core.js・bulk_import.js・storage_audit.jsは
+    いずれも今回一切変更していない（diff直接比較で確認済み）。
+
+①②変更前/変更後行番号：185行、変化なし。
+③変更ファイル：src/core/store.jsのみ
+④実変更行数：1行のみ（diff確認済み）
+⑤ガード条件維持確認：`if (CLOUD?.pushAll)`は変更していない。
+⑥await維持確認：既存のawait構造を維持。
+⑦catch維持確認：`.catch(()=>{})`をそのまま維持。
+
+⑧restore正常E2E：STATE復元→sanitize→tombstone適用→this.save()→
+  Dataset/Worker/Product/Capacity/Plan/Memos/Library/Legacy削除/
+  Manifest/FullState全てPush→Badge:ok→NAV.refresh→成功Toastという
+  順序を実測確認した。
+
+⑨STATE比較：datasets等の条件付き上書き、deletedのマージ処理とも
+  既存通り動作することを確認した。
+
+⑩Storage比較：this.save()のタイミング・回数とも既存と一致。
+
+⑪⑫Cloud Push対象・順序比較：Dataset→Worker→Product→Capacity→Plan→
+  Memos→Library→Legacy削除→Manifest→FullStateという既存順序を
+  維持していることを確認した。
+
+⑬Legacy削除比較：onlyChanged=false（未指定）のため既存通り実行。
+
+⑭⑮Manifest/FullState比較：既存仕様通り常にPushされることを確認。
+
+⑯Badge比較：正常時Badge:ok 1回、失敗時Badge:error 1回、busy時0回、
+  既存pushAll版と完全一致。
+
+⑰busy比較：{ok:false,error:'同期処理中'}が返っても、restoreJSON側は
+  戻り値を見ないため、既存通り成功Toast・NAV.refreshが実行される
+  ことを確認した。
+
+⑱Push失敗比較：Badge:errorが発生しても、restoreJSON側では
+  r.ok判定を一切追加しておらず、既存通り「バックアップを復元
+  しました」という成功Toastが表示されることを確認した。
+
+⑲Manifest失敗比較：同様にrestoreJSON側は無視し、成功Toast・
+  NAV.refreshが実行される既存動作を確認した。
+
+⑳FullState失敗比較：同様。
+
+㉑Legacy失敗比較：処理継続、最終的にBadge:ok・成功Toastとなる
+  既存仕様を維持していることを確認した。
+
+㉒AUTO_SYNC timer確認：this.save()直後に_timerが正しくセットされ、
+  明示的syncPush実行後もcancelPending等は一切追加していないため、
+  _timerはクリアされず、60ms（1800ms相当）後にAUTO_SYNCが正常に
+  発火することを実測確認した。
+
+㉓二重Push確認：明示的syncPush（Badge:ok、全項目強制UPLOAD、
+  Legacy削除あり）→60ms後のAUTO_SYNC（Badge:configured、hash一致
+  項目は全てSKIP、Manifest/FullStateのみ既存仕様通り再UPLOAD、
+  Badge:ok）という既存の二重Push構造を完全に維持していることを
+  確認した。
+
+㉔hash確認：全項目でhashストアの最終状態が既存pushAll版と一致
+  することを確認した。
+
+㉕NAV比較：NAV.refresh()の実行タイミング・回数とも既存と一致。
+
+㉖Toast比較：成功時「バックアップを復元しました」、
+  Push失敗時もこのToastがそのまま表示される（エラーToastへの
+  変更は一切行っていない）という既存仕様を維持していることを
+  確認した。
+
+㉗残存CLOUD.pushAll実呼出数：**0件**（業務コードからの直接呼出は
+  完全になくなった）。
+
+㉘残存CLOUD.pushMonth実呼出数：**0件**（Phase9-4I-3/9-4J-2で
+  既に達成済み、変化なし）。
+
+㉙残存CLOUD.syncSmart実呼出数：**1件**（app.js:2507、今回変更
+  対象外、無変更を確認）。
+
+㉚非公開Cloud直接アクセス一覧：`CLOUD._`への外部からの直接アクセスは
+  bulk_import.js内の1件のみで、これはコメント文字列
+  （`CLOUD._busy`という説明文）であり、実際のコード参照ではない
+  ことを確認した。次Phase（syncSmart接続検討時）の参考情報として
+  記録する。
+
+㉛回帰確認：app.js・cloud.js・cloud_repository.js・
+  sync_coordinator.js・auto_sync.js・field_core.js・bulk_import.js・
+  storage_audit.jsについて、diff直接比較（最も厳密な検証方法）で
+  全て変更前バックアップと完全一致することを確認した。
+
+㉜全JS構文確認：src配下の全JavaScriptファイルでnode --checkを
+  実施し、エラー0件を確認した。
+
+㉝既存との差異：発見なし。
+
+㉞未解決事項：なし。
+
+㉟GitHub投入可否：**GitHub投入可（Version6 Phase9-4K-2 store.js
+  最終pushAll接続版）**
+
+㊱次Phaseへ進めるか：
+  【完了判定】このPhaseの完了をもって、
+    業務コード直接 CLOUD.pushAll() = 0件
+    業務コード直接 CLOUD.pushMonth() = 0件
+  となり、「pushAll / pushMonthのCoordinator接続」は完了と判定する。
+  ただし CLOUD.syncSmart() が1件（app.js:2507）残存しているため、
+  「Cloud同期Repository化全体の完了」ではない。次Phaseでは、この
+  syncSmart残存1件を単独で完全追跡してから、最終接続可否を判断する
+  ことを推奨する。
