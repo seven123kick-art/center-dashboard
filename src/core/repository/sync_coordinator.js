@@ -379,6 +379,35 @@ TODO(V6以降)
          * 書かず、全てCloudRepository経由でcloud.js
          * _applyFullState()へ委譲している。全ステップが既存実装と
          * 一致する。
+         *
+         * Version6 Phase9-4Rで、既存CLOUD.syncSmart()が内部で呼ぶ
+         * pullManifestAndMissing()（非公開ではなく公開メソッドだが、
+         * Manifest DBフォールバック・削除フラグ整合性判定・
+         * Dataset/Worker/Product/Capacity/Plan/Memos/Libraryの
+         * 欠落分Pull補完・変更時STORE.save・Badge更新という複合処理を
+         * 内包する）と完全な機能互換になるよう実装した。
+         * Manifest取得はfetchManifest()からfetchManifestWithDbFallback()
+         * （既存cloud.js _loadManifestOrBuildFromDb()への薄い委譲、
+         * Phase9-2Aで追加済み）へ変更した。
+         * Dataset補完に削除フラグ整合性判定（isDeletedSince/
+         * clearDataDeleted）を追加した。
+         * Worker/Product補完（削除判定・validation・欠落Pull・
+         * STATE反映）、Capacity/Plan/Memos/Library補完、変更時の
+         * STORAGE_REPOSITORY.save()、Pull側Badge('ok')を追加した。
+         * いずれも新しいロジックを考案したのではなく、既存
+         * CLOUD.pullManifestAndMissing()の処理を、CloudRepositoryの
+         * 既存公開API（fetchWorkerMonth/fetchProductMonth/
+         * fetchCapacity/fetchPlan/fetchMemos/fetchLibrary/
+         * validateWorkerMonthRecord/validateProductMonthRecord）と
+         * 既存bareグローバル関数（isDeletedSince/clearDataDeleted/
+         * deletedAt/dataDeleteKey/mergePlanDataByUpdatedAt）を
+         * 組み合わせて再現したのみ。非公開CLOUDメンバーへの直接
+         * アクセスは一切行っていない。
+         *
+         * 既存CLOUD.syncSmart()のcatch節にある
+         * fy/perfStart未定義変数参照（確認済みのReferenceErrorバグ）
+         * は、Phase9-2Cの既存方針通りRepository版へ新規コピーして
+         * いない。
          */
         async syncSmart() {
             if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
@@ -402,25 +431,102 @@ TODO(V6以降)
                 if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(mergedFull);
                 CR.applyFullState(mergedFull);
 
-                // Manifestベースで不足しているDatasetを取得する（syncBootと同様のロジック）。
-                let manifestResult = { ok: false, changed: false };
-                try {
-                    const manifest = await CR.fetchManifest();
-                    if (manifest) {
-                        const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
-                        let changed = false;
-                        for (const meta of metas) {
-                            const metaType = meta.type || 'confirmed';
-                            const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
-                            if (local && String(meta.importedAt || '') <= String(local.importedAt || '')) continue;
-                            const ds = await CR.fetchDataset(meta.ym, metaType);
-                            if (ds && ds.ym) { window.DATASET_REPOSITORY.upsert(ds); changed = true; }
+                // 既存CLOUD.pullManifestAndMissing()の再現。
+                // Manifest DBフォールバック付き取得。
+                let changed = 0;
+                const manifest = await CR.fetchManifestWithDbFallback();
+                if (manifest) {
+                    // --- Dataset欠落Pull補完（削除フラグ整合性込み） ---
+                    const datasetMetas = Array.isArray(manifest.datasets) ? manifest.datasets : [];
+                    for (const meta of datasetMetas) {
+                        if (!meta.ym) continue;
+                        const metaType = meta.type || 'confirmed';
+                        const delKey = dataDeleteKey(meta.ym, metaType);
+                        if (isDeletedSince('datasets', delKey, meta.importedAt || meta.updatedAt || '')) {
+                            if (typeof clearDataDeleted === 'function') clearDataDeleted('datasets', delKey);
                         }
-                        manifestResult = { ok: true, changed };
+                        if (isDeletedSince('datasets', delKey, meta.importedAt || meta.updatedAt || '')) continue;
+                        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
+                        if (!local || String(meta.importedAt || '') > String(local.importedAt || '')) {
+                            const ds = await CR.fetchDataset(meta.ym, metaType);
+                            if (ds && ds.ym) { window.DATASET_REPOSITORY.upsert(ds); changed++; }
+                        }
                     }
-                } catch (e) {
-                    manifestResult = { ok: false, error: e.message || String(e) };
+
+                    if (!Array.isArray(STATE.workerCsvData)) STATE.workerCsvData = [];
+                    if (!Array.isArray(STATE.productAddressData)) STATE.productAddressData = [];
+
+                    // --- Worker欠落Pull補完 ---
+                    const workerMetas = Array.isArray(manifest.workerCsvData) ? manifest.workerCsvData : [];
+                    for (const meta of workerMetas) {
+                        if (!meta.ym || deletedAt('workerMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+                        const local = STATE.workerCsvData.find(d => d.ym === meta.ym);
+                        if (!local || !CR.validateWorkerMonthRecord(local, meta) || String(meta.importedAt || '') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
+                            const rec = await CR.fetchWorkerMonth(meta.ym);
+                            if (rec && rec.ym && CR.validateWorkerMonthRecord(rec, meta)) {
+                                STATE.workerCsvData = STATE.workerCsvData.filter(d => d.ym !== rec.ym);
+                                STATE.workerCsvData.push(rec);
+                                changed++;
+                            }
+                        }
+                    }
+
+                    // --- Product欠落Pull補完 ---
+                    const productMetas = Array.isArray(manifest.productAddressData) ? manifest.productAddressData : [];
+                    for (const meta of productMetas) {
+                        if (!meta.ym || deletedAt('productMonths', meta.ym) || deletedAt('fieldMonths', meta.ym)) continue;
+                        const local = STATE.productAddressData.find(d => d.ym === meta.ym);
+                        if (!local || !CR.validateProductMonthRecord(local, meta) || String(meta.importedAt || '') > String(local.importedAt || local.updatedAt || local.savedAt || '')) {
+                            const rec = await CR.fetchProductMonth(meta.ym);
+                            if (rec && rec.ym && CR.validateProductMonthRecord(rec, meta)) {
+                                STATE.productAddressData = STATE.productAddressData.filter(d => d.ym !== rec.ym);
+                                STATE.productAddressData.push(rec);
+                                changed++;
+                            }
+                        }
+                    }
+
+                    // --- Capacity欠落Pull補完 ---
+                    if (manifest.hasCapacity && !STATE.capacity) {
+                        const cap = await CR.fetchCapacity();
+                        if (cap) { STATE.capacity = cap; changed++; }
+                    }
+
+                    // --- Plan Pull補完 ---
+                    if (manifest.hasPlanData) {
+                        const cloudPlan = await CR.fetchPlan();
+                        if (cloudPlan && typeof cloudPlan === 'object') {
+                            STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
+                            if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+                            changed++;
+                        }
+                    }
+
+                    // --- Memos Pull補完 ---
+                    if (manifest.hasMemos) {
+                        const memos = await CR.fetchMemos();
+                        if (memos && typeof memos === 'object') { STATE.memos = memos; changed++; }
+                    }
+
+                    // --- Library Pull補完 ---
+                    if (manifest.hasLibrary) {
+                        const library = await CR.fetchLibrary();
+                        if (Array.isArray(library)) { STATE.library = library; changed++; }
+                    }
+
+                    // 【重要】既存CLOUD.pullManifestAndMissing()は、manifestが
+                    // 取得できなかった場合（if(!manifest)）に即座にreturnし、
+                    // 以下のtombstone再適用・invalidate・変更時save・Badgeには
+                    // 一切到達しない。この既存の早期return構造をそのまま
+                    // 再現するため、以下の4行はif(manifest)ブロックの内側に
+                    // 配置している（Phase9-4R E2E検証で発見・修正）。
+                    if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+                    if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
+                    if (changed) window.STORAGE_REPOSITORY.save();
+                    if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('ok');
                 }
+
+                const manifestResult = { ok: true, changed: changed > 0 };
 
                 await CR.pushFullState(CR.buildFullState());
                 await CR.pushPlan(STATE.planData || {});
@@ -436,12 +542,14 @@ TODO(V6以降)
 
                 await CR.pushManifest(CR.buildManifest());
 
+                if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('ok');
                 return { ok: true, changed: true, source: 'smart+manifest', manifestChanged: !!(manifestResult && manifestResult.changed) };
             };
 
             try {
                 return await _runSuppressed(run);
             } catch (e) {
+                if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('error');
                 return { ok: false, error: e.message || String(e) };
             } finally {
                 this._busy = false;

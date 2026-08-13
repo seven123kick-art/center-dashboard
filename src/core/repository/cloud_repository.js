@@ -23,13 +23,14 @@ Module
     （プロジェクト全体の設計方針：他ファイルから私有メンバーへ直接
     アクセスしない、を厳守）。
 
-公開API（Version6 Step1〜Phase9-4M-1で全30メソッド実装完了）
+公開API（Version6 Step1〜Phase9-4Rで全31メソッド実装完了）
     window.CLOUD_REPOSITORY
 
-    【実装済み・全30メソッド、CLOUDの公開APIへ100%委譲】
+    【実装済み・全31メソッド、CLOUDの公開APIへ100%委譲】
     fetchDataset() / fetchWorkerMonth() / fetchProductMonth() /
     fetchPlan() / fetchManifest() / fetchManifestWithDbFallback() /
-    fetchCapacity() / fetchLibrary() / fetchFullState() / applyFullState() /
+    fetchCapacity() / fetchLibrary() / fetchMemos() / fetchFullState() /
+    applyFullState() /
     pushDataset() / pushWorkerMonth() / pushProductMonth() /
     pushPlan() / pushLibrary() / pushManifest() / pushCapacity() /
     pushFullState() / pushMemos() / pushMonth() / pushCapacityFull() /
@@ -37,6 +38,13 @@ Module
     validateWorkerMonthRecord() / validateProductMonthRecord() /
     removeLegacyArtifacts() / pullLegacy() /
     uploadFile() / deleteFile() / createSignedUrl()
+
+Phase9-4Rでの追加
+    fetchMemos()を追加した。既存CLOUD.downloadJSON(CLOUD.memosKey())
+    への完全な薄い委譲のみ（fetchLibrary()と同型）。cloud.js側は
+    memosKey()・downloadJSON()とも既に公開済みのため、cloud.js側の
+    変更は不要だった。SyncCoordinator.syncSmart()のMemos欠落分Pull
+    補完で使用する。
 
 Phase9-4M-1での追加
     pushCapacityFull()を追加した。既存CLOUD.pushCapacity()（Capacity+
@@ -226,6 +234,15 @@ TODO(V6)
         async fetchLibrary() {
             const CLOUD = _requireCloud();
             return CLOUD.downloadJSON(CLOUD.libraryKey());
+        },
+
+        /**
+         * 既存CLOUD.downloadJSON(CLOUD.memosKey())への完全な薄い委譲。
+         * fetchLibrary()と同じ思想（Version9-4R）。
+         */
+        async fetchMemos() {
+            const CLOUD = _requireCloud();
+            return CLOUD.downloadJSON(CLOUD.memosKey());
         },
 
         /* ---------- Push系：実装済み（1件のみ、既存の同名公開APIへ委譲） ---------- */

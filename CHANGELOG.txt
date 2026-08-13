@@ -5979,3 +5979,102 @@ Version6 Phase9-4P (2026-08-13) 残存CLOUD責務確定＋storage_audit Manifest
 ⑭次Phaseへ進めるか：残存CLOUD責務の設計方針が確定し、
   storage_audit.jsのManifest接続も完了した。次フェーズでは
   syncSmartの機能差解消（別Phase）に着手可能な状態が整っている。
+
+Version6 Phase9-4R (2026-08-13) syncSmart完全互換化【app.js未接続】
+変更ファイル：
+  - src/core/repository/cloud_repository.js（編集：fetchMemos()を
+    1メソッド追加、fetchLibrary()と同型の薄い委譲）
+  - src/core/repository/sync_coordinator.js（編集：syncSmart()を
+    既存CLOUD.syncSmart()と機能互換になるよう全面書き換え）
+  ※ app.js・cloud.js・auto_sync.js・storage_audit.js・
+    bulk_import.js・past_library.jsはいずれも今回一切変更していない。
+    app.js:2507のCLOUD.syncSmart()実呼出は意図的に1件残存させている
+    （今回は最終接続を行わない）。
+
+■実装内容
+  fetchMemos()：既存CLOUD.downloadJSON(CLOUD.memosKey())への完全な
+  薄い委譲のみ。
+
+  syncSmart()：既存CLOUD.syncSmart()が内部で呼ぶ
+  pullManifestAndMissing()（Manifest DBフォールバック・削除フラグ
+  整合性判定・Dataset/Worker/Product/Capacity/Plan/Memos/Libraryの
+  欠落分Pull補完・変更時STORE.save・Badge更新という複合処理）と
+  完全な機能互換になるよう実装した。新しいロジックを考案したのでは
+  なく、既存CLOUD.pullManifestAndMissing()の処理を、CloudRepository
+  の既存公開API（fetchManifestWithDbFallback/fetchWorkerMonth/
+  fetchProductMonth/fetchCapacity/fetchPlan/fetchMemos/fetchLibrary/
+  validateWorkerMonthRecord/validateProductMonthRecord）と既存
+  bareグローバル関数（isDeletedSince/clearDataDeleted/deletedAt/
+  dataDeleteKey/mergePlanDataByUpdatedAt/applyDeletionTombstonesToState
+  等）を組み合わせて再現した。非公開CLOUDメンバーへの直接アクセスは
+  一切行っていない。
+
+■E2E検証で発見・修正した重大バグ
+  実装直後のNode.js E2E比較（Case A〜Y、25ケース）で、Case D
+  （Manifest取得失敗時）に実質的な機能差を発見した。既存
+  CLOUD.pullManifestAndMissing()は、manifestが取得できなかった場合
+  （if(!manifest)）に即座にreturnし、以降のtombstone再適用・
+  invalidate・変更時save・Badge更新processには一切到達しない。
+  実装当初のCoordinator版はこの早期return構造を再現できておらず、
+  manifestがnullでもこれらの処理へ到達してしまっていた。この既存の
+  早期return構造を正確に再現するよう修正し、再検証によって全25
+  ケースの完全一致を確認した。
+
+■E2E比較結果（Case A〜Y、全25ケース）
+  A. データあり変更なし：一致
+  B. Local差異あり：一致
+  C. Manifest通常取得：一致
+  D. Manifest欠落（DBフォールバック相当）：一致（バグ修正後）
+  E. Dataset欠落Pull：一致
+  F. Dataset削除フラグあり：一致
+  G. Worker欠落Pull：一致
+  H. Worker削除済み：一致
+  I. Worker不正record：一致
+  J. Product欠落Pull：一致
+  K. Product削除済み：一致
+  L. Product不正record：一致
+  M. Capacity欠落Pull：一致
+  N. Capacity既存時（Pullしない）：一致
+  O. Plan Pull+merge：一致
+  P. Memos Pull：一致
+  Q. Library Pull：一致
+  R. 複数種類同時欠落：一致
+  S. Pull変更ありStorage.save：一致
+  T. Pull変更なしStorage.save：一致
+  U. 正常時Badge回数：一致
+  V. 途中取得失敗：一致
+  W. Push失敗：一致
+  X. Legacy削除失敗：一致
+  Y. Manifest Push失敗：一致
+  全ケースについて、Push対象・順序・引数・STATE最終値・deleted
+  最終値・Storage.save回数・Badge回数/値/順序・return・throw/reject・
+  busy解除が旧版CLOUD.syncSmart()と完全一致することを確認した。
+
+  ※比較にあたり、Coordinator版特有の中間層計装（
+  DATASET_REPOSITORY.upsert経由でのDataset反映、
+  STORAGE_REPOSITORY.save経由でのSTORE.save呼び出し）による
+  ログ差異は、既存の一貫した設計パターン（Phase8以降確立済み）に
+  よるものであり、外部から観測可能な副作用には影響しないことを
+  確認した上で、実質的な比較対象から除外した。
+
+■特殊異常系
+  STORAGE_REPOSITORY未定義という通常環境では発生しない異常系
+  において、_repositoriesReady()が正しく検知し
+  {ok:false,reason:'repositories_not_ready'}で安全に早期return
+  することを確認した。既存コードの変更は不要だった。
+
+■残存確認
+  app.js:2507のCLOUD.syncSmart()実呼出は意図的に1件残存（今回は
+  最終接続を行わない）。
+
+■回帰確認
+  app.js・cloud.js・auto_sync.js・storage_audit.js・bulk_import.js・
+  past_library.jsについて、diff直接比較およびハッシュ比較により、
+  全て無変更であることを確認した。
+
+■GitHub投入可否
+  投入可（Version6 Phase9-4R syncSmart完全互換化版・app.js未接続）
+
+■次Phase
+  app.jsのCLOUD.syncSmart() → SYNC_COORDINATOR.syncSmart()という
+  1行の最終接続が可能な状態になった。
