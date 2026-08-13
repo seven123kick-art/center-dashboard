@@ -5924,3 +5924,58 @@ Version6 Phase9-4N-6 (2026-08-13) past_library clearAll 最終deleteFile接続
 pushCapacity()・deleteFile()・uploadFile()・createSignedUrl()は
 全て0件となった。past_library.jsのlibraryFileKey等Key生成APIは
 意図的にCLOUD側へ残存。
+
+Version6 Phase9-4P (2026-08-13) 残存CLOUD責務確定＋storage_audit Manifest接続＋syncSmart最終準備
+変更ファイル：
+  - src/modules/storage_audit.js（編集：1箇所、
+    CLOUD.downloadJSON(CLOUD.manifestKey()) → CLOUD_REPOSITORY.fetchManifest()）
+  ※ bulk_import.js・cloud.js・cloud_repository.js・sync_coordinator.js・
+    auto_sync.js・app.js・past_library.js・capacity.jsはいずれも今回
+    一切変更していない。
+
+■設計方針の確定（今回のGPT側方針をそのまま採用）：
+  以下は「残存CLOUD直接利用」として今後問題扱いしない：
+  - bulk_import.js の CLOUD.downloadJSON（Push後検証用、kind動的分岐）
+  - storage_audit.js の CLOUD.dbGetState / CLOUD.dbStateKey（監査専用）
+  - Key生成API（datasetKey/workerMonthKey/productMonthKey/planKey/
+    manifestKey/libraryFileKey等）
+  - CLOUD.renderForm / CLOUD.saveConfig / CLOUD.onAfterApplyFullState
+
+①storage_audit対象確認：Phase9-4O報告と完全一致することを確認した。
+②fetchManifest薄い委譲確認：CLOUD.downloadJSON(CLOUD.manifestKey())
+  への完全な薄い委譲のまま、差異なし。
+③変更箇所数：1箇所のみ
+④diff：287行のみ、.catch(e=>null)・await・後続監査処理は一切
+  変更していない。
+⑤Case A〜D（正常/null/reject/Manifest内容あり）：全て旧版・新版で
+  完全一致することをNode.jsで確認した。
+⑥全JS構文：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+⑦他ファイル無変更：diff/ハッシュ比較で確認済み。
+
+⑧設計上残すCLOUD API一覧：Key生成API群・renderForm・saveConfig・
+  onAfterApplyFullState・bulk_import.jsのdownloadJSON・
+  storage_audit.jsのdbGetState/dbStateKey。
+
+⑨想定外残存API有無：なし（`CLOUD.pull(`という出現はapp.js:2753の
+  コメント内言及のみで、実呼出ではないことを確認した）。
+
+⑩CLOUD.syncSmart現在件数：1件（app.js:2507）
+⑪syncSmart所属関数：PLAN.importFromPaste()（計画データ貼付・
+  完全入替後の手動同期）
+
+⑫既知7機能差の現在状態：
+  1.Manifest DBフォールバック：維持（欠如のまま）
+  2.削除フラグ整合性：維持（欠如のまま）
+  3.Worker欠落Pull補完：維持（欠如のまま）
+  4.Product欠落Pull補完：維持（欠如のまま）
+  5.Capacity欠落Pull補完：維持（欠如のまま）
+  6.Plan欠落Pull補完：維持（欠如のまま）
+  7.Badge：維持（欠如のまま）
+  いずれも今回は一切修正していない。
+
+⑬GitHub投入可否：**投入可**
+
+⑭次Phaseへ進めるか：残存CLOUD責務の設計方針が確定し、
+  storage_audit.jsのManifest接続も完了した。次フェーズでは
+  syncSmartの機能差解消（別Phase）に着手可能な状態が整っている。

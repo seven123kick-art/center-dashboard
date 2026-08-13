@@ -284,7 +284,7 @@ window.DATA_STORAGE_AUDIT = {
     el.innerHTML = '確認中...';
     try {
       const months = storageFiscalMonths(fy);
-      const manifest = await CLOUD.downloadJSON(CLOUD.manifestKey()).catch(e => null);
+      const manifest = await CLOUD_REPOSITORY.fetchManifest().catch(e => null);
       const mDatasets = new Set((manifest?.datasets || []).map(m => m && m.ym).filter(Boolean));
       const mWorkers = new Set((manifest?.workerCsvData || []).map(m => m && m.ym).filter(Boolean));
       const mProducts = new Set((manifest?.productAddressData || []).map(m => m && m.ym).filter(Boolean));
@@ -359,7 +359,7 @@ window.DATA_STORAGE_TABLE = {
     markDataDeleted('planFiscalYears', fy);
     delete STATE.planData[fy];
     applyDeletionTombstonesToState(STATE);
-    try { if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD.planKey()); } catch(e) {}
+    try { if (CLOUD?.deleteFile) await CLOUD_REPOSITORY.deleteFile(CLOUD.planKey()); } catch(e) {}
     await this._syncAfterDelete(`${fy}年度の計画データ`);
     UI.toast(`${fy}年度の計画データを削除しました`);
   },
@@ -404,7 +404,7 @@ window.DATA_STORAGE_TABLE = {
     } catch(e) {}
     try {
       for (const d of rows) {
-        if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD.datasetKey(d.ym, d.type || 'confirmed'));
+        if (CLOUD?.deleteFile) await CLOUD_REPOSITORY.deleteFile(CLOUD.datasetKey(d.ym, d.type || 'confirmed'));
       }
     } catch(e) {}
     await this._syncAfterDelete(`${ymLabel(ym)}の${label}`);
