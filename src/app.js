@@ -854,7 +854,7 @@ async function supersedeDailyWithConfirmed(ym) {
   if (typeof markDataDeleted === 'function') markDataDeleted('datasets', dataDeleteKey(ym, 'daily'));
   STATE.datasets = STATE.datasets.filter(d => !(d.ym === ym && (d.type || 'confirmed') === 'daily' && d.source !== 'history'));
   try { if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('dataset', `${ym}_daily`); } catch(e) {}
-  try { if (window.CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD.datasetKey(ym, 'daily')); } catch(e) {}
+  try { if (window.CLOUD?.deleteFile) await CLOUD_REPOSITORY.deleteFile(CLOUD.datasetKey(ym, 'daily')); } catch(e) {}
   return true;
 }
 window.supersedeDailyWithConfirmed = supersedeDailyWithConfirmed;
@@ -1024,7 +1024,7 @@ const IMPORT = {
       STATE.capacity.calendar = STATE.capacity.calendar || {};
 
       Repository.Storage.save();
-      CLOUD.pushCapacity().catch(()=>{});
+      SYNC_COORDINATOR.syncCapacity().catch(()=>{});
       NAV.refresh();
       UI.toast(`キャパ取込完了: ${Object.keys(areas).length}地区 / ${rowCount}行`);
       if (window.CAPACITY_UI?.render) CAPACITY_UI.render();
@@ -1054,7 +1054,7 @@ ${ds.fileName || 'ファイル名なし'}
       if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('dataset', `${ym}_${type}`);
     } catch(e) {}
     try {
-      if (CLOUD?.deleteFile) await CLOUD.deleteFile(CLOUD.datasetKey(ym, type));
+      if (CLOUD?.deleteFile) await CLOUD_REPOSITORY.deleteFile(CLOUD.datasetKey(ym, type));
       if (CLOUD?.pushAll) await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true });
     } catch(e) {
       UI.toast('ローカル削除は完了しましたが、クラウド同期に失敗しました: ' + e.message, 'warn');
@@ -2504,7 +2504,7 @@ const PLAN = {
     if (msg) msg.textContent = `${fy}年度 完全入替完了: ${count}科目`;
     renderImport();
     NAV.refresh();
-    CLOUD.syncSmart().then(r => {
+    SYNC_COORDINATOR.syncSmart().then(r => {
       if (r && r.ok) UI.toast(`${fy}年度 計画データを完全入替し、クラウド同期しました（${count}科目）`);
       else UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`, 'warn');
     }).catch(() => UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`, 'warn'));

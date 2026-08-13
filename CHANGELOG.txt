@@ -6078,3 +6078,76 @@ Version6 Phase9-4R (2026-08-13) syncSmart完全互換化【app.js未接続】
 ■次Phase
   app.jsのCLOUD.syncSmart() → SYNC_COORDINATOR.syncSmart()という
   1行の最終接続が可能な状態になった。
+
+Version6 Phase9-4S (2026-08-13) syncSmart 最終接続
+変更ファイル：
+  - src/app.js（編集：1箇所、PLAN.importFromPaste()内の
+    CLOUD.syncSmart() → SYNC_COORDINATOR.syncSmart()）
+  ※ sync_coordinator.js・cloud_repository.js・cloud.js・
+    auto_sync.js・bulk_import.js・storage_audit.js・past_library.js
+    はいずれも今回一切変更していない。Phase9-4Rで完成・検証済みの
+    SYNC_COORDINATOR.syncSmart()には一切触れていない。
+
+①変更前CLOUD.syncSmart実呼出数：1件（app.js:2507）
+②対象関数：PLAN.importFromPaste()
+③変更行数：1行のみ
+④diff内容：2507行の呼出先のみ。引数・await構造・try/catch相当の
+  .then/.catchチェーン・return・Toast・STATE処理・Repository.
+  Storage.save・NAV.refresh・renderImportは一切変更していない
+  ことを確認した（diff確認済み、不要差分なし）。
+
+⑤PLAN.importFromPaste正常結果：Storage.save→renderImport→
+  NAV.refresh→（fire-and-forgetで）syncSmart呼出という既存順序を
+  実測確認した。
+
+⑥syncSmart正常結果：syncSmart呼出1回のみ、成功時「{fy}年度 計画
+  データを完全入替し、クラウド同期しました（{count}科目）」という
+  既存Toastが表示されることを確認した。
+
+⑦syncSmart失敗結果（{ok:false}）：「{fy}年度 計画データは保存
+  しましたが、クラウド同期に失敗しました」という既存の警告Toastが
+  表示され、busyが正しく解除されることを確認した。
+
+⑧Cloud取得失敗結果（syncSmart内部でthrow）：例外が.then/.catch
+  チェーンで正しく吸収され、同じ警告Toastが表示されることを確認した。
+  例外がPLAN.importFromPaste()の外部（呼出元）へ伝播しないことを
+  確認した。
+
+⑨Push失敗結果：同様に警告Toastが表示されることを確認した。
+
+⑩await/呼出タイミング比較：既存通りfire-and-forget（awaitなし）で
+  あり、NAV.refresh等の後続処理がsyncSmart完了を待たずに先に実行
+  されることを確認した。
+
+⑪Toast比較：成功/失敗とも既存の文言・タイミングと完全一致。
+
+⑫return/例外比較：直接SYNC_COORDINATOR.syncSmart()を呼んだ場合と、
+  app.js経由（.then内）で取得した結果に、意味のある差異がないことを
+  確認した。
+
+⑬busy解除確認：全Caseでfinally節によりbusyが正しく解除されることを
+  確認した。
+
+⑭CLOUD.syncSmart残存実呼出数：**0件**（業務コードから完全に移行完了）
+
+⑮SYNC_COORDINATOR.syncSmart接続確認：app.js:2507で正しく接続されて
+  いることを確認した。
+
+⑯他ファイル無変更確認：sync_coordinator.js・cloud_repository.js・
+  cloud.js・auto_sync.js・bulk_import.js・storage_audit.js・
+  past_library.jsについて、diff直接比較（最も厳密な検証方法）に
+  より全て無変更であることを確認した。
+
+⑰全JS構文結果：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+
+⑱差異・未解決事項：なし。
+
+⑲GitHub投入可否：**投入可（Version6 Phase9-4S syncSmart最終接続版）**
+
+⑳Phase9-4シリーズ完了可否：**完了。** 業務コード直接
+  CLOUD.pushAll()・pushMonth()・pushCapacity()・deleteFile()・
+  uploadFile()・createSignedUrl()・syncSmart()は全て0件となった。
+  設計上CLOUDに残すと確定したAPI（Key生成API・renderForm・
+  saveConfig・onAfterApplyFullState・bulk_import.jsのdownloadJSON・
+  storage_audit.jsのdbGetState/dbStateKey）はそのまま維持している。
