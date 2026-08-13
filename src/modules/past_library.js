@@ -192,7 +192,7 @@ window.PAST_LIBRARY = {
     if (!confirm(`過去資料「${item.title}」を削除しますか？`)) return;
 
     if (item.storagePath) {
-      await CLOUD.deleteFile(item.storagePath).catch(()=>{});
+      await CLOUD_REPOSITORY.deleteFile(item.storagePath).catch(()=>{});
     }
 
     STATE.library=STATE.library.filter(i=>i.id!==id);

@@ -5642,3 +5642,253 @@ Version6 Phase9-4N-3 (2026-08-13) past_library Storage API 第1段接続
   特にpast_library.jsのclearAll()（await無し・並列fire-and-forget
   という特殊構造）については、Phase9-4N-2で判定C（要注意）とした
   通り、個別の追加検証が必要と考える。
+
+Version6 Phase9-4N-4 (2026-08-13) deleteFile 第1段接続
+変更ファイル：
+  - src/app.js（編集：2箇所、supersedeDailyWithConfirmed内・
+    deleteDataset内のCLOUD.deleteFile() → CLOUD_REPOSITORY.deleteFile()）
+  - src/modules/storage_audit.js（編集：2箇所、deletePlan内・
+    deleteCsvMonth内のCLOUD.deleteFile() → CLOUD_REPOSITORY.deleteFile()）
+  ※ past_library.js・cloud.js・cloud_repository.js・
+    sync_coordinator.js・auto_sync.js・bulk_import.js・capacity.jsは
+    いずれも今回一切変更していない。past_library.js内の
+    CLOUD.deleteFile()（2箇所）・clearAll()のfire-and-forget構造・
+    Phase9-4N-3で接続済みのCLOUD_REPOSITORY.uploadFile/
+    createSignedUrlは完全に無変更のまま維持。
+
+①変更前deleteFile総実呼出数：6件（app.js×2、storage_audit.js×2、
+  past_library.js×2）、変化なし。
+
+②今回対象4件：app.js（supersedeDailyWithConfirmed、deleteDataset）、
+  storage_audit.js（deletePlan、deleteCsvMonth）。
+
+③対象外past_library 2件：delete()内・clearAll()内、今回一切
+  変更していない。
+
+④各対象関数名：supersedeDailyWithConfirmed(ym)、deleteDataset(ym,type)、
+  deletePlan(fy)、deleteCsvMonth(ym,type)。全文をPhase9-4N-2調査時点と
+  再比較し、差異なしを確認した。
+
+⑤変更ファイル：src/app.js・src/modules/storage_audit.jsの2ファイル
+⑥実変更箇所数：4箇所のみ（diff確認済み）
+
+⑦diff内容：857行・1057行（app.js）、362行・407行
+  （storage_audit.js）のみ。Key生成（datasetKey/planKey）・
+  STATE処理・markDataDeleted・deleted/tombstone・Storage.save・
+  syncPush・_syncAfterDelete・Toast・render/NAV・try/catch・
+  await構造は一切diffに含まれていないことを確認した。
+
+⑧⑨接続前後E2E結果：Case A〜J（supersede正常/失敗、deleteDataset
+  正常/失敗、deletePlan正常/失敗、deleteCsvMonth単件/複数/途中失敗、
+  {ok:false}ケース）を旧版・新版で実行し、deleteFile呼出回数・key・
+  順序・STATE・deleted/tombstone・Storage.save・syncPush・Toast・
+  render/NAV・return・後続処理が全て完全一致することを確認した。
+
+⑩supersede正常結果：markDataDeleted→STATE.datasets filter→
+  IDB_CACHE.remove→deleteFileという既存順序を維持。
+
+⑪supersede失敗結果：deleteFile失敗時も外側try-catchで吸収され、
+  return trueという既存動作が変わらないことを確認した。
+
+⑫deleteDataset正常結果：STATE変更→Storage.save→IDB_CACHE.remove→
+  deleteFile→SYNC_COORDINATOR.syncPush→NAV.refresh→Toastという
+  既存順序を維持。
+
+⑬deleteDataset失敗結果：deleteFile失敗時もsyncPushへ進み、
+  最終的に同じToast・NAV.refreshが実行される既存動作を確認した。
+
+⑭deletePlan正常結果：markDataDeleted→STATE削除→tombstone→
+  deleteFile→_syncAfterDelete相当という既存順序を維持。
+
+⑮deletePlan失敗結果：deleteFile失敗時も_syncAfterDeleteへ進む
+  既存動作を確認した。
+
+⑯deleteCsvMonth単件結果：単一Datasetの削除で既存版と完全一致。
+
+⑰deleteCsvMonth複数結果：複数Dataset（confirmed/daily）の削除で、
+  ループの実行順序・全件のdeleteFile呼出が既存版と完全一致することを
+  確認した。
+
+⑱deleteCsvMonth途中失敗結果（重点確認）：1件目（confirmed）の
+  deleteFileが失敗（{ok:false}、throwなし）しても、ループが中断
+  されず2件目（daily）のdeleteFileが正しく実行されることを確認した。
+  これはdeleteFile自体が例外を投げず{ok:false}を返す既存設計に
+  依存する挙動であり、旧版・新版で完全に同一の結果となることを
+  確認した。Promise.all等への変更は一切行っていない。
+
+⑲{ok:false}時比較：全Caseで既存版と完全一致。
+
+⑳STATE比較：全Caseで既存版と完全一致。
+㉑deleted/tombstone比較：markDataDeleted・
+  applyDeletionTombstonesToStateの呼出タイミング・回数とも既存版と
+  完全一致。
+㉒Storage.save比較：既存版と完全一致（deleteDatasetのみ、他は
+  _syncAfterDelete内で発生）。
+㉓syncPush比較：既存の呼出条件・引数とも変更していない。
+㉔_syncAfterDelete比較：中身は一切変更していない。
+㉕Manifest/FullState比較：既存通り、deleteFile後の再構築処理
+  （syncPush/_syncAfterDelete経由）に依存する既存設計を維持。
+㉖Toast比較：全Caseで既存の文言・タイミングと完全一致。
+㉗render/NAV比較：既存版と完全一致。
+㉘throw/reject比較：deleteFile自体が例外を投げない設計のため、
+  通常環境ではthrow/rejectは発生しない。
+
+㉙特殊異常系差異：CLOUD_REPOSITORY自体が未定義という通常環境では
+  発生しない異常系において、4箇所全てが既存のtry-catch構造
+  （またはifガード＋try-catchの組合せ）で包まれているため、
+  同期的例外が発生しても既存の外側try-catchで正しく吸収され、
+  既存動作は壊れないことを確認した。
+
+㉚past_library無変更確認：diff直接比較により、Phase9-4N-3完了時点の
+  状態と完全に一致することを確認した。
+
+㉛clearAll無変更確認：`paths.forEach(p => CLOUD.deleteFile(p).catch(()=>{}))`
+  という既存のfire-and-forget構造を一切変更していないことを確認した。
+
+㉜uploadFile/createSignedUrl接続維持確認：Phase9-4N-3で接続した
+  CLOUD_REPOSITORY.uploadFile（2箇所）・CLOUD_REPOSITORY.
+  createSignedUrl（1箇所）が引き続き正しく機能していることを確認した。
+
+㉝実装後CLOUD.deleteFile残存数：**2件**（past_library.jsのみ、
+  想定通り）
+㉞app.js残存数：**0件**
+㉟storage_audit.js残存数：**0件**
+
+㊱全JS構文結果：src配下の全JavaScriptファイルでnode --checkを
+  実施し、エラー0件を確認した。
+
+㊲差異・未解決事項：㉙に記載の特殊異常系限定の事項以外は発見なし。
+  通常環境での動作には一切影響しない。
+
+㊳GitHub投入可否：**GitHub投入可（Version6 Phase9-4N-4 deleteFile
+  第1段接続版）**
+
+㊴次Phaseへ進めるか：残るCLOUD.deleteFile 2件（past_library.jsの
+  delete()・clearAll()）の接続を検討できるが、特にclearAll()は
+  await無し・並列fire-and-forgetという特殊構造のため、Phase9-4N-2で
+  判定C（要注意）とした通り、個別の追加検証が必要と考える。
+
+Version6 Phase9-4N-5 (2026-08-13) past_library deleteFile 第2段接続
+変更ファイル：
+  - src/modules/past_library.js（編集：1箇所、delete(id)内の
+    CLOUD.deleteFile() → CLOUD_REPOSITORY.deleteFile()）
+  ※ clearAll()・libraryFileKey・uploadFile・createSignedUrl・
+    STATE.library処理・Repository.Storage.save・renderList・
+    try/catch・await構造は一切変更していない。app.js・
+    storage_audit.js・cloud.js・cloud_repository.js・
+    sync_coordinator.js・auto_sync.js・bulk_import.jsも今回一切
+    変更していない。
+
+①変更前CLOUD.deleteFile残存数：2件（past_library.js、delete(id)・
+  clearAll()）、変化なし。
+
+②今回対象：delete(id)の195行、1箇所のみ。
+
+③対象外clearAll：208行、今回一切変更していない。
+
+④現在行番号：195行（変化なし、Phase9-4N-2/4N-4調査時点と一致）。
+
+⑤delete(id)既存処理順序：「Cloud削除→STATE.library filter→
+  Repository.Storage.save→renderList」という既存の特殊な順序
+  （他4箇所とは逆、deleteFileが先）を再確認し、そのまま維持した。
+
+⑥CloudRepository.deleteFile再確認：完全な薄い委譲のまま、差異なし。
+
+⑦接続前Case A〜H：正常削除・{ok:false}・通信失敗・reject/throw・
+  storagePathなし・idなし・Cloud未接続相当・連続複数削除の全ケースで
+  旧版の基準を取得した。
+
+⑧正常削除結果：deleteFile成功→STATE.library削除→Storage.save→
+  renderListという既存順序を確認。
+
+⑨{ok:false}結果：deleteFileが{ok:false}を返しても（reject
+  ではないため.catchは発火しないが）、既存通りSTATE.library削除以降の
+  処理が継続することを確認した。
+
+⑩通信失敗結果：Supabase未設定相当でも{ok:false}が返るだけで、
+  後続処理は既存通り継続。
+
+⑪reject/throw結果：deleteFile自体が例外を投げても.catch(()=>{})で
+  吸収され、既存通り後続処理が継続することを確認した。
+
+⑫storagePath無し：deleteFile自体が呼ばれず、直接STATE.library削除へ
+  進む既存分岐を維持。
+
+⑬id無し：item不存在のため早期return、STATE.library変化なしという
+  既存挙動を維持。
+
+⑭連続削除結果：3件を1件ずつ削除した場合、各回で独立して
+  deleteFile→STATE削除→Storage.save→renderListが実行される既存
+  パターンを確認した。
+
+⑮STATE.library比較：全Caseで旧版・新版が完全一致。
+
+⑯Cloud削除→STATE削除順序比較：全Caseで既存の順序（他とは逆）が
+  維持されていることを確認した。「Cloud削除に失敗したらSTATEを
+  残すべき」等の改善は一切行っていない。
+
+⑰Storage.save比較：全Caseで既存版と完全一致（呼出回数・タイミング）。
+
+⑱AUTO_SYNC比較：明示的なsuppress/cancelPending/withoutSync/syncPushは
+  今回も追加していない。Repository.Storage.save経由の既存タイミングを
+  維持した。
+
+⑲renderList比較：全Caseで既存版と完全一致。
+
+⑳Toast比較：delete(id)には元々Toastが存在しないため、今回もToastを
+  追加していない。
+
+㉑return比較：全Caseで既存版と完全一致（明示的returnなし、confirm/
+  item不存在時のみ早期return）。
+
+㉒特殊異常系差異：「CLOUD_REPOSITORY自体が未定義」という通常環境では
+  発生しない異常系において、プロパティアクセス自体が同期的例外を
+  投げ.catch()に到達せず伝播する（旧版の「CLOUD自体未定義」と同じ
+  性質）ことを確認した。一方、「CloudRepository内部でCLOUDが未定義」
+  というケースでは、_requireCloud()が投げる例外は既存の.catch(()=>{})
+  によって正しく吸収され、安全に継続処理されることを確認した
+  （初回テストで表示上の誤りがあったため、正確に再検証し確定した）。
+  これらはいずれも通常環境での動作には影響しない。
+
+㉓変更ファイル：src/modules/past_library.jsのみ
+㉔変更箇所数：1箇所のみ（diff確認済み）
+
+㉕diff確認：195行のみ。clearAll・CLOUD.libraryFileKey・
+  CLOUD_REPOSITORY.uploadFile・CLOUD_REPOSITORY.createSignedUrl・
+  STATE.library・Repository.Storage.save・renderList・Toast・
+  AUTO_SYNC・try/catch・await・returnはいずれもdiffに含まれていない
+  ことを確認した。
+
+㉖接続後Case A〜H：全ケースを新版で再実行し、旧版と完全一致することを
+  確認した。
+
+㉗clearAll未変更確認：diff・目視確認により完全に無変更であることを
+  確認した。
+
+㉘fire-and-forget維持確認：`paths.forEach(p => CLOUD.deleteFile(p).catch(()=>{}))`
+  という既存構造を一切変更していない（Promise.all・await・for...of
+  への変更は行っていない）。
+
+㉙CLOUD.deleteFile残存数：**1件**（past_library.js clearAll()のみ、
+  想定通り）。
+
+㉚uploadFile/createSignedUrl 0件維持：確認済み。
+
+㉛他API無変更：libraryFileKey・datasetKey・planKey等のKey API、
+  downloadJSON・syncSmart・renderForm・saveConfig・
+  onAfterApplyFullStateはいずれも今回変更していない。
+
+㉜全JS構文：src配下の全JavaScriptファイルでnode --checkを実施し、
+  エラー0件を確認した。
+
+㉝既存との差異：㉒に記載の特殊異常系限定の事項以外は発見なし。
+
+㉞未解決事項：なし。
+
+㉟GitHub投入可否：**GitHub投入可（Version6 Phase9-4N-5
+  past_library deleteFile第2段接続版）**
+
+㊱次Phaseへ進めるか：残るCLOUD.deleteFileは、past_library.jsの
+  clearAll()（await無し・並列fire-and-forgetという特殊構造）の1件
+  のみとなった。次フェーズでは、このclearAll()の並列実行構造を
+  維持したまま接続可能かどうか、個別のE2E検証が必要と考える。
