@@ -205,7 +205,7 @@ window.PAST_LIBRARY = {
   clearAll() {
     if(confirm('全過去資料を削除しますか？\n※Storage上のファイル本体も削除を試行します。')){
       const paths = (STATE.library || []).map(i=>i.storagePath).filter(Boolean);
-      paths.forEach(p => CLOUD.deleteFile(p).catch(()=>{}));
+      paths.forEach(p => CLOUD_REPOSITORY.deleteFile(p).catch(()=>{}));
       STATE.library=[];
       Repository.Storage.save();
       this.renderList();

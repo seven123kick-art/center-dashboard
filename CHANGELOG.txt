@@ -5892,3 +5892,35 @@ Version6 Phase9-4N-5 (2026-08-13) past_library deleteFile 第2段接続
   clearAll()（await無し・並列fire-and-forgetという特殊構造）の1件
   のみとなった。次フェーズでは、このclearAll()の並列実行構造を
   維持したまま接続可能かどうか、個別のE2E検証が必要と考える。
+
+Version6 Phase9-4N-6 (2026-08-13) past_library clearAll 最終deleteFile接続
+変更ファイル：
+  - src/modules/past_library.js（編集：1箇所、clearAll()内の
+    CLOUD.deleteFile() → CLOUD_REPOSITORY.deleteFile()）
+  ※ paths.forEach構造・.catch(()=>{})・STATE.library=[]・
+    Repository.Storage.save()・this.renderList()・confirm・
+    fire-and-forget構造は一切変更していない。他ファイルも今回
+    一切変更していない。
+
+①変更前CLOUD.deleteFile残存数：1件（clearAll()のみ）
+②変更箇所：208行、1行のみ
+③diffが1行のみか：確認済み、1行のみ
+④fire-and-forget維持：paths.forEach・await無し・Promise.all等への
+  変更なし、既存構造を完全維持
+⑤Case A〜D結果：3ファイル削除（正常）・1件{ok:false}・1件reject・
+  複数rejectの全ケースで、旧版・新版が完全に同一のログ順序・
+  タイミングとなることを実測確認した。deleteFileがほぼ同時に開始され、
+  完了を待たずSTATE.library=[]→Storage.save→renderListが実行される
+  既存動作を完全に維持。個別の失敗が他処理へ一切影響しないことも確認。
+⑥STATE.library/save/render順序一致：全Caseで完全一致
+⑦CLOUD.deleteFile残存実呼出数：**0件**
+⑧uploadFile/createSignedUrl残存数：**0件**
+⑨全JS構文結果：エラー0件
+⑩差異・未解決事項：なし（特殊異常系差異は前フェーズで報告済みの
+  既知パターンのみ、今回は通常環境で完全一致を確認）
+⑪GitHub投入可否：**投入可**
+
+これにより、業務コード直接CLOUD.pushAll()・pushMonth()・
+pushCapacity()・deleteFile()・uploadFile()・createSignedUrl()は
+全て0件となった。past_library.jsのlibraryFileKey等Key生成APIは
+意図的にCLOUD側へ残存。
