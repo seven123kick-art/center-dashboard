@@ -174,22 +174,40 @@
   function planForYM(ym, label){
     if (!ym || typeof getPlanRowsForFiscalYear !== 'function') return null;
     const rows = getPlanRowsForFiscalYear(fiscalYearFromYM(ym));
-    if (!rows || !rows.length) return null;
+    if (!rows) return null;
     const mm = ym.slice(4,6);
-    if (label === '営業収益') return getPlanValueK(rows, '営業収益', mm, CONFIG.INCOME_KEYS) || null;
-    if (label === '粗利益') return getPlanValueK(rows, '粗利益', mm, []) || null;
+    if (label === '営業収益') return getPlanValueK(rows, '営業収益', mm, CONFIG.INCOME_KEYS);
+    if (label === '粗利益') return getPlanValueK(rows, '粗利益', mm, []);
     return null;
   }
+
+  /* ---------- 達成率予測の表示ロジック（今回追加） ----------
+     既存の共通ratio()（src/core/format.js）は変更していない。
+     予実差異分析（budget_actual.js）のyoyRatioLabel()と同じ考え方
+     （比較対象がマイナスの場合に単純な%へ変換しない）を、着地予測
+     固有の「計画 vs 着地予測」比較に合わせてこのファイル内だけで
+     実装する。他画面・共通関数への影響はない。 */
+  function achievementLabel(planK, fK){
+    if (planK > 0) return pctLocal(fK / planK * 100);
+    if (planK === 0) return '—';
+    // planK < 0（赤字計画）
+    if (fK > 0) return '黒字転換';
+    if (fK === 0) return '黒字化';
+    if (fK === planK) return '計画並み';
+    if (fK > planK) return '赤字縮小';
+    return '赤字拡大';
+  }
+
   function kpi(label, current, forecast, planK, type='money'){
     const fK = forecast / 1000;
     const cK = current / 1000;
-    const planText = planK ? `${fmtLocal(planK)}千円` : '未登録';
-    const rate = planK ? (fK / planK * 100) : 0;
+    const planText = planK != null ? `${fmtLocal(planK)}千円` : '未登録';
+    const rateText = planK != null ? achievementLabel(planK, fK) : null;
     return `<div class="kpi-card">
       <div class="kpi-label">${escLocal(label)}</div>
       <div class="kpi-value">${fmtLocal(Math.round(fK))}<span style="font-size:13px;font-weight:600">千円</span></div>
       <div class="kpi-sub-row"><span class="kpi-sub">現在 ${fmtLocal(Math.round(cK))}千円</span></div>
-      <div class="kpi-sub-row"><span class="kpi-sub">計画 ${planText}${planK ? `／達成率予測 ${pctLocal(rate)}` : ''}</span></div>
+      <div class="kpi-sub-row"><span class="kpi-sub">計画 ${planText}${rateText != null ? `／達成率予測 ${rateText}` : ''}</span></div>
     </div>`;
   }
   function importSummary(){
