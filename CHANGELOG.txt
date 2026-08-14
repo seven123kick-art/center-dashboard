@@ -1,16 +1,19 @@
-Version6 センター選択画面 キャラクター画像組込
+経営管理システム Version6 UI調整
 2026-08-14
 
 変更ファイル
-- index.html
-  - 北埼玉・戸田カードのキャラクタープレースホルダーを本番画像へ置換。
 - assets/css/landing.css
-  - 透明WebPをカード内にcontain配置する本番スタイルへ変更。
-  - hover時も業務UIを邪魔しない微細な動きのみ追加。
-- assets/images/centers/center-kitasaitama-character.webp（新規）
-  - 北埼玉センター用。768×1152、透明背景、WebP。
-- assets/images/centers/center-toda-character.webp（新規）
-  - 戸田センター用。768×1152、透明背景、WebP。
 
-非変更
-- Dataset / STATE / Cloud / Repository / SyncCoordinator / 業務計算ロジックは変更なし。
+変更内容
+- センター選択カードのキャラクター背面にあった円形装飾を削除
+- キャラクターを表示領域の水平・垂直中央基準へ変更
+- PC表示では視覚重心を考慮して約10px上方へ調整
+- hover時の移動量を新しい基準位置に合わせて調整
+- モバイル表示も中央基準へ統一し、過度な下寄せを解消
+
+変更していないもの
+- キャラクター画像ファイル
+- index.html
+- センター情報取得処理
+- localStorage/Cloud/Repository関連
+- 各センター内部画面
