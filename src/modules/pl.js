@@ -52,8 +52,8 @@ function ensurePLStyle() {
   style.textContent = `
     #pl-tbl .col-current { background:#eef6ff; }
     #pl-tbl .col-plan { background:#fff8e1; }
-    #pl-tbl .col-prev { background:#f5f6f8; border-left:4px solid #94a3b8; }
-    #pl-tbl .col-lastyear { background:#fff1f7; border-left:4px solid #d946ef; }
+    #pl-tbl .col-prev { background:#f6f8fb; border-left:2px solid #b8c3d1; }
+    #pl-tbl .col-lastyear { background:#faf8ff; border-left:2px solid #c8bfdf; }
     #pl-tbl .pl-group-row td { background:#f8fafc; border-top:1px solid #cbd5e1; }
     #pl-tbl .pl-child-row td { font-size:12px; color:#475569; }
     #pl-tbl .pl-total-row td { background:#eef2f7; font-weight:900; border-top:2px solid #94a3b8; }
