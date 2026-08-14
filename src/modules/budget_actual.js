@@ -1,0 +1,332 @@
+/* =====================================================================
+   経営管理システム budget_actual.js
+   2026-08-14
+   Version6 Phase10-B：予実差異分析
+   ・月次PL全体を対象に「計画に対して実績がどうだったか」を一目で
+     判断できる画面を新設する。
+   ・実績データの取得は既存 activeDatasets() / activeDatasetByYM() /
+     activeRealCsvDatasetByYM()（いずれもRepository.Dataset.getActive()
+     経由の既存有効Dataset判定、速報/確定優先ロジックを含む）を
+     そのまま使用する。本ファイルでは有効Dataset判定ロジックを
+     一切新規実装しない。
+   ・予算データの取得・科目突合には既存 readPlanValueByLabel() /
+     PLAN_LABEL_ALIASES / normalizePlanLabel() / sumPlanValues() /
+     getPlanValueK() をそのまま使用する。新規の単純な科目名完全一致
+     ロジックは作らない。
+   ・PL科目階層は既存 CONFIG.PL_DEF をそのまま正本として使用する。
+   ・営業収益/営業費用/営業利益の合計値算出は、既存pl.jsの
+     totalRevenue/totalCost/totalGross算出パターン
+     （ds.totalIncome || valueFromRows(ds, CONFIG.INCOME_KEYS) など）を
+     忠実に再現する。
+   ・valueFromRows() / planValue()相当のヘルパーは、pl.js/
+     profit_structure.js側のローカルクロージャ関数のため、モジュール
+     境界を越えて直接呼び出せない（Phase10-B1確認済み）。そのため
+     本ファイル内に同一ロジックの薄い複製を持つが、内部で使用する
+     計算・取得はすべて既存グローバル関数（readPlanValueByLabel等）
+     であり、新しい業務ロジックは追加していない。
+   ・取込、保存、Cloud同期、Dataset/planData構造は一切変更しない。
+   ・良化/悪化の色判定（ba-good/ba-bad）は本画面専用の新規クラスで
+     あり、既存PL画面のcell-up/cell-downロジックには一切触れない。
+===================================================================== */
+'use strict';
+
+(function () {
+  if (window.__BUDGET_ACTUAL_MODULE_LOADED_20260814__) return;
+  window.__BUDGET_ACTUAL_MODULE_LOADED_20260814__ = true;
+
+  /* ---------- 表示整形（他モジュールと同一の防御パターン。実体は
+     既存 src/core/format.js のグローバル関数をそのまま使う） ---------- */
+  function escLocal(v) { return typeof esc === 'function' ? esc(v) : String(v ?? ''); }
+  function fmtKLocal(v) { return typeof fmtK === 'function' ? fmtK(v) : '—'; }
+  function fmtLocal(v) { return typeof fmt === 'function' ? fmt(v) : '—'; }
+  function pctLocal(v) { return typeof pct === 'function' ? pct(v) : '—'; }
+  function diffLocal(a, b) { return typeof diff === 'function' ? diff(a, b) : '—'; }
+  function ratioLocal(a, b) { return typeof ratio === 'function' ? ratio(a, b) : '—'; }
+  function ymLabelLocal(ym) { return typeof ymLabel === 'function' ? ymLabel(ym) : String(ym || ''); }
+
+  /* ---------- 実績値の取得（pl.jsのローカルclosure valueFromRows()と
+     完全に同一のロジック。モジュール境界のため複製が必要
+     ―Phase10-B1確認済み。新しい算出方法ではない） ---------- */
+  function valueFromRows(dataSet, keys) {
+    if (!dataSet) return null;
+    const arr = Array.isArray(keys) ? keys : [keys];
+    return arr.reduce((sum, key) => sum + n(dataSet.rows?.[key] ?? 0), 0);
+  }
+
+  function groupDefs() {
+    return (CONFIG.PL_DEF || []).filter(d => d && d.type === 'group');
+  }
+
+  /* ---------- 計画値の取得（pl.jsのローカルclosure planValue()と
+     完全に同一のロジック。'営業費用'は既存pl.jsの'売上原価'ラベル
+     （このシステムでは費用合計を指す既存運用）、'営業利益'は
+     既存'粗利益'ラベルへ、それぞれそのままマッピングするだけで、
+     算出方法自体は一切変更していない） ---------- */
+  function planGroupValue(planRows, label, keys, mm) {
+    if (!planRows) return null;
+
+    if (label === '営業費用') {
+      const direct = readPlanValueByLabel(planRows, '売上原価', mm);
+      if (direct != null) return direct;
+      return groupDefs()
+        .filter(d => d.id !== 'revenue')
+        .reduce((sum, d) => sum + (getPlanValueK(planRows, d.label, mm, d.keys) || 0), 0);
+    }
+
+    if (label === '営業利益') {
+      const direct = readPlanValueByLabel(planRows, '粗利益', mm);
+      if (direct != null) return direct;
+      const revDef = groupDefs().find(d => d.id === 'revenue');
+      const revenue = getPlanValueK(planRows, '営業収益', mm, revDef?.keys || CONFIG.INCOME_KEYS) || 0;
+      const cost = groupDefs()
+        .filter(d => d.id !== 'revenue')
+        .reduce((sum, d) => sum + (getPlanValueK(planRows, d.label, mm, d.keys) || 0), 0);
+      return revenue - cost;
+    }
+
+    return getPlanValueK(planRows, label, mm, keys);
+  }
+
+  /* ---------- 実績合計（pl.jsのtotalRevenue/totalCost/totalGross
+     算出パターンと完全に同一。ds.totalIncome/totalExpenseを優先し、
+     無ければCONFIG.INCOME_KEYS/EXPENSE_KEYSからの再集計にフォール
+     バックする既存仕様をそのまま踏襲） ---------- */
+  function actualRevenue(ds) {
+    if (!ds) return null;
+    return ds.totalIncome || valueFromRows(ds, CONFIG.INCOME_KEYS) || 0;
+  }
+  function actualExpense(ds) {
+    if (!ds) return null;
+    return ds.totalExpense || valueFromRows(ds, CONFIG.EXPENSE_KEYS) || 0;
+  }
+  function actualProfit(ds) {
+    if (!ds) return null;
+    const rev = actualRevenue(ds);
+    const exp = actualExpense(ds);
+    if (rev == null || exp == null) return null;
+    return rev - exp;
+  }
+
+  /* ---------- 良化/悪化の色分類（本画面専用の新規UI分類ロジック。
+     既存diff()/ratio()の「!a||!b→'—'」という既存の欠損/0判定と
+     整合させ、数値差が表示されない場合は色も付けない） ---------- */
+  function baDiffClass(actual, compare, isExpense) {
+    if (actual == null || compare == null || !actual || !compare) return '';
+    const rawDiff = actual - compare;
+    if (rawDiff === 0) return 'ba-neutral';
+    const isGood = isExpense ? (rawDiff < 0) : (rawDiff > 0);
+    return isGood ? 'ba-good' : 'ba-bad';
+  }
+
+  function ensureStyle() {
+    if (document.getElementById('ba-style')) return;
+    const style = document.createElement('style');
+    style.id = 'ba-style';
+    style.textContent = `
+      #budget-actual-root .ba-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; margin-bottom:16px; }
+      #budget-actual-root .ba-summary-card { background:#fff; border:1px solid var(--border,#dde3f0); border-radius:12px; padding:14px 16px; box-shadow:0 2px 8px rgba(15,23,42,.05); }
+      #budget-actual-root .ba-summary-title { font-weight:900; font-size:14px; color:var(--text,#1f2d3d); margin-bottom:8px; }
+      #budget-actual-root .ba-summary-table { width:100%; border-collapse:collapse; font-size:12px; }
+      #budget-actual-root .ba-summary-table td { padding:4px 6px; text-align:right; }
+      #budget-actual-root .ba-summary-table td:first-child { text-align:left; color:var(--text3,#8090a3); }
+      #budget-actual-root .ba-good { color:#1a8a4a; font-weight:800; }
+      #budget-actual-root .ba-bad { color:#d94141; font-weight:800; }
+      #budget-actual-root .ba-neutral { color:var(--text2,#52606d); }
+      #budget-actual-root table.tbl th, #budget-actual-root table.tbl td { white-space:nowrap; }
+      #budget-actual-root .ba-total-row td { background:#f8fafc; font-weight:900; border-top:2px solid #94a3b8; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function renderPeriodSelector() {
+    const root = document.getElementById('budget-actual-root');
+    if (!root) return;
+    let box = document.getElementById('budget-actual-period-selector');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'budget-actual-period-selector';
+      root.prepend(box);
+    }
+    if (window.PERIOD_UI?.render) {
+      PERIOD_UI.render(box, {
+        viewKey: 'budget-actual',
+        kind: 'revenue',
+        useMonth: true,
+        subtitle: '年度順：4月 → 翌年3月 / 予算と実績の差異を確認',
+        onChange: () => BUDGET_ACTUAL_UI.render()
+      });
+    }
+  }
+
+  function summaryCard(title, actual, planV, pyV, isExpense) {
+    const diffPlan = (actual != null && planV != null) ? diffLocal(actual, planV * 1000) : '—';
+    const ratioPlan = (actual != null && planV != null) ? ratioLocal(actual, planV * 1000) : '—';
+    const diffPy = (actual != null && pyV != null) ? diffLocal(actual, pyV) : '—';
+    const ratioPy = (actual != null && pyV != null) ? ratioLocal(actual, pyV) : '—';
+    const planDiffClass = baDiffClass(actual, planV != null ? planV * 1000 : null, isExpense);
+    const pyDiffClass = baDiffClass(actual, pyV, isExpense);
+
+    return `
+      <div class="ba-summary-card">
+        <div class="ba-summary-title">${escLocal(title)}</div>
+        <table class="ba-summary-table">
+          <tr><td>実績</td><td>${actual != null ? fmtKLocal(actual) : '—'}</td></tr>
+          <tr><td>予算</td><td>${planV != null ? fmtLocal(planV) : '—'}</td></tr>
+          <tr><td>予実差</td><td class="${planDiffClass}">${diffPlan}</td></tr>
+          <tr><td>予算比</td><td class="${planDiffClass}">${ratioPlan}</td></tr>
+          <tr><td>前年実績</td><td>${pyV != null ? fmtKLocal(pyV) : '—'}</td></tr>
+          <tr><td>前年差</td><td class="${pyDiffClass}">${diffPy}</td></tr>
+          <tr><td>前年比</td><td class="${pyDiffClass}">${ratioPy}</td></tr>
+        </table>
+      </div>`;
+  }
+
+  function subjectRow(label, actual, planV, pyV, isExpense, isTotal) {
+    const diffPlan = (actual != null && planV != null) ? diffLocal(actual, planV * 1000) : '—';
+    const ratioPlan = (actual != null && planV != null) ? ratioLocal(actual, planV * 1000) : '—';
+    const diffPy = (actual != null && pyV != null) ? diffLocal(actual, pyV) : '—';
+    const ratioPy = (actual != null && pyV != null) ? ratioLocal(actual, pyV) : '—';
+    const planDiffClass = baDiffClass(actual, planV != null ? planV * 1000 : null, isExpense);
+    const pyDiffClass = baDiffClass(actual, pyV, isExpense);
+    const rowClass = isTotal ? 'ba-total-row' : '';
+
+    return `<tr class="${rowClass}">
+      <td>${escLocal(label)}</td>
+      <td class="r">${planV != null ? fmtLocal(planV) : '—'}</td>
+      <td class="r">${actual != null ? fmtKLocal(actual) : '—'}</td>
+      <td class="r ${planDiffClass}">${diffPlan}</td>
+      <td class="r ${planDiffClass}">${ratioPlan}</td>
+      <td class="r">${pyV != null ? fmtKLocal(pyV) : '—'}</td>
+      <td class="r ${pyDiffClass}">${diffPy}</td>
+      <td class="r ${pyDiffClass}">${ratioPy}</td>
+    </tr>`;
+  }
+
+  function render() {
+    ensureStyle();
+    const root = document.getElementById('budget-actual-root');
+    if (!root) return;
+
+    renderPeriodSelector();
+
+    const ym = STATE.selYM;
+    const ds = ym ? activeRealCsvDatasetByYM(ym) : null;
+
+    root.querySelectorAll('.ba-content').forEach(el => el.remove());
+    const content = document.createElement('div');
+    content.className = 'ba-content';
+
+    if (!ds) {
+      content.innerHTML = '<div class="msg msg-info">選択月の収支データがありません。</div>';
+      root.appendChild(content);
+      if (window.UI?.updateTopbar) UI.updateTopbar('budget-actual');
+      return;
+    }
+
+    const fy = fiscalYearFromYM(ds.ym);
+    const mm = ds.ym.slice(4, 6);
+    const planRows = getPlanRowsForFiscalYear(fy);
+    const py = sameMonthLastYear(ds.ym);
+
+    const actRev = actualRevenue(ds);
+    const actExp = actualExpense(ds);
+    const actPrf = actualProfit(ds);
+    const pyRev = py ? actualRevenue(py) : null;
+    const pyExp = py ? actualExpense(py) : null;
+    const pyPrf = py ? actualProfit(py) : null;
+
+    const revDef = groupDefs().find(d => d.id === 'revenue');
+    const planRev = planGroupValue(planRows, '営業収益', revDef?.keys || CONFIG.INCOME_KEYS, mm);
+    const planExp = planGroupValue(planRows, '営業費用', CONFIG.EXPENSE_KEYS, mm);
+    const planPrf = planGroupValue(planRows, '営業利益', [], mm);
+
+    /* ---- A. 上部サマリー ---- */
+    const summaryHtml = `
+      <div class="ba-summary-grid">
+        ${summaryCard('営業収益', actRev, planRev, pyRev, false)}
+        ${summaryCard('営業費用', actExp, planExp, pyExp, true)}
+        ${summaryCard('営業利益', actPrf, planPrf, pyPrf, false)}
+      </div>`;
+
+    /* ---- C. 科目別予実（既存CONFIG.PL_DEFの並び順をそのまま使用） ---- */
+    const subjectRows = groupDefs().map(def => {
+      const isExpense = def.id !== 'revenue';
+      const actual = valueFromRows(ds, def.keys);
+      const planV = planGroupValue(planRows, def.label, def.keys, mm);
+      const pyV = py ? valueFromRows(py, def.keys) : null;
+      return subjectRow(def.label, actual, planV, pyV, isExpense, false);
+    }).join('');
+
+    const subjectTotalRow = subjectRow('営業費用合計', actExp, planExp, pyExp, true, true)
+      + subjectRow('営業利益', actPrf, planPrf, pyPrf, false, true);
+
+    const subjectHtml = `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><span class="card-title">科目別予実</span></div>
+        <div class="scroll-x">
+          <table class="tbl">
+            <thead><tr>
+              <th style="min-width:140px">科目</th>
+              <th class="r" style="min-width:80px">予算</th>
+              <th class="r" style="min-width:80px">実績</th>
+              <th class="r" style="min-width:80px">予実差</th>
+              <th class="r" style="min-width:70px">予算比</th>
+              <th class="r" style="min-width:80px">前年実績</th>
+              <th class="r" style="min-width:80px">前年差</th>
+              <th class="r" style="min-width:70px">前年比</th>
+            </tr></thead>
+            <tbody>${subjectRows}${subjectTotalRow}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    /* ---- D. 月別推移（年度4月～翌3月） ---- */
+    const months = monthsOfFiscalYear(fy);
+    const trendRows = months.map(monthYm => {
+      const monthDs = activeRealCsvDatasetByYM(monthYm);
+      const monthMm = monthYm.slice(4, 6);
+      const monthActRev = monthDs ? actualRevenue(monthDs) : null;
+      const monthActPrf = monthDs ? actualProfit(monthDs) : null;
+      const monthPlanRev = planGroupValue(planRows, '営業収益', revDef?.keys || CONFIG.INCOME_KEYS, monthMm);
+      const monthPlanPrf = planGroupValue(planRows, '営業利益', [], monthMm);
+      return `<tr>
+        <td>${escLocal(ymLabelLocal(monthYm))}</td>
+        <td class="r">${monthPlanRev != null ? fmtLocal(monthPlanRev) : '—'}</td>
+        <td class="r">${monthActRev != null ? fmtKLocal(monthActRev) : '—'}</td>
+        <td class="r">${monthPlanPrf != null ? fmtLocal(monthPlanPrf) : '—'}</td>
+        <td class="r">${monthActPrf != null ? fmtKLocal(monthActPrf) : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    const trendHtml = `
+      <div class="card">
+        <div class="card-header"><span class="card-title">月別推移（${escLocal(fy)}年度）</span></div>
+        <div class="scroll-x">
+          <table class="tbl">
+            <thead><tr>
+              <th style="min-width:80px">月</th>
+              <th class="r" style="min-width:100px">営業収益予算</th>
+              <th class="r" style="min-width:100px">営業収益実績</th>
+              <th class="r" style="min-width:100px">営業利益予算</th>
+              <th class="r" style="min-width:100px">営業利益実績</th>
+            </tr></thead>
+            <tbody>${trendRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    content.innerHTML = `
+      <div style="font-size:12px;color:var(--text3,#8090a3);margin-bottom:10px">
+        ${escLocal(ymLabelLocal(ds.ym))}・${escLocal(typeof datasetKindLabel === 'function' ? datasetKindLabel(ds) : '')}　単位：千円
+      </div>
+      ${summaryHtml}
+      ${subjectHtml}
+      ${trendHtml}
+    `;
+    root.appendChild(content);
+
+    if (window.UI?.updateTopbar) UI.updateTopbar('budget-actual');
+  }
+
+  window.BUDGET_ACTUAL_UI = { render };
+})();

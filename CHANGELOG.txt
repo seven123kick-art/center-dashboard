@@ -6151,3 +6151,109 @@ Version6 Phase9-4S (2026-08-13) syncSmart 最終接続
   設計上CLOUDに残すと確定したAPI（Key生成API・renderForm・
   saveConfig・onAfterApplyFullState・bulk_import.jsのdownloadJSON・
   storage_audit.jsのdbGetState/dbStateKey）はそのまま維持している。
+
+Version6 Phase10-B (2026-08-14) 予実差異分析 新機能実装
+変更ファイル：
+  - src/modules/budget_actual.js（新規作成）
+  - center.html（編集：ナビゲーション項目追加、view要素追加、
+    script参照追加）
+  - src/modules/navigation.js（編集：1行、NAV._render()の
+    switch-caseへ'budget-actual'ケースを追加）
+  ※ STATE構造・Dataset構造・planData構造・Repository・
+    SyncCoordinator・Cloud同期・速報/確定優先ロジック・既存PL画面の
+    計算・表示仕様はいずれも一切変更していない。app.js・cloud.js・
+    cloud_repository.js・sync_coordinator.js・dataset_repository.js・
+    registry.js・pl.js・profit_structure.js・trend.js・kamoku.js・
+    format.jsは全てハッシュ比較で無変更を確認済み。
+
+■新画面概要
+  月次PL全体を対象とした「計画に対して実績がどうだったか」を一目で
+  判断できる予実差異分析画面（view-budget-actual、ナビゲーション
+  「予実差異分析」）を新設した。
+  A. 上部サマリー：営業収益/営業費用/営業利益の3指標について、
+     予算・実績・予実差・予算比・前年実績・前年差・前年比を表示。
+  B. 良化/悪化表示：新画面専用のba-good/ba-bad/ba-neutralクラスで、
+     収益・利益は実績>比較値で良化、費用は実績<比較値で良化という
+     経営上の意味に合わせた判定を実装した（既存PL画面のcell-up/
+     cell-downロジックには一切触れていない）。
+  C. 科目別予実：CONFIG.PL_DEFの既存階層・並びをそのまま使用し、
+     科目別に予算・実績・予実差・予算比・前年実績・前年差・前年比
+     を一覧表示。
+  D. 月別推移：対象年度4月～翌3月について、営業収益予算/実績・
+     営業利益予算/実績を月別に表示。Datasetが存在しない月は
+     「—」表示とし、将来月を0円実績として扱わない。
+
+■既存ロジックの再利用（新規実装0件）
+  - 実績取得：activeDatasets() / activeRealCsvDatasetByYM()
+    （Repository.Dataset.getActive()経由、速報/確定優先ロジック含む）
+  - 予算取得・科目突合：readPlanValueByLabel() / PLAN_LABEL_ALIASES /
+    normalizePlanLabel() / sumPlanValues() / getPlanValueK() /
+    getPlanRowsForFiscalYear()
+  - 前年取得：sameMonthLastYear()
+  - 年度計算：fiscalYearFromYM() / monthsOfFiscalYear()
+  - PL科目階層：CONFIG.PL_DEF / CONFIG.INCOME_KEYS / CONFIG.EXPENSE_KEYS
+  - 予実差・予算比・前年差・前年比の計算式：diff() / ratio()
+    （src/core/format.js）
+  - 年月選択UI：PERIOD_UI.render()
+
+■モジュール境界のため複製が必要だった最小限のヘルパー
+  pl.js/profit_structure.jsのvalueFromRows()相当・planValue()相当は
+  各モジュールのローカルクロージャ関数のため、モジュール境界を越えて
+  直接呼び出せない。本モジュール内に同一ロジックの薄い複製
+  （valueFromRows/planGroupValue）を持つが、内部で使用する計算・取得
+  はすべて既存グローバル関数であり、新しい業務ロジックは追加して
+  いない。
+
+■新規追加ロジック
+  baDiffClass()：本画面専用の良化/悪化色分類ロジック（既存diff()/
+  ratio()の「!a||!b→'—'」という既存の欠損/0判定と整合させ、数値差が
+  表示されない場合は色も付けない設計）。既存PL画面のcell-up/
+  cell-downロジックとは独立しており、既存ロジックへの変更は一切ない。
+
+■E2E検証結果（全30ケース、53アサーション、PASS 53/FAIL 0）
+  実際のソースファイル（dataset_repository.js・registry.js・
+  format.js）とapp.jsから逐語抽出した28関数を用いたNode.js
+  テストハーネスにより検証した。
+  1. 予算・実績・前年すべて存在：PASS
+  2. 予算なし：PASS（null、0を生成しない）
+  3. 実績なし：PASS（ds=null、actualRevenue=null）
+  4. 前年なし：PASS（py=null）
+  5. 実績0円：PASS（0はnullと区別、既存diff()の0非表示仕様を維持）
+  6. 予算0円：PASS（0はnullと区別、既存ratio()の0非表示仕様を維持）
+  7. 前年0円：PASS
+  8. 速報Datasetのみ：PASS（datasetKindLabel=速報）
+  9. 確定Datasetのみ：PASS（datasetKindLabel=確定）
+  10. 速報→確定の既存優先関係：PASS（既存Repository.Dataset.
+      getActive仕様通り確定が優先）
+  11. 4月：PASS（当年度扱い）
+  12. 3月：PASS（前年度扱い）
+  13. 年度跨ぎ：PASS（1月→前年1月の前年同月取得が正しく計算）
+  14. 収益が予算超過：PASS（ba-good）
+  15. 収益が予算未達：PASS（ba-bad）
+  16. 費用が予算超過：PASS（ba-bad、費用は少ない方が良化）
+  17. 費用が予算未満：PASS（ba-good）
+  18. 利益が予算超過：PASS（ba-good）
+  19. 利益が予算未達：PASS（ba-bad）
+  20. 科目別予算alias一致：PASS（その他収入（産廃）等の別名一致）
+  21. 科目別予算不一致：PASS（存在しない科目はnull）
+  22. 将来月Datasetなし：PASS（0円実績として扱わない）
+  23. 前年同月取得：PASS
+  24. 月別推移4月～3月：PASS（12ヶ月、4月始まり～翌3月終わり）
+  25. 既存PL画面への影響なし：PASS（pl.jsハッシュ一致）
+  26. 既存Trend画面への影響なし：PASS（trend.jsハッシュ一致）
+  27. Cloud同期への影響なし：PASS（cloud.js/cloud_repository.js/
+      sync_coordinator.jsハッシュ一致）
+  28. 全JS構文エラーなし：PASS
+  29. 既存画面ナビゲーション正常：PASS（navigation.js既存case無変更、
+      budget-actual case追加確認）
+  30. 新画面配線正常：PASS（view要素・nav-item確認）
+
+  ※検証過程で2件の一時的な失敗を発見したが、原因は実装のバグでは
+  なくテストデータの月キー不一致（テスト側のミス）であったことを
+  特定し、テストデータを修正の上で再検証し全PASSを確認した。
+
+■実装対象外（Phase10-Bに含めないと明記された事項）
+  Excel/CSV/PDF出力、印刷最適化、ReportKnowledge入力、コメント保存、
+  計画編集、センター横断比較は今回実装していない。
+
+■GitHub投入可否：投入可（Version6 Phase10-B 予実差異分析実装版）
