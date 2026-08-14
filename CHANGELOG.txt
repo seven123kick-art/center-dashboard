@@ -1,42 +1,16 @@
-Version6 UI/UX Foundation Refresh - 2026-08-14
+Version6 UI/UX刷新 Step2
+2026-08-14
 
-変更対象
+変更ファイル
 - index.html
-  - センター選択画面を全面再構築
-  - 北埼玉=紫系、戸田=オレンジ系のテーマに整理
-  - 既存の単純カードUIを、Version6向けワークスペース選択画面へ刷新
-  - 実在しない件数・更新日時などのダミー情報は表示しない
+- assets/css/landing.css
 
-- center.html
-  - センター別テーマ識別用data-centerを追加
-  - サイドバーのロゴ/センター表示/ナビゲーション構造を整理
-  - ローカル保存済・書出・復元・クラウド公開など保守系操作を常設サイドバーから撤去
-  - データ管理への導線は維持
-  - 復元用inputは既存JS互換のため非表示で維持
-
-- assets/css/landing.css（新規）
-  - センター選択画面専用のVersion6デザイン
-
-- assets/css/foundation/base.css
-  - Version6デザイントークンを根本更新
-  - 紫系を基本テーマ、戸田ではオレンジ系に切替
-  - 業務上の良化/悪化/警告色はアクセント色と分離
-
-- assets/css/foundation/shell.css
-  - サイドバー、トップバー、コンテンツシェルを再設計
-
-- assets/css/foundation/theme.css
-  - カード、KPI、テーブル、ボタン、入力UI等の共通見た目を再構築
-  - 個別画面への後付けパッチではなく共通基盤を変更
-
-非変更
-- Repository / SyncCoordinator / Cloud
-- Dataset / planData / STATE構造
-- 各分析画面の計算ロジック
-- navigation.js
-
-検証
-- index.html / center.html のHTML ID重複なし
-- center.htmlのsidebar/main/cloud-label/session-load-inputは各1件
-- src/app.js / src/modules/navigation.js 構文チェックPASS
-- センターリンク2件を維持
+変更内容
+- センター選択画面から常設サイドバーを撤去
+- 正常時ステータス、データ分離説明、保守操作説明を撤去
+- センター選択という単一目的に情報設計を再構築
+- 北埼玉/戸田カードをキャラクター画像差し込み前提の構造へ再設計
+- キャラクター画像用ステージを正式に確保（現時点はプレースホルダー）
+- センター固有色（北埼玉=紫、戸田=オレンジ）を維持
+- PC/タブレット/スマートフォン向けレスポンシブを再設計
+- 業務ロジック、Dataset、Cloud、Repository、同期処理は変更なし
