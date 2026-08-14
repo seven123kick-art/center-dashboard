@@ -155,6 +155,9 @@ const KAMOKU_UI = (() => {
   </div>
   ${cmpAvail?`<span style="font-size:11px;color:var(--text3)">\u6bd4\u8f03: ${ymLabel(cmpYm)}</span>`
             :(cmpMode!=='none'?'<span style="font-size:11px;color:#e87830">\u6bd4\u8f03\u30c7\u30fc\u30bf\u306a\u3057</span>':'')}
+  <div class="no-print" style="display:flex;gap:8px;margin-left:auto">
+    <button class="btn" onclick="KAMOKU_UI.exportExcel()">\uD83D\uDCCA Excel\u51fa\u529b</button>
+  </div>
 </div>
 <div id="k-body"></div>`;
 
@@ -267,6 +270,76 @@ ${hasCmp ? _barSection(rows, cr, totInc, totExp, ctInc, ctExp, ym, cmpYm) : ''}
     });
 
     _drawCharts(rows);
+
+    /* ---- 出力用構造化データの構築（Phase10-C2追加）----
+       画面表示に使った計算済み値（rows/cr/totInc/totExp/profit/
+       margin/ctInc/ctExp/cProfit/cMargin）をそのまま再利用する。
+       Datasetからの再集計は一切行わない。kamoku.jsの値は
+       全て円単位（Dataset.rowsから直接取得）のため、
+       Excel出力時にのみ1000で割って千円に統一する。 */
+    const exportSummaryRows = [
+      ['総収入', totInc/1000, hasCmp?(ctInc/1000):null, hasCmp?((totInc-ctInc)/1000):null],
+      ['総費用', totExp/1000, hasCmp?(ctExp/1000):null, hasCmp?((totExp-ctExp)/1000):null],
+      ['営業利益', profit/1000, hasCmp?(cProfit/1000):null, hasCmp?((profit-cProfit)/1000):null],
+      ['利益率（％）', margin/100, hasCmp?(cMargin/100):null, hasCmp?((margin-cMargin)/100):null],
+    ];
+
+    const exportIncomeRows = [];
+    for (const g of INCOME_GROUPS) {
+      const v = n(rows[g.key]);
+      const cv = cr ? n(cr[g.key]) : null;
+      if (!v && !cv) continue;
+      exportIncomeRows.push([g.label, v/1000, cv!=null?cv/1000:null, cv!=null?(v-cv)/1000:null, totInc?v/totInc:null]);
+      for (const s of g.subs) {
+        const sv = n(rows[s]);
+        const scv = cr ? n(cr[s]) : null;
+        if (!sv && !scv) continue;
+        exportIncomeRows.push(['（' + s + '）', sv/1000, scv!=null?scv/1000:null, scv!=null?(sv-scv)/1000:null, v?sv/v:null]);
+      }
+    }
+
+    const exportExpenseRows = [];
+    for (const g of EXPENSE_GROUPS) {
+      for (const item of g.items) {
+        const v = n(rows[item.key]);
+        const cv = cr ? n(cr[item.key]) : null;
+        if (!v && !cv) continue;
+        exportExpenseRows.push([g.group + '／' + item.label, v/1000, cv!=null?cv/1000:null, cv!=null?(v-cv)/1000:null, totExp?v/totExp:null]);
+      }
+    }
+
+    window.KAMOKU_UI_EXPORT = window.KAMOKU_UI_EXPORT || {};
+    window.KAMOKU_UI_EXPORT._lastExportData = {
+      title: '科目分析',
+      center: (typeof CENTER !== 'undefined' && CENTER?.name) ? CENTER.name : '',
+      period: ymLabel(ym) + (hasCmp ? '（比較：' + ymLabel(cmpYm) + '）' : '') + '　単位：千円',
+      filename: (typeof EXPORT_SERVICE !== 'undefined' && EXPORT_SERVICE.buildFilename)
+        ? EXPORT_SERVICE.buildFilename([(typeof CENTER !== 'undefined' && CENTER?.name) || '', '科目分析', ym], 'xlsx')
+        : null,
+      sheets: [{
+        name: 'サマリー',
+        columns: ['項目', ymLabel(ym), hasCmp?ymLabel(cmpYm):'比較なし', '差額'],
+        rows: exportSummaryRows,
+      }, {
+        name: '収入内訳',
+        columns: ['科目', ymLabel(ym), hasCmp?ymLabel(cmpYm):'比較なし', '差額', '構成比'],
+        rows: exportIncomeRows,
+      }, {
+        name: '費用内訳',
+        columns: ['科目', ymLabel(ym), hasCmp?ymLabel(cmpYm):'比較なし', '差額', '構成比'],
+        rows: exportExpenseRows,
+      }],
+    };
+  }
+
+  function kamokuExportExcel() {
+    const data = window.KAMOKU_UI_EXPORT?._lastExportData;
+    if (!data) { if (window.UI?.toast) UI.toast('出力するデータがありません', 'warn'); return; }
+    if (!window.EXPORT_SERVICE) { if (window.UI?.toast) UI.toast('出力機能を読み込めませんでした', 'error'); return; }
+    EXPORT_SERVICE.toExcel(data).catch(e => {
+      console.error('[KAMOKU_UI.exportExcel]', e);
+      if (window.UI?.toast) UI.toast('Excel出力に失敗しました: ' + e.message, 'error');
+    });
   }
 
   function _incRows(rows, cr, totInc, hasCmp) {
@@ -423,7 +496,7 @@ ${hasCmp ? _barSection(rows, cr, totInc, totExp, ctInc, ctExp, ym, cmpYm) : ''}
     },options:opts});
   }
 
-  return { render };
+  return { render, exportExcel: kamokuExportExcel };
 })();
 
 window.KAMOKU_UI = KAMOKU_UI;

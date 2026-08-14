@@ -1,0 +1,38 @@
+経営管理システム Version6 / Phase10-C2 安全統合
+作成日: 2026-08-14
+
+【目的】
+現行UI（2026-08-14 10:08:56版）を正本として維持し、Phase10-C2の出力機能のみを安全に統合。
+古いcenter.htmlによるUI巻き戻しは行っていない。
+
+【変更ファイル】
+- center.html
+  - 現行UIを維持したまま、PLのExcel/印刷ボタン、TrendのExcelボタンのみ追加
+- src/modules/pl.js
+  - Excel/印刷接続
+  - 計画/前月/前年の分母0時にInfinityを出さず空欄扱いへ修正
+- src/modules/kamoku.js
+  - Excel出力接続
+- src/modules/trend.js
+  - Excel出力接続
+  - 0件をnullにせず0として保持
+  - 前月/前年の分母0時にInfinityを出さず空欄扱いへ修正
+- src/modules/landing_forecast.js
+  - 印刷/PDF保存接続
+- src/modules/export_service.js
+  - C1共通出力基盤を復元（現行center.htmlが参照済みだがファイル欠落のため）
+- assets/libs/xlsx.full.min.js
+  - SheetJSローカルライブラリを復元
+- assets/libs/LICENSES/xlsx-LICENSE.txt
+  - SheetJSライセンス
+- assets/css/foundation/components.css
+  - 現行UI CSSを維持し、C1の印刷専用ルールだけを再統合
+
+【変更していないもの】
+- Cloud / Repository / SyncCoordinator / STATE / Dataset構造
+- 現行サイドバー・カード・ナビゲーション等のUI刷新内容
+- PL/科目分析/Trend/着地予測の既存主要業務計算ロジック
+
+【投入方法】
+ZIPをリポジトリルートで展開し、同一パスへ上書き。
+変更ファイルのみ収録。

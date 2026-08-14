@@ -173,6 +173,7 @@ function renderPL() {
   const pyGross   = py ? (pyRevenue - pyCost) : null;
 
   const rows = [];
+  const exportRows = [];
 
   for (const def of CONFIG.PL_DEF) {
     if (def.type === 'group') {
@@ -182,7 +183,7 @@ function renderPL() {
       const planV  = planValue(def.label, def.keys);
       const open   = PL_TOGGLE.isOpen(def.id);
 
-      rows.push(makePLRow({
+      const groupOpt = {
         label: def.label,
         value: actual,
         base: totalRevenue,
@@ -193,7 +194,9 @@ function renderPL() {
         groupId: def.id,
         open,
         rowClass: 'pl-group-row'
-      }));
+      };
+      rows.push(makePLRow(groupOpt));
+      exportRows.push(makeExportPLRow(groupOpt));
 
       if (open && Array.isArray(def.children)) {
         for (const child of def.children) {
@@ -204,7 +207,7 @@ function renderPL() {
 
           if (!childActual && !childPrev && !childPy && !childPlan) continue;
 
-          rows.push(makePLRow({
+          const childOpt = {
             label: child.label,
             value: childActual,
             base: totalRevenue,
@@ -214,7 +217,9 @@ function renderPL() {
             bold: false,
             child: true,
             rowClass: 'pl-child-row'
-          }));
+          };
+          rows.push(makePLRow(childOpt));
+          exportRows.push(makeExportPLRow(childOpt));
         }
       }
 
@@ -222,7 +227,7 @@ function renderPL() {
     }
 
     if (def.type === 'total-cost') {
-      rows.push(makePLRow({
+      const totalCostOpt = {
         label: def.label,
         value: totalCost,
         base: totalRevenue,
@@ -232,12 +237,14 @@ function renderPL() {
         bold: true,
         total: true,
         rowClass: 'pl-total-row'
-      }));
+      };
+      rows.push(makePLRow(totalCostOpt));
+      exportRows.push(makeExportPLRow(totalCostOpt));
       continue;
     }
 
     if (def.type === 'gross-profit') {
-      rows.push(makePLRow({
+      const grossProfitOpt = {
         label: def.label,
         value: totalGross,
         base: totalRevenue,
@@ -247,7 +254,9 @@ function renderPL() {
         bold: true,
         total: true,
         rowClass: 'pl-profit-row'
-      }));
+      };
+      rows.push(makePLRow(grossProfitOpt));
+      exportRows.push(makeExportPLRow(grossProfitOpt));
       continue;
     }
   }
@@ -256,6 +265,24 @@ function renderPL() {
 
   const title = document.getElementById('pl-card-title');
   if (title) title.textContent = `月次収支表（${ymLabel(ds.ym)}・${datasetKindLabel(ds)}）`;
+
+  /* ---- 出力用構造化データの構築（Phase10-C2追加） ----
+     画面表示に使った計算済みexportRowsをそのまま再利用する。
+     Dataset/planDataからの再集計は一切行わない。 */
+  window.PL_UI_EXPORT = window.PL_UI_EXPORT || {};
+  window.PL_UI_EXPORT._lastExportData = {
+    title: '月次収支表',
+    center: (typeof CENTER !== 'undefined' && CENTER?.name) ? CENTER.name : '',
+    period: ymLabel(ds.ym) + '　単位：千円',
+    filename: (typeof EXPORT_SERVICE !== 'undefined' && EXPORT_SERVICE.buildFilename)
+      ? EXPORT_SERVICE.buildFilename([(typeof CENTER !== 'undefined' && CENTER?.name) || '', '月次収支', ds.ym], 'xlsx')
+      : null,
+    sheets: [{
+      name: '月次収支表',
+      columns: ['科目', '実績', '収入比', '計画', '計画差異', '計画比', '前月実績', '前月差異', '前月比', '前年実績', '前年差異', '前年比'],
+      rows: exportRows,
+    }],
+  };
 }
 
 
@@ -343,8 +370,69 @@ function makePLRow(opt) {
   </tr>`;
 }
 
+/* ---------- Excel出力用の並行ヘルパー（Phase10-C2追加） ----------
+   makePLRow(opt)と全く同一のopt引数を受け取り、HTML文字列の代わりに
+   Excel用の配列行を返す。makePLRow(opt)自体・その呼出コードは一切
+   変更していない。金額は既存fmtK/fmtと同じ単位変換（実績・前月・
+   前年は円→千円、計画は既に千円のためそのまま）を数値型で行う。
+   比率（収入比・計画比・前月比・前年比）は既存ratio()/pct()と同じ
+   計算式を数値化して用いる。分析値自体（v/base/planV/prevV/pyV）は
+   呼出元から渡されたものをそのまま使い、一切再計算しない。 */
+function makeExportPLRow(opt) {
+  const label = opt.label || '';
+  const v = n(opt.value);
+  const base = n(opt.base);
+  const planK = opt.planV != null ? opt.planV : null;
+  const prevV = opt.prevV != null ? opt.prevV : null;
+  const pyV = opt.pyV != null ? opt.pyV : null;
+  const ratNum = base && base > 0 ? (v / base) : null;
+  const planDiff = planK != null ? (v - planK * 1000) : null;
+  const planRatio = planK != null && Number(planK) !== 0 ? (v / (planK * 1000) - 1) : null;
+  const prevDiff = prevV != null ? (v - prevV) : null;
+  const prevRatio = prevV != null && Number(prevV) !== 0 ? (v / prevV - 1) : null;
+  const pyDiff = pyV != null ? (v - pyV) : null;
+  const pyRatio = pyV != null && Number(pyV) !== 0 ? (v / pyV - 1) : null;
+
+  const displayLabel = opt.child ? `└ ${label}` : label;
+
+  return [
+    displayLabel,
+    v / 1000,
+    ratNum,
+    planK != null ? planK : null,
+    planDiff != null ? planDiff / 1000 : null,
+    planRatio,
+    prevV != null ? prevV / 1000 : null,
+    prevDiff != null ? prevDiff / 1000 : null,
+    prevRatio,
+    pyV != null ? pyV / 1000 : null,
+    pyDiff != null ? pyDiff / 1000 : null,
+    pyRatio,
+  ];
+}
+
   window.PL_TOGGLE = PL_TOGGLE;
   window.renderPL = renderPL;
   window.openPLFullView = openPLFullView;
   window.closePLFullView = closePLFullView;
+
+  /* ---------- Excel出力 / 印刷（Phase10-C2追加） ---------- */
+  function plExportExcel() {
+    const data = window.PL_UI_EXPORT?._lastExportData;
+    if (!data) { if (window.UI?.toast) UI.toast('出力するデータがありません', 'warn'); return; }
+    if (!window.EXPORT_SERVICE) { if (window.UI?.toast) UI.toast('出力機能を読み込めませんでした', 'error'); return; }
+    EXPORT_SERVICE.toExcel(data).catch(e => {
+      console.error('[PL_UI.exportExcel]', e);
+      if (window.UI?.toast) UI.toast('Excel出力に失敗しました: ' + e.message, 'error');
+    });
+  }
+  function plPrintReport() {
+    const data = window.PL_UI_EXPORT?._lastExportData;
+    if (!data) { if (window.UI?.toast) UI.toast('印刷するデータがありません', 'warn'); return; }
+    if (!window.EXPORT_SERVICE) { if (window.UI?.toast) UI.toast('出力機能を読み込めませんでした', 'error'); return; }
+    EXPORT_SERVICE.toPrint(data);
+  }
+  window.PL_UI_EXPORT = window.PL_UI_EXPORT || {};
+  window.PL_UI_EXPORT.exportExcel = plExportExcel;
+  window.PL_UI_EXPORT.printReport = plPrintReport;
 })();

@@ -242,6 +242,15 @@
       this.render();
       UI.toast(`${ymLabelLocal(ym)}の日別実績を削除しました`);
     },
+    printReport(){
+      const ym = selectedYM();
+      if (!window.EXPORT_SERVICE) { UI?.toast && UI.toast('出力機能を読み込めませんでした', 'error'); return; }
+      EXPORT_SERVICE.toPrint({
+        title: '着地予測',
+        center: (typeof CENTER !== 'undefined' && CENTER?.name) ? CENTER.name : '',
+        period: ymLabelLocal(ym),
+      });
+    },
     renderImportPanel(){
       const root = document.getElementById(IMPORT_ID);
       if (!root) return;
@@ -296,7 +305,11 @@
       const warn = forecast.profit < 0 ? '粗利益が赤字予測です。傭車費・人件費・高単価案件の確認が必要です。' : (planProfit && forecast.profit/1000 < planProfit ? '粗利益が計画未達予測です。月末の高単価案件・傭車使用を確認してください。' : '現時点では大きな異常はありません。');
       root.innerHTML = `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin-bottom:12px">
         <div><h2 style="font-size:20px;margin:0;color:var(--text)">着地予測</h2><div style="font-size:12px;color:var(--text2);margin-top:4px">日別実績をもとに、BtoC家電配送向けの土日祝・月末補正で着地を予測します。</div></div>
-        <div style="display:flex;gap:8px;align-items:center"><label style="font-size:12px;font-weight:700;color:var(--text2)">対象月</label><select id="landing-forecast-ym" onchange="LANDING_FORECAST_UI.render()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border2);border-radius:8px">${months.map(m=>`<option value="${m}" ${m===ym?'selected':''}>${ymLabelLocal(m)}</option>`).join('')}</select></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;font-weight:700;color:var(--text2)">対象月</label>
+          <select id="landing-forecast-ym" onchange="LANDING_FORECAST_UI.render()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border2);border-radius:8px">${months.map(m=>`<option value="${m}" ${m===ym?'selected':''}>${ymLabelLocal(m)}</option>`).join('')}</select>
+          <button class="btn no-print" onclick="LANDING_FORECAST_UI.printReport()">🖨️ 印刷 / PDF保存</button>
+        </div>
       </div>
       <div class="kpi-grid" style="margin-bottom:14px">
         ${kpi('営業収益 着地予測', cur.revenue, forecast.revenue, planRevenue)}

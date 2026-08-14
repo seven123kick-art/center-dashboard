@@ -248,6 +248,8 @@
           <span class="card-title" id="pl-card-title">月次収支表</span>
           <div class="pl-card-actions">
             <span class="pl-unit-label">単位：千円</span>
+            <button type="button" class="btn btn-secondary no-print" onclick="PL_UI_EXPORT.exportExcel()">Excel出力</button>
+            <button type="button" class="btn btn-secondary no-print" onclick="PL_UI_EXPORT.printReport()">印刷 / PDF保存</button>
             <button type="button" class="btn btn-secondary pl-fullview-button" onclick="openPLFullView()">全項目を一覧表示</button>
           </div>
         </div>
@@ -333,10 +335,13 @@
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
           <span class="card-title">月次収支推移（千円）</span>
-          <div class="legend" style="margin:0">
+          <div style="display:flex;align-items:center;gap:12px;margin-left:auto">
+            <button type="button" class="btn btn-secondary no-print" onclick="TREND_UI_EXPORT.exportExcel()">Excel出力</button>
+            <div class="legend" style="margin:0">
             <div class="legend-item"><div class="legend-dot" style="background:#1a4d7c"></div>収入</div>
             <div class="legend-item"><div class="legend-dot" style="background:#e05b4d"></div>費用</div>
             <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div>利益（折れ線）</div>
+            </div>
           </div>
         </div>
         <div class="card-body">
@@ -1443,6 +1448,7 @@
 <script src="src/core/companies.js" defer></script>
 <script src="src/core/workers.js" defer></script>
 <script src="src/core/loader.js" defer></script>
+<script src="src/modules/export_service.js" defer></script>
 <script src="src/modules/dashboard.js" defer></script>
 <script src="src/modules/shipper.js" id="module-shipper" defer></script>
 <script src="src/modules/kamoku.js" id="module-kamoku" defer></script>

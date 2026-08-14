@@ -197,7 +197,66 @@
       });
       tbody.innerHTML = rows.join('');
     }
+
+    /* ---- 出力用構造化データの構築（Phase10-C2追加） ----
+       画面表示に使ったlist（4月～翌3月の昇順、datasetsForSelectedFiscalYear()
+       が既に返す既存の並び）をそのまま再利用する。画面のtrend-tbodyは
+       表示上reverse()して新しい月を上にしているが、データ自体の並びは
+       listのまま4月始まりのため、Excelにはlist（reverse前）をそのまま
+       使うことで「4月～翌3月」の並びと一致させる。Dataset欠落月は
+       datasetsForSelectedFiscalYear()自体が対象月をfilter(Boolean)で
+       除外するため、Excel側でも0円へ勝手に変換しない（欠落月はそもそも
+       行として現れない、既存仕様通り）。 */
+    const exportRows = list.map((d, i) => {
+      const prevD = i > 0 ? list[i - 1] : null;
+      const cnt = ticketCountOfTrend(d);
+      const unitValue = cnt > 0 ? Math.round((Number(d.totalIncome) || 0) / cnt) : null;
+      const inc = Number(d.totalIncome || 0);
+      const exp = Number(d.totalExpense || 0);
+      const prf = Number(d.profit || 0);
+      const prevInc = prevD ? Number(prevD.totalIncome || 0) : null;
+      const pyDs = sameMonthLastYear(d.ym);
+      const pyInc = pyDs ? Number(pyDs.totalIncome || 0) : null;
+      return [
+        ymLabel(d.ym) + (d.type === 'daily' ? '（速報）' : ''),
+        inc / 1000,
+        exp / 1000,
+        prf / 1000,
+        d.profitRate != null ? d.profitRate / 100 : null,
+        cnt,
+        unitValue,
+        (prevInc != null && prevInc !== 0) ? (inc / prevInc - 1) : null,
+        (pyInc != null && pyInc !== 0) ? (inc / pyInc - 1) : null,
+      ];
+    });
+
+    window.TREND_UI_EXPORT = window.TREND_UI_EXPORT || {};
+    window.TREND_UI_EXPORT._lastExportData = {
+      title: '月次実績推移',
+      center: (typeof CENTER !== 'undefined' && CENTER?.name) ? CENTER.name : '',
+      period: (typeof dashboardSelectedFiscalYear === 'function' ? dashboardSelectedFiscalYear() : '') + '年度　単位：千円',
+      filename: (typeof EXPORT_SERVICE !== 'undefined' && EXPORT_SERVICE.buildFilename)
+        ? EXPORT_SERVICE.buildFilename([(typeof CENTER !== 'undefined' && CENTER?.name) || '', 'Trend', (typeof dashboardSelectedFiscalYear === 'function' ? dashboardSelectedFiscalYear() + '年度' : '')], 'xlsx')
+        : null,
+      sheets: [{
+        name: '月次実績推移',
+        columns: ['年月', '収入', '費用', '利益', '利益率', '件数', '単価（円）', '前月比', '前年比'],
+        rows: exportRows,
+      }],
+    };
   }
+
+  function trendExportExcel() {
+    const data = window.TREND_UI_EXPORT?._lastExportData;
+    if (!data) { if (window.UI?.toast) UI.toast('出力するデータがありません', 'warn'); return; }
+    if (!window.EXPORT_SERVICE) { if (window.UI?.toast) UI.toast('出力機能を読み込めませんでした', 'error'); return; }
+    EXPORT_SERVICE.toExcel(data).catch(e => {
+      console.error('[TREND_UI_EXPORT.exportExcel]', e);
+      if (window.UI?.toast) UI.toast('Excel出力に失敗しました: ' + e.message, 'error');
+    });
+  }
+  window.TREND_UI_EXPORT = window.TREND_UI_EXPORT || {};
+  window.TREND_UI_EXPORT.exportExcel = trendExportExcel;
 
   window.renderTrend = renderTrend;
 })();

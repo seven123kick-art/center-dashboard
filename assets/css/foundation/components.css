@@ -154,3 +154,14 @@ select:focus,input[type=text]:focus{outline:none;border-color:var(--blue)}
 
 
 
+
+/* Phase10-C 出力基盤：通常時は非表示、印刷時のみ共通ヘッダーを表示 */
+#export-print-header{display:none}
+@media print{
+  #export-print-header{display:block !important}
+  .export-print-title{font-size:18px;font-weight:900;margin-bottom:4px}
+  .export-print-meta{font-size:12px;color:#333;margin-bottom:2px}
+  @page{size:A4 landscape;margin:12mm}
+  table.tbl thead{display:table-header-group}
+  table.tbl tr{page-break-inside:avoid;break-inside:avoid}
+}
