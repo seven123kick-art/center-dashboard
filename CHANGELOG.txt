@@ -1,23 +1,16 @@
-Version6 UI/UX センター選択画面 Step3 - 2026-08-14
+Version6 センター選択画面 キャラクター画像組込
+2026-08-14
 
-変更ファイル:
+変更ファイル
 - index.html
+  - 北埼玉・戸田カードのキャラクタープレースホルダーを本番画像へ置換。
 - assets/css/landing.css
+  - 透明WebPをカード内にcontain配置する本番スタイルへ変更。
+  - hover時も業務UIを邪魔しない微細な動きのみ追加。
+- assets/images/centers/center-kitasaitama-character.webp（新規）
+  - 北埼玉センター用。768×1152、透明背景、WebP。
+- assets/images/centers/center-toda-character.webp（新規）
+  - 戸田センター用。768×1152、透明背景、WebP。
 
-変更内容:
-- センター選択画面を情報不足のカード構成から再設計。
-- 北埼玉テーマを紫系から若草色・抹茶系・アイボリーへ変更。
-- 戸田はオレンジ・クリーム系テーマを維持。
-- センターカードに「最新実績」「収支データ」「配送明細」「計画データ」「最終更新」を追加。
-- 表示値は固定値を埋め込まず、既存STOREが保存しているlocalStorage軽量索引
-  (dataset_index / field_product_index / planData)から読み取り、取得できない場合は未登録表示とする。
-- 最新実績は同月に確定Datasetがあれば確定を優先して表示。
-- キャラクター画像差込領域は維持。今回画像ファイルの追加・差込は行っていない。
-- 英字センター名を削除し、業務情報を優先した情報設計へ変更。
-- カード全体クリック・レスポンシブ表示を維持。
-
-変更なし:
-- center.html
-- 業務計算ロジック
-- STATE / Dataset / planData構造
-- Cloud / Repository / SyncCoordinator
+非変更
+- Dataset / STATE / Cloud / Repository / SyncCoordinator / 業務計算ロジックは変更なし。
