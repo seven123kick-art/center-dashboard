@@ -241,6 +241,17 @@
 
     <!-- ▼ 月次収支表 -->
     <div class="view" id="view-pl">
+      <div class="analysis-switcher no-print" role="navigation" aria-label="収支分析メニュー">
+        <div class="analysis-switcher-copy">
+          <span class="analysis-switcher-eyebrow">収支分析</span>
+          <span class="analysis-switcher-note">月次の収支・科目内訳・推移を切り替えて確認</span>
+        </div>
+        <div class="analysis-switcher-tabs" role="tablist">
+          <button type="button" class="analysis-switcher-tab active" onclick="NAV.go('pl')">月次収支</button>
+          <button type="button" class="analysis-switcher-tab " onclick="NAV.go('kamoku')">科目分析</button>
+          <button type="button" class="analysis-switcher-tab " onclick="NAV.go('trend')">推移分析</button>
+        </div>
+      </div>
       <div id="pl-notice"></div>
       <div id="pl-kpi-area" class="pl-kpi-grid"></div>
       <div class="card pl-main-card">
@@ -331,6 +342,17 @@
 
     <!-- ▼ 売上推移 -->
     <div class="view" id="view-trend">
+      <div class="analysis-switcher no-print" role="navigation" aria-label="収支分析メニュー">
+        <div class="analysis-switcher-copy">
+          <span class="analysis-switcher-eyebrow">収支分析</span>
+          <span class="analysis-switcher-note">月次の収支・科目内訳・推移を切り替えて確認</span>
+        </div>
+        <div class="analysis-switcher-tabs" role="tablist">
+          <button type="button" class="analysis-switcher-tab " onclick="NAV.go('pl')">月次収支</button>
+          <button type="button" class="analysis-switcher-tab " onclick="NAV.go('kamoku')">科目分析</button>
+          <button type="button" class="analysis-switcher-tab active" onclick="NAV.go('trend')">推移分析</button>
+        </div>
+      </div>
       <div id="trend-notice"></div>
       <div class="card" style="margin-bottom:14px">
         <div class="card-header">
@@ -1041,6 +1063,17 @@
     <!-- ▼ データ取込 -->
     <!-- ▼ 科目分析 -->
     <div class="view" id="view-kamoku">
+      <div class="analysis-switcher no-print" role="navigation" aria-label="収支分析メニュー">
+        <div class="analysis-switcher-copy">
+          <span class="analysis-switcher-eyebrow">収支分析</span>
+          <span class="analysis-switcher-note">月次の収支・科目内訳・推移を切り替えて確認</span>
+        </div>
+        <div class="analysis-switcher-tabs" role="tablist">
+          <button type="button" class="analysis-switcher-tab " onclick="NAV.go('pl')">月次収支</button>
+          <button type="button" class="analysis-switcher-tab active" onclick="NAV.go('kamoku')">科目分析</button>
+          <button type="button" class="analysis-switcher-tab " onclick="NAV.go('trend')">推移分析</button>
+        </div>
+      </div>
       <div id="kamoku-root"></div>
     </div>
 

@@ -165,3 +165,35 @@ select:focus,input[type=text]:focus{outline:none;border-color:var(--blue)}
   table.tbl thead{display:table-header-group}
   table.tbl tr{page-break-inside:avoid;break-inside:avoid}
 }
+
+/* Version6 収支分析：月次収支 / 科目分析 / 推移分析 共通スイッチャー */
+.analysis-switcher{
+  display:flex;align-items:center;justify-content:space-between;gap:18px;
+  margin:0 0 16px;padding:10px 12px 10px 16px;
+  background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(248,247,252,.96));
+  border:1px solid rgba(92,82,120,.12);border-radius:14px;
+  box-shadow:0 8px 24px rgba(46,38,67,.06)
+}
+.analysis-switcher-copy{display:flex;align-items:baseline;gap:10px;min-width:0}
+.analysis-switcher-eyebrow{font-size:12px;font-weight:800;color:var(--text);white-space:nowrap}
+.analysis-switcher-note{font-size:10px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.analysis-switcher-tabs{
+  display:inline-flex;align-items:center;gap:4px;padding:4px;
+  background:rgba(238,236,245,.82);border:1px solid rgba(92,82,120,.08);border-radius:10px;flex-shrink:0
+}
+.analysis-switcher-tab{
+  appearance:none;border:0;background:transparent;color:var(--text2);cursor:pointer;
+  min-height:32px;padding:6px 14px;border-radius:7px;font:inherit;font-size:11px;font-weight:700;
+  transition:background .16s ease,color .16s ease,box-shadow .16s ease,transform .16s ease
+}
+.analysis-switcher-tab:hover{background:rgba(255,255,255,.7);color:var(--text);transform:translateY(-1px)}
+.analysis-switcher-tab.active{
+  background:#fff;color:var(--navy);box-shadow:0 2px 8px rgba(46,38,67,.12),inset 0 0 0 1px rgba(92,82,120,.08)
+}
+@media(max-width:900px){
+  .analysis-switcher{align-items:stretch;flex-direction:column;gap:8px;padding:11px}
+  .analysis-switcher-copy{padding:0 3px}
+  .analysis-switcher-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%}
+  .analysis-switcher-tab{padding-left:8px;padding-right:8px}
+}
+@media(max-width:560px){.analysis-switcher-note{display:none}}

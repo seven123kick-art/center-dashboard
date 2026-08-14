@@ -1,0 +1,20 @@
+Version6 収支分析ナビゲーション統合
+日付: 2026-08-14
+
+変更ファイル
+- center.html
+- assets/css/foundation/components.css
+
+変更内容
+- 月次収支・科目分析・推移分析を「収支分析」の共通スイッチャーで接続。
+- サイドバー項目数は増やさず、月次収支を収支分析系の入口として維持。
+- 既存 NAV.go() を利用し、新しい画面遷移ロジックは追加していない。
+- 各画面で現在位置が分かるアクティブ表示を追加。
+- レスポンシブ表示に対応。
+
+非変更
+- PL / 科目分析 / Trend の計算・描画ロジック
+- Excel / 印刷出力ロジック
+- STATE / Dataset / planData
+- Cloud / Repository / SyncCoordinator
+- navigation.js
