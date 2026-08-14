@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>経営管理システム｜センター選択</title>
 <link rel="stylesheet" href="assets/css/landing.css">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%236d5bd0'/%3E%3Cpath d='M18 18h28v28H18z' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M23 39V31h5v8m4 0V25h5v14m4 0V28h5v11' stroke='white' stroke-width='4'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%237cab55'/%3E%3Cpath d='M18 18h28v28H18z' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M23 39V31h5v8m4 0V25h5v14m4 0V28h5v11' stroke='white' stroke-width='4'/%3E%3C/svg%3E">
 </head>
 <body>
 <main class="landing-main">
@@ -19,62 +19,107 @@
         <h1>経営管理システム</h1>
       </div>
     </div>
-    <div class="header-date" aria-label="本日の日付">
-      <span>本日</span><strong id="today-label">----</strong>
-    </div>
+    <div class="header-date" aria-label="本日の日付"><span>本日</span><strong id="today-label">----</strong></div>
   </header>
 
   <section class="selection-area" aria-labelledby="center-select-title">
     <div class="section-heading">
+      <span class="section-kicker">CENTER SELECT</span>
       <h2 id="center-select-title">使用するセンターを選択</h2>
-      <p>センターを選ぶとダッシュボードを開きます。</p>
+      <p>最新の登録状況を確認して、業務を開始します。</p>
     </div>
 
     <div class="center-grid">
-      <a class="center-card center-card--kitasaitama" href="center.html?c=kitasaitama" aria-label="北埼玉センターを開く">
-        <div class="card-decoration" aria-hidden="true"></div>
+      <a class="center-card center-card--kitasaitama" href="center.html?c=kitasaitama" aria-label="北埼玉センターを開く" data-center="kitasaitama">
         <div class="character-stage" aria-hidden="true">
-          <div class="character-placeholder">
-            <span class="placeholder-mark">ら</span>
-            <small>CHARACTER IMAGE</small>
-          </div>
+          <div class="character-placeholder"><span class="placeholder-mark">ら</span><small>CHARACTER</small></div>
         </div>
         <div class="center-content">
-          <span class="center-tag">北埼玉</span>
-          <span class="center-sub">KITASAITAMA CENTER</span>
+          <div class="center-title-row"><span class="center-tag">北埼玉</span><span class="center-ready"><i></i>利用可能</span></div>
           <h3>北埼玉センター</h3>
-          <div class="center-action">開く <b>→</b></div>
+          <div class="latest-block">
+            <span class="info-label">最新実績</span>
+            <strong class="latest-period" data-role="latest-period">確認中</strong>
+            <span class="latest-kind" data-role="latest-kind"></span>
+          </div>
+          <div class="data-status" aria-label="データ登録状況">
+            <div><span>収支データ</span><b data-role="pl-status">確認中</b></div>
+            <div><span>配送明細</span><b data-role="delivery-status">確認中</b></div>
+            <div><span>計画データ</span><b data-role="plan-status">確認中</b></div>
+          </div>
+          <div class="card-bottom"><span class="updated" data-role="updated">登録状況を確認しています</span><span class="center-action">ダッシュボードを開く <b>→</b></span></div>
         </div>
       </a>
 
-      <a class="center-card center-card--toda" href="center.html?c=toda" aria-label="戸田センターを開く">
-        <div class="card-decoration" aria-hidden="true"></div>
+      <a class="center-card center-card--toda" href="center.html?c=toda" aria-label="戸田センターを開く" data-center="toda">
         <div class="character-stage" aria-hidden="true">
-          <div class="character-placeholder">
-            <span class="placeholder-mark">こ</span>
-            <small>CHARACTER IMAGE</small>
-          </div>
+          <div class="character-placeholder"><span class="placeholder-mark">こ</span><small>CHARACTER</small></div>
         </div>
         <div class="center-content">
-          <span class="center-tag">戸田</span>
-          <span class="center-sub">TODA CENTER</span>
+          <div class="center-title-row"><span class="center-tag">戸田</span><span class="center-ready"><i></i>利用可能</span></div>
           <h3>戸田センター</h3>
-          <div class="center-action">開く <b>→</b></div>
+          <div class="latest-block">
+            <span class="info-label">最新実績</span>
+            <strong class="latest-period" data-role="latest-period">確認中</strong>
+            <span class="latest-kind" data-role="latest-kind"></span>
+          </div>
+          <div class="data-status" aria-label="データ登録状況">
+            <div><span>収支データ</span><b data-role="pl-status">確認中</b></div>
+            <div><span>配送明細</span><b data-role="delivery-status">確認中</b></div>
+            <div><span>計画データ</span><b data-role="plan-status">確認中</b></div>
+          </div>
+          <div class="card-bottom"><span class="updated" data-role="updated">登録状況を確認しています</span><span class="center-action">ダッシュボードを開く <b>→</b></span></div>
         </div>
       </a>
     </div>
   </section>
 
-  <footer class="landing-footer">
-    <span>Management System Version 6</span>
-  </footer>
+  <footer class="landing-footer"><span>Management System Version 6</span></footer>
 </main>
 <script>
 (() => {
-  const el = document.getElementById('today-label');
-  if (!el) return;
-  const d = new Date();
-  el.textContent = new Intl.DateTimeFormat('ja-JP', {year:'numeric', month:'2-digit', day:'2-digit', weekday:'short'}).format(d);
+  const today = document.getElementById('today-label');
+  if (today) today.textContent = new Intl.DateTimeFormat('ja-JP',{year:'numeric',month:'2-digit',day:'2-digit',weekday:'short'}).format(new Date());
+
+  const read = (center, key) => {
+    try { const raw = localStorage.getItem(`mgmt5_${center}_${key}`); return raw ? JSON.parse(raw) : null; }
+    catch (_) { return null; }
+  };
+  const ymLabel = ym => /^\d{6}$/.test(String(ym||'')) ? `${String(ym).slice(0,4)}年${Number(String(ym).slice(4,6))}月` : null;
+  const typeLabel = type => type === 'confirmed' ? '確定' : type === 'daily' || type === 'preliminary' ? '速報' : '';
+  const fyFromYm = ym => { const y=Number(String(ym).slice(0,4)),m=Number(String(ym).slice(4,6)); return y-(m<4?1:0); };
+  const fmtUpdated = value => {
+    if (!value) return null;
+    const d = new Date(value); if (Number.isNaN(d.getTime())) return null;
+    return `最終更新 ${new Intl.DateTimeFormat('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(d)}`;
+  };
+
+  document.querySelectorAll('.center-card[data-center]').forEach(card => {
+    const center = card.dataset.center;
+    const datasets = read(center,'dataset_index');
+    const delivery = read(center,'field_product_index');
+    const plan = read(center,'planData');
+    const dsList = Array.isArray(datasets) ? datasets.filter(x=>x&&x.ym) : [];
+    const latestYm = dsList.reduce((max,x)=>String(x.ym)>max?String(x.ym):max,'');
+    const latestCandidates = dsList.filter(x=>String(x.ym)===latestYm);
+    const latest = latestCandidates.find(x=>x.type==='confirmed') || latestCandidates[latestCandidates.length-1] || null;
+    const deliveryList = Array.isArray(delivery) ? delivery.filter(x=>x&&x.ym) : [];
+    const targetFy = latestYm ? fyFromYm(latestYm) : null;
+    const planRows = targetFy != null && plan && typeof plan==='object' ? (plan[String(targetFy)]?.rows || plan[targetFy]?.rows) : null;
+    const hasPlan = !!(planRows && typeof planRows==='object' && Object.keys(planRows).length);
+
+    const periodEl=card.querySelector('[data-role="latest-period"]'), kindEl=card.querySelector('[data-role="latest-kind"]');
+    const plEl=card.querySelector('[data-role="pl-status"]'), deliveryEl=card.querySelector('[data-role="delivery-status"]'), planEl=card.querySelector('[data-role="plan-status"]'), updatedEl=card.querySelector('[data-role="updated"]');
+    if (latest) {
+      periodEl.textContent=ymLabel(latest.ym)||String(latest.ym); kindEl.textContent=typeLabel(latest.type); plEl.textContent='登録済'; plEl.className='status-ok';
+      const upd=fmtUpdated(latest.importedAt); updatedEl.textContent=upd||'最新データを登録済';
+    } else {
+      periodEl.textContent='未登録'; kindEl.textContent=''; plEl.textContent='未登録'; plEl.className='status-muted'; updatedEl.textContent='収支データはまだ登録されていません';
+    }
+    const hasDelivery = latestYm ? deliveryList.some(x=>String(x.ym)===latestYm) : deliveryList.length>0;
+    deliveryEl.textContent=hasDelivery?'あり':'なし'; deliveryEl.className=hasDelivery?'status-ok':'status-muted';
+    planEl.textContent=hasPlan?'登録済':'未登録'; planEl.className=hasPlan?'status-ok':'status-muted';
+  });
 })();
 </script>
 </body>
