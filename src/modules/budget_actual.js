@@ -148,23 +148,7 @@
   }
 
   function ensureStyle() {
-    if (document.getElementById('ba-style')) return;
-    const style = document.createElement('style');
-    style.id = 'ba-style';
-    style.textContent = `
-      #budget-actual-root .ba-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; margin-bottom:16px; }
-      #budget-actual-root .ba-summary-card { background:#fff; border:1px solid var(--border,#dde3f0); border-radius:12px; padding:14px 16px; box-shadow:0 2px 8px rgba(15,23,42,.05); }
-      #budget-actual-root .ba-summary-title { font-weight:900; font-size:14px; color:var(--text,#1f2d3d); margin-bottom:8px; }
-      #budget-actual-root .ba-summary-table { width:100%; border-collapse:collapse; font-size:12px; }
-      #budget-actual-root .ba-summary-table td { padding:4px 6px; text-align:right; }
-      #budget-actual-root .ba-summary-table td:first-child { text-align:left; color:var(--text3,#8090a3); }
-      #budget-actual-root .ba-good { color:#1a8a4a; font-weight:800; }
-      #budget-actual-root .ba-bad { color:#d94141; font-weight:800; }
-      #budget-actual-root .ba-neutral { color:var(--text2,#52606d); }
-      #budget-actual-root table.tbl th, #budget-actual-root table.tbl td { white-space:nowrap; }
-      #budget-actual-root .ba-total-row td { background:#f8fafc; font-weight:900; border-top:2px solid #94a3b8; }
-    `;
-    document.head.appendChild(style);
+    // Version6: visual styles live in assets/css/features/budget-actual.css.
   }
 
   function renderPeriodSelector() {
@@ -290,8 +274,8 @@
       + subjectRow('営業利益', actPrf, planPrf, pyPrf, false, true);
 
     const subjectHtml = `
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><span class="card-title">科目別予実</span></div>
+      <div class="card ba-table-card">
+        <div class="card-header ba-card-header"><div><span class="card-title">科目別予実</span><div class="ba-card-subtitle">予算・実績・前年を同じ基準で比較</div></div></div>
         <div class="scroll-x">
           <table class="tbl">
             <thead><tr>
@@ -328,8 +312,8 @@
     }).join('');
 
     const trendHtml = `
-      <div class="card">
-        <div class="card-header"><span class="card-title">月別推移（${escLocal(fy)}年度）</span></div>
+      <div class="card ba-table-card">
+        <div class="card-header ba-card-header"><div><span class="card-title">月別推移（${escLocal(fy)}年度）</span><div class="ba-card-subtitle">営業収益と営業利益の年度内推移</div></div></div>
         <div class="scroll-x">
           <table class="tbl">
             <thead><tr>
@@ -345,13 +329,14 @@
       </div>`;
 
     content.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-        <div style="font-size:12px;color:var(--text3,#8090a3)">
-          ${escLocal(ymLabelLocal(ds.ym))}・${escLocal(typeof datasetKindLabel === 'function' ? datasetKindLabel(ds) : '')}　単位：千円
+      <div class="ba-commandbar">
+        <div>
+          <div class="ba-command-title">予実サマリー</div>
+          <div class="ba-command-meta">${escLocal(ymLabelLocal(ds.ym))}・${escLocal(typeof datasetKindLabel === 'function' ? datasetKindLabel(ds) : '')}　単位：千円</div>
         </div>
-        <div class="no-print" style="display:flex;gap:8px">
-          <button class="btn" onclick="BUDGET_ACTUAL_UI.exportExcel()">📊 Excel出力</button>
-          <button class="btn" onclick="BUDGET_ACTUAL_UI.printReport()">🖨️ 印刷 / PDF保存</button>
+        <div class="ba-command-actions no-print">
+          <button class="btn" onclick="BUDGET_ACTUAL_UI.exportExcel()">Excel出力</button>
+          <button class="btn" onclick="BUDGET_ACTUAL_UI.printReport()">印刷 / PDF保存</button>
         </div>
       </div>
       ${summaryHtml}

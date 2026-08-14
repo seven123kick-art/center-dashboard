@@ -1,41 +1,16 @@
-収支分析 UI 最終仕上げ
-作成日: 2026-08-14
+Version6 UI refinement - Budget Actual Analysis
+Date: 2026-08-14
 
-変更対象:
-- center.html
+Changed files:
 - assets/css/app.css
-- assets/css/features/kamoku.css
-- assets/css/features/trend.css（新規）
-- src/modules/kamoku.js
-- src/modules/trend.js
+  - Added budget-actual.css import.
+- assets/css/features/budget-actual.css
+  - New screen-specific visual stylesheet for Budget vs Actual Analysis.
+- src/modules/budget_actual.js
+  - Removed runtime visual CSS injection.
+  - Refined command bar, summary cards, table headers and output buttons.
+  - Removed emoji from output buttons.
+  - Calculation, dataset acquisition, plan matching, Excel data and print logic are unchanged.
 
-内容:
-1. 科目分析
-- フィルタ群を白い操作バーとして統合
-- KPIカード上部の装飾線を廃止
-- 収入・費用の現在値をニュートラルな本文色へ統一
-- 増減・構成比・カテゴリ識別にのみ意味色を残す
-
-2. 推移分析
-- 収支分析3画面共通のデザイン言語へ再構成
-- メイングラフ、件数、主要荷主、実績一覧のカード階層・余白・見出しを統一
-- 収入=落ち着いた青、費用=アンバー、利益=緑へ整理
-- 年度選択UIを収支分析スイッチャー直下へ配置
-- Excel出力機能は既存処理を維持
-
-3. 変更していないもの
-- Cloud / Repository / SyncCoordinator
-- STATE / Dataset構造
-- CSV取込
-- 集計・計算式
-- Excel出力データ構築ロジック
-- ナビゲーションロジック
-
-検証:
-- kamoku.js: node --check PASS
-- trend.js: node --check PASS
-
-Phase UI-3b 推移分析 上部圧縮
-- 推移分析の年度選択を独立した「表示対象」カードから月次収支推移ヘッダーへ統合。
-- 年度選択・凡例・Excel出力を同じ操作領域に整理し、グラフまでの縦余白を削減。
-- 推移分析の計算・Chart.jsデータ・Excel出力・ナビゲーションロジックは変更なし。
+Verification:
+- node --check src/modules/budget_actual.js : PASS
