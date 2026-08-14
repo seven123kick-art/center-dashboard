@@ -1,0 +1,22 @@
+Version6 UI refinement - 2026-08-14
+
+Purpose:
+- Remove the center-color takeover from the workspace UI.
+- Restore a clean, neutral, modern business-application visual language.
+- Remove conflicting KPI accent lines (top + left) at their source definitions.
+
+Changed files:
+- assets/css/foundation/base.css
+  Neutral application tokens; center-specific colors are limited to accents only.
+- assets/css/foundation/shell.css
+  Neutral navy/slate sidebar, cleaner active navigation, white top bar.
+- assets/css/foundation/theme.css
+  Plain white cards, restrained shadows/borders, no KPI left stripe.
+- assets/css/foundation/components.css
+  Removed legacy KPI top-border accents that conflicted with theme.css.
+
+Not changed:
+- Dataset / STATE / Cloud / Repository / Sync logic
+- Analysis calculations
+- Character images / landing page
+- field_product.js behavior and the previously fixed single period selector

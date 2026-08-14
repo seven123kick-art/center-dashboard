@@ -1,46 +1,44 @@
 /* Version6 UI Foundation: reset and design tokens */
 *{box-sizing:border-box;margin:0;padding:0}
-:root{
+ :root{
   --sidebar-w:236px;
   --header-h:64px;
-  --sidebar-bg:#2b2344;
-  --sidebar-bg-2:#352a53;
-  --sidebar-hover:rgba(255,255,255,.075);
-  --sidebar-active:#6f5fd1;
-  --sidebar-text:#bdb6cf;
+  --sidebar-bg:#182132;
+  --sidebar-bg-2:#202b3d;
+  --sidebar-hover:rgba(255,255,255,.065);
+  --sidebar-active:#2f5f8c;
+  --sidebar-text:#b8c3d1;
   --sidebar-text-active:#fff;
-  --bg:#f8f7fc;
+  --bg:#f5f7fa;
   --surface:#fff;
-  --surface-soft:#fbfaff;
-  --light:#f4f1fb;
-  --border:#e9e5f1;
-  --border2:#d9d3e4;
-  --navy:#6f5fd1;
-  --blue:#6f5fd1;
-  --green:#11996a;
-  --red:#d34856;
-  --amber:#d78a39;
-  --text:#252238;
-  --text2:#696477;
-  --text3:#9e98aa;
+  --surface-soft:#f9fafb;
+  --light:#f3f5f8;
+  --border:#e4e8ee;
+  --border2:#d5dbe4;
+  --navy:#315f8c;
+  --blue:#315f8c;
+  --green:#16966a;
+  --red:#df5a52;
+  --amber:#d9852f;
+  --text:#172033;
+  --text2:#647086;
+  --text3:#98a2b3;
   --radius:14px;
-  --radius-lg:20px;
-  --shadow:0 12px 34px rgba(52,42,82,.07),0 2px 8px rgba(52,42,82,.04);
-  --accent:#6f5fd1;
-  --accent-2:#9a86e8;
-  --accent-soft:#f0ecff;
-  --focus:rgba(111,95,209,.16);
-  --good:#11996a;
-  --bad:#d34856;
-  --warn:#d78a39;
+  --radius-lg:18px;
+  --shadow:0 8px 28px rgba(31,42,61,.055),0 1px 3px rgba(31,42,61,.035);
+  --accent:#315f8c;
+  --accent-2:#4b78a2;
+  --accent-soft:#edf4fa;
+  --focus:rgba(49,95,140,.14);
+  --good:#16966a;
+  --bad:#d94f4f;
+  --warn:#d9852f;
 }
 html[data-center="toda"]{
-  --navy:#d88343;
-  --blue:#d88343;
-  --accent:#d88343;
-  --accent-2:#efaa6d;
-  --accent-soft:#fff0e3;
-  --focus:rgba(216,131,67,.16);
+  --accent:#c96f35;
+  --accent-2:#e49358;
+  --accent-soft:#fff3e9;
+  --focus:rgba(201,111,53,.14);
 }
 body{
   font-family:"Yu Gothic UI","Yu Gothic","Meiryo",system-ui,sans-serif;
@@ -51,25 +49,4 @@ body{
   display:flex;
   height:100vh;
   overflow:hidden;
-}
-
-/* Version6 center identity — entrance screen and workspace use one visual language */
-html[data-center="kitasaitama"]{
-  --sidebar-bg:#233329;
-  --sidebar-bg-2:#2e4434;
-  --sidebar-hover:rgba(255,255,255,.075);
-  --sidebar-active:#78a84f;
-  --sidebar-text:#cbd7c9;
-  --navy:#6f9e4a;
-  --blue:#6f9e4a;
-  --accent:#76a94f;
-  --accent-2:#98bf72;
-  --accent-soft:#eff6e8;
-  --focus:rgba(118,169,79,.16);
-}
-html[data-center="toda"]{
-  --sidebar-bg:#3d2d25;
-  --sidebar-bg-2:#52372a;
-  --sidebar-text:#dfcec2;
-  --sidebar-active:#e68b3d;
 }

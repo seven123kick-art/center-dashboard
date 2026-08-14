@@ -6,10 +6,6 @@
 .kpi-row-4{grid-template-columns:repeat(4,minmax(0,1fr))}
 .kpi-row-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow)}
-.kpi-card.accent-navy{border-top:3px solid var(--navy)}
-.kpi-card.accent-green{border-top:3px solid var(--green)}
-.kpi-card.accent-red{border-top:3px solid var(--red)}
-.kpi-card.accent-amber{border-top:3px solid var(--amber)}
 .kpi-label{font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600;letter-spacing:.02em}
 .kpi-value{font-size:22px;font-weight:700;color:var(--text);margin-bottom:4px;letter-spacing:-.5px}
 .kpi-value.navy{color:var(--navy)}
