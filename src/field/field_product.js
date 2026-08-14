@@ -496,26 +496,6 @@
     return `<div class="kpi-card accent-${accent}"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${esc(value)}</div>${sub?`<div class="kpi-sub">${esc(sub)}</div>`:''}</div>`;
   }
 
-  function selectorHTML(result){
-    const yms = allYMs();
-    const ym = result.ym || yms[yms.length-1] || '';
-    const fy = fiscalYear(ym);
-    const years = [...new Set(yms.map(fiscalYear).filter(Boolean))].sort((a,b)=>Number(b)-Number(a));
-    const months = yms.filter(x=>fiscalYear(x)===fy).sort(fyMonthSort);
-
-    return `<div class="fp-selector-card">
-      <div>
-        <div class="fp-selector-title">表示対象</div>
-        <div class="fp-selector-sub">年度順：4月 → 翌年3月 / 登録済みデータ月のみ表示</div>
-      </div>
-      <div class="fp-selector-controls">
-        <label>対象年度</label>
-        <select id="fp-product-year-select">${(years.length?years:[fy]).map(y=>`<option value="${esc(y)}" ${y===fy?'selected':''}>${esc(y)}年度</option>`).join('')}</select>
-        <label>対象月</label>
-        <select id="fp-product-month-select">${(months.length?months:[ym]).filter(Boolean).map(x=>`<option value="${esc(x)}" ${x===ym?'selected':''}>${esc(ymText(x))}</option>`).join('') || '<option value="">データなし</option>'}</select>
-      </div>
-    </div>`;
-  }
 
   function render(){
     if (!active()) return;
@@ -530,7 +510,6 @@
     const top = result.bigs[0];
 
     view.innerHTML = `
-      ${selectorHTML(result)}
       <div class="fp-note">商品カテゴリは、作業内容を優先して分類しています。クレーン・ユニック・手吊り系は最優先でクレーンへ集約し、通常の商品配送は商品名で補完します。</div>
 
       <div class="fp-kpi">
@@ -593,22 +572,6 @@
       </div>
     `;
 
-    const fySel = document.getElementById('fp-product-year-select');
-    const ymSel = document.getElementById('fp-product-month-select');
-    if (fySel) fySel.onchange = () => {
-      const yms = allYMs().filter(x=>fiscalYear(x)===fySel.value).sort(fyMonthSort);
-      const next = yms[yms.length-1] || allYMs().at(-1) || '';
-      if (window.STATE) STATE.selYM = next;
-      const common = document.getElementById('field-common-month-select');
-      if (common && [...common.options].some(o=>o.value===next)) common.value = next;
-      rerender();
-    };
-    if (ymSel) ymSel.onchange = () => {
-      if (window.STATE) STATE.selYM = ymSel.value;
-      const common = document.getElementById('field-common-month-select');
-      if (common && [...common.options].some(o=>o.value===ymSel.value)) common.value = ymSel.value;
-      rerender();
-    };
 
     view.dataset.fieldProductFinal = '1';
   }

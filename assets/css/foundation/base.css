@@ -52,3 +52,24 @@ body{
   height:100vh;
   overflow:hidden;
 }
+
+/* Version6 center identity — entrance screen and workspace use one visual language */
+html[data-center="kitasaitama"]{
+  --sidebar-bg:#233329;
+  --sidebar-bg-2:#2e4434;
+  --sidebar-hover:rgba(255,255,255,.075);
+  --sidebar-active:#78a84f;
+  --sidebar-text:#cbd7c9;
+  --navy:#6f9e4a;
+  --blue:#6f9e4a;
+  --accent:#76a94f;
+  --accent-2:#98bf72;
+  --accent-soft:#eff6e8;
+  --focus:rgba(118,169,79,.16);
+}
+html[data-center="toda"]{
+  --sidebar-bg:#3d2d25;
+  --sidebar-bg-2:#52372a;
+  --sidebar-text:#dfcec2;
+  --sidebar-active:#e68b3d;
+}

@@ -26,3 +26,16 @@
 .topbar-left{display:flex;align-items:center;gap:12px}.page-title{font-size:17px;font-weight:950;color:var(--text);letter-spacing:-.015em}.page-sub{font-size:11px;color:var(--text3);margin-top:3px;font-weight:700}.topbar-right{display:flex;align-items:center;gap:10px}
 #content{flex:1;overflow-y:auto;padding:24px 26px 36px}.view{display:none}.view.active{display:block}
 @media(max-width:760px){#sidebar{position:relative;width:100%;height:auto;max-height:none}#main{height:auto}#topbar{height:auto;min-height:64px;padding:14px 18px;align-items:flex-start;flex-direction:column}#content{padding:14px}}
+
+/* Version6 workspace shell refinement */
+.sidebar-logo{padding:18px 18px 15px}
+.sidebar-logo-sub{letter-spacing:.12em;text-transform:uppercase;opacity:.78}
+.center-fixed-box{margin-top:14px;background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.09)}
+.center-fixed-label{color:rgba(255,255,255,.48);letter-spacing:.10em}
+.sidebar-section{color:rgba(255,255,255,.40);letter-spacing:.10em;text-transform:none}
+.nav-item{padding:10px 12px;color:var(--sidebar-text)}
+.nav-item.active{background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 9px 20px rgba(0,0,0,.14),inset 0 0 0 1px rgba(255,255,255,.12)}
+.sidebar-bottom{color:rgba(255,255,255,.56)}
+#topbar{background:rgba(255,255,255,.94);border-bottom-color:#e8ece7}
+#content{background:linear-gradient(180deg,rgba(247,250,246,.88),rgba(250,251,250,.96))}
+html[data-center="toda"] #content{background:linear-gradient(180deg,rgba(255,249,244,.90),rgba(252,251,250,.97))}

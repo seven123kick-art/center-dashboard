@@ -1,19 +1,24 @@
-経営管理システム Version6 UI調整
-2026-08-14
+Version6 センター内部UI 基礎統一（2026-08-14）
 
 変更ファイル
-- assets/css/landing.css
+- center.html
+- assets/css/foundation/base.css
+- assets/css/foundation/shell.css
+- src/field/field_product.js
 
 変更内容
-- センター選択カードのキャラクター背面にあった円形装飾を削除
-- キャラクターを表示領域の水平・垂直中央基準へ変更
-- PC表示では視覚重心を考慮して約10px上方へ調整
-- hover時の移動量を新しい基準位置に合わせて調整
-- モバイル表示も中央基準へ統一し、過度な下寄せを解消
+1. 商品カテゴリ分析で二重表示されていた「表示対象」を解消。
+   共通期間セレクター（field_core.js）を正本とし、商品カテゴリ分析固有の重複セレクターを削除。
+2. 北埼玉センター内部の基調色を、センター選択画面とつながる若草・深緑系へ統一。
+3. 戸田センターはオレンジ系アクセントと調和する暖色系サイドバーへ統一。
+4. サイドバーの英語中心ラベルを業務利用向けに整理。
+   CURRENT WORKSPACE→選択中のセンター、MAIN→業務メニュー、SYSTEM→システム。
+5. サイドバー、トップバー、コンテンツ背景の共通シェルを調整。
 
-変更していないもの
-- キャラクター画像ファイル
-- index.html
-- センター情報取得処理
-- localStorage/Cloud/Repository関連
-- 各センター内部画面
+非変更
+- Dataset / STATE / Cloud / Repository / SyncCoordinator
+- 集計計算、配送分析計算、予実計算
+- センター選択画面およびキャラクター画像
+
+確認
+- src/field/field_product.js: node --check PASS
