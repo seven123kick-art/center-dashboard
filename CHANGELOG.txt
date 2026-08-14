@@ -1,24 +1,150 @@
-Version6 センター内部UI 基礎統一（2026-08-14）
+Version6 Phase UI-1（2026-08-15）
+サイドバーCSS一本化 ＋ 最小限のUI基盤整理
 
-変更ファイル
-- center.html
+【目的】
+現在実ブラウザで表示されているサイドバーの見た目（濃紺系背景、ブルー系active表示等）を
+一切変更せず、shell.css / route-analysis.css / shell-extras.css の3ファイルに
+分散・重複していたサイドバー関連CSS定義を、shell.css を唯一の正本として一本化した。
+
+【変更ファイル（4件のみ）】
 - assets/css/foundation/base.css
 - assets/css/foundation/shell.css
-- src/field/field_product.js
+- assets/css/features/route-analysis.css
+- assets/css/features/shell-extras.css
 
-変更内容
-1. 商品カテゴリ分析で二重表示されていた「表示対象」を解消。
-   共通期間セレクター（field_core.js）を正本とし、商品カテゴリ分析固有の重複セレクターを削除。
-2. 北埼玉センター内部の基調色を、センター選択画面とつながる若草・深緑系へ統一。
-3. 戸田センターはオレンジ系アクセントと調和する暖色系サイドバーへ統一。
-4. サイドバーの英語中心ラベルを業務利用向けに整理。
-   CURRENT WORKSPACE→選択中のセンター、MAIN→業務メニュー、SYSTEM→システム。
-5. サイドバー、トップバー、コンテンツ背景の共通シェルを調整。
+【背景（実装前調査で判明した事実）】
+route-analysis.css に独自の :root ブロックがあり、base.css のサイドバー用
+デザイントークン（--sidebar-w / --sidebar-bg / --sidebar-hover / --sidebar-active）を
+CSS読込順（base→shell→components→shell-extras→theme→capacity-loading→
+route-analysis→version2）の関係で実質的に上書きしていた。
+つまり「現在実際にブラウザで表示されているサイドバーの色」は、base.css記載の値
+ではなく、route-analysis.css側の値（--sidebar-bg:#0f172a 等）が最終的に有効に
+なっていた。今回はこの「現在最終的に有効な値」を正確に算出し、base.css /
+shell.cssへ統合した。見た目を変えるための色変更は一切行っていない。
 
-非変更
-- Dataset / STATE / Cloud / Repository / SyncCoordinator
-- 集計計算、配送分析計算、予実計算
-- センター選択画面およびキャラクター画像
+【① 変更ファイル】
+base.css / shell.css / route-analysis.css / shell-extras.css
 
-確認
-- src/field/field_product.js: node --check PASS
+【② 各ファイルの変更内容】
+
+■ base.css
+:root のサイドバー用トークン4つの値を、実際に最終的に有効だった値へ更新。
+  --sidebar-w   : 236px → 248px
+  --sidebar-bg  : #182132 → #0f172a
+  --sidebar-hover : rgba(255,255,255,.065) → #17233a
+  --sidebar-active : #2f5f8c → #1e3a5f
+（--sidebar-bg-2 / --sidebar-text / --sidebar-text-active は元々route-analysis.css
+  側で再定義されていなかったため変更なし）
+新規トークンの追加は行っていない。
+
+■ shell.css
+route-analysis.css / shell-extras.css 側で個別に上書きされていた直接プロパティ値を、
+「現在最終的に有効な値」としてそのままマージ統合した。
+  #sidebar            : box-shadow の rgba値を route-analysis.css側の値へ統合
+  .sidebar-logo         : padding を route-analysis.css側の値へ統合
+  .sidebar-section        : font-size / letter-spacing / color / padding を統合
+  .nav-item            : margin / border-radius を統合
+  .nav-item.active        : background(linear-gradient) / box-shadow を統合
+  .center-fixed-box        : padding / border-bottom を shell-extras.css側の
+                    最終値へ統合
+  .center-fixed-label       : shell-extras.css側の最終値（font-size/color/
+                    font-weight/letter-spacing/margin-bottom/
+                    padding-left）へ統合
+  .center-fixed-name       : shell-extras.css側の最終値（font-size/
+                    font-weight:700/line-height/padding-left）へ統合
+  .sidebar-top-link        : shell-extras.css内の二重定義のうち、実際に
+                    最終的に有効だった値（padding/color/font-size/
+                    gap/transition/border-left）へ統合
+  .sidebar-top-link:hover     : shell-extras.css側の最終値（background:#243a55）
+                    へ統合
+
+■ route-analysis.css
+サイドバー関連の :root トークン4行・#sidebar/.sidebar-logo/.sidebar-section/
+.nav-item/.nav-item.active/.nav-item:hover の直接プロパティ上書きを削除。
+非サイドバー系トークン（--bg/--surface/--border/--border2/--navy/--blue/
+--text/--text2/--text3/--radius/--shadow）、および配送分析画面固有のCSS
+（.saas-*、.route-*、.card、.tbl、.btn、.kpi-card 等）は一切変更していない。
+
+■ shell-extras.css
+重複していたサイドバー関連定義（.sidebar-top-link、.sidebar-top-link:hover、
+.center-fixed-box、.center-fixed-label、.center-fixed-name の2回目の定義）を
+削除。HTML未参照のデッドクラス（.fixed-center-box 等）、Capacity関連CSS
+（.capacity-status 等）、現場分析の画面調整CSS（#view-field-* 関連）は
+一切変更していない。
+
+【③ shell.cssへ移したセレクタ一覧】
+#sidebar（box-shadow統合）
+.sidebar-logo（padding統合）
+.sidebar-section（font-size/letter-spacing/color/padding統合）
+.nav-item（margin/border-radius統合）
+.nav-item.active（background/box-shadow統合）
+.center-fixed-box（padding/border-bottom統合）
+.center-fixed-label（最終値へ全面統合）
+.center-fixed-name（最終値へ全面統合、font-weight:700が正しい最終値）
+.sidebar-top-link（最終値へ全面統合）
+.sidebar-top-link:hover（最終値へ全面統合）
+
+【④ route-analysis.cssから削除した定義】
+:root 内の --sidebar-w / --sidebar-bg / --sidebar-hover / --sidebar-active
+#sidebar{box-shadow:...}
+.sidebar-logo{padding:...}
+.sidebar-section{font-size/letter-spacing/color/padding}
+.nav-item{margin/padding/border-radius/border-left/font-size/gap}
+.nav-item.active{background/box-shadow}
+.nav-item:hover{transform}（値がshell.cssと同一のため実質無害な重複削除）
+
+【⑤ shell-extras.cssから削除した定義】
+.sidebar-top-link（1回目・2回目とも）
+.sidebar-top-link:hover（1回目・2回目とも）
+.center-fixed-box
+.center-fixed-label
+.center-fixed-name
+
+【⑥ 変更前後で最終CSS値が変わった箇所】
+なし（意図した値変更は全て「現在最終的に有効だった値」をそのまま維持する
+ための統合であり、視覚的な計算結果は変更前後で完全一致する）。
+
+唯一、.nav-item の border-left が「明示的な0指定」から「未指定」に
+変わっているが、同セレクタには既に border:1px solid transparent という
+透明な指定があるため、border-left の幅が1pxか0pxかは透明色のため視覚上
+区別がつかない。実務上の見た目への影響はない。
+
+検証方法：CSS読込順（base→shell→components→shell-extras→theme→
+capacity-loading→route-analysis→version2）を再現したカスケードシミュレーター
+（Python、CSS変数解決・コメント除去対応）を用い、サイドバー関連の対象17
+セレクタについて、変更前後の最終計算値をプロパティ単位で比較した。
+17セレクタ中16セレクタが完全一致、残り1セレクタ（.nav-item）も上記の
+border-left（視覚的に無害）のみの差異であることを確認した。
+
+【⑦ 配送分析画面固有CSSへの影響】
+なし。route-analysis.css内の .saas-* / .route-* / .card / .tbl / .btn /
+.kpi-card 等、配送分析画面のカード・テーブル・グラフ・レイアウトに関わる
+定義は一切変更していない（diffで確認済み）。
+
+【⑧ 収支分析3画面導線への影響】
+なし。今回はHTML・navigation.js・version2.css（.nav-subitem定義を含む）を
+一切変更していない。
+
+【⑨ JS変更有無】
+なし。
+
+【⑩ 業務ロジック変更有無】
+なし。Cloud / CloudRepository / SyncCoordinator / DatasetRepository / STATE /
+CSV取込ロジック / 既存計算ロジック / Chart.js描画ロジック / Excel出力ロジック /
+印刷ロジックは今回一切変更していない（ハッシュ比較で無変更を確認済み）。
+
+【⑪ 構文・CSS確認結果】
+4ファイルとも中括弧の対応数が一致（構文エラーなし）。
+プロパティ:値形式の簡易検証でもエラーなし。
+カスケードシミュレーターによる最終計算値比較で、意図した統合以外の
+差異が発生していないことを確認した。
+
+【⑫ 残課題】
+実ブラウザでの最終的な目視確認（Ctrl+F5後の表示）は未実施。
+今回の変更はCSS計算値レベルでの一致を確認したものであり、実際の
+レンダリング結果の目視確認を推奨する。
+.fixed-center-box 等のHTML未参照デッドCSSは今回のスコープ外のため
+そのまま残置している（削除禁止指示のため）。
+
+【⑬ 最終判定】
+PASS

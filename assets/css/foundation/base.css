@@ -1,12 +1,12 @@
 /* Version6 UI Foundation: reset and design tokens */
 *{box-sizing:border-box;margin:0;padding:0}
  :root{
-  --sidebar-w:236px;
+  --sidebar-w:248px;
   --header-h:64px;
-  --sidebar-bg:#182132;
+  --sidebar-bg:#0f172a;
   --sidebar-bg-2:#202b3d;
-  --sidebar-hover:rgba(255,255,255,.065);
-  --sidebar-active:#2f5f8c;
+  --sidebar-hover:#17233a;
+  --sidebar-active:#1e3a5f;
   --sidebar-text:#b8c3d1;
   --sidebar-text-active:#fff;
   --bg:#f5f7fa;
