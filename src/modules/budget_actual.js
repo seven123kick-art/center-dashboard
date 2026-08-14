@@ -44,6 +44,35 @@
   function ratioLocal(a, b) { return typeof ratio === 'function' ? ratio(a, b) : '—'; }
   function ymLabelLocal(ym) { return typeof ymLabel === 'function' ? ymLabel(ym) : String(ym || ''); }
 
+  /* ---------- Excel数値セル用の薄いヘルパー（Phase10-C1追加） ----------
+     既存diff()/ratio()（src/core/format.js）と完全に同一の計算式・
+     完全に同一の欠損判定（!a||!bで欠損扱い）を用いる、表示形式の
+     違いだけの薄いラッパー。分析値の計算・再集計は一切行わない。
+     diff()/ratio()は「文字列」を返すためExcelセルへ直接入れると
+     文字列型になってしまうため、Excel側で数値型として扱うために
+     同じ計算式で数値そのものを返すだけの関数。 */
+  function numDiff(a, b) {
+    if (a == null || b == null || !a || !b) return null;
+    return a - b;
+  }
+  function numRatio(a, b) {
+    if (a == null || b == null || !a || !b) return null;
+    return (a / b - 1); // Excel側でパーセント表示形式にすれば画面のratio()と同じ見た目になる
+  }
+
+  /* ---------- Excel金額列の単位統一（円→千円、Phase10-C1修正） ----------
+     画面表示では実績・前年（actRev等）は円単位のfmtK()で千円表示、
+     予算（planRev等）はfmt()でそのまま千円表示という既存仕様がある
+     （fmtK/fmtの定義自体は一切変更していない）。Excel出力では
+     数値としてこの表示単位を統一するため、円単位の値だけをExcel
+     格納直前に1000で割る。計算ロジック（actualRevenue/
+     planGroupValue/numDiff/numRatio等）は一切変更していない。
+     null/0は区別してそのまま維持し、0を欠損扱いにしない。 */
+  function toK(v) {
+    if (v == null) return null;
+    return v / 1000;
+  }
+
   /* ---------- 実績値の取得（pl.jsのローカルclosure valueFromRows()と
      完全に同一のロジック。モジュール境界のため複製が必要
      ―Phase10-B1確認済み。新しい算出方法ではない） ---------- */
@@ -316,8 +345,14 @@
       </div>`;
 
     content.innerHTML = `
-      <div style="font-size:12px;color:var(--text3,#8090a3);margin-bottom:10px">
-        ${escLocal(ymLabelLocal(ds.ym))}・${escLocal(typeof datasetKindLabel === 'function' ? datasetKindLabel(ds) : '')}　単位：千円
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:12px;color:var(--text3,#8090a3)">
+          ${escLocal(ymLabelLocal(ds.ym))}・${escLocal(typeof datasetKindLabel === 'function' ? datasetKindLabel(ds) : '')}　単位：千円
+        </div>
+        <div class="no-print" style="display:flex;gap:8px">
+          <button class="btn" onclick="BUDGET_ACTUAL_UI.exportExcel()">📊 Excel出力</button>
+          <button class="btn" onclick="BUDGET_ACTUAL_UI.printReport()">🖨️ 印刷 / PDF保存</button>
+        </div>
       </div>
       ${summaryHtml}
       ${subjectHtml}
@@ -325,8 +360,77 @@
     `;
     root.appendChild(content);
 
+    /* ---- 出力用構造化データの構築（Phase10-C1追加） ----
+       画面表示に使った計算済み変数（actRev/actExp/actPrf/planRev/
+       planExp/planPrf/pyRev/pyExp/pyPrf、および科目別・月別ループ内の
+       actual/planV/pyV）をそのまま再利用する。Dataset/planDataからの
+       再集計は一切行わない。 */
+    const exportSummaryRows = [
+      ['営業収益', planRev, toK(actRev), toK(numDiff(actRev, planRev != null ? planRev * 1000 : null)), numRatio(actRev, planRev != null ? planRev * 1000 : null), toK(pyRev), toK(numDiff(actRev, pyRev)), numRatio(actRev, pyRev)],
+      ['営業費用', planExp, toK(actExp), toK(numDiff(actExp, planExp != null ? planExp * 1000 : null)), numRatio(actExp, planExp != null ? planExp * 1000 : null), toK(pyExp), toK(numDiff(actExp, pyExp)), numRatio(actExp, pyExp)],
+      ['営業利益', planPrf, toK(actPrf), toK(numDiff(actPrf, planPrf != null ? planPrf * 1000 : null)), numRatio(actPrf, planPrf != null ? planPrf * 1000 : null), toK(pyPrf), toK(numDiff(actPrf, pyPrf)), numRatio(actPrf, pyPrf)],
+    ];
+    const exportSubjectRows = groupDefs().map(def => {
+      const actual = valueFromRows(ds, def.keys);
+      const planV = planGroupValue(planRows, def.label, def.keys, mm);
+      const pyV = py ? valueFromRows(py, def.keys) : null;
+      return [def.label, planV, toK(actual), toK(numDiff(actual, planV != null ? planV * 1000 : null)), numRatio(actual, planV != null ? planV * 1000 : null), toK(pyV), toK(numDiff(actual, pyV)), numRatio(actual, pyV)];
+    });
+    exportSubjectRows.push(['営業費用合計', planExp, toK(actExp), toK(numDiff(actExp, planExp != null ? planExp * 1000 : null)), numRatio(actExp, planExp != null ? planExp * 1000 : null), toK(pyExp), toK(numDiff(actExp, pyExp)), numRatio(actExp, pyExp)]);
+    exportSubjectRows.push(['営業利益', planPrf, toK(actPrf), toK(numDiff(actPrf, planPrf != null ? planPrf * 1000 : null)), numRatio(actPrf, planPrf != null ? planPrf * 1000 : null), toK(pyPrf), toK(numDiff(actPrf, pyPrf)), numRatio(actPrf, pyPrf)]);
+
+    const exportTrendRows = months.map(monthYm => {
+      const monthDs = activeRealCsvDatasetByYM(monthYm);
+      const monthMm = monthYm.slice(4, 6);
+      const monthActRev = monthDs ? actualRevenue(monthDs) : null;
+      const monthActPrf = monthDs ? actualProfit(monthDs) : null;
+      const monthPlanRev = planGroupValue(planRows, '営業収益', revDef?.keys || CONFIG.INCOME_KEYS, monthMm);
+      const monthPlanPrf = planGroupValue(planRows, '営業利益', [], monthMm);
+      return [ymLabelLocal(monthYm), monthPlanRev, toK(monthActRev), monthPlanPrf, toK(monthActPrf)];
+    });
+
+    window.BUDGET_ACTUAL_UI._lastExportData = {
+      title: '予実差異分析',
+      center: (typeof CENTER !== 'undefined' && CENTER?.name) ? CENTER.name : '',
+      period: ymLabelLocal(ds.ym) + '　単位：千円',
+      filename: (typeof EXPORT_SERVICE !== 'undefined' && EXPORT_SERVICE.buildFilename)
+        ? EXPORT_SERVICE.buildFilename([(typeof CENTER !== 'undefined' && CENTER?.name) || '', '予実差異分析', ds.ym], 'xlsx')
+        : null,
+      sheets: [{
+        name: '予実差異分析',
+        summary: [{
+          label: 'サマリー',
+          columns: ['項目', '予算', '実績', '予実差', '予算比', '前年実績', '前年差', '前年比'],
+          rows: exportSummaryRows,
+        }],
+        columns: ['科目', '予算', '実績', '予実差', '予算比', '前年実績', '前年差', '前年比'],
+        rows: exportSubjectRows,
+      }, {
+        name: '月別推移',
+        columns: ['月', '営業収益予算', '営業収益実績', '営業利益予算', '営業利益実績'],
+        rows: exportTrendRows,
+      }],
+    };
+
     if (window.UI?.updateTopbar) UI.updateTopbar('budget-actual');
   }
 
-  window.BUDGET_ACTUAL_UI = { render };
+  function exportExcel() {
+    const data = window.BUDGET_ACTUAL_UI._lastExportData;
+    if (!data) { if (window.UI?.toast) UI.toast('出力するデータがありません', 'warn'); return; }
+    if (!window.EXPORT_SERVICE) { if (window.UI?.toast) UI.toast('出力機能を読み込めませんでした', 'error'); return; }
+    EXPORT_SERVICE.toExcel(data).catch(e => {
+      console.error('[BUDGET_ACTUAL_UI.exportExcel]', e);
+      if (window.UI?.toast) UI.toast('Excel出力に失敗しました: ' + e.message, 'error');
+    });
+  }
+
+  function printReport() {
+    const data = window.BUDGET_ACTUAL_UI._lastExportData;
+    if (!data) { if (window.UI?.toast) UI.toast('印刷するデータがありません', 'warn'); return; }
+    if (!window.EXPORT_SERVICE) { if (window.UI?.toast) UI.toast('出力機能を読み込めませんでした', 'error'); return; }
+    EXPORT_SERVICE.toPrint(data);
+  }
+
+  window.BUDGET_ACTUAL_UI = { render, exportExcel, printReport, _lastExportData: null };
 })();

@@ -6257,3 +6257,220 @@ Version6 Phase10-B (2026-08-14) 予実差異分析 新機能実装
   計画編集、センター横断比較は今回実装していない。
 
 ■GitHub投入可否：投入可（Version6 Phase10-B 予実差異分析実装版）
+
+Version6 Phase10-C1 (2026-08-14) 共通出力基盤＋予実差異分析への接続
+新規ファイル：
+  - src/modules/export_service.js（共通出力サービス、Excel/印刷）
+  - assets/libs/xlsx.full.min.js（SheetJS Community Edition 0.18.5、
+    Apache-2.0ライセンス、ローカルベンダリング）
+  - assets/libs/LICENSES/xlsx-LICENSE.txt（ライセンス全文同梱）
+変更ファイル：
+  - src/modules/budget_actual.js（編集：Excel/印刷出力への接続を
+    末尾に追加。既存の分析計算・HTML生成ロジックは1文字も変更していない）
+  - center.html（編集：export_service.jsのscriptタグ追加のみ、1行）
+  - assets/css/foundation/components.css（編集：既存@media print
+    ブロックへの追記のみ。既存4ルール（#sidebar/#main/#content/
+    .no-print）は無変更）
+  ※ Repository・SyncCoordinator・Cloud・STATE構造・Dataset構造・
+    planData構造・速報/確定優先ロジック・Phase10-Bの予実計算式・
+    前年取得・費用良化/悪化判定・既存PL等の業務ロジックはいずれも
+    一切変更していない。app.js・cloud.js・cloud_repository.js・
+    sync_coordinator.js・pl.js・trend.js・kamoku.js・format.js・
+    navigation.jsは全てハッシュ/diff比較で無変更を確認済み。
+
+■①採用したXLSX方式
+  SheetJS Community Edition（npm package "xlsx"）。ブラウザ単体で
+  動作するUMDビルド（xlsx.full.min.js）を使用。既存docx.iife.js
+  （report_ui.js）と同一の「必要時に動的<script>タグで遅延読込する」
+  方式を採用し、外部CDNには依存しない。
+
+■②ライブラリ名・バージョン
+  xlsx 0.18.5（SheetJS、npm registry.npmjs.org経由で取得）
+
+■③ライセンス確認結果
+  Apache License 2.0。商用利用・改変・再配布が許可された寛容な
+  OSSライセンス。ライセンス全文をassets/libs/LICENSES/
+  xlsx-LICENSE.txtとして成果物に同梱した。
+
+■④ローカル配置場所
+  assets/libs/xlsx.full.min.js（既存assets/libs/docx.iife.jsと同じ
+  vendor配置規則に合わせた）
+
+■⑤外部CDN追加有無
+  なし。新規外部CDN依存は追加していない。
+
+■⑥新規ファイル
+  src/modules/export_service.js、assets/libs/xlsx.full.min.js、
+  assets/libs/LICENSES/xlsx-LICENSE.txt
+
+■⑦変更ファイル
+  src/modules/budget_actual.js、center.html、
+  assets/css/foundation/components.css
+
+■⑧共通EXPORT_SERVICE API
+  window.EXPORT_SERVICE = {
+    toExcel(data): Promise  // data={title,center,period,filename,sheets:[{name,summary,columns,rows}]}
+    toPrint(data): void     // 印刷用ヘッダーを差し込みwindow.print()を実行
+    buildFilename(parts, ext): string
+    ensureXLSX(): Promise   // XLSXライブラリの遅延読込
+  }
+  分析値の計算・再集計は一切行わない。画面モジュールから渡された
+  構造化済みデータをそのまま出力するだけ。
+
+■⑨予実差異分析側の接続方法
+  budget_actual.jsのrender()関数の末尾（既存の計算・HTML生成が
+  完了した直後）に、既存の計算済み変数（actRev/actExp/actPrf/
+  planRev/planExp/planPrf/pyRev/pyExp/pyPrf、および科目別・月別
+  ループ内のactual/planV/pyV）をそのまま構造化データへ詰める処理
+  を追加した。Dataset/planDataからの再集計は一切行っていない。
+  Excel出力ボタン・印刷ボタンをクリックすると、この構造化データ
+  （window.BUDGET_ACTUAL_UI._lastExportData）をEXPORT_SERVICEへ
+  渡す。
+
+  ※比率（予算比・前年比）をExcel上で数値型として提供するため、
+  既存diff()/ratio()（src/core/format.js）と完全に同一の計算式・
+  完全に同一の欠損判定（!a||!bで欠損扱い）を用いる薄いラッパー
+  （numDiff/numRatio）を追加した。これは表示形式（文字列→数値）の
+  違いのみであり、分析値の再計算ではない。
+
+■⑩画面値とExcel値の一致確認
+  Excel出力に使うexportSummaryRows/exportSubjectRows/
+  exportTrendRowsは、画面表示用のsummaryHtml/subjectHtml/trendHtml
+  の生成に使った変数（actRev等）と完全に同一の値を参照している。
+  別の集計経路は一切作っていない。
+
+■⑪Excelセル型確認
+  Node.js環境で実際にxlsx.full.min.jsを使いXLSX生成・読込検証を
+  行った。金額・予実差・予算比（マイナス値含む）は全てExcelセル
+  として数値型（type:'n'）で保存されることを確認した。文字列化は
+  していない。
+
+■⑫日本語確認
+  日本語シート名（「予実差異分析」）、日本語タイトル・センター名・
+  長い科目名（「特積収入（産廃）」等）とも文字化けなく正しく
+  保存・読込できることをNode.js環境で確認した。
+
+■⑬欠損確認
+  null値（予算なし・前年なし・Datasetなし相当）はExcelセルが
+  undefined（空欄）として扱われ、0や文字列"null"／"—"へ変換
+  されないことを確認した。
+
+■⑭ファイル名確認
+  「センター名_予実差異分析_対象年月.xlsx」形式（既存Word報告書の
+  日本語命名規則を踏襲）。OS非対応文字は共通のsanitizeFilenamePart()
+  で除去する。
+
+■⑮印刷方式
+  ブラウザ標準のwindow.print()のみを使用。新規PDF専用ライブラリ
+  （jsPDF等）は導入していない。UI上のボタン名も「印刷 / PDF保存」
+  とし、自動的にPDFファイルが生成されるという誤解を与えない表記
+  にした。
+
+■⑯印刷レイアウト確認
+  既存@media printブロック（#sidebar非表示・#main/#content
+  overflow解除・.no-print非表示）は無変更のまま、以下を追記した：
+  ・印刷専用ヘッダー（タイトル・センター・対象期間・出力日時）の
+    表示制御
+  ・A4横（@page{size:A4 landscape}）
+  ・表の改ページ制御（thead繰り返し、tr分割禁止）
+  既存の.view{display:none}.view.active{display:block}という
+  既存の仕組みにより、非アクティブな画面は追加ルールなしで自動的に
+  印刷対象から除外されることを確認した。
+
+■⑰既存Phase10-Bへの影響
+  なし。budget_actual.jsの既存計算ロジック（Dataset取得・予算取得・
+  前年取得・良化悪化判定・HTML生成）は1文字も変更していない。
+  diff比較で末尾への追加のみであることを確認した。
+
+■⑱Cloud/Repository/SyncCoordinator変更有無
+  なし。出力機能はローカル生成・ダウンロードのみで、Cloud保存・
+  Repository・SyncCoordinatorへの副作用は一切ない。
+
+■⑲データ構造変更有無
+  なし。STATE構造・Dataset構造・planData構造は一切変更していない。
+
+■⑳全E2E結果
+  Node.js環境で実際にxlsx.full.min.jsライブラリを実行し、実データを
+  模したExcel生成・読込検証を行い、以下を確認した：
+  ・日本語シート名/タイトル/センター名/長い科目名の正常表示
+  ・数値セル型（金額・予実差・マイナス値・予算比パーセント値）が
+    全てtype:'n'（number）として保存
+  ・null値がundefined（空欄）として扱われ0/文字列化されない
+  ・全JS構文エラー0件
+  ・HTML div開閉タグバランス正常（436=436）
+  ・既存PL/Trend/kamoku/format.js/app.js/cloud.js/
+    cloud_repository.js/sync_coordinator.js/navigation.jsが全て
+    ハッシュ/diff比較で無変更
+  ・center.html差分がexport_service.js script追加1行のみ
+  ・print CSS差分が既存4ルールを一切変更しない追記のみ
+  ブラウザ実機でのボタンクリック・実際の印刷ダイアログ起動・
+  複数ページ表の崩れ確認は、Node.js環境の制約上、コード生成した
+  Excel/CSS内容の検証にとどめている（サーバーレスのため実ブラウザ
+  E2Eは対象外、静的検証とNode.js実行検証で代替した）。
+
+■㉑全JS構文チェック
+  src配下の全JavaScriptファイル（新規export_service.js含む）で
+  node --checkを実施し、エラー0件を確認した。ベンダリングした
+  xlsx.full.min.jsも構文エラー0件を確認した。
+
+■㉒残課題
+  実ブラウザでのボタン操作・印刷プレビューの目視確認は未実施
+  （開発環境の制約）。次回ブラウザでの実機確認を推奨する。
+
+■㉓最終判定：PASS
+
+■㉔GitHub投入物：あり
+
+Version6 Phase10-C1修正 (2026-08-14) Excel出力の金額単位統一
+変更ファイル：
+  - src/modules/budget_actual.js（編集：Excel出力用構造化データの
+    金額単位を千円に統一）
+  ※ export_service.js・xlsx.full.min.js・components.css・
+    center.htmlはいずれも今回一切変更していない（ハッシュ比較で
+    無変更を確認済み）。budget_actual.jsの画面表示ロジック・
+    既存計算関数（actualRevenue/actualExpense/actualProfit/
+    planGroupValue/valueFromRows/numDiff/numRatio自体）・Phase10-B
+    の予実計算式・前年取得・費用良化/悪化判定は一切変更していない。
+
+■問題
+  budget_actual.jsのExcel出力データで、予算（planRev等）は千円単位、
+  実績・前年（actRev/pyRev等）は円単位という既存データ単位の違いを
+  そのままExcelへ格納しており、同一表内で金額が1000倍異なる状態に
+  なっていた。
+
+■修正内容
+  Excel格納直前にのみ単位を変換する薄いヘルパーtoK(v)（v/1000、
+  null保持）をbudget_actual.js内に追加し、円単位の値（実績・前年・
+  それらの差額）にのみ適用して千円に統一した。予算値・予算比・
+  前年比はそのまま（単位変換不要）。画面表示（fmtK/fmtによる
+  既存の表示ロジック）・既存の計算関数自体は一切変更していない。
+  「単位：千円」をExcelのperiod情報（センター・対象年月の隣）に
+  追記した。EXPORT_SERVICE自体への変更は行っていない
+  （業務計算を持たせない原則を維持）。
+
+■必須検証結果
+  予算25,000千円・実績25,000,000円の入力に対し、Excel上では
+  予算25,000・実績25,000となることをNode.js実行環境で実際に
+  xlsx生成・再読込し確認した。
+  - 営業収益/営業費用/営業利益、科目別、前年、差額、月別推移の
+    全金額列で単位統一を確認した。
+  - 0円：toK(0)=0（nullに変換されない、セルは数値型のまま0を保持）
+  - マイナス値：toK(-300000)=-300（符号を維持したまま正しく変換）
+  - null（予算なし等）：toK(null)=null（0に変換されない、Excelでは
+    空欄として扱われる）
+  - 前年比較（円単位同士の差額）：正しく千円へ変換されることを確認
+  - 予算比・前年比：単位変換されず、既存の数値型（比率）のまま
+    維持されることを確認
+  実際に生成したxlsxファイルをXLSX.read()で再読込し、全該当セルが
+  期待値・数値型（type:'n'）であることを確認した。
+
+■既存動作への影響
+  なし。画面表示・Phase10-Bの計算ロジック・EXPORT_SERVICE共通基盤・
+  Cloud/Repository/SyncCoordinator/STATE/Dataset/planData構造は
+  一切変更していない。
+
+■全JS構文チェック：エラー0件
+
+■最終判定：PASS
+
+■GitHub投入物：あり（修正版budget_actual.jsのみ）
