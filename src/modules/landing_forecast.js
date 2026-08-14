@@ -188,10 +188,8 @@
     return `<div class="kpi-card">
       <div class="kpi-label">${escLocal(label)}</div>
       <div class="kpi-value">${fmtLocal(Math.round(fK))}<span style="font-size:13px;font-weight:600">千円</span></div>
-      <div style="font-size:11px;color:var(--text2);line-height:1.7;margin-top:6px">
-        現在 ${fmtLocal(Math.round(cK))}千円<br>
-        計画 ${planText}${planK ? `<br>達成率予測 ${pctLocal(rate)}` : ''}
-      </div>
+      <div class="kpi-sub-row"><span class="kpi-sub">現在 ${fmtLocal(Math.round(cK))}千円</span></div>
+      <div class="kpi-sub-row"><span class="kpi-sub">計画 ${planText}${planK ? `／達成率予測 ${pctLocal(rate)}` : ''}</span></div>
     </div>`;
   }
   function importSummary(){
@@ -303,25 +301,31 @@
         <td>${dayLabel(r.date)}</td><td class="r">${fmtKLocal(r.revenue)}</td><td class="r">${fmtKLocal(r.labor)}</td><td class="r">${fmtKLocal(r.yosha)}</td><td class="r">${fmtKLocal(r.other)}</td><td class="r ${r.profit>=0?'cell-up':'cell-down'}">${fmtKLocal(r.profit)}</td>
       </tr>`).join('');
       const warn = forecast.profit < 0 ? '粗利益が赤字予測です。傭車費・人件費・高単価案件の確認が必要です。' : (planProfit && forecast.profit/1000 < planProfit ? '粗利益が計画未達予測です。月末の高単価案件・傭車使用を確認してください。' : '現時点では大きな異常はありません。');
-      root.innerHTML = `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin-bottom:12px">
-        <div><h2 style="font-size:20px;margin:0;color:var(--text)">着地予測</h2><div style="font-size:12px;color:var(--text2);margin-top:4px">日別実績をもとに、BtoC家電配送向けの土日祝・月末補正で着地を予測します。</div></div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <label style="font-size:12px;font-weight:700;color:var(--text2)">対象月</label>
-          <select id="landing-forecast-ym" onchange="LANDING_FORECAST_UI.render()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border2);border-radius:8px">${months.map(m=>`<option value="${m}" ${m===ym?'selected':''}>${ymLabelLocal(m)}</option>`).join('')}</select>
-          <button class="btn no-print" onclick="LANDING_FORECAST_UI.printReport()">🖨️ 印刷 / PDF保存</button>
+      const memoAlertClass = forecast.profit < 0 ? 'is-alert' : (planProfit && forecast.profit/1000 < planProfit ? 'is-warn' : '');
+      const memoBadge = forecast.profit < 0 ? '<span class="badge badge-warn">要確認</span>' : (planProfit && forecast.profit/1000 < planProfit ? '<span class="badge badge-warn">要確認</span>' : '<span class="badge badge-ok">正常</span>');
+      root.innerHTML = `<div class="lf-commandbar">
+        <div class="lf-command-title">日別実績をもとに、BtoC家電配送向けの土日祝・月末補正で着地を予測します。</div>
+        <div class="lf-toolbar-inner">
+          <div class="lf-filter">
+            <span class="lf-filter-label">対象月</span>
+            <select id="landing-forecast-ym" onchange="LANDING_FORECAST_UI.render()">${months.map(m=>`<option value="${m}" ${m===ym?'selected':''}>${ymLabelLocal(m)}</option>`).join('')}</select>
+          </div>
+          <div class="lf-command-actions no-print">
+            <button class="btn" onclick="LANDING_FORECAST_UI.printReport()">印刷 / PDF保存</button>
+          </div>
         </div>
       </div>
-      <div class="kpi-grid" style="margin-bottom:14px">
+      <div class="kpi-grid">
         ${kpi('営業収益 着地予測', cur.revenue, forecast.revenue, planRevenue)}
         ${kpi('粗利益 着地予測', cur.profit, forecast.profit, planProfit)}
-        <div class="kpi-card"><div class="kpi-label">粗利率予測</div><div class="kpi-value">${pctLocal(forecast.profitRate)}</div><div style="font-size:11px;color:var(--text2);line-height:1.7;margin-top:6px">現在 ${pctLocal(cur.profitRate)}<br>最終入力 ${lastDate ? lastDate.replace(/-/g,'/') : '-'}</div></div>
-        <div class="kpi-card"><div class="kpi-label">進捗率（BtoC補正）</div><div class="kpi-value">${pctLocal(forecast.progress*100)}</div><div style="font-size:11px;color:var(--text2);line-height:1.7;margin-top:6px">単純予測との差 ${diffText}<br>赤日・土日・月末を加味</div></div>
+        <div class="kpi-card"><div class="kpi-label">粗利率予測</div><div class="kpi-value">${pctLocal(forecast.profitRate)}</div><div class="kpi-sub-row"><span class="kpi-sub">現在 ${pctLocal(cur.profitRate)}</span></div><div class="kpi-sub-row"><span class="kpi-sub">最終入力 ${lastDate ? lastDate.replace(/-/g,'/') : '-'}</span></div></div>
+        <div class="kpi-card"><div class="kpi-label">進捗率（BtoC補正）</div><div class="kpi-value">${pctLocal(forecast.progress*100)}</div><div class="kpi-sub-row"><span class="kpi-sub">単純予測との差 ${diffText}</span></div><div class="kpi-sub-row"><span class="kpi-sub">赤日・土日・月末を加味</span></div></div>
       </div>
-      <div class="card" style="margin-bottom:14px;border-left:4px solid ${forecast.profit < 0 ? '#dc2626' : '#1a4d7c'}"><div class="card-header"><span class="card-title">判断メモ</span></div><div class="card-body" style="font-size:13px;line-height:1.9;color:var(--text)">${escLocal(warn)}<br><span style="font-size:12px;color:var(--text2)">単純日割ではなく、BtoC配送で伸びやすい土日祝・月末の残り日数を補正しています。</span></div></div>
-      <div class="card" style="margin-bottom:14px"><div class="card-header"><span class="card-title">予測内訳</span></div><div class="card-body" style="overflow:auto"><table class="data-table"><thead><tr><th>区分</th><th class="r">現在</th><th class="r">単純予測</th><th class="r">BtoC補正予測</th></tr></thead><tbody>
+      <div class="card lf-memo-card ${memoAlertClass}"><div class="card-header"><span class="card-title">判断メモ</span>${memoBadge}</div><div class="card-body" style="font-size:13px;line-height:1.9;color:var(--text)">${escLocal(warn)}<br><span class="lf-memo-note">単純日割ではなく、BtoC配送で伸びやすい土日祝・月末の残り日数を補正しています。</span></div></div>
+      <div class="card" style="margin-bottom:14px"><div class="card-header"><span class="card-title">予測内訳</span></div><div class="card-body" style="overflow:auto"><table class="tbl"><thead><tr><th>区分</th><th class="r">現在</th><th class="r">単純予測</th><th class="r">BtoC補正予測</th></tr></thead><tbody>
         ${['revenue','labor','yosha','other','profit'].map(k=>{ const labels={revenue:'営業収益',labor:'人件費',yosha:'傭車費',other:'その他経費',profit:'粗利益'}; return `<tr><td>${labels[k]}</td><td class="r">${fmtKLocal(cur[k])}</td><td class="r">${fmtKLocal(simple ? simple[k] : 0)}</td><td class="r">${fmtKLocal(forecast[k])}</td></tr>`; }).join('')}
       </tbody></table></div></div>
-      <div class="card"><div class="card-header"><span class="card-title">日別実績</span></div><div class="card-body" style="overflow:auto"><table class="data-table"><thead><tr><th>日付</th><th class="r">営業収益</th><th class="r">人件費</th><th class="r">傭車費</th><th class="r">その他経費</th><th class="r">粗利益</th></tr></thead><tbody>${dailyRows}</tbody></table></div></div>`;
+      <div class="card"><div class="card-header"><span class="card-title">日別実績</span></div><div class="card-body" style="overflow:auto"><table class="tbl"><thead><tr><th>日付</th><th class="r">営業収益</th><th class="r">人件費</th><th class="r">傭車費</th><th class="r">その他経費</th><th class="r">粗利益</th></tr></thead><tbody>${dailyRows}</tbody></table></div></div>`;
     }
   };
 })();

@@ -44,6 +44,31 @@
   function ratioLocal(a, b) { return typeof ratio === 'function' ? ratio(a, b) : '—'; }
   function ymLabelLocal(ym) { return typeof ymLabel === 'function' ? ymLabel(ym) : String(ym || ''); }
 
+  /* ---------- 前年比の表示ロジック（今回追加） ----------
+     既存の共通ratio()（src/core/format.js）は「!a||!b→'—'」という
+     欠損判定のみを行い、比較対象（前年実績）がマイナスの場合を
+     考慮していない。そのため前年が赤字だった場合に
+     (実績/前年-1)*100 という計算式が意味をなさない極端な数値
+     （例：-1,974.0%）を返してしまう。
+     このratio()自体はPL/Trend/dashboard/indicators/report_ui.js等、
+     他の完成済み画面でも広く使われている共通関数であり、今回は
+     予実差異分析の前年比表示に限定した対応とするため、ratio()
+     自体は一切変更しない（他画面への影響を避けるため）。
+     前年が正数の場合は、既存ratio()の計算結果をそのまま使用し、
+     通常の前年比計算は一切変更していない。 */
+  function yoyRatioLabel(actual, compare) {
+    if (actual == null || compare == null) return '—';
+    if (compare > 0) return ratioLocal(actual, compare); // 通常ケース：既存計算をそのまま使用
+    if (compare === 0) return '—'; // 0除算を避ける、既存ratio()と同じ挙動
+    // compare < 0（前年が赤字）の場合
+    if (actual > 0) return '黒字転換';
+    if (actual === 0) return '—';
+    // actual < 0（今年も赤字）
+    if (actual > compare) return '赤字縮小';
+    if (actual < compare) return '赤字拡大';
+    return '—';
+  }
+
   /* ---------- Excel数値セル用の薄いヘルパー（Phase10-C1追加） ----------
      既存diff()/ratio()（src/core/format.js）と完全に同一の計算式・
      完全に同一の欠損判定（!a||!bで欠損扱い）を用いる、表示形式の
@@ -58,6 +83,22 @@
   function numRatio(a, b) {
     if (a == null || b == null || !a || !b) return null;
     return (a / b - 1); // Excel側でパーセント表示形式にすれば画面のratio()と同じ見た目になる
+  }
+
+  /* ---------- Excel出力用の前年比ヘルパー（今回追加） ----------
+     画面のyoyRatioLabel()と同一の判定ロジック。前年が正数の通常
+     ケースでは既存numRatio()の計算結果（数値）をそのまま返し、
+     前年がマイナス/0の場合のみ意味のある文字列を返す。numRatio()
+     自体・予算比計算は一切変更していない。 */
+  function yoyRatioForExcel(actual, compare) {
+    if (actual == null || compare == null) return null;
+    if (compare > 0) return numRatio(actual, compare);
+    if (compare === 0) return null;
+    if (actual > 0) return '黒字転換';
+    if (actual === 0) return null;
+    if (actual > compare) return '赤字縮小';
+    if (actual < compare) return '赤字拡大';
+    return null;
   }
 
   /* ---------- Excel金額列の単位統一（円→千円、Phase10-C1修正） ----------
@@ -175,7 +216,7 @@
     const diffPlan = (actual != null && planV != null) ? diffLocal(actual, planV * 1000) : '—';
     const ratioPlan = (actual != null && planV != null) ? ratioLocal(actual, planV * 1000) : '—';
     const diffPy = (actual != null && pyV != null) ? diffLocal(actual, pyV) : '—';
-    const ratioPy = (actual != null && pyV != null) ? ratioLocal(actual, pyV) : '—';
+    const ratioPy = yoyRatioLabel(actual, pyV);
     const planDiffClass = baDiffClass(actual, planV != null ? planV * 1000 : null, isExpense);
     const pyDiffClass = baDiffClass(actual, pyV, isExpense);
 
@@ -198,7 +239,7 @@
     const diffPlan = (actual != null && planV != null) ? diffLocal(actual, planV * 1000) : '—';
     const ratioPlan = (actual != null && planV != null) ? ratioLocal(actual, planV * 1000) : '—';
     const diffPy = (actual != null && pyV != null) ? diffLocal(actual, pyV) : '—';
-    const ratioPy = (actual != null && pyV != null) ? ratioLocal(actual, pyV) : '—';
+    const ratioPy = yoyRatioLabel(actual, pyV);
     const planDiffClass = baDiffClass(actual, planV != null ? planV * 1000 : null, isExpense);
     const pyDiffClass = baDiffClass(actual, pyV, isExpense);
     const rowClass = isTotal ? 'ba-total-row' : '';
@@ -351,18 +392,18 @@
        actual/planV/pyV）をそのまま再利用する。Dataset/planDataからの
        再集計は一切行わない。 */
     const exportSummaryRows = [
-      ['営業収益', planRev, toK(actRev), toK(numDiff(actRev, planRev != null ? planRev * 1000 : null)), numRatio(actRev, planRev != null ? planRev * 1000 : null), toK(pyRev), toK(numDiff(actRev, pyRev)), numRatio(actRev, pyRev)],
-      ['営業費用', planExp, toK(actExp), toK(numDiff(actExp, planExp != null ? planExp * 1000 : null)), numRatio(actExp, planExp != null ? planExp * 1000 : null), toK(pyExp), toK(numDiff(actExp, pyExp)), numRatio(actExp, pyExp)],
-      ['営業利益', planPrf, toK(actPrf), toK(numDiff(actPrf, planPrf != null ? planPrf * 1000 : null)), numRatio(actPrf, planPrf != null ? planPrf * 1000 : null), toK(pyPrf), toK(numDiff(actPrf, pyPrf)), numRatio(actPrf, pyPrf)],
+      ['営業収益', planRev, toK(actRev), toK(numDiff(actRev, planRev != null ? planRev * 1000 : null)), numRatio(actRev, planRev != null ? planRev * 1000 : null), toK(pyRev), toK(numDiff(actRev, pyRev)), yoyRatioForExcel(actRev, pyRev)],
+      ['営業費用', planExp, toK(actExp), toK(numDiff(actExp, planExp != null ? planExp * 1000 : null)), numRatio(actExp, planExp != null ? planExp * 1000 : null), toK(pyExp), toK(numDiff(actExp, pyExp)), yoyRatioForExcel(actExp, pyExp)],
+      ['営業利益', planPrf, toK(actPrf), toK(numDiff(actPrf, planPrf != null ? planPrf * 1000 : null)), numRatio(actPrf, planPrf != null ? planPrf * 1000 : null), toK(pyPrf), toK(numDiff(actPrf, pyPrf)), yoyRatioForExcel(actPrf, pyPrf)],
     ];
     const exportSubjectRows = groupDefs().map(def => {
       const actual = valueFromRows(ds, def.keys);
       const planV = planGroupValue(planRows, def.label, def.keys, mm);
       const pyV = py ? valueFromRows(py, def.keys) : null;
-      return [def.label, planV, toK(actual), toK(numDiff(actual, planV != null ? planV * 1000 : null)), numRatio(actual, planV != null ? planV * 1000 : null), toK(pyV), toK(numDiff(actual, pyV)), numRatio(actual, pyV)];
+      return [def.label, planV, toK(actual), toK(numDiff(actual, planV != null ? planV * 1000 : null)), numRatio(actual, planV != null ? planV * 1000 : null), toK(pyV), toK(numDiff(actual, pyV)), yoyRatioForExcel(actual, pyV)];
     });
-    exportSubjectRows.push(['営業費用合計', planExp, toK(actExp), toK(numDiff(actExp, planExp != null ? planExp * 1000 : null)), numRatio(actExp, planExp != null ? planExp * 1000 : null), toK(pyExp), toK(numDiff(actExp, pyExp)), numRatio(actExp, pyExp)]);
-    exportSubjectRows.push(['営業利益', planPrf, toK(actPrf), toK(numDiff(actPrf, planPrf != null ? planPrf * 1000 : null)), numRatio(actPrf, planPrf != null ? planPrf * 1000 : null), toK(pyPrf), toK(numDiff(actPrf, pyPrf)), numRatio(actPrf, pyPrf)]);
+    exportSubjectRows.push(['営業費用合計', planExp, toK(actExp), toK(numDiff(actExp, planExp != null ? planExp * 1000 : null)), numRatio(actExp, planExp != null ? planExp * 1000 : null), toK(pyExp), toK(numDiff(actExp, pyExp)), yoyRatioForExcel(actExp, pyExp)]);
+    exportSubjectRows.push(['営業利益', planPrf, toK(actPrf), toK(numDiff(actPrf, planPrf != null ? planPrf * 1000 : null)), numRatio(actPrf, planPrf != null ? planPrf * 1000 : null), toK(pyPrf), toK(numDiff(actPrf, pyPrf)), yoyRatioForExcel(actPrf, pyPrf)]);
 
     const exportTrendRows = months.map(monthYm => {
       const monthDs = activeRealCsvDatasetByYM(monthYm);
