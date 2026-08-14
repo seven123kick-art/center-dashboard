@@ -1,6 +1,6 @@
 /* Revenue / expense detail analysis — Version6 refined UI */
 #kamoku-root{padding-bottom:40px}
-#kamoku-root .kamoku-toolbar{display:flex;align-items:center;gap:14px;margin:4px 0 18px;flex-wrap:wrap;padding:0 2px}
+#kamoku-root .kamoku-toolbar{display:flex;align-items:center;gap:14px;margin:0 0 18px;flex-wrap:wrap;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
 #kamoku-root .kamoku-filter{display:flex;align-items:center;gap:8px}
 #kamoku-root .kamoku-filter-label{font-size:12px;color:var(--text2);font-weight:800}
 #kamoku-root .kamoku-filter select{min-height:40px;padding:7px 34px 7px 12px;font-size:12px}
@@ -8,8 +8,8 @@
 #kamoku-root .kamoku-compare-note.is-warning{color:var(--warn)}
 #kamoku-root .kamoku-actions{display:flex;gap:8px;margin-left:auto}
 #kamoku-root .kamoku-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:20px}
-#kamoku-root .kamoku-kpi-card{padding:18px 18px 16px;min-height:112px;overflow:visible;position:relative}
-#kamoku-root .kamoku-kpi-card::before{content:"";position:absolute;left:18px;top:0;width:36px;height:3px;border-radius:0 0 3px 3px;background:var(--accent)}
+#kamoku-root .kamoku-kpi-card{padding:18px 18px 16px;min-height:112px;overflow:visible;position:relative;border-color:var(--border)}
+
 #kamoku-root .kamoku-kpi-label{font-size:11px;color:var(--text2);font-weight:900;margin-bottom:8px}
 #kamoku-root .kamoku-kpi-value{font-size:23px;line-height:1.15;letter-spacing:-.025em;font-weight:950;color:var(--text)}
 #kamoku-root .kamoku-kpi-value span{font-size:10px;letter-spacing:0;font-weight:900}

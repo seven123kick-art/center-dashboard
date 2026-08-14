@@ -83,6 +83,9 @@
   function renderTrend() {
     const notice = document.getElementById('trend-notice');
     renderCommonPeriodSelector('trend', { useMonth:false });
+    const periodBox = document.getElementById('trend-period-selector');
+    const switcher = document.querySelector('#view-trend .analysis-switcher');
+    if (periodBox && switcher && switcher.nextElementSibling !== periodBox) switcher.after(periodBox);
 
     const list = datasetsForSelectedFiscalYear();
     if (!list.length) {
@@ -107,9 +110,9 @@
       data:{
         labels,
         datasets:[
-          {label:'収入（千円）',data:inc,backgroundColor:'rgba(26,77,124,.7)',order:2},
-          {label:'費用（千円）',data:exp,backgroundColor:'rgba(224,91,77,.7)',order:2},
-          {label:'利益（千円）',data:prf,type:'line',borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,.1)',fill:false,tension:.3,pointRadius:4,order:1},
+          {label:'収入（千円）',data:inc,backgroundColor:'rgba(49,95,140,.78)',order:2},
+          {label:'費用（千円）',data:exp,backgroundColor:'rgba(217,133,47,.72)',order:2},
+          {label:'利益（千円）',data:prf,type:'line',borderColor:'#16966a',backgroundColor:'rgba(22,150,106,.08)',fill:false,tension:.3,pointRadius:4,order:1},
         ]
       },
       options:{
@@ -128,7 +131,7 @@
           datasets:[{
             label:'件数',
             data:list.map(d=>ticketCountOfTrend(d)),
-            backgroundColor:'rgba(26,77,124,.72)'
+            backgroundColor:'rgba(49,95,140,.76)'
           }]
         },
         options:{

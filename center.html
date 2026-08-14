@@ -354,41 +354,44 @@
         </div>
       </div>
       <div id="trend-notice"></div>
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-header">
-          <span class="card-title">月次収支推移（千円）</span>
-          <div style="display:flex;align-items:center;gap:12px;margin-left:auto">
-            <button type="button" class="btn btn-secondary no-print" onclick="TREND_UI_EXPORT.exportExcel()">Excel出力</button>
-            <div class="legend" style="margin:0">
-            <div class="legend-item"><div class="legend-dot" style="background:#1a4d7c"></div>収入</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#e05b4d"></div>費用</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div>利益（折れ線）</div>
+      <div class="card trend-hero">
+        <div class="trend-card-header">
+          <div>
+            <div class="trend-card-title">月次収支推移</div>
+            <div class="trend-card-note">収入・費用・利益の年度内推移　単位：千円</div>
+          </div>
+          <div class="trend-card-actions">
+            <div class="trend-legend">
+              <div class="trend-legend-item"><span class="trend-legend-dot"></span>収入</div>
+              <div class="trend-legend-item"><span class="trend-legend-dot is-expense"></span>費用</div>
+              <div class="trend-legend-item"><span class="trend-legend-dot is-profit"></span>利益</div>
             </div>
+            <button type="button" class="btn btn-secondary no-print" onclick="TREND_UI_EXPORT.exportExcel()">Excel出力</button>
           </div>
         </div>
-        <div class="card-body">
-          <div class="chart-wrap" style="height:230px"><canvas id="c-trend-main"></canvas></div>
-        </div>
-      </div>
-      <div class="grid2">
-        <div class="card">
-          <div class="card-header"><span class="card-title">月次件数推移</span></div>
-          <div class="card-body">
-            <div class="chart-wrap" style="height:180px"><canvas id="c-trend-cnt"></canvas></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">主要荷主　月別推移（千円）</span>
-            <div id="st-legend" class="legend" style="margin:0"></div>
-          </div>
-          <div class="card-body">
-            <div class="chart-wrap" style="height:180px"><canvas id="c-trend-shipper"></canvas></div>
-          </div>
+        <div class="trend-chart-body">
+          <div class="chart-wrap" style="height:250px"><canvas id="c-trend-main"></canvas></div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-header"><span class="card-title">月次実績一覧</span></div>
+      <div class="trend-grid">
+        <div class="card">
+          <div class="trend-card-header"><div><div class="trend-card-title">月次件数推移</div><div class="trend-card-note">配送件数の月別推移</div></div></div>
+          <div class="trend-chart-body">
+            <div class="chart-wrap" style="height:190px"><canvas id="c-trend-cnt"></canvas></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="trend-card-header">
+            <div><div class="trend-card-title">主要荷主 月別推移</div><div class="trend-card-note">主要荷主の売上推移　単位：千円</div></div>
+            <div id="st-legend" class="legend" style="margin-left:auto"></div>
+          </div>
+          <div class="trend-chart-body">
+            <div class="chart-wrap" style="height:190px"><canvas id="c-trend-shipper"></canvas></div>
+          </div>
+        </div>
+      </div>
+      <div class="card trend-table-card">
+        <div class="trend-card-header"><div><div class="trend-card-title">月次実績一覧</div><div class="trend-card-note">年度内の実績・件数・比較指標</div></div></div>
         <div class="scroll-x">
           <table class="tbl" id="trend-tbl">
             <thead><tr>

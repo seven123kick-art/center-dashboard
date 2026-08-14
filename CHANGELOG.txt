@@ -1,27 +1,36 @@
-Phase UI - 科目分析画面リファイン
-Date: 2026-08-14
+収支分析 UI 最終仕上げ
+作成日: 2026-08-14
 
-変更ファイル:
-- src/modules/kamoku.js
+変更対象:
+- center.html
 - assets/css/app.css
-- assets/css/features/kamoku.css (new)
+- assets/css/features/kamoku.css
+- assets/css/features/trend.css（新規）
+- src/modules/kamoku.js
+- src/modules/trend.js
 
 内容:
-1. 科目分析の画面表示金額を元データ(円)から千円表示へ補正。Excel出力は既存通り千円で変更なし。
-2. KPIカードの原色トップラインを廃止し、共通UIに馴染む控えめなアクセントへ変更。
-3. KPI数値・比較値・ラベルの視覚階層を整理。
-4. 収入/費用内訳の絵文字を廃止し、意味色を小さなアクセントとして使用。
-5. フィルタ、Excelボタン、表、構成比バー、グラフカードの余白・罫線・文字階層を統一。
-6. kamoku.js内の埋め込みCSSを専用 feature CSSへ分離。
-7. レスポンシブ時はKPI 2列→1列、詳細/グラフは1列へ変更。
+1. 科目分析
+- フィルタ群を白い操作バーとして統合
+- KPIカード上部の装飾線を廃止
+- 収入・費用の現在値をニュートラルな本文色へ統一
+- 増減・構成比・カテゴリ識別にのみ意味色を残す
 
-非変更:
-- getRows / 集計ロジック
-- _incRows / _expRows の集計内容
-- Chart.js描画ロジック
+2. 推移分析
+- 収支分析3画面共通のデザイン言語へ再構成
+- メイングラフ、件数、主要荷主、実績一覧のカード階層・余白・見出しを統一
+- 収入=落ち着いた青、費用=アンバー、利益=緑へ整理
+- 年度選択UIを収支分析スイッチャー直下へ配置
+- Excel出力機能は既存処理を維持
+
+3. 変更していないもの
+- Cloud / Repository / SyncCoordinator
+- STATE / Dataset構造
+- CSV取込
+- 集計・計算式
 - Excel出力データ構築ロジック
-- Cloud / Repository / SyncCoordinator / STATE / CSV取込
-- center.html / navigation.js
+- ナビゲーションロジック
 
-確認:
-- node --check src/modules/kamoku.js: PASS
+検証:
+- kamoku.js: node --check PASS
+- trend.js: node --check PASS

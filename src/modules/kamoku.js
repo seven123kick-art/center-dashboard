@@ -199,7 +199,7 @@ const KAMOKU_UI = (() => {
         </tr>
         ${_incRows(rows, cr, totInc, hasCmp, ymLabel(ym), ymLabel(cmpYm))}
         <tr class="tot"><td>\u5408\u8a08</td>
-          <td style="text-align:right;color:#1a6fc4">${fmtK(totInc)}</td>
+          <td style="text-align:right;color:var(--text);font-weight:700">${fmtK(totInc)}</td>
           ${hasCmp?`<td style="text-align:right;color:var(--text3)">${fmtK(ctInc)}</td>`:''}
           ${hasCmp?diffCell(totInc,ctInc):''}
           <td></td>
@@ -221,7 +221,7 @@ const KAMOKU_UI = (() => {
         </tr>
         ${_expRows(rows, cr, totExp, hasCmp)}
         <tr class="tot"><td>\u5408\u8a08</td>
-          <td style="text-align:right;color:#e05a5a">${fmtK(totExp)}</td>
+          <td style="text-align:right;color:var(--text);font-weight:700">${fmtK(totExp)}</td>
           ${hasCmp?`<td style="text-align:right;color:var(--text3)">${fmtK(ctExp)}</td>`:''}
           ${hasCmp?diffCell(totExp,ctExp):''}
           <td></td>
@@ -344,7 +344,7 @@ ${hasCmp ? _barSection(rows, cr, totInc, totExp, ctInc, ctExp, ym, cmpYm) : ''}
         <td style="font-weight:600">
           ${hasS?`<span class="k-toggle" data-key="${g.key}" style="cursor:pointer;user-select:none">\u25b6 </span>`:'　'}${g.label}
         </td>
-        <td style="text-align:right;color:#1a6fc4;font-weight:600">${fmtK(v)}${hasCmp&&cv!=null?diffBadge(v,cv):''}</td>
+        <td style="text-align:right;color:var(--text);font-weight:700">${fmtK(v)}${hasCmp&&cv!=null?diffBadge(v,cv):''}</td>
         ${hasCmp?`<td style="text-align:right;color:var(--text3)">${cv!=null?fmtK(cv):'\u2014'}</td>`:''}
         ${hasCmp?diffCell(v,cv):''}
         <td>
@@ -385,7 +385,7 @@ ${hasCmp ? _barSection(rows, cr, totInc, totExp, ctInc, ctExp, ym, cmpYm) : ''}
         const pct = totExp ? item.v/totExp*100 : 0;
         html += `<tr>
           <td style="padding-left:20px;color:var(--text2)">\u2514 ${item.label}</td>
-          <td style="text-align:right;color:#e05a5a;font-weight:600">${fmtK(item.v)}${hasCmp&&item.cv!=null?diffBadge(item.v,item.cv):''}</td>
+          <td style="text-align:right;color:var(--text);font-weight:700">${fmtK(item.v)}${hasCmp&&item.cv!=null?diffBadge(item.v,item.cv):''}</td>
           ${hasCmp?`<td style="text-align:right;color:var(--text3)">${item.cv!=null?fmtK(item.cv):'\u2014'}</td>`:''}
           ${hasCmp?diffCell(item.v,item.cv):''}
           <td>
