@@ -34,3 +34,8 @@
 検証:
 - kamoku.js: node --check PASS
 - trend.js: node --check PASS
+
+Phase UI-3b 推移分析 上部圧縮
+- 推移分析の年度選択を独立した「表示対象」カードから月次収支推移ヘッダーへ統合。
+- 年度選択・凡例・Excel出力を同じ操作領域に整理し、グラフまでの縦余白を削減。
+- 推移分析の計算・Chart.jsデータ・Excel出力・ナビゲーションロジックは変更なし。

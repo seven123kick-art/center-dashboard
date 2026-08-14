@@ -84,8 +84,8 @@
     const notice = document.getElementById('trend-notice');
     renderCommonPeriodSelector('trend', { useMonth:false });
     const periodBox = document.getElementById('trend-period-selector');
-    const switcher = document.querySelector('#view-trend .analysis-switcher');
-    if (periodBox && switcher && switcher.nextElementSibling !== periodBox) switcher.after(periodBox);
+    const actions = document.querySelector('#view-trend .trend-card-actions');
+    if (periodBox && actions && periodBox.parentElement !== actions) actions.prepend(periodBox);
 
     const list = datasetsForSelectedFiscalYear();
     if (!list.length) {

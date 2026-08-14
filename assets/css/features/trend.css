@@ -1,12 +1,15 @@
 /* Trend analysis — Version6 refined UI */
 #view-trend{padding-bottom:40px}
-#view-trend #trend-period-selector{margin-top:0}
-#view-trend .period-selector-card{box-shadow:var(--shadow)!important;border-color:var(--border)!important;border-radius:var(--radius)!important}
+#view-trend #trend-period-selector{margin:0;display:flex;align-items:center}
+#view-trend #trend-period-selector .period-selector-card{margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;background:transparent!important;border-radius:0!important;display:flex;align-items:center;gap:8px}
+#view-trend #trend-period-selector .period-selector-card>div:first-child{display:none!important}
+#view-trend #trend-period-selector label{font-size:11px;font-weight:800;color:var(--text2);white-space:nowrap}
+#view-trend #trend-period-selector select{min-width:128px;height:38px;padding-top:0;padding-bottom:0}
 #view-trend .trend-hero{margin-bottom:16px;overflow:hidden}
 #view-trend .trend-card-header{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)}
 #view-trend .trend-card-title{font-size:13px;font-weight:950;color:var(--text)}
 #view-trend .trend-card-note{font-size:10px;font-weight:700;color:var(--text3)}
-#view-trend .trend-card-actions{margin-left:auto;display:flex;align-items:center;gap:10px}
+#view-trend .trend-card-actions{margin-left:auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 #view-trend .trend-chart-body{padding:16px 18px 14px}
 #view-trend .trend-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-bottom:16px;align-items:stretch}
 #view-trend .trend-grid>.card{overflow:hidden;margin:0}
@@ -20,4 +23,4 @@
 #view-trend .trend-legend-dot.is-expense{background:#d9852f}
 #view-trend .trend-legend-dot.is-profit{background:#16966a}
 @media(max-width:1000px){#view-trend .trend-grid{grid-template-columns:1fr}}
-@media(max-width:760px){#view-trend .trend-card-header{align-items:flex-start;flex-wrap:wrap}#view-trend .trend-card-actions{width:100%;margin-left:0;justify-content:space-between}}
+@media(max-width:760px){#view-trend .trend-card-header{align-items:flex-start;flex-wrap:wrap}#view-trend .trend-card-actions{width:100%;margin-left:0;justify-content:flex-start}#view-trend .trend-legend{width:100%;order:3}}
