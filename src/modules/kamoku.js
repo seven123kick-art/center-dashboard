@@ -66,7 +66,7 @@ const KAMOKU_UI = (() => {
   const n = v => Number(v) || 0;
   const fmtK = v => {
     if (v === 0) return '\u2014';
-    const abs = Math.abs(Math.round(v));
+    const abs = Math.abs(Math.round(v / 1000));
     return (v < 0 ? '-' : '') + abs.toLocaleString() + '\u5343\u5186';
   };
   const diffBadge = (cur, prev) => {
@@ -122,41 +122,30 @@ const KAMOKU_UI = (() => {
     const cmpAvail = cmpYm && months.includes(cmpYm);
 
     root.innerHTML = `
-<style>
-#kamoku-root{padding-bottom:40px}
-#kamoku-root .kt{width:100%;border-collapse:collapse;font-size:12px}
-#kamoku-root .kt th{background:var(--surface2,#f4f6fa);color:var(--text3,#8899aa);font-size:11px;font-weight:600;padding:6px 10px;text-align:right;border-bottom:2px solid var(--border,#dde3f0)}
-#kamoku-root .kt th:first-child{text-align:left}
-#kamoku-root .kt td{padding:6px 10px;border-bottom:1px solid var(--border,#dde3f0);vertical-align:middle}
-#kamoku-root .kt .grp td{background:var(--surface2,#f4f6fa);font-weight:700}
-#kamoku-root .kt .sub td:first-child{padding-left:24px;color:var(--text2,#556)}
-#kamoku-root .kt .tot td{background:var(--surface2,#f4f6fa);font-weight:700;border-top:2px solid var(--border,#dde3f0)}
-#kamoku-root .kbar{height:5px;background:var(--border,#dde3f0);border-radius:2px;overflow:hidden;min-width:40px}
-#kamoku-root .kbar-f{height:100%;border-radius:2px;transition:width .3s}
-</style>
 
-<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-  <div style="display:flex;align-items:center;gap:6px">
-    <span style="font-size:12px;color:var(--text3)">\u5bfe\u8c61\u6708</span>
-    <select id="k-ym" onchange="KAMOKU_UI.render()" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border,#dde3f0);background:var(--surface,#fff);color:var(--text1);font-size:12px">
+
+<div class="kamoku-toolbar">
+  <div class="kamoku-filter">
+    <span class="kamoku-filter-label">\u5bfe\u8c61\u6708</span>
+    <select id="k-ym" onchange="KAMOKU_UI.render()">
       ${months.map(m=>`<option value="${m}" ${m===selYm?'selected':''}>${ymLabel(m)}</option>`).join('')}
     </select>
   </div>
-  <div style="display:flex;align-items:center;gap:6px">
-    <span style="font-size:12px;color:var(--text3)">\u6bd4\u8f03</span>
-    <select id="k-cmp" onchange="KAMOKU_UI.render()" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border,#dde3f0);background:var(--surface,#fff);color:var(--text1);font-size:12px">
+  <div class="kamoku-filter">
+    <span class="kamoku-filter-label">\u6bd4\u8f03</span>
+    <select id="k-cmp" onchange="KAMOKU_UI.render()">
       <option value="none"   ${cmpMode==='none'  ?'selected':''}>\u6bd4\u8f03\u306a\u3057</option>
       <option value="prev"   ${cmpMode==='prev'  ?'selected':''}>\u524d\u6708\u3068\u6bd4\u8f03</option>
       <option value="select" ${cmpMode==='select'?'selected':''}>\u6708\u3092\u6307\u5b9a</option>
     </select>
-    ${cmpMode==='select'?`<select id="k-cmpym" onchange="KAMOKU_UI.render()" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border,#dde3f0);background:var(--surface,#fff);color:var(--text1);font-size:12px">
+    ${cmpMode==='select'?`<select id="k-cmpym" onchange="KAMOKU_UI.render()">
       ${months.filter(m=>m!==selYm).map(m=>`<option value="${m}" ${m===selCmpYm?'selected':''}>${ymLabel(m)}</option>`).join('')}
     </select>`:'<span id="k-cmpym" style="display:none"></span>'}
   </div>
-  ${cmpAvail?`<span style="font-size:11px;color:var(--text3)">\u6bd4\u8f03: ${ymLabel(cmpYm)}</span>`
-            :(cmpMode!=='none'?'<span style="font-size:11px;color:#e87830">\u6bd4\u8f03\u30c7\u30fc\u30bf\u306a\u3057</span>':'')}
-  <div class="no-print" style="display:flex;gap:8px;margin-left:auto">
-    <button class="btn" onclick="KAMOKU_UI.exportExcel()">\uD83D\uDCCA Excel\u51fa\u529b</button>
+  ${cmpAvail?`<span class="kamoku-compare-note">\u6bd4\u8f03: ${ymLabel(cmpYm)}</span>`
+            :(cmpMode!=='none'?'<span class="kamoku-compare-note is-warning">\u6bd4\u8f03\u30c7\u30fc\u30bf\u306a\u3057</span>':'')}
+  <div class="kamoku-actions no-print">
+    <button class="btn" onclick="KAMOKU_UI.exportExcel()">Excel\u51fa\u529b</button>
   </div>
 </div>
 <div id="k-body"></div>`;
@@ -187,7 +176,7 @@ const KAMOKU_UI = (() => {
 
     el.innerHTML = `
 <!-- サマリーカード -->
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
+<div class="kamoku-kpi-grid">
   ${_card('\u7dcf\u53ce\u5165',  totInc, ctInc,  '#1a6fc4')}
   ${_card('\u7dcf\u8cbb\u7528',  totExp, ctExp,  '#e05a5a')}
   ${_card('\u55b6\u696d\u5229\u76ca', profit, cProfit, profit>=0?'#16a34a':'#dc2626')}
@@ -195,11 +184,11 @@ const KAMOKU_UI = (() => {
 </div>
 
 <!-- 2列テーブル -->
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;align-items:start">
+<div class="kamoku-detail-grid">
 
   <!-- 収入 -->
-  <div class="card" style="overflow:hidden">
-    <div style="padding:10px 14px;border-bottom:1px solid var(--border,#dde3f0);font-size:13px;font-weight:700;color:var(--text1)">\uD83D\uDCB0 \u53ce\u5165\u5185\u8a33</div>
+  <div class="card kamoku-panel">
+    <div class="kamoku-panel-header"><span class="kamoku-panel-accent is-income"></span><span>\u53ce\u5165\u5185\u8a33</span></div>
     <div style="overflow-x:auto">
       <table class="kt">
         <tr>
@@ -220,8 +209,8 @@ const KAMOKU_UI = (() => {
   </div>
 
   <!-- 費用 -->
-  <div class="card" style="overflow:hidden">
-    <div style="padding:10px 14px;border-bottom:1px solid var(--border,#dde3f0);font-size:13px;font-weight:700;color:var(--text1)">\uD83D\uDCB8 \u8cbb\u7528\u5185\u8a33</div>
+  <div class="card kamoku-panel">
+    <div class="kamoku-panel-header"><span class="kamoku-panel-accent is-expense"></span><span>\u8cbb\u7528\u5185\u8a33</span></div>
     <div style="overflow-x:auto">
       <table class="kt">
         <tr>
@@ -243,13 +232,13 @@ const KAMOKU_UI = (() => {
 </div>
 
 <!-- グラフ -->
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
-  <div class="card">
-    <div style="padding:10px 14px;font-size:12px;font-weight:700">\u53ce\u5165\u69cb\u6210</div>
+<div class="kamoku-chart-grid">
+  <div class="card kamoku-chart-card">
+    <div class="kamoku-chart-title">\u53ce\u5165\u69cb\u6210</div>
     <div style="height:190px;padding:8px;position:relative"><canvas id="k-c1"></canvas></div>
   </div>
-  <div class="card">
-    <div style="padding:10px 14px;font-size:12px;font-weight:700">\u8cbb\u7528\u69cb\u6210</div>
+  <div class="card kamoku-chart-card">
+    <div class="kamoku-chart-title">\u8cbb\u7528\u69cb\u6210</div>
     <div style="height:190px;padding:8px;position:relative"><canvas id="k-c2"></canvas></div>
   </div>
 </div>
@@ -411,19 +400,19 @@ ${hasCmp ? _barSection(rows, cr, totInc, totExp, ctInc, ctExp, ym, cmpYm) : ''}
 
   function _card(label, val, cval, color) {
     const db = cval!=null ? diffBadge(val,cval) : '';
-    return `<div class="card" style="padding:12px 14px;border-top:3px solid ${color}">
-      <div style="font-size:11px;color:var(--text3);margin-bottom:3px">${label}</div>
-      <div style="font-size:15px;font-weight:700;color:${color}">${fmtK(val)}${db}</div>
-      ${cval!=null?`<div style="font-size:10px;color:var(--text3);margin-top:1px">\u524d\u6708: ${fmtK(cval)}</div>`:''}
+    return `<div class="card kamoku-kpi-card">
+      <div class="kamoku-kpi-label">${label}</div>
+      <div class="kamoku-kpi-value">${fmtK(val)}${db}</div>
+      ${cval!=null?`<div class="kamoku-kpi-compare">\u524d\u6708: ${fmtK(cval)}</div>`:''}
     </div>`;
   }
   function _cardPct(label, val, cval) {
     const color = val>=0 ? '#16a34a' : '#dc2626';
     const db = cval!=null ? diffBadge(val,cval) : '';
-    return `<div class="card" style="padding:12px 14px;border-top:3px solid ${color}">
-      <div style="font-size:11px;color:var(--text3);margin-bottom:3px">${label}</div>
-      <div style="font-size:15px;font-weight:700;color:${color}">${val.toFixed(1)}%${db}</div>
-      ${cval!=null?`<div style="font-size:10px;color:var(--text3);margin-top:1px">\u524d\u6708: ${cval.toFixed(1)}%</div>`:''}
+    return `<div class="card kamoku-kpi-card">
+      <div class="kamoku-kpi-label">${label}</div>
+      <div class="kamoku-kpi-value">${val.toFixed(1)}%${db}</div>
+      ${cval!=null?`<div class="kamoku-kpi-compare">\u524d\u6708: ${cval.toFixed(1)}%</div>`:''}
     </div>`;
   }
 

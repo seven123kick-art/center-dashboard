@@ -1,21 +1,27 @@
-Version6 Phase UI-3 (2026-08-14)
+Phase UI - 科目分析画面リファイン
+Date: 2026-08-14
 
-変更対象:
-- center.html
-- src/modules/pl.js
-- assets/css/features/version2.css
+変更ファイル:
+- src/modules/kamoku.js
+- assets/css/app.css
+- assets/css/features/kamoku.css (new)
 
-変更内容:
-- 月次収支の前月比較列の区切り線を 4px → 2px に調整し、ブルーグレー系へ統一。
-- 月次収支の前年比較列の蛍光マゼンタ (#d946ef) を廃止し、淡いラベンダーグレー (#c8bfdf) に変更。
-- 前年列背景を #fff1f7 → #faf8ff に変更し、Version6の白・青・淡色UIへ調和。
-- 通常表と「全項目を一覧表示」の双方を同一トーンへ統一。
+内容:
+1. 科目分析の画面表示金額を元データ(円)から千円表示へ補正。Excel出力は既存通り千円で変更なし。
+2. KPIカードの原色トップラインを廃止し、共通UIに馴染む控えめなアクセントへ変更。
+3. KPI数値・比較値・ラベルの視覚階層を整理。
+4. 収入/費用内訳の絵文字を廃止し、意味色を小さなアクセントとして使用。
+5. フィルタ、Excelボタン、表、構成比バー、グラフカードの余白・罫線・文字階層を統一。
+6. kamoku.js内の埋め込みCSSを専用 feature CSSへ分離。
+7. レスポンシブ時はKPI 2列→1列、詳細/グラフは1列へ変更。
 
 非変更:
-- 計算ロジック
-- 表構造・列構成
-- 折りたたみ/展開
-- 年度/月切替
-- Excel出力
-- 印刷/PDF
-- Cloud/Repository/STATE/CSV/Chart.js
+- getRows / 集計ロジック
+- _incRows / _expRows の集計内容
+- Chart.js描画ロジック
+- Excel出力データ構築ロジック
+- Cloud / Repository / SyncCoordinator / STATE / CSV取込
+- center.html / navigation.js
+
+確認:
+- node --check src/modules/kamoku.js: PASS
