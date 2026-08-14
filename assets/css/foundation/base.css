@@ -1,32 +1,54 @@
-/* Version2 UI Foundation: reset and design tokens */
-
-/* ═══════════════════════════════════════════
-   RESET & VARIABLES
-═══════════════════════════════════════════ */
+/* Version6 UI Foundation: reset and design tokens */
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:220px;
-  --sidebar-bg:#1c2e44;
-  --sidebar-hover:#243a55;
-  --sidebar-active:#2e5282;
-  --sidebar-text:#a8bdd4;
-  --sidebar-text-active:#ffffff;
-  --header-h:54px;
-  --bg:#eef0f3;
-  --surface:#ffffff;
-  --light:#f8fafc;
-  --border:#e0e2e6;
-  --border2:#c8ccd4;
-  --navy:#1a4d7c;
-  --blue:#2563eb;
-  --green:#16a34a;
-  --red:#dc2626;
-  --amber:#d97706;
-  --text:#111827;
-  --text2:#4b5563;
-  --text3:#9ca3af;
-  --radius:8px;
-  --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05);
+  --sidebar-w:236px;
+  --header-h:64px;
+  --sidebar-bg:#2b2344;
+  --sidebar-bg-2:#352a53;
+  --sidebar-hover:rgba(255,255,255,.075);
+  --sidebar-active:#6f5fd1;
+  --sidebar-text:#bdb6cf;
+  --sidebar-text-active:#fff;
+  --bg:#f8f7fc;
+  --surface:#fff;
+  --surface-soft:#fbfaff;
+  --light:#f4f1fb;
+  --border:#e9e5f1;
+  --border2:#d9d3e4;
+  --navy:#6f5fd1;
+  --blue:#6f5fd1;
+  --green:#11996a;
+  --red:#d34856;
+  --amber:#d78a39;
+  --text:#252238;
+  --text2:#696477;
+  --text3:#9e98aa;
+  --radius:14px;
+  --radius-lg:20px;
+  --shadow:0 12px 34px rgba(52,42,82,.07),0 2px 8px rgba(52,42,82,.04);
+  --accent:#6f5fd1;
+  --accent-2:#9a86e8;
+  --accent-soft:#f0ecff;
+  --focus:rgba(111,95,209,.16);
+  --good:#11996a;
+  --bad:#d34856;
+  --warn:#d78a39;
 }
-body{font-family:'Meiryo','メイリオ','Yu Gothic','游ゴシック',Arial,sans-serif;font-size:13px;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden}
-
+html[data-center="toda"]{
+  --navy:#d88343;
+  --blue:#d88343;
+  --accent:#d88343;
+  --accent-2:#efaa6d;
+  --accent-soft:#fff0e3;
+  --focus:rgba(216,131,67,.16);
+}
+body{
+  font-family:"Yu Gothic UI","Yu Gothic","Meiryo",system-ui,sans-serif;
+  font-size:13px;
+  letter-spacing:.005em;
+  background:radial-gradient(circle at 82% 0%,rgba(220,213,250,.28),transparent 30%),var(--bg);
+  color:var(--text);
+  display:flex;
+  height:100vh;
+  overflow:hidden;
+}

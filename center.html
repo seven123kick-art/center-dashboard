@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>経営管理システム</title>
+<script>document.documentElement.dataset.center=(new URLSearchParams(location.search).get('c')==='toda')?'toda':'kitasaitama';</script>
 
 <link rel="stylesheet" href="assets/css/app.css">
 <script src="config/config.local.js"></script>
@@ -121,83 +122,65 @@
 <!-- ════════ SIDEBAR ════════ -->
 <div id="sidebar">
   <div class="sidebar-logo">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="width:32px;height:32px;background:#2e5282;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="white"><rect x="1" y="4" width="16" height="11" rx="1.5" fill="none" stroke="white" stroke-width="1.3"/><rect x="3" y="9.5" width="3" height="4.5"/><rect x="7.5" y="7" width="3" height="7"/><rect x="12" y="8" width="3" height="6.5"/></svg>
+    <div style="display:flex;align-items:center;gap:11px">
+      <div style="width:38px;height:38px;background:linear-gradient(145deg,var(--accent),var(--accent-2));border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 8px 18px rgba(0,0,0,.18)">
+        <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round"><rect x="2.5" y="3.5" width="15" height="13" rx="3"/><path d="M6 13v-3m4 3V7m4 6V9"/></svg>
       </div>
       <div>
         <div class="sidebar-logo-title">経営管理システム</div>
-        <div class="sidebar-logo-sub" data-center-name>北埼玉センター</div>
+        <div class="sidebar-logo-sub">MANAGEMENT SYSTEM</div>
       </div>
     </div>
   </div>
 
-  <!-- センター表示（固定） -->
   <div class="center-fixed-box">
-    <div class="center-fixed-label">CENTER</div>
+    <div class="center-fixed-label">CURRENT WORKSPACE</div>
     <div class="center-fixed-name" data-center-name>北埼玉センター</div>
   </div>
-  <a class="sidebar-top-link" href="index.html">← TOPへ戻る</a>
+  <a class="sidebar-top-link" href="index.html">← センター選択へ</a>
 
-  <div class="sidebar-section">ナビゲーション</div>
+  <div class="sidebar-section">MAIN</div>
 
   <div class="nav-item active nav-primary" data-view="dashboard" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 7.2L8 2l6 5.2V14a1 1 0 0 1-1 1h-3.2v-4.3H6.2V15H3a1 1 0 0 1-1-1z"/></svg>
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 7.2 8 2.7l5.5 4.5v6.3H9.8v-4H6.2v4H2.5z"/></svg>
     <span class="nav-label">ホーム</span>
   </div>
 
   <div class="nav-item nav-primary" data-view="pl" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 6h12M6 2v12M10 2v12"/></svg>
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M2 6h12M6 2v12M10 2v12"/></svg>
     <span class="nav-label">月次収支</span>
   </div>
 
   <div class="nav-item nav-primary" data-view="budget-actual" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 13h3v-6H2z"/><path d="M6.5 13h3v-9h-3z"/><path d="M11 13h3v-4h-3z"/></svg>
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 13h3V8H2zm4.5 0h3V4h-3zm4.5 0h3V6.5h-3z"/></svg>
     <span class="nav-label">予実差異分析</span>
   </div>
 
   <div class="nav-item nav-primary" data-view="landing-forecast" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13h12"/><path d="M3 10l3-3 3 2 4-5"/><circle cx="6" cy="7" r="1" fill="currentColor"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="13" cy="4" r="1" fill="currentColor"/></svg>
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13h12M3 10l3-3 3 2 4-5"/><circle cx="13" cy="4" r="1" fill="currentColor"/></svg>
     <span class="nav-label">着地予測</span>
   </div>
 
   <div class="nav-item nav-primary" data-view="route-analysis" data-nav-hub="delivery" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="4" width="9" height="7" rx="1"/><path d="M10.5 6h2l2 2v3h-4z"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="12.5" cy="12.5" r="1.5"/></svg>
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="4" width="9" height="7" rx="1.5"/><path d="M10.5 6h2l2 2v3h-4z"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="12.5" cy="12.5" r="1.5"/></svg>
     <span class="nav-label">配送分析</span>
   </div>
 
+  <div class="sidebar-section">SYSTEM</div>
   <div class="nav-item nav-primary" data-view="csv-import" data-nav-hub="data" onclick="NAV.go(this)">
-    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12v9H2z"/><path d="M5 4V2h6v2"/><path d="M5 8h6M5 11h4"/></svg>
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1.5"/><path d="M5 4V2h6v2M5 8h6M5 11h4"/></svg>
     <span class="nav-label">データ管理</span>
   </div>
 
   <div class="sidebar-bottom">
-    <div style="margin-bottom:8px">
-      <div id="autosave-badge" style="display:flex;align-items:center;gap:5px;font-size:10px;color:#4d9fea;margin-bottom:4px">
-        <span id="autosave-dot" style="width:6px;height:6px;border-radius:50%;background:#607d9a;flex-shrink:0"></span>
-        <span id="autosave-label">ローカル保存のみ</span>
-      </div>
-      <div id="cloud-badge" style="display:flex;align-items:center;gap:5px;font-size:10px;color:#607d9a;margin-bottom:6px">
-        <span id="cloud-dot" style="width:6px;height:6px;border-radius:50%;background:#4d9fea;flex-shrink:0"></span>
-        <span id="cloud-label">クラウド: 設定済</span>
-      </div>
-      <div id="session-msg" style="font-size:10px;color:#607d9a;min-height:28px;line-height:1.5"></div>
+    <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px;color:#9e96b5;font-size:10px;font-weight:800">
+      <span id="cloud-dot" style="width:7px;height:7px;border-radius:50%;background:#65d3a5;flex-shrink:0"></span>
+      <span id="cloud-label">同期状態を確認中</span>
     </div>
-    <div style="display:flex;gap:5px;margin-bottom:6px">
-      <button onclick="DB.exportJSON()" class="btn" title="全データをJSONファイルとして書き出し（バックアップ用）"
-        style="flex:1;font-size:10px;padding:4px 0;color:#a8bdd4;border-color:#2e5282;background:transparent">↓ 書出</button>
-      <button onclick="document.getElementById('session-load-input').click()" class="btn" title="バックアップJSONから復元"
-        style="flex:1;font-size:10px;padding:4px 0;color:#a8bdd4;border-color:#2e5282;background:transparent">↑ 復元</button>
-      <button onclick="NAV.go('import')" class="btn"
-        title="データ管理（容量確認・月削除）"
-        style="flex:1;font-size:10px;padding:4px 0;color:#a8bdd4;border-color:#2e5282;background:transparent">⚙ 管理</button>
-      <input type="file" id="session-load-input" accept=".json" style="display:none" onchange="DB.importJSON(this.files[0])">
-    </div>
-    <button onclick="PUBLISH.go()" title="このアプリをSupabaseにアップロードしてURLで共有"
-      style="width:100%;font-size:10px;padding:5px 0;margin-bottom:6px;background:#1a4d7c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:700">
-      ☁ クラウドに公開（URL共有）
-    </button>
-    <div class="sidebar-version">v4.0 — エスラインギフ</div>
+    <div id="autosave-badge" style="display:none"><span id="autosave-dot"></span><span id="autosave-label">ローカル保存</span></div>
+    <div id="session-msg" style="font-size:9px;color:#756e89;min-height:14px;line-height:1.4;margin-bottom:7px"></div>
+    <input type="file" id="session-load-input" accept=".json" style="display:none">
+    <div class="sidebar-version">Version 6 · S-LINE GIFU</div>
   </div>
 </div>
 
