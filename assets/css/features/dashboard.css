@@ -1,0 +1,33 @@
+/* Home dashboard — みなし人件費率の2基準表示
+   委託関連を分母・分子の双方から除外した率と、双方に含めた率を
+   同一カード内で並列表示する。ホームKPI内だけにスコープする。 */
+#kpi-area .home-labor-rate-breakdown{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin-top:8px;
+}
+#kpi-area .home-labor-rate-item{
+  min-width:0;
+  padding-left:12px;
+  border-left:1px solid var(--border);
+}
+#kpi-area .home-labor-rate-item:first-child{
+  padding-left:0;
+  border-left:0;
+}
+#kpi-area .home-labor-rate-label{
+  margin-bottom:2px;
+  font-size:11px;
+  line-height:1.35;
+  color:var(--text3);
+}
+#kpi-area .home-labor-rate-item .kpi-value{
+  font-size:23px;
+  line-height:1.15;
+}
+#kpi-area .home-labor-rate-target{
+  margin-top:8px;
+  padding-top:8px;
+  border-top:1px solid var(--border);
+}
