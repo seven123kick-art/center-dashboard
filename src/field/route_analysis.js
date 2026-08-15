@@ -176,6 +176,74 @@
     if(root) root.innerHTML='';
   }
 
+  function exportContext(){
+    const ym=document.getElementById('route-ym-select')?.value || '';
+    const company=document.getElementById('route-company-select')?.value || '';
+    const type=document.getElementById('route-type-select')?.value || '';
+    const q=String(document.getElementById('route-search')?.value || '').trim();
+    const period=ym && ym.length===6 ? `${ym.slice(0,4)}年${Number(ym.slice(4,6))}月` : ym;
+    const filters=[company && `所属会社:${company}`, type && `運行区分:${type}`, q && `検索:${q}`].filter(Boolean).join(' / ');
+    return {ym,period,filters};
+  }
+
+  function buildExportData(){
+    const ctx=exportContext();
+    const rows=(currentRows||[]).map(r=>[
+      r.date || '',
+      r.headNumber || '',
+      r.worker || '未取得',
+      r.companyName || '未設定',
+      r.operationType || '',
+      Number(r.count)||0,
+      Number(r.sales)||0,
+      Number(r.payment)||0,
+      Number(r.margin)||0,
+      marginRate(r),
+      r.status || ''
+    ]);
+    const totalCount=(currentRows||[]).reduce((s,r)=>s+(Number(r.count)||0),0);
+    const totalSales=(currentRows||[]).reduce((s,r)=>s+(Number(r.sales)||0),0);
+    const totalPay=(currentRows||[]).reduce((s,r)=>s+(Number(r.payment)||0),0);
+    const totalMargin=totalSales-totalPay;
+    return {
+      title:'便別採算',
+      center:(typeof CENTER !== 'undefined' && CENTER?.name) || '',
+      period:ctx.period,
+      filters:ctx.filters,
+      filename:(window.EXPORT_SERVICE?.buildFilename)
+        ? EXPORT_SERVICE.buildFilename([(typeof CENTER !== 'undefined' && CENTER?.name) || '', '便別採算', ctx.ym], 'xlsx')
+        : undefined,
+      sheets:[{
+        name:'便別採算',
+        summary:[{
+          label:'集計',
+          columns:['対象便数','配送件数','売上','傭車支払','一次利益','利益率'],
+          rows:[[(currentRows||[]).length,totalCount,totalSales,totalPay,totalMargin,totalSales ? totalMargin/totalSales*100 : 0]]
+        }],
+        columns:['配達日','便・ヘッドNo','作業者','所属会社','運行区分','件数','売上','傭車支払','一次利益','利益率(%)','状態'],
+        rows
+      }]
+    };
+  }
+
+  function exportExcel(){
+    if(!window.EXPORT_SERVICE){ if(window.UI?.toast) window.UI.toast('出力機能を読み込めませんでした','error'); return; }
+    EXPORT_SERVICE.toExcel(buildExportData()).catch(e=>{
+      console.error('[route_analysis export]',e);
+      if(window.UI?.toast) window.UI.toast('Excel出力に失敗しました','error');
+    });
+  }
+
+  function printView(){
+    if(!window.EXPORT_SERVICE){ if(window.UI?.toast) window.UI.toast('出力機能を読み込めませんでした','error'); return; }
+    const ctx=exportContext();
+    EXPORT_SERVICE.toPrint({
+      title:'便別採算',
+      center:(typeof CENTER !== 'undefined' && CENTER?.name) || '',
+      period:[ctx.period,ctx.filters].filter(Boolean).join(' / ')
+    });
+  }
+
   function render(){
     setup();
     const sel=document.getElementById('route-ym-select');
@@ -239,5 +307,5 @@
     setView(viewMode);
   }
 
-  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,joinedRows,setView,openDetail,closeDetail};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,joinedRows,setView,openDetail,closeDetail,exportExcel,printView};
 })();
