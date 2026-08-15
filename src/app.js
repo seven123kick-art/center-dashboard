@@ -1630,6 +1630,8 @@ function mergeFullState(localFull, cloudFull) {
     reportKnowledge: mergeReportKnowledge(local.reportKnowledge || {}, cloud.reportKnowledge || {}),
     routeData: (cloud.routeData && cloud.routeData.length) ? cloud.routeData : (local.routeData || []),
     dailyRecords: (cloud.dailyRecords && cloud.dailyRecords.length) ? cloud.dailyRecords : (local.dailyRecords || []),
+    companyMaster: (cloud.companyMaster && cloud.companyMaster.length) ? cloud.companyMaster : (local.companyMaster || []),
+    workerMaster: (cloud.workerMaster && cloud.workerMaster.length) ? cloud.workerMaster : (local.workerMaster || []),
     deleted,
   };
   return applyDeletionTombstonesToState(merged);

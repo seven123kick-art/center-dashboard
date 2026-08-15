@@ -197,6 +197,22 @@ TODO(V6以降)
 
                 // manifest.deleted は古い削除フラグ汚染の原因になるためマージしない（既存仕様を踏襲）。
 
+                // full_state は routeData / companyMaster / workerMaster 等の軽量台帳の正本でもある。
+                // 起動同期でここを取得しないと、別端末・キャッシュ消失後に便別採算だけ
+                // 「配達持出PDFなし」「所属会社なし」になるため、月別CSV取得より先に復元する。
+                try {
+                    const cloudFull = await CR.fetchFullState();
+                    if (cloudFull && typeof cloudFull === 'object') {
+                        const localFull = CR.buildFullState();
+                        const mergedFull = (typeof mergeFullState === 'function')
+                            ? mergeFullState(localFull, cloudFull)
+                            : cloudFull;
+                        CR.applyFullState(mergedFull);
+                    }
+                } catch (e) {
+                    console.warn('[SyncCoordinator.syncBoot] full_state取得失敗:', e?.message || e);
+                }
+
                 let changed = 0;
                 const metas = Array.isArray(manifest.datasets) ? manifest.datasets.filter(m => m && m.ym) : [];
                 const localActive = window.DATASET_REPOSITORY.getActive();
