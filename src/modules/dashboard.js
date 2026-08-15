@@ -88,25 +88,12 @@ window.renderDashboard = function renderDashboard() {
   const prevDs = prevDS(ds.ym);
   const pyDs = typeof sameMonthLastYear === 'function' ? sameMonthLastYear(ds.ym) : null;
 
-  /* ---------- みなし人件費率：総額ベースの算出（今回追加） ----------
-     既存の委託除外ベース（ds.pseudoLaborRate、processDataset()で
-     算出済み・変更していない）とは別に、委託を除外しない総額ベースを
-     算出する。新たな科目集計は行わず、既存のds計算済みプロパティ
-     （laborCost=人件費+傭車費(委託費除く)、excludedConsignmentExpense
-     =委託費、totalIncome=営業収益）の単純な算術演算のみで求める。
-     laborCost + excludedConsignmentExpense
-       = 人件費 + 傭車費(委託費除く) + 委託費
-       = 人件費 + 傭車費全額（CONFIG.YOSHA_KEYS全体）
-     という既存processDataset()のコメントに基づく既存科目区分と
-     完全に一致する。 */
-  // 既存保存データには excludedConsignmentExpense が未保持の世代があるため、
-  // その場合だけ元の rows['委託費'] から補完する。計算定義自体は変更しない。
-  const consignmentExpense = Number.isFinite(Number(ds.excludedConsignmentExpense))
-    ? Number(ds.excludedConsignmentExpense)
-    : (typeof n === 'function' ? n(ds.rows?.['委託費']) : (Number(ds.rows?.['委託費']) || 0));
+  /* ---------- みなし人件費率：委託込み ----------
+     委託除外（ds.pseudoLaborRate）は、分母から委託収入を除外した既存指標。
+     委託込みは分子を同じ ds.laborCost のまま、分母だけ営業収益全体
+     （ds.totalIncome）とする。委託費は分子へ足し戻さない。 */
   const laborCostBase = Number.isFinite(Number(ds.laborCost)) ? Number(ds.laborCost) : 0;
-  const totalLaborCostFull = laborCostBase + consignmentExpense;
-  const pseudoLaborRateFull = ds.totalIncome > 0 ? (totalLaborCostFull / ds.totalIncome * 100) : null;
+  const pseudoLaborRateFull = ds.totalIncome > 0 ? (laborCostBase / ds.totalIncome * 100) : null;
 
   /* ---------- 80%判定と表示の丸め不一致の修正（今回追加） ----------
      既存pct()（src/core/format.js）はfmt()経由でMath.round(v)により
