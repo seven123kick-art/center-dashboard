@@ -16,7 +16,6 @@
 
   const COLORS = ['#1a4d7c','#e05b4d','#198754','#b85c00','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#ea580c'];
   const MONTH_ORDER = ['04','05','06','07','08','09','10','11','12','01','02','03'];
-  let timer = null;
 
   function arr(v){ return Array.isArray(v) ? v : []; }
   function obj(v){ return v && typeof v === 'object' && !Array.isArray(v); }
@@ -501,19 +500,23 @@
     if (!active()) return;
 
     ensureStyle();
-    const view = document.getElementById('view-field-product');
-    if (!view) return;
-    const mount = document.getElementById('field-product-final-content');
-    if (!mount) return;
 
-    // 共通の「表示対象」は field_core.js が管理するため触らない。
-    // 商品カテゴリ固有領域だけを更新し、タブ切替時のDOM退避・再挿入による位置ずれを防ぐ。
+    // 他の現場分析と同じタイミングで、共通の「表示対象」を先に正位置へ置く。
+    // 商品カテゴリだけ後から移動すると、切替直後に縦位置が変わって見えるため。
+    if (typeof window.setupFieldCommonSelectors === 'function') {
+      try { window.setupFieldCommonSelectors(); } catch(e) { console.warn('[field_product] setupFieldCommonSelectors failed', e); }
+    }
+
+    const view = document.getElementById('view-field-product');
+    const root = document.getElementById('field-product-render-root');
+    if (!view || !root) return;
+
     const result = aggregate();
     const maxBig = Math.max(...result.bigs.map(x=>x.amount),1);
     const maxMid = Math.max(...result.mids.slice(0,12).map(x=>x.amount),1);
     const top = result.bigs[0];
 
-    mount.innerHTML = `
+    root.innerHTML = `
       <div class="fp-note">商品カテゴリは、作業内容を優先して分類しています。クレーン・ユニック・手吊り系は最優先でクレーンへ集約し、通常の商品配送は商品名で補完します。</div>
 
       <div class="fp-kpi">
@@ -580,26 +583,15 @@
   }
 
   function rerender(){
-    clearTimeout(timer);
-    timer = setTimeout(render, 0);
+    // 共通セレクタを含むview全体ではなく、商品カテゴリ本体だけを同期描画する。
+    // NAV._render / field_core.refreshFieldAll から既に正規に呼ばれるため、
+    // 40ms遅延・NAV after hook・300ms監視による二重/三重描画は行わない。
+    render();
   }
 
   function hook(){
-    document.addEventListener('change', e=>{
-      const id = e.target && e.target.id;
-      if (id === 'field-common-month-select' || id === 'field-common-year-select' || id === 'field-common-fy-select') rerender();
-    });
-
-    setInterval(()=>{
-      if (!active()) return;
-      const view = document.getElementById('view-field-product');
-      if (!view) return;
-      const oldUI = view.dataset.fieldProductFinal !== '1';
-      if (oldUI) render();
-    }, 300);
-
-    rerender();
-    window.addEventListener('load', rerender);
+    // 初期表示が商品カテゴリだった場合だけ描画。通常の画面切替はNAV._renderが担当する。
+    if (active()) render();
   }
 
   window.FIELD_PRODUCT_UI = window.FIELD_PRODUCT_UI || {};

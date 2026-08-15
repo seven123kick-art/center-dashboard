@@ -213,16 +213,26 @@
       }).join('')}</div></div>`;
   }
 
-  function renderSoon(){ clearTimeout(window.__fieldContentCompleteTimer); window.__fieldContentCompleteTimer = setTimeout(()=>{ try { render(); } catch(e){ console.error('[field_content]', e); } }, 80); }
+  function isFieldContentActive(){
+    return STATE?.view === 'field-content' || !!document.getElementById('view-field-content')?.classList.contains('active');
+  }
+  function renderSoon(){
+    clearTimeout(window.__fieldContentCompleteTimer);
+    window.__fieldContentCompleteTimer = setTimeout(()=>{
+      if (!isFieldContentActive()) return;
+      try { render(); } catch(e){ console.error('[field_content]', e); }
+    }, 80);
+  }
 
   window.FIELD_CONTENT_UI = { render, renderSoon };
   if (window.FIELD_CSV_REBUILD) FIELD_CSV_REBUILD.renderContent = render;
 
   if (window.NAV && typeof NAV.onAfterGo === 'function' && !NAV.__fieldContentWrapped20260502) {
-    NAV.onAfterGo(function(el){ renderSoon(); });
+    NAV.onAfterGo(function(el, view){ if (view === 'field-content') renderSoon(); });
     NAV.__fieldContentWrapped20260502 = true;
   }
   document.addEventListener('change', (e)=>{
+    if (!isFieldContentActive()) return;
     if (e.target && (e.target.id === 'field-common-month-select' || e.target.id === 'field-common-fy-select')) renderSoon();
   }, true);
   document.addEventListener('DOMContentLoaded', renderSoon);

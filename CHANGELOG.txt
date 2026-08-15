@@ -1,24 +1,46 @@
-商品カテゴリ切替時の一瞬の位置ずれ 根本修正 2026-08-15
+Version6 商品カテゴリ切替時「表示対象」ちらつき 根本修正
+日付: 2026-08-15
 
-変更ファイル
+【変更ファイル】
 - center.html
 - src/field/field_product.js
+- src/field/field_content.js
 
-原因
-- 商品カテゴリだけ専用render()が #view-field-product 全体を innerHTML 置換していた。
-- その際、共通の「表示対象」DOMを一度 remove() してから再挿入していたため、1フレーム程度レイアウトが変化し得た。
-- さらに navigation.js が直接 render() した後、field_product.js 自身の NAV.onAfterGo が40ms遅延再描画しており、商品カテゴリだけ二段階描画になっていた。
+【原因】
+商品カテゴリだけ、配送分析タブ切替時の描画経路が他タブと異なっていました。
+1. navigation.js が FIELD_PRODUCT_UI.render() を正規描画として呼ぶ
+2. field_product.js が NAV.onAfterGo で40ms後に再描画
+3. field_product.js が300ms監視でも条件により再描画
+4. 商品カテゴリrender()が view-field-product 全体のinnerHTMLを置換し、共有DOM「field-common-selector-box」を退避/再挿入
+5. さらに field_content.js のNAV after hookが全画面切替で80ms後に発火し、setupFieldCommonSelectors()を再実行
 
-修正
-- center.html に商品カテゴリ専用の固定描画領域 #field-product-final-content を設置。
-- field_product.js は #view-field-product 全体ではなく専用領域だけを再描画。
-- 共通「表示対象」DOMの remove()/insertBefore() を廃止。
-- 商品カテゴリ専用の NAV.onAfterGo 二重描画フックを廃止。
-- refresh用遅延を40msから0msへ変更（同一イベントループ内の重複要求だけまとめる）。
-- 既存集計・分類・金額計算・表示内容は変更なし。
+この複数の遅延描画・共有DOM再配置により、商品カテゴリへ切り替えた直後だけ「表示対象」の位置が後から動いて見える状態でした。
 
-確認
-- field_product.js: node --check PASS
-- setTimeout(render, 40): 残存なし
-- keepCommonSelector/remove/reinsert処理: 残存なし
-- NAV.onAfterGo 商品カテゴリ専用フック: 残存なし
+【修正内容】
+1. 商品カテゴリ本体専用の #field-product-render-root を center.html に設置
+2. field_product.js は view-field-product 全体ではなく専用rootだけを更新
+3. 共通の「表示対象」DOMを remove / insert する処理を廃止
+4. 商品カテゴリrender()開始時に setupFieldCommonSelectors() を同期実行し、他タブと同じタイミングで正位置へ配置
+5. 商品カテゴリ固有の40ms遅延再描画を廃止
+6. 商品カテゴリ固有のNAV after hookを廃止（navigation.jsの正規render経路に一本化）
+7. 商品カテゴリ固有の300ms監視再描画を廃止
+8. 商品カテゴリ固有の共通セレクタchange二重監視を廃止（field_core.jsの正規refresh経路に一本化）
+9. field_content.jsのNAV after hook / change hookを「作業内容がactive時のみ」に限定し、商品カテゴリ切替後80msで共有「表示対象」を再構築していた横断副作用を停止
+
+【変更していないもの】
+- 商品カテゴリ分類・集計・金額計算
+- 商品カテゴリ多色バーの配色/幅計算
+- FIELD_DATA_ACCESS / STATE のデータ取得
+- 共通年度/月ロジック
+- field_core.js
+- navigation.js
+- Cloud / Repository / SyncCoordinator
+- 他配送分析タブの業務ロジック
+
+【検証】
+- src/field/field_product.js: node --check PASS
+- src/field/field_content.js: node --check PASS
+- center.html div開閉数: 441 / 441 一致
+- 商品カテゴリ内の setTimeout / setInterval / NAV.onAfterGo / 共通セレクタchange二重監視を除去確認
+- #field-product-render-root は1件のみ
+- 旧 #f-product-tbody / #c-product-bar は専用商品カテゴリUIから除去し、field_core.jsの旧互換renderProduct()は対象DOM不在時に安全にreturnする既存仕様を維持

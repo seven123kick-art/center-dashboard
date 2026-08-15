@@ -908,8 +908,9 @@
 
     <!-- ▼ 商品カテゴリ分析 -->
     <div class="view" id="view-field-product">
-      <!-- 共通の表示対象は field_core.js が先頭へ配置。商品カテゴリ本体はこの固定mount内だけを再描画する。 -->
-      <div id="field-product-final-content"></div>
+      <!-- 共通の表示対象は field_core.js がこのview直下へ配置する。
+           商品カテゴリ本体は専用rootだけを書き換え、共通UIを破棄・再挿入しない。 -->
+      <div id="field-product-render-root"></div>
     </div>
 
     <!-- ▼ エリア分析 -->
