@@ -1,15 +1,14 @@
-配達持出リストPDF取込 v6
+Version6 配達持出リストPDF取込 v7 (2026-08-15)
 
 変更ファイル
 - src/field/route_analysis.js
 
 変更内容
-- getTextContent() が0件になる旧式/暗号化PDF向けに、PDF.jsの getOperatorList() から既にデコードされた文字描画グリフを読むフォールバックを追加。
-- OCRは使用しない。PDF自体や保存データ構造、既存の通常PDF抽出経路は変更しない。
-- 通常の getTextContent() が1件以上取れるPDFは従来処理をそのまま使用。
-- 失敗時診断に Text件数 と Op文字数 を表示。
+- PDF.js 4.4.168 の getTextContent() が空になる旧式PDFに対し、streamTextContent()も確認する経路を追加。
+- 4.4.168で便を1件も確定できない場合のみ、PDF.js最新安定版6.2.108へ自動フォールバックして再解析。
+- 両エンジンとも CMap / standard_fonts を明示し、isEvalSupported:false で解析。
+- 日付・ヘッド番号・作業者・原票番号の抽出ルール、STATE.routeDataの保存形式、便別採算計算は変更なし。
+- 失敗時診断に PDF.jsバージョン / text・stream・operatorのどの経路だったかを表示。
 
-検証
-- JS構文チェック PASS。
-- ユーザー提供6月PDFは PDF 1.3 / RC4暗号化 / copy許可で、pdftotextでは配達日・ヘッド番号等のテキスト存在を確認済み。
-- 実ブラウザ上の operator-list フォールバック結果は投入後に確認が必要。
+狙い
+- 実PDFには文字情報が存在する一方、Chrome + PDF.js 4.4.168では Text=0 / Op文字=0 となる事象を、PDF解釈エンジンのバージョン差で回避できるか実機で確定する。

@@ -15,6 +15,38 @@
     return mod;
   }
 
+  let latestPdfjsPromise=null;
+  async function latestPdfjs(){
+    if(latestPdfjsPromise) return latestPdfjsPromise;
+    latestPdfjsPromise=(async()=>{
+      const mod=await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.min.mjs');
+      mod.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.worker.min.mjs';
+      return mod;
+    })();
+    return latestPdfjsPromise;
+  }
+
+  async function readTextContent(page){
+    // 通常APIが空配列を返す旧式PDF向けに、同じPDF.jsのstream APIも試す。
+    const normal=await page.getTextContent({includeMarkedContent:true,disableNormalization:false});
+    if((normal?.items||[]).length) return {items:normal.items,source:'text'};
+    if(typeof page.streamTextContent!=='function') return {items:[],source:'text-empty'};
+    const stream=page.streamTextContent({includeMarkedContent:true,disableNormalization:false});
+    const reader=stream.getReader();
+    const items=[];
+    try{
+      while(true){
+        const {value,done}=await reader.read();
+        if(done) break;
+        if(Array.isArray(value?.items)) items.push(...value.items);
+      }
+    }finally{
+      try{reader.releaseLock();}catch(_){ }
+    }
+    return {items,source:items.length?'stream':'stream-empty'};
+  }
+
+
   function pdfTextLines(items){
     const rows=[];
     for(const it of (items||[])){
@@ -102,31 +134,41 @@
     return out.join('').replace(/\s+/g,' ').trim();
   }
 
-  async function parsePdf(file){
-    const lib=await pdfjs();
-    const data=await file.arrayBuffer();
-    const pdf=await lib.getDocument({
+  async function parsePdfWithEngine(file, lib, engineName, assetBase){
+    const data=new Uint8Array(await file.arrayBuffer());
+    const task=lib.getDocument({
       data,
-      // 配達持出リストは UniJIS-UCS2-HW-H を使用する旧式PDF。
-      // CMapを明示しないとChrome上のPDF.jsではページを開けても
-      // getTextContent() が0件になるため、Adobe CMapを明示する。
-      cMapUrl:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/cmaps/',
+      cMapUrl:`${assetBase}cmaps/`,
       cMapPacked:true,
-      standardFontDataUrl:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/standard_fonts/'
-    }).promise;
+      standardFontDataUrl:`${assetBase}standard_fonts/`,
+      isEvalSupported:false,
+      useWorkerFetch:false
+    });
+    const pdf=await task.promise;
     const map=new Map();
     const diagnostics=[];
     for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p);
-      const tc=await page.getTextContent();
-      let text=tc.items.map(x=>x.str).join(' ');
+      let items=[];
+      let source='';
       let fallbackChars=0;
-      if(!tc.items.length){
-        text=await operatorTextFallback(page,lib);
-        fallbackChars=text.length;
+      try{
+        const tr=await readTextContent(page);
+        items=tr.items||[];
+        source=tr.source||'';
+      }catch(e){
+        source=`text-error:${e?.name||'Error'}`;
       }
-      const r=parsePageText(text,tc.items);
-      diagnostics.push({page:p,head:r.headNumber,date:r.date,items:tc.items.length,fallbackChars});
+      let text=items.map(x=>x?.str||'').join(' ');
+      if(!items.length){
+        try{
+          text=await operatorTextFallback(page,lib);
+          fallbackChars=text.length;
+          if(fallbackChars) source='operator';
+        }catch(_){ }
+      }
+      const r=parsePageText(text,items);
+      diagnostics.push({page:p,head:r.headNumber,date:r.date,items:items.length,fallbackChars,engine:engineName,source});
       if(!r.headNumber||!r.date) continue;
       const key=`${r.date}|${r.headNumber}`;
       const old=map.get(key)||{...r,slips:[]};
@@ -134,10 +176,36 @@
       old.slips=[...new Set([...(old.slips||[]),...(r.slips||[])])];
       map.set(key,old);
     }
+    try{await pdf.destroy();}catch(_){ }
     const routes=[...map.values()];
     routes._diagnostics=diagnostics;
     return routes;
   }
+
+  async function parsePdf(file){
+    // v7: 旧4.4系で文字レイヤーが空になる帳票は、最新安定版PDF.jsへ自動フォールバック。
+    // 抽出ルールや保存形式は変えず、PDF解釈エンジンだけを二段構えにする。
+    const attempts=[];
+    try{
+      const lib=await pdfjs();
+      const r=await parsePdfWithEngine(file,lib,'pdfjs-4.4.168','https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/');
+      attempts.push(...(r._diagnostics||[]));
+      if(r.length) return r;
+    }catch(e){
+      attempts.push({page:0,head:'',date:'',items:0,fallbackChars:0,engine:'pdfjs-4.4.168',source:`engine-error:${e?.name||'Error'}`});
+    }
+    try{
+      const lib=await latestPdfjs();
+      const r=await parsePdfWithEngine(file,lib,'pdfjs-6.2.108','https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/');
+      r._diagnostics=[...attempts,...(r._diagnostics||[])];
+      return r;
+    }catch(e){
+      const routes=[];
+      routes._diagnostics=[...attempts,{page:0,head:'',date:'',items:0,fallbackChars:0,engine:'pdfjs-6.2.108',source:`engine-error:${e?.name||'Error'}`}];
+      return routes;
+    }
+  }
+
 
   function joinedRows(ym){
     if (!window.LEDGER?.buildMonth) return [];
@@ -182,7 +250,7 @@
       Repository.Storage.save();
       if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(()=>{});
       if (!parsedRouteCount) {
-        const d=allDiagnostics.flatMap(x=>x.pages).slice(0,3).map(x=>`P${x.page}:日付=${x.date||'×'} / ヘッド=${x.head||'×'} / Text=${x.items} / Op文字=${x.fallbackChars||0}`).join('、');
+        const d=allDiagnostics.flatMap(x=>x.pages).slice(-6).map(x=>`${x.engine||'?'} P${x.page}:日付=${x.date||'×'} / ヘッド=${x.head||'×'} / Text=${x.items} / Op文字=${x.fallbackChars||0} / ${x.source||''}`).join('、');
         if(msg) msg.innerHTML=`<span style="color:#991b1b;font-weight:700">PDFは読み込みましたが便を確定できませんでした。</span><br><span style="font-size:12px;color:#64748b">診断: ${esc(d||'PDF文字情報なし')}</span>`;
         return;
       }
