@@ -131,6 +131,41 @@
     select.value = values.includes(selected) ? selected : '';
   }
 
+
+  function resolveWorkerMaster(workerName, date=''){
+    const name=String(workerName||'');
+    if(!name) return null;
+    const direct=window.WORKERS?.find ? WORKERS.find(name,date) : null;
+    if(direct) return direct;
+    const key=norm(name);
+    if(!key || !window.WORKERS?.all) return null;
+    return WORKERS.all().find(r=>norm(r?.workerName)===key) || null;
+  }
+
+  function enrichRouteRows(rows){
+    return (Array.isArray(rows)?rows:[]).map(r=>{
+      if(r?.companyName && r?.operationType) return r;
+      const master=resolveWorkerMaster(r?.worker,r?.date);
+      if(!master) return r;
+      return {
+        ...r,
+        companyName:r.companyName || master.companyName || '',
+        operationType:r.operationType || master.operationType || '',
+        workerRegistered:r.workerRegistered || !!master
+      };
+    });
+  }
+
+  function filteredRowsFromCurrentControls(){
+    const ym=document.getElementById('route-ym-select')?.value || '';
+    const ledger=window.LEDGER?.buildMonth ? LEDGER.buildMonth(ym) : {routes:joinedRows(ym)};
+    const allRows=enrichRouteRows(ledger.routes || []);
+    const company=document.getElementById('route-company-select')?.value || '';
+    const type=document.getElementById('route-type-select')?.value || '';
+    const q=String(document.getElementById('route-search')?.value || '').trim().toLowerCase();
+    return allRows.filter(r=>(!company||r.companyName===company)&&(!type||r.operationType===type)&&(!q||`${r.worker} ${r.headNumber} ${r.companyName}`.toLowerCase().includes(q)));
+  }
+
   function setView(mode){
     viewMode = mode === 'card' ? 'card' : 'table';
     document.getElementById('route-view-table')?.classList.toggle('active', viewMode==='table');
@@ -188,7 +223,8 @@
 
   function buildExportData(){
     const ctx=exportContext();
-    const rows=(currentRows||[]).map(r=>[
+    const exportRows=filteredRowsFromCurrentControls();
+    const rows=exportRows.map(r=>[
       r.date || '',
       r.headNumber || '',
       r.worker || '未取得',
@@ -201,9 +237,9 @@
       marginRate(r),
       r.status || ''
     ]);
-    const totalCount=(currentRows||[]).reduce((s,r)=>s+(Number(r.count)||0),0);
-    const totalSales=(currentRows||[]).reduce((s,r)=>s+(Number(r.sales)||0),0);
-    const totalPay=(currentRows||[]).reduce((s,r)=>s+(Number(r.payment)||0),0);
+    const totalCount=exportRows.reduce((s,r)=>s+(Number(r.count)||0),0);
+    const totalSales=exportRows.reduce((s,r)=>s+(Number(r.sales)||0),0);
+    const totalPay=exportRows.reduce((s,r)=>s+(Number(r.payment)||0),0);
     const totalMargin=totalSales-totalPay;
     return {
       title:'便別採算',
@@ -218,7 +254,7 @@
         summary:[{
           label:'集計',
           columns:['対象便数','配送件数','売上','傭車支払','一次利益','利益率'],
-          rows:[[(currentRows||[]).length,totalCount,totalSales,totalPay,totalMargin,totalSales ? totalMargin/totalSales*100 : 0]]
+          rows:[[exportRows.length,totalCount,totalSales,totalPay,totalMargin,totalSales ? totalMargin/totalSales*100 : 0]]
         }],
         columns:['配達日','便・ヘッドNo','作業者','所属会社','運行区分','件数','売上','傭車支払','一次利益','利益率(%)','状態'],
         rows
@@ -255,7 +291,7 @@
     }
     const ym=sel?.value||'';
     const ledger=window.LEDGER?.buildMonth ? LEDGER.buildMonth(ym) : {routes:joinedRows(ym),diagnostics:null};
-    const allRows=ledger.routes || [];
+    const allRows=enrichRouteRows(ledger.routes || []);
     const diag=ledger.diagnostics;
 
     const companySel=document.getElementById('route-company-select');

@@ -1,16 +1,16 @@
-2026-08-15 配送分析 Phase D-7 便別採算 出力機能追加
+便別採算 Excel出力・所属会社フィルター修正 2026-08-15
 
-変更ファイル
-- center.html
+変更ファイル:
 - src/field/route_analysis.js
 
-変更内容
-- 便別採算に「Excel出力」「印刷 / PDF保存」を追加。
-- Excelは現在画面に表示されているフィルター適用後の便のみを出力。
-- 集計（対象便数、配送件数、売上、傭車支払、一次利益、利益率）と便別明細を出力。
-- 印刷は既存EXPORT_SERVICEを利用し、対象年月と現在の絞り込み条件を印刷ヘッダーへ表示。
-- PDF取込、CSV取込、一覧/カード切替、LEDGER、STATE、Repository、Cloud、SyncCoordinator、便別採算計算式は変更なし。
+修正内容:
+1. Excel出力時に画面キャッシュ currentRows に依存せず、出力ボタン押下時点の対象年月・所属会社・運行区分・検索条件から LEDGER.buildMonth() を再取得して出力対象を確定するよう修正。
+2. 所属会社/運行区分がLEDGER行で空の場合、作業者マスタを再参照して補完。完全一致に加え、NFKC正規化＋空白除去後の作業者名一致もフォールバックとして使用。
+3. 画面表示側とExcel出力側で同じ補完済みデータを利用し、フィルター候補と出力内容の不一致を防止。
 
-検証
-- route_analysis.js: node --check PASS
-- center.html div開始/終了数一致
+変更していないもの:
+- LEDGER本体
+- 売上/傭車支払/一次利益/利益率の計算式
+- STATE/Repository/Cloud/SyncCoordinator
+- PDF/CSV取込ロジック
+- 他の配送分析タブ
