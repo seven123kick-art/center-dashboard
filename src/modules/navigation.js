@@ -88,6 +88,8 @@ window.DELIVERY_NAV = {
     const active = this.views.has(view);
     const hub = document.querySelector('[data-nav-hub="delivery"]');
     if (hub) hub.classList.toggle('active', active);
+    const sharedTabs = document.getElementById('delivery-analysis-tabs');
+    if (sharedTabs) sharedTabs.hidden = !active;
     document.querySelectorAll('[data-delivery-tabs]').forEach(tabs => {
       tabs.querySelectorAll('[data-delivery-view]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.deliveryView === view);
