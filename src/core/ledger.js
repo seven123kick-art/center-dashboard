@@ -11,6 +11,20 @@
   const dateKey = v => digits(v).slice(0,8);
   const ymKey = v => digits(v).slice(0,6);
 
+  /* 配達持出リストPDF解析ノイズの判定（今回追加）
+     PDFページのフッター（出力日時・Page n/n・センター名単独表記）が
+     v7解析時に作業者名として誤抽出されるケースの防御的フィルタ。
+     この判定はマスタ未登録一覧の表示にのみ使用し、STATE.routeData /
+     linkLevel / status 等の既存分類ロジックには一切影響しない。 */
+  function isPdfNoiseWorkerLabel(name){
+    const s = text(name);
+    if (!s) return false;
+    if (/^20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}\s+\d{1,2}:\d{2}(:\d{2})?$/.test(s)) return true; // 出力日時のみ
+    if (/^Page\s*\d+\s*\/\s*\d+$/i.test(s)) return true; // ページ番号のみ
+    if (/センター$/.test(s) && s.replace(/センター$/,'').length <= 6 && !/[　\s]/.test(s.replace(/センター$/,''))) return true; // センター名単独
+    return false;
+  }
+
   function workerRecord(ym){
     return arr(STATE.workerCsvData).find(x => x && x.ym === ym) || null;
   }
@@ -227,7 +241,8 @@
       routesWithoutPayment: routeRows.filter(r=>!r.paymentSource).length,
       routesWithoutWorker: routeRows.filter(r=>r.status === '作業者未一致').length,
       routesWithUnregisteredWorker: routeRows.filter(r=>r.worker && !r.workerRegistered).length,
-      unregisteredWorkers: [...new Set(routeRows.filter(r=>r.worker && !r.workerRegistered).map(r=>r.worker))],
+      unregisteredWorkers: [...new Set(routeRows.filter(r=>r.worker && !r.workerRegistered && !isPdfNoiseWorkerLabel(r.worker)).map(r=>r.worker))],
+      pdfNoiseWorkerCount: routeRows.filter(r=>r.worker && !r.workerRegistered && isPdfNoiseWorkerLabel(r.worker)).length,
       routesWithoutSales: routeRows.filter(r=>r.status === '売上未一致' || r.status === '原票未取得').length,
       integrationRate: routeSlipTotal ? matchedRouteSlipCount / routeSlipTotal * 100 : 0,
       fullyLinkedRoutes: routeRows.filter(r=>r.linkLevel==='完全連動').length,

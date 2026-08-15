@@ -297,6 +297,134 @@ IMPORT.deleteFieldData = function(ym) {
   function csvRowsFromText(text){ return CSV && CSV.toRows ? CSV.toRows(text) : []; }
   async function readCsvFile(file){ return CSV && CSV.read ? CSV.read(file) : await file.text(); }
 
+  /* ---------- CSV取り違え防止（今回追加） ----------
+     「作業者別CSV欄へ商品・住所CSVを投入」等の誤操作を、登録前に検知する。
+     判定は「他形式に固有のマーカーが強く出ているか」だけを見る一方向チェックとし、
+     取込先形式そのものの判定（作業者名列等）は既存のparseWorkerCsvRows/
+     parseProductAddressRows側の列検出ロジックに委ねる（変更していない）。
+     これにより、ヘッダー表記の揺れで正常なファイルまで誤って拒否するリスクを避けつつ、
+     明確な取り違え（他形式固有の列が見える場合）だけを確実に止める。 */
+  function detectForeignCsvSignature(rows, sampleText, ownType){
+    const header = (rows && rows[0]) ? rows[0].map(v => String(v ?? '')).join(' ') : '';
+    const bodySample = String(sampleText || '').slice(0, 4000);
+    const isProductHeader = /エスライン原票番号|お届け先郵便番号/.test(header);
+    const isWorkerHeader = /作業者名|担当者|配送担当/.test(header) || /^作業者$/.test((rows?.[0]||[]).map(v=>String(v??'').trim()).find(v=>v==='作業者')||'');
+    const isSkdlLike = /SKDL0001|SKDL0003/i.test(bodySample) || (rows?.[0]?.[0] !== undefined && /^科目$/.test(String(rows[0][0]||'').trim()));
+
+    if (ownType !== 'product' && isProductHeader) return '商品・住所CSV';
+    if (ownType !== 'worker' && isWorkerHeader) return '作業者別CSV';
+    if (ownType !== 'skdl' && isSkdlLike) return '収支CSV（SKDL）';
+    return null;
+  }
+  function assertNotForeignCsv(rows, sampleText, ownType, fileName, targetLabel){
+    const foreign = detectForeignCsvSignature(rows, sampleText, ownType);
+    if (foreign) {
+      throw new Error(`${fileName}：このファイルは「${foreign}」の形式に見えます。現在の取込先は「${targetLabel}」です。取込先を確認してください。`);
+    }
+  }
+
+  /* ---------- 取込先自身の形式であることの確認（positive validation、今回追加） ----------
+     「他形式ではない」ことの確認（assertNotForeignCsv）だけでは、
+     作業者別・商品住所・SKDLのいずれにも該当しない無関係CSVが
+     素通りしてしまう（既存parserのheaderIndex(...,fallback)が
+     固定列位置へフォールバックし、parserが「読めてしまう」ため）。
+     ここでは「その形式が実際に成立している」ことを、ヘッダー名の
+     一致だけでなく、値のパターンでも確認する。
+     判定条件はparseWorkerCsvRows/parseProductAddressRows自身が
+     使っている候補ヘッダー名・列位置・正規化関数
+     （normalizeWorkDate/normalizeSlipNo/normalizeZip/yen）を
+     そのまま踏襲し、新しい判定ロジックを推測で作らない。 */
+
+  function sampleBodyRows(rows, limit){
+    const body = (rows || []).slice(1).filter(r => r && r.some(c => clean(c)));
+    return body.slice(0, limit || 30);
+  }
+
+  function validateWorkerCsvSignature(rows, fileName){
+    const header = rows?.[0] || [];
+    // parseWorkerCsvRows自身と同じ候補名・フォールバックで列を特定する。
+    // ただし作業者名列は「ヘッダー名で見つかったこと」自体を必須条件とする。
+    // 作業者別CSVはワークシート上の固定列位置が既存コード上どこにも
+    // 文書化されておらず（商品・住所CSVのようにI/L/P/R/U列と明記された
+    // 前例がない）、fallback=0への到達は「たまたま1列目の値が作業者名に
+    // 見えているだけ」の可能性を否定できないため、そのまま採用しない。
+    const normalized = header.map(h => clean(h).replace(/[\s　]/g,''));
+    const workerNames = ['作業者名','作業者','担当者','社員名','氏名'];
+    const workerIdxFound = normalized.findIndex(h => workerNames.some(n => h === n || h.includes(n)));
+    if (workerIdxFound < 0) {
+      return { ok:false, reason:`作業者名の列（例：作業者名／作業者／担当者／社員名／氏名）を見出し行から確認できません` };
+    }
+    const dateNames = ['日付','作業日','配送日','配達完了日','計上日'];
+    const dateIdxFound = normalized.findIndex(h => dateNames.some(n => h === n || h.includes(n)));
+    const dateIdx = dateIdxFound >= 0 ? dateIdxFound : 0;
+
+    const body = sampleBodyRows(rows, 30);
+    if (!body.length) return { ok:false, reason:'データ行が1件もありません' };
+
+    let dateOk = 0, nameOk = 0, checked = 0;
+    for (const r of body) {
+      const nameVal = clean(r[workerIdxFound]);
+      const dateVal = normalizeWorkDate(r[dateIdx]);
+      if (!nameVal && !dateVal) continue;
+      checked++;
+      if (nameVal && !/^\d+$/.test(nameVal)) nameOk++; // 作業者名は数字のみではないはず
+      if (dateVal) dateOk++;
+    }
+    if (!checked) return { ok:false, reason:'作業者名・日付とも判定できる行がありません' };
+    if (nameOk / checked < 0.6) return { ok:false, reason:'作業者名列の値が氏名として妥当ではありません' };
+    if (dateOk / checked < 0.6) return { ok:false, reason:'日付列の値が日付として妥当ではありません' };
+    return { ok:true };
+  }
+
+  function validateProductCsvSignature(rows, fileName){
+    const header = rows?.[0] || [];
+    const normalized = header.map(h => clean(h).replace(/[\s　]/g,''));
+    const findIdx = (names, fallback) => {
+      const i = normalized.findIndex(h => names.some(n => h === n || h.includes(n)));
+      return i >= 0 ? i : fallback;
+    };
+    // parseProductAddressRows自身と同じ候補名・フォールバック列位置
+    // （center.htmlの案内文にも明記されているI/L/U列＝8/11/20）。
+    // この形式は固定列位置での取込を正式に許容しているため、
+    // ヘッダー名の一致有無に関わらず、値パターンで実データ性を確認する。
+    const idxSlip   = findIdx(['エスライン原票番号','原票番号','伝票番号','送り状番号'], 8);
+    const idxZip    = findIdx(['郵便番号','お届け先郵便番号','届け先郵便番号'], 11);
+    const idxAmount = findIdx(['金額','売上','売上金額','請求金額','請求額','作業金額','作業料','料金','直収','直収金額'], 20);
+
+    const body = sampleBodyRows(rows, 30);
+    if (!body.length) return { ok:false, reason:'データ行が1件もありません' };
+
+    let slipOk = 0, zipOk = 0, amountOk = 0, checked = 0;
+    for (const r of body) {
+      const slipVal = normalizeSlipNo(r[idxSlip]);
+      const zipVal = normalizeZip(r[idxZip]);
+      const amountVal = r[idxAmount];
+      if (!slipVal && !zipVal && (amountVal === undefined || clean(amountVal) === '')) continue;
+      checked++;
+      if (slipVal && slipVal.length >= 6) slipOk++; // 原票番号は一定桁数の識別子である前提
+      if (zipVal && zipVal.length === 7) zipOk++; // 日本の郵便番号は7桁
+      if (amountVal !== undefined && clean(amountVal) !== '' && !Number.isNaN(yen(amountVal))) amountOk++;
+    }
+    if (!checked) return { ok:false, reason:'原票番号・郵便番号・金額のいずれも判定できる行がありません' };
+    // 3指標のうち、郵便番号（7桁という明確な形式的特徴）は特に重要なため必須とし、
+    // 残り2指標のうち少なくとも1つが十分な割合で成立することを求める（複数特徴の組合せ確認）。
+    if (zipOk / checked < 0.5) return { ok:false, reason:'郵便番号列（7桁）が確認できません' };
+    if (slipOk / checked < 0.5 && amountOk / checked < 0.5) return { ok:false, reason:'原票番号・金額のいずれの列も妥当な値になっていません' };
+    return { ok:true };
+  }
+
+  function assertOwnCsvSignature(rows, fileName, ownType, targetLabel){
+    const validator = ownType === 'worker' ? validateWorkerCsvSignature
+      : ownType === 'product' ? validateProductCsvSignature
+      : null;
+    if (!validator) return; // 未対応の種別はここでは判定しない（既存挙動を維持）
+    const result = validator(rows, fileName);
+    if (!result.ok) {
+      throw new Error(`${fileName}：このファイルを「${targetLabel}」として確認できません（${result.reason}）。登録は行っていません。`);
+    }
+  }
+
+
   function headerIndex(header, names, fallback){
     const normalized = header.map(h => clean(h).replace(/[\s　]/g,''));
     for (const name of names) {
@@ -735,7 +863,10 @@ IMPORT.deleteFieldData = function(ym) {
 
     for (const file of Array.from(files || [])) {
       const text = await readCsvFile(file);
-      const parsed = parseWorkerCsvRows(csvRowsFromText(text), file.name);
+      const rows0 = csvRowsFromText(text);
+      assertNotForeignCsv(rows0, text, 'worker', file.name, '作業者別CSV');
+      assertOwnCsvSignature(rows0, file.name, 'worker', '作業者別CSV');
+      const parsed = parseWorkerCsvRows(rows0, file.name);
       combined.lineRowCount += parsed.lineRowCount || 0;
       combined.includedAmount += Number(parsed.includedAmount || 0);
       combined.salesAmount += Number(parsed.salesAmount || 0);
@@ -848,7 +979,10 @@ IMPORT.deleteFieldData = function(ym) {
     let rawRows = 0, detailRows = 0, filesUsed = [];
     for (const file of Array.from(files || [])) {
       const text = await readCsvFile(file);
-      const parsed = parseProductAddressRows(csvRowsFromText(text), file.name);
+      const rows0 = csvRowsFromText(text);
+      assertNotForeignCsv(rows0, text, 'product', file.name, '商品・住所CSV');
+      assertOwnCsvSignature(rows0, file.name, 'product', '商品・住所CSV');
+      const parsed = parseProductAddressRows(rows0, file.name);
       rawRows += parsed.rawRows;
       detailRows += parsed.detailRows;
       filesUsed.push(file.name);

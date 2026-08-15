@@ -100,9 +100,21 @@
 
     let worker='';
     const workerLine=lines.find(v=>/作業者(?!TEL)/.test(v))||'';
-    let wm=workerLine.match(/作業者\s*[:：]?\s*(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店|$)/);
-    if(!wm) wm=spaced.match(/作業者\s*[:：]?\s*(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店)/);
+    let wm=workerLine.match(/作業者\s*[:：]?\s*(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店|\s+20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}|\s+Page\s*\d|$)/);
+    if(!wm) wm=spaced.match(/作業者\s*[:：]?\s*(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店|\s+20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}|\s+Page\s*\d)/);
     if(wm) worker=wm[1].replace(/^[:：]\s*/,'').trim();
+    // v7解析の既知の問題：ページによっては「作業者」ラベル直後の行に、
+    // 印刷日時やページ番号（フッター相当）が同じ行として結合されるレイアウトがあり、
+    // 従来の終端条件（配達持出リスト／作業者TEL／支店／行末）だけでは取り切れず、
+    // 作業者名へ混入していた。抽出後に既知のノイズパターンを除去する（原因調査済み）。
+    worker = worker
+      .replace(/\s*20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}\s+\d{1,2}:\d{2}(:\d{2})?.*$/,'')
+      .replace(/\s*Page\s*\d+\s*\/\s*\d+.*$/i,'')
+      .trim();
+    // 「○○センター」のみ（実際の作業者氏名を伴わない）は、ページヘッダーの
+    // センター名表記がそのまま作業者欄として誤抽出されたケースと判断し、
+    // 未確定（空）として扱う。実データを推測で確定しない。
+    if (/センター$/.test(worker) && worker.replace(/センター$/,'').length <= 6 && !/[　\s]/.test(worker.replace(/センター$/,''))) worker='';
 
     const slips=[...new Set((spaced.match(/(?:^|\D)([59]\d{11})(?=\D|$)/g)||[])
       .map(v=>(v.match(/[59]\d{11}/)||[])[0]).filter(Boolean))];
@@ -212,12 +224,31 @@
     return LEDGER.buildMonth(ym).routes;
   }
 
+  async function isPdfMagicBytes(file){
+    try{
+      const head = await file.slice(0,5).arrayBuffer();
+      const bytes = new Uint8Array(head);
+      const s = String.fromCharCode(...bytes);
+      return s === '%PDF-';
+    }catch(_){ return true; } // 読めない場合は既存の解析処理側の判定に委ねる（過検知を避ける）
+  }
+
   async function importFiles(files){
-    const arr=[...files].filter(f=>/\.pdf$/i.test(f.name));
+    const all=[...files];
+    const arr=all.filter(f=>/\.pdf$/i.test(f.name));
     const msg=document.getElementById('route-import-msg');
-    if (!arr.length) return;
+    if (!arr.length) {
+      if (all.length && msg) msg.innerHTML='<span style="color:#991b1b;font-weight:700">この欄はPDF専用です。選択されたファイルはPDF形式ではありません。</span>';
+      return;
+    }
     try{
       if(msg) msg.innerHTML='<span style="color:#334155;font-weight:700">PDFを解析中です…</span>';
+      const nonPdf=[];
+      for (const f of arr){ if(!(await isPdfMagicBytes(f))) nonPdf.push(f.name); }
+      if (nonPdf.length){
+        if(msg) msg.innerHTML=`<span style="color:#991b1b;font-weight:700">PDF形式ではないファイルが含まれています：${esc(nonPdf.join('、'))}。登録は行っていません。</span>`;
+        return;
+      }
       const byYm=new Map();
       let parsedRouteCount = 0;
       const allDiagnostics=[];
@@ -300,9 +331,13 @@
   }
 
   async function importHeadPaymentFiles(files){
-    const arr=[...files].filter(f=>/\.(xls|xlsx)$/i.test(f.name));
+    const all=[...files];
+    const arr=all.filter(f=>/\.(xls|xlsx)$/i.test(f.name));
     const msg=document.getElementById('route-head-payment-import-msg');
-    if(!arr.length) return;
+    if(!arr.length) {
+      if (all.length && msg) msg.innerHTML='<span style="color:#991b1b;font-weight:700">この欄はExcel（xls/xlsx）専用です。選択されたファイルは対応形式ではありません。</span>';
+      return;
+    }
     try{
       if(msg) msg.innerHTML='<span style="color:#334155;font-weight:700">配達ヘッド傭車料を解析中です…</span>';
       if(window.EXPORT_SERVICE?.ensureXLSX) await EXPORT_SERVICE.ensureXLSX();
@@ -594,7 +629,10 @@
       const notices=[];
       if(missing.length) notices.push(`<div class="msg msg-warn">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`);
       else notices.push(`<div class="msg msg-info">完全連動 <strong>${fmt(diag.fullyLinkedRoutes||0)}便</strong>　配達ヘッド ${fmt(diag.headLinkedRoutes||0)}便　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`);
-      if((diag.unregisteredWorkers||[]).length) notices.push(`<div class="msg msg-warn">マスタ未登録：${diag.unregisteredWorkers.map(esc).join('、')}。マスタ管理から所属会社を登録してください。</div>`);
+      if((diag.unregisteredWorkers||[]).length) {
+        const n = diag.unregisteredWorkers.length;
+        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>要確認データ：マスタ未登録の作業者 ${fmt(n)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${diag.unregisteredWorkers.map(esc).join('、')}<br><span style="font-weight:700">マスタ管理から所属会社を登録してください。</span></div></details>`);
+      }
       diagnostic.innerHTML=notices.join('');
     }
 
