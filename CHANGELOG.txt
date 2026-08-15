@@ -1,24 +1,22 @@
-便別採算 データ復元経路 根本修正 2026-08-15
+配達持出リストPDF取込修正 2026-08-15
 
 変更ファイル
-- src/app.js
-- src/core/repository/sync_coordinator.js
+- src/field/route_analysis.js
 
 修正内容
-1. 起動同期時に full_state を取得し、routeData（配達持出PDF解析結果）・companyMaster・workerMaster を復元するよう修正。
-2. mergeFullState() が companyMaster / workerMaster を落としていたため、クラウド優先・ローカルフォールバックでマージ対象に追加。
-3. 月別CSV本体（workerCsvData / productAddressData）は従来どおり年度別遅延取得。収支datasetsも既存Manifest経路のまま。計算式は変更なし。
+- PDF.jsの文字抽出順が帳票の見た目順と異なる場合でも、配達日・ヘッド番号をラベル基準で取得できるよう修正。
+- NFKC正規化を追加し、全角/互換文字差を吸収。
+- 配達日は帳票印刷日時ではなく「配達日」ラベル直後の日付を取得。
+- ヘッド番号は「ヘッド番号」ラベルを優先し、帳票形式の38始まり10桁をフォールバック。
+- 作業者名に帳票印刷日時/Page情報が混入する場合を除去。
+- 原票番号抽出は別カラム数字の誤連結を避けるため、空白を全削除した文字列を使用しない。
 
-原因
-- routeData / companyMaster / workerMaster は full_state に保存される設計だが、Repository版syncBootでは full_state を通常取得していなかった。
-- さらに mergeFullState() に companyMaster / workerMaster が含まれていなかった。
-- そのため別端末・キャッシュ消失後に、他分析は月別CSVから復元できても便別採算だけ配達持出PDFなし・所属会社なしになり得た。
+検証
+- 実PDF 01.pdf（19ページ）で全ページを検証。
+- 8便を識別：3812440015 / 3812442491 / 3812442605 / 3812442653 / 3812442686 / 3812442841 / 3812444064 / 3812454446
+- 全19ページで配達日 2026-06-01 とヘッド番号を取得。
+- 作業者名も各ページで取得。
+- 原票番号も抽出確認。
+- node --check 構文エラーなし。
 
-確認
-- node --check src/app.js : PASS
-- node --check src/core/repository/sync_coordinator.js : PASS
-- LEDGERの売上/傭車支払/一次利益計算は変更なし
-- route_analysis.jsの表示・Excel計算は変更なし
-
-注意
-クラウドfull_state自体にrouteDataが一度も保存されていない場合、この修正だけで過去の配達持出PDF解析結果を生成することはできません。その場合は配達持出PDFの再取込が必要です。
+業務計算・便別採算の計算ロジック、画面UI、クラウド同期仕様は変更していません。

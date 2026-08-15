@@ -16,18 +16,36 @@
   }
 
   function parsePageText(text){
-    const clean = String(text || '').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ');
-    const compact = clean.replace(/\s+/g,' ');
-    const head = (compact.match(/ヘッド番号[^0-9]{0,20}(\d{8,12})/) || compact.match(/(38\d{8})/) || [])[1] || '';
-    const dm = compact.match(/(20\d{2})\s*[\/\-年]\s*(\d{1,2})\s*[\/\-月]\s*(\d{1,2})/);
+    // PDF.js は帳票の見た目順と異なる順序で文字を返したり、数字の途中に空白を挟むことがある。
+    // NFKC 正規化した上で、項目名取得用の spaced と数字抽出用の dense を使い分ける。
+    const clean = String(text || '').normalize('NFKC').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ');
+    const spaced = clean.replace(/\s+/g,' ').trim();
+    const dense = clean.replace(/\s+/g,'');
+
+    // 実帳票では「配達日」と「ヘッド番号」の内部抽出順がページごとに前後し得るため、
+    // ラベル順には依存せず帳票固有の値形式でもフォールバックする。
+    const head = (
+      dense.match(/ヘッド番号[:：]?([0-9]{8,12})/) ||
+      dense.match(/(?:^|\D)(38[0-9]{8})(?=\D|$)/) || []
+    )[1] || '';
+    const dm = (
+      dense.match(/配達日[:：]?(20[0-9]{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/) ||
+      spaced.match(/配達日\s*[:：]?\s*(20[0-9]{2})\s*[\/\-年]\s*(\d{1,2})\s*[\/\-月]\s*(\d{1,2})日?/)
+    );
     const date = dm ? `${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}` : '';
+
     let worker = '';
-    const wm = compact.match(/作業者\s+(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店)/);
-    if (wm) worker = wm[1].replace(/^[:：]\s*/,'').trim();
+    const wm = spaced.match(/作業者\s*[:：]\s*(.+?)(?=\s+作業者TEL|\s+配達持出リスト|\s+支店)/);
+    if (wm) {
+      worker = wm[1]
+        .replace(/\s+20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s+Page\s+\d+\s*\/\s*\d+.*$/i,'')
+        .trim();
+    }
 
     // 原票番号は主に5または9で始まる12桁。荷主伝票番号との混同を抑える。
-    const slips = [...new Set((compact.match(/(?:^|\D)([59]\d{11})(?=\D|$)/g) || [])
-      .map(v=>(v.match(/[59]\d{11}/)||[])[0]).filter(Boolean))];
+    // 別カラムの数字同士を連結しないよう、原票抽出は空白を潰した dense ではなく spaced を使う。
+    const slips = [...new Set((spaced.match(/(?:^|\D)([59][0-9]{11})(?=\D|$)/g) || [])
+      .map(v=>(v.match(/[59][0-9]{11}/)||[])[0]).filter(Boolean))];
     return { headNumber:head, date, worker, slips };
   }
 
