@@ -1,40 +1,26 @@
-Phase D-7 配送分析6タブ 共通ナビゲーション化
-作成日: 2026-08-15
+配送分析 商品カテゴリ切替時の表示対象ちらつき修正
+2026-08-15
 
-■ 目的
-配送分析6画面でタブの有無・表示位置が画面ごとに異なる問題を解消し、同一機能群として常に同じ位置・同じ構造で表示する。
+変更ファイル
+- src/field/field_product.js
 
-■ 変更ファイル
-- center.html
-- src/modules/navigation.js
+原因
+- 商品カテゴリ専用render()が #view-field-product 全体を innerHTML で再描画していた。
+- field_core.js が管理する共通DOM #field-common-selector-box（表示対象）も同じview内に移設されるため、商品カテゴリ再描画時だけ一度破棄され、その後再生成・再配置されていた。
+- この再配置が切替時の一瞬の位置ずれとして見えていた。
 
-■ 変更内容
-1. center.html
-- 6画面それぞれに重複していた analysis-hub-tabs を削除。
-- #content 直下に配送分析専用の共通タブ #delivery-analysis-tabs を1つだけ配置。
-- タブ項目・onclick・data-delivery-view の値は既存仕様を維持。
+修正
+- 商品カテゴリ再描画前に共通「表示対象」DOMを退避し、再描画直後に同じDOMを先頭へ戻す。
+- 共通セレクタの値・イベント・年度月ロジックは変更しない。
 
-2. src/modules/navigation.js
-- DELIVERY_NAV.sync(view) で配送分析6画面のときだけ共通タブを表示し、それ以外では非表示にする処理を追加。
-- 既存のアクティブタブ切替ロジックは維持。
+無変更
+- 商品カテゴリ集計ロジック
+- 年度/月選択ロジック
+- field_core.js
+- navigation.js
+- 他の配送分析5タブ
+- STATE / STORE / Cloud / Repository / SyncCoordinator
 
-■ 変更していない重要箇所
-- 各分析画面の業務計算
-- データ取得・保存
-- STATE / STORE / LEDGER
-- Repository / Cloud / SyncCoordinator
-- 地図・ヒートマップ
-- キャパ計算・カレンダー補正
-- 各タブの描画処理
-- 年度/月セレクタの処理
-
-■ 検証
-- 配送分析タブコンテナ: 6個 -> 1個
-- 6種類のタブボタン: 各1個のみ存在
-- navigation.js: node --check PASS
-- 意図した変更ファイル: 2ファイルのみ
-
-■ 実機確認ポイント
-- 配送分析6画面すべてで、トップバー直下の同じ位置に6タブが表示されること
-- 選択中タブが正しく濃紺になること
-- ホーム/月次収支/予実差異分析/着地予測/データ管理では配送分析タブが表示されないこと
+検証
+- node --check PASS
+- 修正範囲は render() 内の共有DOM保持処理のみ

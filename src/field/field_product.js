@@ -504,6 +504,13 @@
     const view = document.getElementById('view-field-product');
     if (!view) return;
 
+    // 共通の「表示対象」は field_core.js が管理する共有DOM。
+    // 商品カテゴリの再描画で view.innerHTML を置換すると一度破棄され、
+    // 次の共通セレクタ再構築まで位置が瞬間的にずれるため、描画中は退避して戻す。
+    const commonSelector = document.getElementById('field-common-selector-box');
+    const keepCommonSelector = commonSelector && commonSelector.parentElement === view ? commonSelector : null;
+    if (keepCommonSelector) keepCommonSelector.remove();
+
     const result = aggregate();
     const maxBig = Math.max(...result.bigs.map(x=>x.amount),1);
     const maxMid = Math.max(...result.mids.slice(0,12).map(x=>x.amount),1);
@@ -572,6 +579,7 @@
       </div>
     `;
 
+    if (keepCommonSelector) view.insertBefore(keepCommonSelector, view.firstChild);
 
     view.dataset.fieldProductFinal = '1';
   }
