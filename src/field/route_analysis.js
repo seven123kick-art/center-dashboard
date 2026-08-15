@@ -33,62 +33,37 @@
   }
 
   function parsePageText(text, items){
-    // 帳票上の「配達日」「ヘッド番号」はPDF内部の文字順が見た目と一致しない場合がある。
-    // そのため、まずPDF.jsの各text itemを座標付きで直接探索し、ラベルに最も近い値を採用する。
-    // 座標情報が取れないPDFだけ、従来の行復元/全文検索へフォールバックする。
-    const clean=String(text||'').normalize('NFKC').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ');
+    // 配達持出リスト実帳票向けの堅牢抽出。
+    // PDF.js はラベルと値を視覚順とは異なる順序で返すことがあるため、
+    // 「ラベル直後」だけに依存せず、ページ全体の候補から確定する。
+    const rawItems=(items||[]).map(it=>String(it?.str||'').normalize('NFKC').replace(/\u0000/g,' ').trim()).filter(Boolean);
+    const clean=String(text||rawItems.join(' ')).normalize('NFKC').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ');
     const spaced=clean.replace(/\s+/g,' ').trim();
-    const dense=clean.replace(/\s+/g,'');
+    const dense=rawItems.join('').replace(/\s+/g,'') || clean.replace(/\s+/g,'');
     const lines=pdfTextLines(items);
-    const tokens=(items||[]).map((it,i)=>{
-      const tr=Array.isArray(it?.transform)?it.transform:[];
-      return {
-        i,
-        text:String(it?.str||'').normalize('NFKC').replace(/\u0000/g,' ').trim(),
-        x:Number(tr[4]||0), y:Number(tr[5]||0)
-      };
-    }).filter(v=>v.text);
 
-    const dateRe=/(20\d{2})\s*[\/\-年]\s*(\d{1,2})\s*[\/\-月]\s*(\d{1,2})日?/;
-    const dateTokenRe=/^(20\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})$/;
-    const headTokenRe=/^(38\d{8}|\d{8,12})$/;
-    const near=(anchor,candidates,maxY=10)=>{
-      if(!anchor||!candidates.length) return null;
-      const sameBand=candidates.filter(v=>Math.abs(v.y-anchor.y)<=maxY);
-      const pool=sameBand.length?sameBand:candidates;
-      return pool.slice().sort((a,b)=>{
-        const da=Math.abs(a.y-anchor.y)*20+Math.abs(a.x-anchor.x);
-        const db=Math.abs(b.y-anchor.y)*20+Math.abs(b.x-anchor.x);
-        return da-db;
-      })[0]||null;
-    };
+    // ヘッド番号：実帳票は 38 で始まる10桁。まずページ全体から直接取得。
+    // 数字がPDF itemで分割されても rawItems.join('') なら復元できる。
+    let head='';
+    let hm=dense.match(/38\d{8}/);
+    if(!hm) hm=spaced.match(/(?:^|\D)(\d{8,12})(?=\D|$)/);
+    if(hm) head=(hm[1]||hm[0]||'').replace(/\D/g,'');
 
+    // 配達日：ページには右上の印刷日時もあるため、全日付候補のうち
+    // 「配達日」近傍を最優先。それでも取れなければ最後の日付を採用する。
+    const datePattern=/(20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/g;
     let date='';
-    const dateAnchor=tokens.find(v=>v.text.replace(/\s+/g,'').includes('配達日'));
-    const dateCandidates=tokens.map(v=>({v,m:v.text.match(dateTokenRe)})).filter(o=>o.m).map(o=>({...o.v,m:o.m}));
-    const dateNear=near(dateAnchor,dateCandidates,12);
-    if(dateNear?.m){
-      const dm=dateNear.m;
-      date=`${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}`;
+    let dateSource='';
+    const labelPos=dense.indexOf('配達日');
+    if(labelPos>=0){
+      const near=dense.slice(labelPos, labelPos+160);
+      const m=[...near.matchAll(datePattern)][0];
+      if(m){ dateSource='label'; date=`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`; }
     }
     if(!date){
-      const dateLine=lines.find(v=>v.includes('配達日'))||'';
-      let dm=dateLine.match(dateRe);
-      if(!dm) dm=(dense.match(/配達日(?:(?!連絡事項).){0,100}?(20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/)||[]);
-      if(dm) date=`${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}`;
-    }
-
-    let head='';
-    const headAnchor=tokens.find(v=>v.text.replace(/\s+/g,'').includes('ヘッド番号'));
-    const headCandidates=tokens.map(v=>({v,m:v.text.replace(/[：:\s]/g,'').match(headTokenRe)})).filter(o=>o.m).map(o=>({...o.v,m:o.m}));
-    const headNear=near(headAnchor,headCandidates,12);
-    if(headNear?.m) head=headNear.m[1]||headNear.m[0]||'';
-    if(!head){
-      const headLine=lines.find(v=>v.includes('ヘッド番号'))||'';
-      let hm=headLine.match(/ヘッド番号\s*[:：]?\s*(\d{8,12})/);
-      if(!hm) hm=dense.match(/ヘッド番号[:：]?(\d{8,12})/);
-      if(!hm) hm=dense.match(/(?:^|\D)(38\d{8})(?=\D|$)/);
-      if(hm) head=hm[1]||'';
+      const all=[...dense.matchAll(datePattern)];
+      const m=all.length ? all[all.length-1] : null;
+      if(m){ dateSource='last'; date=`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`; }
     }
 
     let worker='';
@@ -97,10 +72,9 @@
     if(!wm) wm=spaced.match(/作業者\s*[:：]?\s*(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店)/);
     if(wm) worker=wm[1].replace(/^[:：]\s*/,'').trim();
 
-    // 原票番号は主に5または9で始まる12桁。荷主伝票番号との混同を抑える。
     const slips=[...new Set((spaced.match(/(?:^|\D)([59]\d{11})(?=\D|$)/g)||[])
       .map(v=>(v.match(/[59]\d{11}/)||[])[0]).filter(Boolean))];
-    return {headNumber:head,date,worker,slips};
+    return {headNumber:head,date,worker,slips,_debug:{dateSource,itemCount:rawItems.length,denseHead:dense.slice(0,220)}};
   }
 
   async function parsePdf(file){
@@ -108,11 +82,13 @@
     const data=await file.arrayBuffer();
     const pdf=await lib.getDocument({data}).promise;
     const map=new Map();
+    const diagnostics=[];
     for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p);
       const tc=await page.getTextContent();
       const text=tc.items.map(x=>x.str).join(' ');
       const r=parsePageText(text,tc.items);
+      diagnostics.push({page:p,head:r.headNumber,date:r.date,items:tc.items.length});
       if(!r.headNumber||!r.date) continue;
       const key=`${r.date}|${r.headNumber}`;
       const old=map.get(key)||{...r,slips:[]};
@@ -120,7 +96,9 @@
       old.slips=[...new Set([...(old.slips||[]),...(r.slips||[])])];
       map.set(key,old);
     }
-    return [...map.values()];
+    const routes=[...map.values()];
+    routes._diagnostics=diagnostics;
+    return routes;
   }
 
   function joinedRows(ym){
@@ -136,9 +114,11 @@
       if(msg) msg.innerHTML='<span style="color:#334155;font-weight:700">PDFを解析中です…</span>';
       const byYm=new Map();
       let parsedRouteCount = 0;
+      const allDiagnostics=[];
       for(const f of arr){
         const routes=await parsePdf(f);
         parsedRouteCount += routes.length;
+        allDiagnostics.push({file:f.name,pages:routes._diagnostics||[]});
         for(const r of routes){
           const ym=ymOfDate(r.date);
           if(!ym) continue;
@@ -164,7 +144,8 @@
       Repository.Storage.save();
       if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(()=>{});
       if (!parsedRouteCount) {
-        if(msg) msg.innerHTML='<span style="color:#991b1b;font-weight:700">PDFは読み込みましたが、配達日・ヘッド番号を取得できませんでした。対象が「配達持出リスト」か確認してください。</span>';
+        const d=allDiagnostics.flatMap(x=>x.pages).slice(0,3).map(x=>`P${x.page}:日付=${x.date||'×'} / ヘッド=${x.head||'×'} / 文字=${x.items}`).join('、');
+        if(msg) msg.innerHTML=`<span style="color:#991b1b;font-weight:700">PDFは読み込みましたが便を確定できませんでした。</span><br><span style="font-size:12px;color:#64748b">診断: ${esc(d||'PDF文字情報なし')}</span>`;
         return;
       }
       if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルから${parsedRouteCount}便を取り込みました。</span>`;
