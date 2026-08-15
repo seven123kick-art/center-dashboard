@@ -21,33 +21,28 @@
      実装する。他画面・共通関数への影響はない。
      sameLabel引数は「同額」時の文言（前月比なら'前月並み'、
      前年比なら'前年並み'）を呼出元から渡す。 */
-  function homeCompareInfo(current, compare, isExpense, sameLabel){
-    if (current == null || compare == null) return null;
-    if (compare > 0) {
-      const text = ratio(current, compare);
-      if (text === '—') return { text, cls: '' };
-      const raw = current - compare;
-      if (raw === 0) return { text, cls: '' };
-      const isGood = isExpense ? raw < 0 : raw > 0;
-      return { text, cls: isGood ? 'up' : 'down' };
+  function homeCompareInfo(current, compare, isExpense){
+    if (current == null || compare == null || !Number.isFinite(Number(current)) || !Number.isFinite(Number(compare))) {
+      return { text: '—', cls: '' };
     }
-    if (compare === 0) return { text: '—', cls: '' };
-    // compare < 0（赤字比較。費用合計は通常マイナスにならないため、
-    // 主に営業収益・センター利益で発生し得る分岐）
-    if (current > 0) return { text: '黒字転換', cls: 'up' };
-    if (current === 0) return { text: '黒字化', cls: 'up' };
-    if (current === compare) return { text: sameLabel || '同水準', cls: '' };
-    if (current > compare) return { text: '赤字縮小', cls: 'up' };
-    return { text: '赤字拡大', cls: 'down' };
+    const cur = Number(current);
+    const cmp = Number(compare);
+    if (cmp === 0) return { text: '—', cls: '' };
+
+    // ホームKPIは前月比・前年比を通常の増減率で統一表示する。
+    // 比較元が赤字の場合も符号逆転を避けるため、分母は絶対値を使用する。
+    const rate = (cur - cmp) / Math.abs(cmp) * 100;
+    const rounded = Math.round(rate * 10) / 10;
+    const text = `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)}%`;
+    if (rounded === 0) return { text, cls: '' };
+    const isGood = isExpense ? rounded < 0 : rounded > 0;
+    return { text, cls: isGood ? 'up' : 'down' };
   }
 
   function compareRow(current, prevDs, pyDs, valueKey, isExpense){
-    const prevInfo = prevDs ? homeCompareInfo(current, prevDs[valueKey], isExpense, '前月並み') : null;
-    const pyInfo = pyDs ? homeCompareInfo(current, pyDs[valueKey], isExpense, '前年並み') : null;
-    const parts = [];
-    if (prevInfo) parts.push(`<span class="pill ${prevInfo.cls}">前月比 ${escLocal(prevInfo.text)}</span>`);
-    if (pyInfo) parts.push(`<span class="pill ${pyInfo.cls}">前年比 ${escLocal(pyInfo.text)}</span>`);
-    return parts.length ? `<div class="kpi-sub-row">${parts.join('')}</div>` : '';
+    const prevInfo = homeCompareInfo(current, prevDs ? prevDs[valueKey] : null, isExpense);
+    const pyInfo = homeCompareInfo(current, pyDs ? pyDs[valueKey] : null, isExpense);
+    return `<div class="kpi-sub-row"><span class="pill ${prevInfo.cls}">前月比 ${escLocal(prevInfo.text)}</span><span class="pill ${pyInfo.cls}">前年比 ${escLocal(pyInfo.text)}</span></div>`;
   }
 
   function escLocal(v){ return typeof esc === 'function' ? esc(v) : String(v ?? ''); }
@@ -104,8 +99,14 @@ window.renderDashboard = function renderDashboard() {
        = 人件費 + 傭車費全額（CONFIG.YOSHA_KEYS全体）
      という既存processDataset()のコメントに基づく既存科目区分と
      完全に一致する。 */
-  const totalLaborCostFull = ds.laborCost + ds.excludedConsignmentExpense;
-  const pseudoLaborRateFull = ds.totalIncome > 0 ? (totalLaborCostFull / ds.totalIncome * 100) : 0;
+  // 既存保存データには excludedConsignmentExpense が未保持の世代があるため、
+  // その場合だけ元の rows['委託費'] から補完する。計算定義自体は変更しない。
+  const consignmentExpense = Number.isFinite(Number(ds.excludedConsignmentExpense))
+    ? Number(ds.excludedConsignmentExpense)
+    : (typeof n === 'function' ? n(ds.rows?.['委託費']) : (Number(ds.rows?.['委託費']) || 0));
+  const laborCostBase = Number.isFinite(Number(ds.laborCost)) ? Number(ds.laborCost) : 0;
+  const totalLaborCostFull = laborCostBase + consignmentExpense;
+  const pseudoLaborRateFull = ds.totalIncome > 0 ? (totalLaborCostFull / ds.totalIncome * 100) : null;
 
   /* ---------- 80%判定と表示の丸め不一致の修正（今回追加） ----------
      既存pct()（src/core/format.js）はfmt()経由でMath.round(v)により
@@ -143,12 +144,11 @@ window.renderDashboard = function renderDashboard() {
         </div>
         <div class="home-labor-rate-item">
           <div class="home-labor-rate-label">委託関連を含む</div>
-          <div class="kpi-value navy">${pct(pseudoLaborRateFull)}</div>
+          <div class="kpi-value navy">${pseudoLaborRateFull == null ? '—' : pct(pseudoLaborRateFull)}</div>
         </div>
       </div>
       <div class="kpi-sub-row home-labor-rate-target">
         <span class="kpi-sub">委託除外目標：${CONFIG.TARGETS.pseudoLaborRate}%以内</span>
-        <span class="pill ${pseudoLaborAchieved ? 'up' : 'down'}">${pseudoLaborAchieved ? '✓ 達成' : '⚠ 超過'}</span>
       </div>
     </div>`;
 
