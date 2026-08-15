@@ -1,117 +1,148 @@
-Version6 配送分析 Phase D-4: 「作業者別」タブ UI完成
+Version6 配送分析 Phase D-5: 「作業内容」「商品カテゴリ」タブ UI完成
 （2026-08-15）
 
 【目的】
-Phase D-3で完成させた「便別採算」および完成5画面
-（月次収支/科目分析/推移分析/予実差異分析/着地予測）と
-デザイントーンを揃え、配送分析「作業者別」タブをVersion6の
-完成画面として仕上げた。作業内容・商品カテゴリ・エリア別・
-キャパ分析の他4タブは今回一切変更していない。
+Phase D-3（便別採算）・Phase D-4（作業者別）で確立した方針を踏襲し、
+配送分析「作業内容」「商品カテゴリ」の2タブをVersion6完成画面の
+デザイントーンへ揃えた。便別採算・作業者別・エリア別・キャパ分析
+は今回一切変更していない。
 
 【変更ファイル】
-- src/field/field_worker.js のみ
+- src/field/field_content.js（作業内容）
+- src/field/field_product.js（商品カテゴリ）
 
 ============================================================
-実装内容
+【重要な訂正】前回Phase D-2調査結果の精度について
 ============================================================
-
-■1. アクセントバー装飾の削除（Phase D-2発見事項の解消）
-KPIカード5枚から accent-navy / accent-green / accent-amber
-クラスを削除した。これらのCSS定義は現在
-#view-route-analysis .saas-kpi-grid スコープ内にのみ存在し
-（Phase D-1のスコープ化により）、field_worker.js側では元々
-装飾バーが表示されない状態だった（Phase D-2で発見済み）。
-完成5画面・便別採算（Phase D-3で同様の装飾を削除済み）との
-統一を優先し、装飾を復活させず削除する方針とした。
-
-■2. KPIカードの巨大化!important指定を整理
-#view-field-worker #f-kpi-worker .kpi-card 等にあった
-min-height:148px!important / padding:20px 22px!important /
-font-size:31px!important（値）・13px!important（ラベル）等、
-共通.kpi-cardのデフォルト値（font-size:27px（値）・11px
-（ラベル）、theme.css）とほぼ同等かそれ以上の巨大な強制指定を
-削除し、共通.kpi-cardの標準サイズへ委ねた。
-作業者別固有で必要な最小限の調整（5列グリッドレイアウト
-・対象月カードの文字サイズ調整・平均売上/日カードの左寄せ配置）
-のみ、スコープ付きで残した。
-
-■3. 独自テーブルスタイルの整理
-.field-worker-ranking-table th/td の独自背景色・パディング指定
-（共通.tbl th/tdとほぼ同等の見た目を微妙に異なる色調で再定義
-していただけ）を削除し、共通.tbl（table class="tbl
-field-worker-ranking-table"、既存のまま）のデフォルトスタイル
-（ヘッダー背景・hover背景・sticky等）へ委ねた。
-選択中の作業者行を強調する.is-active（業務上意味のある表示、
-現在選択中の作業者が分かる）は維持した。
-
-■4. ハードコードされた旧UI色の統一
-work-break-fill（内訳バー）・rank-badge（順位バッジ）・
-work-more-toggle（もっと見るリンク）で使われていた#1a4d7c
-（旧UIの濃紺ハードコード、前回のUI監査で発見済みの色）を、
-既存デザイントークンvar(--navy)（現在の正しい値）へ置き換えた。
-視覚的な色合いは近似だが、新デザイントークンへ正しく追従する
-ようになった。
-
-■5. 不要な!importantの削減
-.field-worker-row.is-active td の!important（共通.tbl
-tbody tr:hover tdとの優先度競合を避けるためだったが、
-セレクタの詳細度自体で十分優先されるため不要と判断）、
-.field-worker-row:hover td の独自hover色指定（共通.tbl
-tbody tr:hover tdとほぼ同色のため削除し共通スタイルへ委ねた）
-を削除した。
+Phase D-2の調査報告では「作業内容タブは素の.card/.card-header
+を使用」としていたが、今回実際のコードを詳細確認した結果、
+field_content.jsは実際には.card/.tbl等の共通クラスを一切使わず、
+完全に独自のデザインシステム（.fc-*プレフィックス）を持って
+いたことが判明した。この点を正直に報告する。
+今回は、.fc-*というクラス構造自体（大分類→中分類→小分類の
+折りたたみ表示等、独自の情報設計に密接に結びついた構造）を
+維持しつつ、色・装飾面のみを共通トーンへ揃える方針とした
+（構造の完全置換は、HTML生成部分の大規模書き換えを伴い
+リスクが高いため見送った）。
 
 ============================================================
-実装後の確認
+作業内容タブ（field_content.js）の変更内容
 ============================================================
 
-■作業者別の計算ロジック無変更
-rowsFromRecord() / normalizeWorkLabel() / splitWorks() /
-renderRanking() / renderWorkerDetail() / render() の6関数を
-Pythonでバイト単位比較し、完全一致（変更前後で1文字も違わない）
-ことを確認した。makeKpi()はHTML生成部分のクラス名（accent-*の
-削除）のみ差分があり、数値計算部分（totalCount/totalAmount/
-salesAmount/directAmount/workDayCount/avgCount等）は一切変更
-していないことをdiffで確認した。
+■1. 旧UI由来の太い上線装飾を削除
+.fc-kpi{border-top:5px solid #1a4d7c}という、前回のUI監査で
+発見した「旧UIの濃紺太線」パターンをKPIカードから削除した。
+.green/.amberという色バリエーション（border-top-colorのみ変更）
+も同時に削除し、完成5画面・便別採算・作業者別と同じ「白カード＋
+淡い境界線＋控えめな影」（var(--border)/var(--shadow)）へ統一した。
+KPIカードHTML生成部分（render()）からも、対応するgreen/amber
+クラス修飾子を削除した。
+
+■2. !importantの削除
+.fc-kpi-target-month .fc-kpi-value{font-size:27px!important;...}
+の!importantを削除した。.fc-kpi-target-monthは.fc-kpi-valueより
+詳細度が高いセレクタのため、!important無しでも正しく優先される
+ことを確認済み。
+
+■3. ハードコードされた旧UI色の統一
+.fc-rank（順位バッジ）・.fc-fill（内訳バー）で使われていた
+#1a4d7c を、既存デザイントークンvar(--navy)へ置き換えた。
+
+■4. 維持した内容
+.fc-card/.fc-head/.fc-body/.fc-table等の独自クラス構造、
+大分類→中分類→小分類の折りたたみ表示、ドーナツ・棒グラフ
+（HTMLバー表示、Chart.js不使用）の情報内容・順序は一切変更して
+いない。classifyWork()/buildRows()/sortRows()/pct()/bars()の
+業務計算関数はPythonによるバイト単位比較で完全一致することを
+確認した。
+
+============================================================
+商品カテゴリタブ（field_product.js）の変更内容
+============================================================
+
+■1. accent-navy/green/amberの削除（Phase D-2発見事項の解消）
+kpi()関数からaccent引数・accent-${accent}クラスの付与を削除した。
+全5箇所の呼出元（対象月/商品売上/原票数/平均単価/最大カテゴリ）
+からも、対応するaccent引数（'green'/'amber'/'navy'）を削除した。
+便別採算（Phase D-3）・作業者別（Phase D-4）と同じ方針で、
+完成5画面に存在しない装飾を復活させず削除する形で統一した。
+
+■2. !importantによる強制指定の確認結果
+field_product.jsには!importantが0件であることを確認した
+（grepで再確認済み）。.fp-kpi .kpi-card{min-height:96px}という
+指定はあるが、!important無しの通常優先度であり、共通.kpi-card
+のデフォルトサイズと大きく矛盾しないため、今回は変更せずそのまま
+維持した。
+
+■3. ハードコードされた旧UI色の統一
+.fp-fill（内訳バーの単色背景）・.fp-plus（詳細展開のプラス
+アイコン）で使われていた#1a4d7cを、既存デザイントークン
+var(--navy)へ置き換えた。
+
+■4. 変更しなかった項目（報告事項）
+COLORS配列（['#1a4d7c','#e05b4d','#198754',...]、17行目）は
+変更していない。当初「Chart.js用パレット」と想定していたが、
+実際にはfield_product.jsはChart.jsを使用しておらず、この配列は
+「大分類・中分類を色分けして視覚的に区別するための、独自HTML
+棒グラフ用の多色パレット」であることが判明した。1色目に
+#1a4d7cが含まれるが、これは単純な旧UI色の使い回しではなく、
+複数カテゴリを区別するための意図的な配色システムの一部と判断し、
+グラフ表示に関わる設定として保守的に扱い、今回は変更していない。
+
+■5. 既存スコープの確認
+field_product.jsのCSSは元々#view-field-productスコープで
+正しく閉じられていた（Phase D-1のグローバル汚染とは無関係の
+ファイル）。今回新たなスコープ追加は不要だった。
+
+============================================================
+実装後確認
+============================================================
+
+■作業内容の業務計算無変更
+classifyWork() / buildRows() / sortRows() / pct() / bars()の
+5関数をPythonでバイト単位比較し、完全一致することを確認した。
+
+■商品カテゴリの業務計算無変更
+classify() / aggregate() / rowsFromProductRecord() /
+rowsFromWorkerRecord()の4関数をPythonでバイト単位比較し、
+完全一致することを確認した。
 
 ■Chart.js設定無変更
-field_worker.jsはChart.js（canvas要素）を使用しておらず、
-棒グラフ表現はrenderBarRows()による独自の横棒（div幅指定）で
-実装されている。この関数も含め全て一切変更していない。
+field_content.js・field_product.jsとも、Chart.js
+（new Chart/CHART_MGR）を使用していないことを確認した
+（両タブとも独自HTMLバー表示のため、Chart.js設定自体が
+存在しない）。
 
-■他5タブへのCSSリークなし
-field_content.js / field_product.js / field_area.js /
-capacity.js / route_analysis.jsは今回一切編集していない
-（ハッシュ確認済み）。field_worker.js内のCSSは全て
-#view-field-worker スコープ、または作業者別固有クラス名
-（.worker-*/.work-*/.rank-badge/.field-worker-*）に閉じており、
-他タブのセレクタと命名衝突がないことを確認した。
+■他4タブ無変更確認
+field_worker.js / field_area.js / capacity.js /
+route_analysis.jsは今回一切編集していない（ハッシュ確認済み）。
 
-■:root や .card / .btn / .tbl / .kpi-card 等のグローバル再定義なし
-field_worker.js全体を正規表現で検索し、グローバルスコープでの
-:root / .card{} / .btn{} / .tbl{} / .kpi-card{} / select{} /
-input{} の再定義が存在しないことを確認した（該当0件）。
+■CSSグローバル汚染なし
+両ファイルとも:root / .card{} / .btn{} / .tbl{} / .kpi-card{} /
+select{} / input{} のグローバル再定義が存在しないことを正規表現で
+確認した（該当0件）。field_content.jsの.fc-*系は元々画面固有の
+プレフィックス命名のため他画面と衝突しない。field_product.jsは
+既に#view-field-productスコープ内で完結している。
 
-■JS/CSS構文エラーなし
-node --checkでfield_worker.js構文エラー0件を確認した。
+■JS構文エラーなし
+node --checkで両ファイルとも構文エラー0件を確認した。
+全JS構文チェックもエラー0件。
 
-■他ファイル無変更確認
-完成5画面（pl.js/kamoku.js/trend.js/budget_actual.js/
-landing_forecast.js）・dashboard.js・他4タブ・共通CSS
-（base.css/theme.css/components.css/shell.css）・
-route-analysis.css・center.htmlは全てハッシュ/diff比較で
-無変更であることを確認した。STATE構造・Repository・Cloud・
-SyncCoordinator・LEDGER・データ保存形式には一切触れていない。
+■残った!important / inline style
+field_content.js：インラインstyleとして「データなし」表示部分
+（bars()関数内のpadding:40px;text-align:center等）が残っている
+が、これは条件付き表示の一部であり、共通CSSクラス化すると
+かえって可読性が下がるため、Phase D-4と同じ判断基準（安全に
+共通CSSへ寄せられるものだけ整理する）に従い今回は変更していない。
+!importantは0件（今回の修正で全て削除済み）。
+field_product.js：!importantは元々0件。インラインstyle
+（.fp-fill/.fp-track内のwidth指定、COLORS配列参照によるbackground
+色指定）はグラフ的な動的値のため、CSSクラス化は困難でありJSに
+残すべきものと判断した。
 
-============================================================
-残課題
-============================================================
-・実ブラウザでの最終目視確認は開発環境の制約上未実施
-・5列グリッドレイアウト（kpi.style.gridTemplateColumns経由の
-  インラインstyle設定）はJS側に残置している。これをCSSクラス
-  （例：kpi-row-5相当）へ完全移行することは、グローバル共通
-  クラスの新設を避ける今回の方針（新しいkpi-row-5等を作らない）
-  との兼ね合いから見送った。現状の実装（作業者別固有スコープでの
-  grid-template-columns指定）で機能上・見た目上の問題はない。
+■実ブラウザ未確認
+今回の変更は開発環境の制約上、実ブラウザでの最終目視確認を
+行っていない。次回実機確認を推奨する。
 
 ============================================================
 最終判定

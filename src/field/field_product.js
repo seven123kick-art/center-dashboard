@@ -471,13 +471,13 @@
       #view-field-product .fp-bar-row{display:grid;grid-template-columns:minmax(130px,230px) 1fr minmax(120px,150px);gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid #eef2f7}
       #view-field-product .fp-bar-name{font-weight:900;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #view-field-product .fp-track{height:16px;background:#e5e7eb;border-radius:999px;overflow:hidden}
-      #view-field-product .fp-fill{height:100%;border-radius:999px;background:#1a4d7c}
+      #view-field-product .fp-fill{height:100%;border-radius:999px;background:var(--navy)}
       #view-field-product .fp-val{text-align:right;font-weight:900;color:#0f172a;white-space:nowrap}
       #view-field-product .fp-sub{font-size:12px;color:#64748b;font-weight:700}
       #view-field-product .fp-detail-card{border:1px solid #dbe3ee;border-radius:14px;margin:10px 0;background:#fff;overflow:hidden}
       #view-field-product .fp-detail-head{display:grid;grid-template-columns:30px 1fr auto auto;gap:10px;align-items:center;padding:12px 14px;background:#f8fafc;cursor:pointer}
       #view-field-product .fp-detail-head:hover{background:#f1f5f9}
-      #view-field-product .fp-plus{font-weight:900;color:#1a4d7c;font-size:18px}
+      #view-field-product .fp-plus{font-weight:900;color:var(--navy);font-size:18px}
       #view-field-product .fp-detail-title{font-size:15px;font-weight:900;color:#0f172a}
       #view-field-product .fp-pill{display:inline-flex;align-items:center;border:1px solid #dbe3ee;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:800;background:#fff;color:#334155;white-space:nowrap}
       #view-field-product .fp-detail-body{display:none;padding:12px 18px 16px}
@@ -492,8 +492,8 @@
     document.head.appendChild(st);
   }
 
-  function kpi(label,value,sub,accent='navy'){
-    return `<div class="kpi-card accent-${accent}"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${esc(value)}</div>${sub?`<div class="kpi-sub">${esc(sub)}</div>`:''}</div>`;
+  function kpi(label,value,sub){
+    return `<div class="kpi-card"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${esc(value)}</div>${sub?`<div class="kpi-sub">${esc(sub)}</div>`:''}</div>`;
   }
 
 
@@ -514,10 +514,10 @@
 
       <div class="fp-kpi">
         ${kpi('対象月', ymText(result.ym), '商品カテゴリ分析')}
-        ${kpi('商品売上', `${fmtK(result.totalAmount)}千円`, '幹線料除外後', 'green')}
+        ${kpi('商品売上', `${fmtK(result.totalAmount)}千円`, '幹線料除外後')}
         ${kpi('原票数', fmt(result.slipCount), '原票番号ユニーク')}
-        ${kpi('平均単価', `${fmt(result.slipCount ? result.totalAmount/result.slipCount : 0)}円`, '売上 ÷ 原票数', 'amber')}
-        ${kpi('最大カテゴリ', top ? top.big : '—', top ? `${fmtK(top.amount)}千円 / ${pct(top.amount,result.totalAmount)}` : '', 'navy')}
+        ${kpi('平均単価', `${fmt(result.slipCount ? result.totalAmount/result.slipCount : 0)}円`, '売上 ÷ 原票数')}
+        ${kpi('最大カテゴリ', top ? top.big : '—', top ? `${fmtK(top.amount)}千円 / ${pct(top.amount,result.totalAmount)}` : '')}
       </div>
 
       <div class="fp-grid">
