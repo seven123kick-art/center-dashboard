@@ -33,33 +33,63 @@
   }
 
   function parsePageText(text, items){
-    // 2026/06 実帳票で検証。
-    // PDF.js の単純な items.join(' ') は、見た目では「配達日 2026/06/01」「ヘッド番号 381...」でも
-    // 「配達日 ヘッド番号 381... 2026/06/01」のように返る場合がある。
-    // まず座標から見た目上の行を復元し、失敗時のみ全文をラベル近傍検索する。
+    // 帳票上の「配達日」「ヘッド番号」はPDF内部の文字順が見た目と一致しない場合がある。
+    // そのため、まずPDF.jsの各text itemを座標付きで直接探索し、ラベルに最も近い値を採用する。
+    // 座標情報が取れないPDFだけ、従来の行復元/全文検索へフォールバックする。
     const clean=String(text||'').normalize('NFKC').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ');
     const spaced=clean.replace(/\s+/g,' ').trim();
     const dense=clean.replace(/\s+/g,'');
     const lines=pdfTextLines(items);
+    const tokens=(items||[]).map((it,i)=>{
+      const tr=Array.isArray(it?.transform)?it.transform:[];
+      return {
+        i,
+        text:String(it?.str||'').normalize('NFKC').replace(/\u0000/g,' ').trim(),
+        x:Number(tr[4]||0), y:Number(tr[5]||0)
+      };
+    }).filter(v=>v.text);
 
     const dateRe=/(20\d{2})\s*[\/\-年]\s*(\d{1,2})\s*[\/\-月]\s*(\d{1,2})日?/;
-    const headRe=/(38\d{8}|\d{8,12})/;
+    const dateTokenRe=/^(20\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})$/;
+    const headTokenRe=/^(38\d{8}|\d{8,12})$/;
+    const near=(anchor,candidates,maxY=10)=>{
+      if(!anchor||!candidates.length) return null;
+      const sameBand=candidates.filter(v=>Math.abs(v.y-anchor.y)<=maxY);
+      const pool=sameBand.length?sameBand:candidates;
+      return pool.slice().sort((a,b)=>{
+        const da=Math.abs(a.y-anchor.y)*20+Math.abs(a.x-anchor.x);
+        const db=Math.abs(b.y-anchor.y)*20+Math.abs(b.x-anchor.x);
+        return da-db;
+      })[0]||null;
+    };
 
     let date='';
-    const dateLine=lines.find(v=>v.includes('配達日'))||'';
-    let dm=dateLine.match(dateRe);
-    if(!dm){
-      // ラベル後にヘッド番号が割り込む抽出順も許容し、印刷日時(ページ右上)は拾わない。
-      dm=(dense.match(/配達日(?:(?!連絡事項).){0,80}?(20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/)||[]);
+    const dateAnchor=tokens.find(v=>v.text.replace(/\s+/g,'').includes('配達日'));
+    const dateCandidates=tokens.map(v=>({v,m:v.text.match(dateTokenRe)})).filter(o=>o.m).map(o=>({...o.v,m:o.m}));
+    const dateNear=near(dateAnchor,dateCandidates,12);
+    if(dateNear?.m){
+      const dm=dateNear.m;
+      date=`${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}`;
     }
-    if(dm) date=`${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}`;
+    if(!date){
+      const dateLine=lines.find(v=>v.includes('配達日'))||'';
+      let dm=dateLine.match(dateRe);
+      if(!dm) dm=(dense.match(/配達日(?:(?!連絡事項).){0,100}?(20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/)||[]);
+      if(dm) date=`${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}`;
+    }
 
     let head='';
-    const headLine=lines.find(v=>v.includes('ヘッド番号'))||'';
-    let hm=headLine.match(/ヘッド番号\s*[:：]?\s*(\d{8,12})/);
-    if(!hm) hm=dense.match(/ヘッド番号[:：]?(\d{8,12})/);
-    if(!hm) hm=dense.match(/(?:^|\D)(38\d{8})(?=\D|$)/);
-    if(hm) head=hm[1]||'';
+    const headAnchor=tokens.find(v=>v.text.replace(/\s+/g,'').includes('ヘッド番号'));
+    const headCandidates=tokens.map(v=>({v,m:v.text.replace(/[：:\s]/g,'').match(headTokenRe)})).filter(o=>o.m).map(o=>({...o.v,m:o.m}));
+    const headNear=near(headAnchor,headCandidates,12);
+    if(headNear?.m) head=headNear.m[1]||headNear.m[0]||'';
+    if(!head){
+      const headLine=lines.find(v=>v.includes('ヘッド番号'))||'';
+      let hm=headLine.match(/ヘッド番号\s*[:：]?\s*(\d{8,12})/);
+      if(!hm) hm=dense.match(/ヘッド番号[:：]?(\d{8,12})/);
+      if(!hm) hm=dense.match(/(?:^|\D)(38\d{8})(?=\D|$)/);
+      if(hm) head=hm[1]||'';
+    }
 
     let worker='';
     const workerLine=lines.find(v=>/作業者(?!TEL)/.test(v))||'';
