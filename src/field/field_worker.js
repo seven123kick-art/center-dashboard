@@ -160,11 +160,11 @@
     const avgDirect = workDayCount > 0 ? directAmount / workDayCount : 0;
     kpi.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
     kpi.innerHTML = `
-      <div class="kpi-card accent-navy kpi-target-month"><div class="kpi-label">対象月</div><div class="kpi-value">${esc(ymText(ym))}</div></div>
-      <div class="kpi-card accent-navy"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div></div>
-      <div class="kpi-card accent-green"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div></div>
-      <div class="kpi-card accent-green"><div class="kpi-label">平均件数/日</div><div class="kpi-value">${workDayCount ? fmt1(avgCount) : '—'}件</div></div>
-      <div class="kpi-card accent-amber kpi-card-amount"><div class="kpi-label">平均売上/日</div><div class="kpi-value">${workDayCount ? fmtK(avgTotalSales) : '—'}千円</div><div class="kpi-sub kpi-amount-breakdown">売上 ${fmtK(avgSales)}千　直収 ${fmtK(avgDirect)}千</div></div>`;
+      <div class="kpi-card kpi-target-month"><div class="kpi-label">対象月</div><div class="kpi-value">${esc(ymText(ym))}</div></div>
+      <div class="kpi-card"><div class="kpi-label">配送件数</div><div class="kpi-value">${fmt(totalCount)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">稼働日数</div><div class="kpi-value">${workDayCount ? fmt(workDayCount) : '—'}日</div></div>
+      <div class="kpi-card"><div class="kpi-label">平均件数/日</div><div class="kpi-value">${workDayCount ? fmt1(avgCount) : '—'}件</div></div>
+      <div class="kpi-card kpi-card-amount"><div class="kpi-label">平均売上/日</div><div class="kpi-value">${workDayCount ? fmtK(avgTotalSales) : '—'}千円</div><div class="kpi-sub kpi-amount-breakdown">売上 ${fmtK(avgSales)}千　直収 ${fmtK(avgDirect)}千</div></div>`;
   }
 
   function renderStatusNotice(){
@@ -251,14 +251,10 @@
       .worker-amount-note{margin:-2px 0 14px;color:#64748b;font-size:12px;line-height:1.6;padding:0 4px}
 
       #view-field-worker #f-kpi-worker{align-items:stretch!important;gap:16px!important}
-      #view-field-worker #f-kpi-worker .kpi-card{min-height:148px!important;padding:20px 22px!important;display:flex!important;flex-direction:column!important;justify-content:flex-start!important}
-      #view-field-worker #f-kpi-worker .kpi-label{font-size:13px!important;font-weight:900!important;line-height:1.25!important;margin:0 0 14px!important;color:#1f2a44!important}
-      #view-field-worker #f-kpi-worker .kpi-value{font-size:31px!important;font-weight:950!important;line-height:1.08!important;letter-spacing:.01em!important;margin:0!important;color:#0f172a!important}
-      #view-field-worker #f-kpi-worker .kpi-target-month .kpi-value{font-size:27px!important;white-space:nowrap!important;letter-spacing:-.04em!important;line-height:1.12!important}
-      #view-field-worker #f-kpi-worker .kpi-sub{font-size:12px!important;font-weight:900!important;line-height:1.35!important;color:#8aa0bb!important;margin-top:12px!important}
-      #view-field-worker #f-kpi-worker .kpi-amount-breakdown{white-space:nowrap!important}
-      #view-field-worker #f-kpi-worker .kpi-card-amount{align-items:flex-start!important;text-align:left!important}
-      @media(max-width:1180px){#view-field-worker #f-kpi-worker{grid-template-columns:repeat(2,minmax(0,1fr))!important}#view-field-worker #f-kpi-worker .kpi-amount-breakdown{white-space:normal!important}}
+      #view-field-worker #f-kpi-worker .kpi-target-month .kpi-value{font-size:22px;white-space:nowrap;letter-spacing:-.02em}
+      #view-field-worker #f-kpi-worker .kpi-amount-breakdown{white-space:nowrap}
+      #view-field-worker #f-kpi-worker .kpi-card-amount{align-items:flex-start;text-align:left}
+      @media(max-width:1180px){#view-field-worker #f-kpi-worker{grid-template-columns:repeat(2,minmax(0,1fr))!important}#view-field-worker #f-kpi-worker .kpi-amount-breakdown{white-space:normal}}
       .worker-back-btn{display:inline-flex;align-items:center;gap:7px;margin:16px auto 0;padding:9px 16px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#334155;font-size:13px;font-weight:900;cursor:pointer;box-shadow:0 2px 6px rgba(15,23,42,.06);transition:background .15s ease,border-color .15s ease,transform .08s ease,box-shadow .15s ease}
       .worker-back-btn:hover{background:#f1f5f9;border-color:#93c5fd;box-shadow:0 4px 10px rgba(15,23,42,.08)}
       .worker-back-btn:active{transform:translateY(1px);box-shadow:0 1px 4px rgba(15,23,42,.08)}
@@ -273,21 +269,18 @@
       .work-break-row{display:grid;grid-template-columns:minmax(82px,120px) minmax(110px,1fr) minmax(62px,78px);gap:10px;align-items:center;margin:9px 0}
       .work-break-label{font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#334155}
       .work-break-track{height:12px;background:#e5e7eb;border-radius:999px;overflow:hidden}
-      .work-break-fill{height:100%;background:#1a4d7c;border-radius:999px}
+      .work-break-fill{height:100%;background:var(--navy);border-radius:999px}
       .work-break-value{text-align:right;font-size:13px;font-weight:900;color:#0f172a;white-space:nowrap}
       .worker-card-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:0 0 12px;padding:2px 0 10px;border-bottom:1px solid #edf2f7}
       .worker-card-main-title{font-size:17px;font-weight:900;color:#0f172a;letter-spacing:.02em}
       .worker-card-sub-title{font-size:12px;font-weight:700;color:#64748b}
-      .field-worker-ranking-table th{font-size:12px;color:#334155;background:#f3f6fb}
-      .field-worker-ranking-table td{font-size:13px;padding-top:10px;padding-bottom:10px}
-      .field-worker-ranking-table .field-worker-row.is-active td{background:#eaf3ff !important;border-top:1px solid #bfdbfe;border-bottom:1px solid #bfdbfe}
-      .field-worker-ranking-table .field-worker-row.is-active td:first-child{border-left:4px solid #1a4d7c}
+      .field-worker-ranking-table .field-worker-row.is-active td{background:#eaf3ff;border-top:1px solid #bfdbfe;border-bottom:1px solid #bfdbfe}
+      .field-worker-ranking-table .field-worker-row.is-active td:first-child{border-left:4px solid var(--navy)}
       .field-worker-ranking-table .field-worker-row{cursor:pointer}
-      .field-worker-ranking-table .field-worker-row:hover td{background:#f8fbff}
-      .rank-badge{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;border-radius:8px;background:#eef4fb;color:#1a4d7c;font-weight:900;font-size:12px}
-      .field-worker-row.is-active .rank-badge{background:#1a4d7c;color:#fff}
+      .rank-badge{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;border-radius:8px;background:#eef4fb;color:var(--navy);font-weight:900;font-size:12px}
+      .field-worker-row.is-active .rank-badge{background:var(--navy);color:#fff}
       .work-more-toggle{margin-top:8px;border-top:1px dashed #d8e1ec;padding-top:8px}
-      .work-more-toggle summary{cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #dbe6f3;border-radius:999px;background:#f8fafc;color:#1a4d7c;font-size:12px;font-weight:900;list-style:none}
+      .work-more-toggle summary{cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #dbe6f3;border-radius:999px;background:#f8fafc;color:var(--navy);font-size:12px;font-weight:900;list-style:none}
       .work-more-toggle summary::-webkit-details-marker{display:none}
       .work-more-toggle summary::after{content:'＋';font-weight:900}
       .work-more-toggle[open] summary::after{content:'－'}
