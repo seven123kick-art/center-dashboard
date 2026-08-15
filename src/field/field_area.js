@@ -1072,8 +1072,8 @@
     st.textContent = `
       #view-field-area #fpane-map > .card > .card-header > div:last-child{display:none!important}
       #view-field-area #fpane-map > .card > .card-header .card-title + div{display:none!important}
-      #view-field-area #fpane-map > .card > .card-header{padding:16px 20px 10px!important}
-      #view-field-area #fpane-map > .card > .card-header .card-title{font-size:17px!important;font-weight:950!important;color:#0f172a!important}
+      #view-field-area #fpane-map > .card > .card-header{padding:16px 20px 10px}
+      #view-field-area #fpane-map > .card > .card-header .card-title{font-size:17px;font-weight:950;color:#0f172a}
 
       #field-map{height:auto!important;min-height:260px;border:0!important;border-radius:0!important;background:#fff!important;overflow:visible!important}
       #field-map .fa-area-v3{background:#fff}
@@ -1096,16 +1096,7 @@
       #field-map .fa3-warn{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:950;white-space:nowrap}
 
       #field-map .fa3-kpis{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr)) minmax(260px,1.25fr);gap:12px}
-      #field-map .fa3-kpi{position:relative;background:linear-gradient(180deg,#ffffff,#f8fafc);border:1px solid #dbe3ee;border-radius:18px;padding:16px 18px 16px 20px;box-shadow:0 10px 24px rgba(15,23,42,.055);min-width:0;overflow:hidden}
-      #field-map .fa3-kpi:before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:#2563eb}
-      #field-map .fa3-kpi:nth-child(1){background:linear-gradient(180deg,#eff6ff,#ffffff)}
-      #field-map .fa3-kpi:nth-child(1):before{background:#2563eb}
-      #field-map .fa3-kpi:nth-child(2){background:linear-gradient(180deg,#ecfdf5,#ffffff)}
-      #field-map .fa3-kpi:nth-child(2):before{background:#16a34a}
-      #field-map .fa3-kpi:nth-child(3){background:linear-gradient(180deg,#fff7ed,#ffffff)}
-      #field-map .fa3-kpi:nth-child(3):before{background:#f97316}
-      #field-map .fa3-kpi:nth-child(4){background:linear-gradient(180deg,#f5f3ff,#ffffff)}
-      #field-map .fa3-kpi:nth-child(4):before{background:#7c3aed}
+      #field-map .fa3-kpi{position:relative;background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);min-width:0;overflow:hidden}
       #field-map .fa3-kpi span{display:block;font-size:12px;color:#64748b;font-weight:950;margin-bottom:8px}
       #field-map .fa3-kpi b{display:block;font-size:25px;color:#0f172a;font-weight:950;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       #field-map .fa3-kpi em{display:block;font-style:normal;font-size:12px;color:#64748b;font-weight:850;margin-top:6px}
