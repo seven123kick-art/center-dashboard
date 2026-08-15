@@ -15,56 +15,80 @@
     return mod;
   }
 
-  function parsePageText(text){
-    // PDF.js は帳票の見た目順と異なる順序で文字を返したり、数字の途中に空白を挟むことがある。
-    // NFKC 正規化した上で、項目名取得用の spaced と数字抽出用の dense を使い分ける。
-    const clean = String(text || '').normalize('NFKC').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ');
-    const spaced = clean.replace(/\s+/g,' ').trim();
-    const dense = clean.replace(/\s+/g,'');
-
-    // 実帳票では「配達日」と「ヘッド番号」の内部抽出順がページごとに前後し得るため、
-    // ラベル順には依存せず帳票固有の値形式でもフォールバックする。
-    const head = (
-      dense.match(/ヘッド番号[:：]?([0-9]{8,12})/) ||
-      dense.match(/(?:^|\D)(38[0-9]{8})(?=\D|$)/) || []
-    )[1] || '';
-    const dm = (
-      dense.match(/配達日[:：]?(20[0-9]{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/) ||
-      spaced.match(/配達日\s*[:：]?\s*(20[0-9]{2})\s*[\/\-年]\s*(\d{1,2})\s*[\/\-月]\s*(\d{1,2})日?/)
-    );
-    const date = dm ? `${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}` : '';
-
-    let worker = '';
-    const wm = spaced.match(/作業者\s*[:：]\s*(.+?)(?=\s+作業者TEL|\s+配達持出リスト|\s+支店)/);
-    if (wm) {
-      worker = wm[1]
-        .replace(/\s+20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s+Page\s+\d+\s*\/\s*\d+.*$/i,'')
-        .trim();
+  function pdfTextLines(items){
+    const rows=[];
+    for(const it of (items||[])){
+      const text=String(it?.str||'').normalize('NFKC').replace(/\u0000/g,' ').trim();
+      if(!text) continue;
+      const tr=Array.isArray(it?.transform)?it.transform:[];
+      const x=Number(tr[4]||0), y=Number(tr[5]||0);
+      let row=rows.find(r=>Math.abs(r.y-y)<=3.2);
+      if(!row){ row={y,parts:[]}; rows.push(row); }
+      row.parts.push({x,text});
     }
+    return rows
+      .sort((a,b)=>b.y-a.y)
+      .map(r=>r.parts.sort((a,b)=>a.x-b.x).map(v=>v.text).join(' ').replace(/\s+/g,' ').trim())
+      .filter(Boolean);
+  }
+
+  function parsePageText(text, items){
+    // 2026/06 実帳票で検証。
+    // PDF.js の単純な items.join(' ') は、見た目では「配達日 2026/06/01」「ヘッド番号 381...」でも
+    // 「配達日 ヘッド番号 381... 2026/06/01」のように返る場合がある。
+    // まず座標から見た目上の行を復元し、失敗時のみ全文をラベル近傍検索する。
+    const clean=String(text||'').normalize('NFKC').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ');
+    const spaced=clean.replace(/\s+/g,' ').trim();
+    const dense=clean.replace(/\s+/g,'');
+    const lines=pdfTextLines(items);
+
+    const dateRe=/(20\d{2})\s*[\/\-年]\s*(\d{1,2})\s*[\/\-月]\s*(\d{1,2})日?/;
+    const headRe=/(38\d{8}|\d{8,12})/;
+
+    let date='';
+    const dateLine=lines.find(v=>v.includes('配達日'))||'';
+    let dm=dateLine.match(dateRe);
+    if(!dm){
+      // ラベル後にヘッド番号が割り込む抽出順も許容し、印刷日時(ページ右上)は拾わない。
+      dm=(dense.match(/配達日(?:(?!連絡事項).){0,80}?(20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/)||[]);
+    }
+    if(dm) date=`${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}`;
+
+    let head='';
+    const headLine=lines.find(v=>v.includes('ヘッド番号'))||'';
+    let hm=headLine.match(/ヘッド番号\s*[:：]?\s*(\d{8,12})/);
+    if(!hm) hm=dense.match(/ヘッド番号[:：]?(\d{8,12})/);
+    if(!hm) hm=dense.match(/(?:^|\D)(38\d{8})(?=\D|$)/);
+    if(hm) head=hm[1]||'';
+
+    let worker='';
+    const workerLine=lines.find(v=>/作業者(?!TEL)/.test(v))||'';
+    let wm=workerLine.match(/作業者\s*[:：]?\s*(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店|$)/);
+    if(!wm) wm=spaced.match(/作業者\s*[:：]?\s*(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店)/);
+    if(wm) worker=wm[1].replace(/^[:：]\s*/,'').trim();
 
     // 原票番号は主に5または9で始まる12桁。荷主伝票番号との混同を抑える。
-    // 別カラムの数字同士を連結しないよう、原票抽出は空白を潰した dense ではなく spaced を使う。
-    const slips = [...new Set((spaced.match(/(?:^|\D)([59][0-9]{11})(?=\D|$)/g) || [])
-      .map(v=>(v.match(/[59][0-9]{11}/)||[])[0]).filter(Boolean))];
-    return { headNumber:head, date, worker, slips };
+    const slips=[...new Set((spaced.match(/(?:^|\D)([59]\d{11})(?=\D|$)/g)||[])
+      .map(v=>(v.match(/[59]\d{11}/)||[])[0]).filter(Boolean))];
+    return {headNumber:head,date,worker,slips};
   }
 
   async function parsePdf(file){
-    const lib = await pdfjs();
-    const data = await file.arrayBuffer();
-    const pdf = await lib.getDocument({data}).promise;
-    const map = new Map();
-    for (let p=1; p<=pdf.numPages; p++) {
-      const page = await pdf.getPage(p);
-      const tc = await page.getTextContent();
-      const text = tc.items.map(x=>x.str).join(' ');
-      const r = parsePageText(text);
-      if (!r.headNumber || !r.date) continue;
-      const key = `${r.date}|${r.headNumber}`;
-      const old = map.get(key) || { ...r, slips:[] };
-      if (!old.worker && r.worker) old.worker = r.worker;
-      old.slips = [...new Set([...(old.slips||[]), ...(r.slips||[])])];
-      map.set(key, old);
+    const lib=await pdfjs();
+    const data=await file.arrayBuffer();
+    const pdf=await lib.getDocument({data}).promise;
+    const map=new Map();
+    for(let p=1;p<=pdf.numPages;p++){
+      const page=await pdf.getPage(p);
+      const tc=await page.getTextContent();
+      const text=tc.items.map(x=>x.str).join(' ');
+      const r=parsePageText(text,tc.items);
+      if(!r.headNumber||!r.date) continue;
+      const key=`${r.date}|${r.headNumber}`;
+      const old=map.get(key)||{...r,slips:[]};
+      if(!old.worker&&r.worker) old.worker=r.worker;
+      old.slips=[...new Set([...(old.slips||[]),...(r.slips||[])])];
+      map.set(key,old);
     }
     return [...map.values()];
   }
