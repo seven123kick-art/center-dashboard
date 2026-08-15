@@ -165,6 +165,9 @@
       else if (!paymentSource) status = '傭車費なし';
       else if (matchedCount < selected.slips.length) status = '一部原票未一致';
       const linkLevel = matchedCount>0 && matchedCount===selected.slips.length && !!paymentSource ? '完全連動' : (headPay ? '配達ヘッド' : '未照合');
+      // 採算は売上と支払が完全に連動した便だけ確定扱いにする。
+      // 配達ヘッド補完だけの便を『売上0円の赤字便』として扱わない。
+      const profitabilityConfirmed = linkLevel === '完全連動';
 
       routeRows.push({
         routeId: `${dateKey(route.date)}|${digits(route.headNumber)}`,
@@ -187,7 +190,8 @@
         workerCode: text(headPay?.workerCode || master?.workerCode),
         toll: num(headPay?.toll),
         linkLevel,
-        margin: sales-payment,
+        profitabilityConfirmed,
+        margin: profitabilityConfirmed ? sales-payment : null,
         avg: matchedCount ? sales/matchedCount : 0,
         status,
         matchMode: selected.mode,
