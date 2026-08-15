@@ -80,7 +80,15 @@
   async function parsePdf(file){
     const lib=await pdfjs();
     const data=await file.arrayBuffer();
-    const pdf=await lib.getDocument({data}).promise;
+    const pdf=await lib.getDocument({
+      data,
+      // 配達持出リストは UniJIS-UCS2-HW-H を使用する旧式PDF。
+      // CMapを明示しないとChrome上のPDF.jsではページを開けても
+      // getTextContent() が0件になるため、Adobe CMapを明示する。
+      cMapUrl:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/cmaps/',
+      cMapPacked:true,
+      standardFontDataUrl:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/standard_fonts/'
+    }).promise;
     const map=new Map();
     const diagnostics=[];
     for(let p=1;p<=pdf.numPages;p++){
