@@ -207,10 +207,10 @@
     const totalCount=rows.reduce((s,r)=>s+r.count,0), totalSales=rows.reduce((s,r)=>s+r.sales,0), totalPay=rows.reduce((s,r)=>s+r.payment,0), totalMargin=totalSales-totalPay;
     const kpi=document.getElementById('route-kpi');
     if(kpi) kpi.innerHTML=`
-      <div class="kpi-card accent-navy"><div class="kpi-label">対象便数</div><div class="kpi-value">${fmt(rows.length)}<small style="font-size:11px;margin-left:4px">便</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">配送 ${fmt(totalCount)}件</div></div>
-      <div class="kpi-card accent-green"><div class="kpi-label">売上</div><div class="kpi-value">${fmt(totalSales)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">1件平均 ${fmt(totalCount?totalSales/totalCount:0)}円</div></div>
-      <div class="kpi-card accent-amber"><div class="kpi-label">傭車支払</div><div class="kpi-value">${fmt(totalPay)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">売上比 ${totalSales?(totalPay/totalSales*100).toFixed(1):'0.0'}%</div></div>
-      <div class="kpi-card accent-navy"><div class="kpi-label">一次利益</div><div class="kpi-value ${totalMargin>=0?'profit-positive':'profit-negative'}">${fmt(totalMargin)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">利益率 ${totalSales?(totalMargin/totalSales*100).toFixed(1):'0.0'}%</div></div>`;
+      <div class="kpi-card"><div class="kpi-label">対象便数</div><div class="kpi-value">${fmt(rows.length)}<small style="font-size:11px;margin-left:4px">便</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">配送 ${fmt(totalCount)}件</div></div>
+      <div class="kpi-card"><div class="kpi-label">売上</div><div class="kpi-value">${fmt(totalSales)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">1件平均 ${fmt(totalCount?totalSales/totalCount:0)}円</div></div>
+      <div class="kpi-card"><div class="kpi-label">傭車支払</div><div class="kpi-value">${fmt(totalPay)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">売上比 ${totalSales?(totalPay/totalSales*100).toFixed(1):'0.0'}%</div></div>
+      <div class="kpi-card"><div class="kpi-label">一次利益</div><div class="kpi-value ${totalMargin>=0?'profit-positive':'profit-negative'}">${fmt(totalMargin)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">利益率 ${totalSales?(totalMargin/totalSales*100).toFixed(1):'0.0'}%</div></div>`;
 
     const diagnostic=document.getElementById('route-diagnostic');
     if(diagnostic && diag){

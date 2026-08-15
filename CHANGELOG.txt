@@ -1,203 +1,144 @@
-Version6 配送分析 Phase D-1: route-analysis.css グローバル汚染解消
+Version6 配送分析 Phase D-3: 便別採算タブ UI完成
 （2026-08-15）
 
 【目的】
-route-analysis.cssに残っていたVersion6共通UI（:root トークン・
-.card/.card-header/.card-body/.btn/select/.tbl th/.tbl td/
-.kpi-card/.kpi-label/.kpi-value/body/#content）の再定義を解消し、
-「base.css/theme.css/components.cssが共通UIの正本、
-route-analysis.cssは配送分析固有UIのみ」という責務分離を実現した。
+Phase D-1（グローバルCSS汚染解消）を土台に、便別採算タブ自体を
+Version6完成5画面（月次収支/科目分析/推移分析/予実差異分析/
+着地予測）と統一感のあるUIへ仕上げた。他5タブ（作業者別/作業内容/
+商品カテゴリ/エリア別/キャパ分析）は今回一切変更していない。
 
 【変更ファイル】
+- center.html
+- src/field/route_analysis.js
 - assets/css/features/route-analysis.css
 
 ============================================================
-① 変更ファイル
+①変更ファイル
 ============================================================
-assets/css/features/route-analysis.css のみ（JS・HTML・他CSSは
-一切変更していない）
+center.html / src/field/route_analysis.js /
+assets/css/features/route-analysis.css の3ファイルのみ。
 
 ============================================================
-② 削除した:rootトークン
+②独自ヘッダー変更内容
 ============================================================
---bg / --surface / --border / --border2 / --navy / --blue /
---text / --text2 / --text3 / --radius / --shadow
-の11個全て。base.css側に既に正式定義があるため、route-analysis.css
-側の重複定義（値が微妙に異なっていた）を削除した。
+「DELIVERY PROFITABILITY」（.saas-eyebrow）をHTML・CSSの両方から
+削除した。「便別採算」（.saas-page-title）「売上・傭車支払・
+一次利益を便単位で把握し、原票まで掘り下げます。」（.saas-page-sub）
+はテキストとして維持し、.saas-page-titleのfont-sizeを25px→16px
+（既存完成画面のセクションタイトル程度の自然な強さ）へ調整した。
+letter-spacing/marginも合わせて調整。HTML構造・要素そのもの
+（<h1>/<p>）は変更していない。
 
 ============================================================
-③ 削除したグローバル共通クラス定義
+③フィルター変更内容
 ============================================================
-body{font-family:Inter,...;background:var(--bg)}
-#content{padding:24px 28px 36px}
-.card{border:...;border-radius:14px;box-shadow:...}（.saas-content-cardとの結合定義から分離）
-.card-header{padding:15px 18px}
-.card-body{padding:18px}
-.btn{border-radius:9px;padding:8px 14px}
-.btn-primary{background:#174f86;...}
-select,input[type=text]{border-radius:9px;padding:8px 10px;border-color:...}
-.tbl th{background:...;padding:11px 12px;...;color:#68758a}
-.tbl td{padding:11px 12px;border-bottom:...}
-.kpi-card{border:...;border-radius:14px;...;padding:18px}
-.kpi-label{font-size:11px;letter-spacing:.04em;color:#718096}
-.kpi-value{font-size:23px;letter-spacing:-.02em}
+機能・ID・onchange/oninputイベント・選択値保持ロジックは一切
+変更していない。見た目のみ、.saas-toolbarのpadding（13px 15px→
+9px 14px）・box-shadow（独自値→var(--shadow)）・border-radius
+（14px固定→var(--radius)）を、着地予測/科目分析で確立した基準値
+（padding:9px 14px、margin-bottom:14px）へ統一した。
+select/inputのmin-height（36px）は元々同じ値だったため変更なし。
+対象年月・所属会社・運行区分・検索・一覧/カード切替の各要素は
+IDも構造も一切変更していない。
 
 ============================================================
-④ 配送分析固有へ移した定義
+④KPI変更内容
 ============================================================
-.saas-content-card：これまで.cardとの結合セレクタ
-（.card,.saas-content-card{...}）で共通クラスに依存していたが、
-削除に伴い独立した定義（border/border-radius/box-shadow/
-background/overflow）を明示的に持たせた。border-radiusは
-var(--radius-lg,18px)としてtheme.cssと同じ値・同じトークンを参照し、
-box-shadowはvar(--shadow)を参照するため、base.cssの正しい値へ
-自動的に追従する。
-
-配送分析固有クラス（.saas-page-head/.saas-eyebrow/
-.saas-page-title/.saas-page-sub/.saas-head-actions/
-.saas-btn-secondary/.saas-toolbar/.saas-filter-group/
-.saas-filter-search/.saas-view-switch/.saas-kpi-grid/
-.saas-content-head/.saas-legend/.dot/.dot-ok/.dot-warn/
-.saas-table/.profit-positive/.profit-negative/.route-status/
-.route-card-*/.route-detail-*）は全て#view-route-analysis配下へ
-スコープした（機能・値は一切変更していない、純粋なセレクタの
-先頭に#view-route-analysisを追加しただけ）。@media(max-width:1000px)
-内のセレクタにも同様にスコープを適用した。
+項目（対象便数/売上/傭車支払/一次利益）はそのまま維持。
+下部アクセントバー装飾（accent-navy/accent-green/accent-amber、
+および.saas-kpi-grid .kpi-card::after装飾）を、CSS定義ごと削除
+した。route_analysis.js側でもkpi-card生成時にaccent-*クラスの
+付与自体を削除した（4箇所、数値計算・fmt()呼出・変数参照は
+一切変更していない）。center.html側もKPIエリアのラッパーから
+saas-kpi-gridクラスを削除した。
+一次利益カードの正負色分け（profit-positive/profit-negative、
+totalMargin>=0判定）は業務上意味のある表示のため一切変更して
+いない。
 
 ============================================================
-⑤ 変更前後で最終適用値が変わった共通UI
+⑤警告変更内容
 ============================================================
-Pythonによるカスケードシミュレーター（CSS読込順を正確に再現、
-コメント除去・CSS変数解決対応）で、削除前後の最終計算値を
-プロパティ単位で比較した。
-
-【:root トークン】11個中9個で値が変化（現状route-analysis.css値 →
-修正後base.css正式値）：
-  --bg: #f6f8fb → #f5f7fa
-  --surface: #ffffff → #fff（実質同一）
-  --border: #e8edf3 → #e4e8ee
-  --border2: #d7dee8 → #d5dbe4
-  --navy: #174f86 → #315f8c
-  --blue: #2563eb → #315f8c
-  --text2: #5d6b82 → #647086
-  --text3: #94a0b2 → #98a2b3
-  --shadow: 0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.05)
-    → 0 8px 28px rgba(31,42,61,.055),0 1px 3px rgba(31,42,61,.035)
-  （--text/--radiusは元々同値のため変化なし）
-
-【共通クラス】9個全てで一部プロパティが変化：
-  .card: border-radius 14px→18px、box-shadow上記の通り
-  .card-header: padding 15px 18px→14px 18px
-  .btn: border-radius 9px→11px、padding 8px 14px→6px 14px
-  select: padding 8px 10px→5px 8px
-    （border-radius/borderはtheme.css側が既に!importantで保護して
-    いたため、実質的には元々変化していなかった＝route-analysis.css
-    のborder-radius:9px指定は既に無効だったデッドコード）
-  .tbl th: padding 11px 12px→10px 9px、color #68758a→#475467、
-    position:stickyが正しく機能するようになった（以前も定義自体は
-    生きていたが、paddingの上書きにより見た目が僅かに異なっていた）
-  .tbl td: padding 11px 12px→9px
-  .kpi-card: border-radius 14px→16px、padding 18px→17px 18px
-  .kpi-label: color #718096→#667085、letter-spacing .04em→.02em
-  .kpi-value: font-size 23px→27px、letter-spacing -.02em→-.04em
-
-  .btn-primary: 変化なし（theme.css側が!importantで既に保護して
-  おり、route-analysis.css側の定義は元々無効だったデッドコード）
-  .card-body: 変化なし（元々同値）
-
-  body: font-family "Inter,'Yu Gothic UI',..." →
-    "\"Yu Gothic UI\",\"Yu Gothic\",\"Meiryo\",system-ui,sans-serif"
-    background: 単色var(--bg) → linear-gradient(180deg,#f6f8fb 0%,
-    #f8fafc 100%)
-    【確認済み】center.htmlにInterフォントのweb font読込
-    （<link>等）は存在しないため、Interは多くの環境で利用不可であり
-    自動的にYu Gothic UI等へフォールバックしていたと考えられる。
-    実質的な見た目の差はごく僅かと判断される。背景も近似色同士の
-    グラデーションのため視覚的差異は僅少。
-
-これらの変化は、素の.card/.card-header/.tbl/.btn/.kpi-card
-クラスを実際に使用している既存完成画面（pl.js/kamoku.js/
-budget_actual.js/landing_forecast.js/trend関連HTML）全てに及ぶ。
-これは「壊れた」のではなく、「route-analysis.cssによって意図せず
-上書きされていた値が、本来のtheme.css/base.css/components.cssの
-意図した値へ復元された」ことを意味する。値の差は1〜4px程度の
-微差（border-radius、padding、font-size）であり、レイアウト崩壊や
-機能不全を招くものではないと判断したが、実際のピクセル差を
-上記の通り全て報告する。
+変更なし。既に既存のmsg/msg-warn/msg-info共通クラスを使用して
+おり（route_analysis.js内のdiagnostic生成部分）、追加の統一作業は
+不要と判断した。文言生成・不足判定ロジックにも一切触れていない。
 
 ============================================================
-⑥ 他画面への影響
+⑥一覧/カード表示変更内容
 ============================================================
-月次収支・科目分析・推移分析・予実差異分析・着地予測・サイドバーは、
-いずれも今回route-analysis.css以外のファイルを一切変更していない。
-上記⑤の値の変化により、これらの画面が使用する素の.card/.card-header/
-.tbl/.btn/.kpi-card/selectの見た目が、本来のtheme.css/base.cssの
-意図値へ統一される（1〜4px程度の微差）。機能面（クリック・入力・
-表示切替等）への影響はない。
+機能・列・データ・イベント（openDetail呼出、setView呼出等）は
+一切変更していない。テーブルは既存通りclass="tbl saas-table"の
+併用形式を維持（Phase D-1で.tbl自体は既に共通クラスへ復元済み
+のため追加変更不要）。カード表示（.route-profit-card等）は白背景・
+共通border/box-shadowを既に使用しており、Phase D-1で:root
+トークンが正しい値へ復元されたことで自動的に統一トーンとなって
+いるため、今回追加のCSS変更は行っていない。
 
 ============================================================
-⑦ 配送分析への影響
+⑦モーダルへの影響
 ============================================================
-.saas-content-cardは独立定義により、これまでと同じ見た目
-（border/border-radius/box-shadow/background/overflow）を維持する。
-.saas-*/.route-*系はセレクタに#view-route-analysisスコープを
-追加しただけで、値・機能は一切変更していない。ただし、これら
-画面固有クラスが内部で参照する共通トークン（var(--border)、
-var(--text2)、var(--text3)、var(--shadow)等）は上記⑤の通り
-値が変わるため、便別採算タブの一部の色・影も微妙に変化する
-（例：.saas-toolbarのborder色、.route-card-*の文字色等）。
+機能・データ・イベント（openDetail/closeDetail）は一切変更して
+いない。.route-detail-panelのborder-radius（18px固定）を、
+既存トークンvar(--radius-lg,18px)へ置き換えた（視覚的な値は
+完全に同一、保守性のためのトークン化のみ）。他のモーダル内定義
+（.route-detail-kpi等）は明確な旧UI逸脱と判断できなかったため、
+今回は変更していない。
 
 ============================================================
-⑧ JS変更有無
+⑧PDF/CSV取込への影響
 ============================================================
-なし。route_analysis.jsはdiff比較で完全に無変更であることを
-確認した。
+なし。ボタンのonclick（NAV.go('import')/NAV.go('csv-import')）は
+一切変更していない。クラス名をsaas-btn-secondary→単純なbtnへ
+整理した（見た目のみ、他画面で使用実績のない未使用クラスの
+削除であることを事前確認済み）。PDF/CSV取込処理そのもの
+（parsePdf/parsePageText/importFiles）は文字単位で完全一致する
+ことを確認した。
 
 ============================================================
-⑨ 業務ロジック変更有無
+⑨業務ロジック無変更確認
 ============================================================
-なし。LEDGER/PDF取込/PDF.js/STATE構造/Repository/Cloud/
-SyncCoordinator/CSV取込/保存・同期処理/モーダル仕様/一覧・カード
-切替仕様には一切触れていない。
+marginRate / parsePdf / parsePageText / importFiles / joinedRows
+の5関数をPythonでバイト単位比較し、完全一致（変更前後で1文字も
+違わない）ことを確認した。LEDGER / STATE / Repository / CLOUD /
+SYNC_COORDINATORへの参照件数も変更前後で一致（11件→11件）する
+ことを確認した。
 
 ============================================================
-⑩ CSS構文結果
+⑩他5タブ無変更確認
 ============================================================
-route-analysis.css：中括弧の対応数が一致（{ =62 } =62、
-構文エラーなし）。全JS構文チェックもエラー0件。
+field_worker.js / field_content.js / field_product.js /
+field_area.js / capacity.jsは今回一切編集していない
+（ハッシュ確認済み）。Phase D-2で発見したaccent-*スコープ問題
+（field_worker.js/field_product.jsのアクセントバーが現在表示
+されない可能性がある件）は、今回意図的に修正していない
+（次Phaseの課題として引き継ぐ）。
 
 ============================================================
-⑪ 回帰確認結果
+⑪CSSグローバル汚染再発なし確認
 ============================================================
-カスケードシミュレーターにより、修正後の:rootトークン・共通
-クラスの最終計算値が、想定通りbase.css/theme.css/components.css
-の意図値と完全に一致することを確認した。
-#view-route-analysisというHTML要素IDが実在することを確認し、
-スコープが正しく機能する土台があることを確認した。
-
-【残る確認事項（開発環境の制約により未実施）】
-実ブラウザでのCtrl+F5後の目視確認（①ホーム②月次収支③科目分析
-④推移分析⑤予実差異分析⑥着地予測⑦配送分析⑧データ管理の8画面、
-card radius/shadow/button/table/KPI/select/サイドバー/配送分析へ
-移動した瞬間の見た目変化）は、静的なCSS計算値の検証にとどめている。
+route-analysis.cssに:root / body{} / .card{} / .card-header /
+.card-body / .btn{} / select / input / .tbl th / .tbl td /
+.kpi-card{} / .kpi-label / .kpi-value / #content{}のグローバル
+再定義が存在しないことを正規表現で確認した（該当0件）。
+全ての配送分析固有セレクタは引き続き#view-route-analysis配下へ
+スコープされている。
 
 ============================================================
-⑫ 残課題
+⑫JS/CSS構文確認
 ============================================================
-・実ブラウザでの最終目視確認が未実施
-・body要素のfont-family/background変化（⑤参照）は、Interフォント
-  が実際にインストールされている稀な環境では、より大きな見た目の
-  差として現れる可能性がある
-・他5タブ（作業者別/作業内容/商品カテゴリ/エリア別/キャパ分析）は
-  今回のCSSスコープ化の対象外（これらは元々素の.card等を使用して
-  おり、route-analysis.cssのグローバル定義に依存していなかったため
-  対応不要と判断したが、念のため今回変更していないことを明記する）
+全JS構文チェック：エラー0件
+route-analysis.css：中括弧の対応数が一致（{ =55 } =55、構文
+エラーなし）
 
 ============================================================
-⑬ 最終判定
+⑬残課題
 ============================================================
-PASS WITH NOTES
-（⑤に記載した通り、複数の完成画面・配送分析自体に1〜4px程度の
-微小な見た目の変化が生じるため、単純なPASSではなくNOTES付きと
-した。これは「バグ修正による意図した復元」であり、実装上の問題
-ではない。実ブラウザでの最終確認を推奨する）
+・Phase D-2で発見したfield_worker.js/field_product.jsの
+  accent-*スコープ問題は未対応（次Phaseの課題）
+・実ブラウザでの最終目視確認は開発環境の制約上未実施
+・便別採算のExcel出力は今回追加していない（別Phase候補として
+  引き続き検討可能）
+
+============================================================
+⑭最終判定
+============================================================
+PASS
