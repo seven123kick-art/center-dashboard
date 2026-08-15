@@ -77,6 +77,31 @@
     return {headNumber:head,date,worker,slips,_debug:{dateSource,itemCount:rawItems.length,denseHead:dense.slice(0,220)}};
   }
 
+  async function operatorTextFallback(page, lib){
+    // Some legacy/encrypted PDFs return zero items from getTextContent() even though
+    // PDF.js can decode the page's text drawing operators.  Read those decoded
+    // glyphs as a fallback; this does not OCR or change the source PDF.
+    const opList=await page.getOperatorList();
+    const out=[];
+    const OPS=lib.OPS||{};
+    const textFns=new Set([OPS.showText, OPS.showSpacedText, OPS.nextLineShowText, OPS.nextLineSetSpacingShowText].filter(v=>v!==undefined));
+    const append=v=>{
+      if(v==null) return;
+      if(typeof v==='string'){ out.push(v); return; }
+      if(Array.isArray(v)){ v.forEach(append); return; }
+      if(typeof v==='object'){
+        if(typeof v.unicode==='string') out.push(v.unicode);
+        else if(typeof v.fontChar==='string') out.push(v.fontChar);
+      }
+    };
+    for(let i=0;i<(opList.fnArray||[]).length;i++){
+      if(!textFns.has(opList.fnArray[i])) continue;
+      append(opList.argsArray?.[i]);
+      out.push(' ');
+    }
+    return out.join('').replace(/\s+/g,' ').trim();
+  }
+
   async function parsePdf(file){
     const lib=await pdfjs();
     const data=await file.arrayBuffer();
@@ -94,9 +119,14 @@
     for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p);
       const tc=await page.getTextContent();
-      const text=tc.items.map(x=>x.str).join(' ');
+      let text=tc.items.map(x=>x.str).join(' ');
+      let fallbackChars=0;
+      if(!tc.items.length){
+        text=await operatorTextFallback(page,lib);
+        fallbackChars=text.length;
+      }
       const r=parsePageText(text,tc.items);
-      diagnostics.push({page:p,head:r.headNumber,date:r.date,items:tc.items.length});
+      diagnostics.push({page:p,head:r.headNumber,date:r.date,items:tc.items.length,fallbackChars});
       if(!r.headNumber||!r.date) continue;
       const key=`${r.date}|${r.headNumber}`;
       const old=map.get(key)||{...r,slips:[]};
@@ -152,7 +182,7 @@
       Repository.Storage.save();
       if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(()=>{});
       if (!parsedRouteCount) {
-        const d=allDiagnostics.flatMap(x=>x.pages).slice(0,3).map(x=>`P${x.page}:日付=${x.date||'×'} / ヘッド=${x.head||'×'} / 文字=${x.items}`).join('、');
+        const d=allDiagnostics.flatMap(x=>x.pages).slice(0,3).map(x=>`P${x.page}:日付=${x.date||'×'} / ヘッド=${x.head||'×'} / Text=${x.items} / Op文字=${x.fallbackChars||0}`).join('、');
         if(msg) msg.innerHTML=`<span style="color:#991b1b;font-weight:700">PDFは読み込みましたが便を確定できませんでした。</span><br><span style="font-size:12px;color:#64748b">診断: ${esc(d||'PDF文字情報なし')}</span>`;
         return;
       }
