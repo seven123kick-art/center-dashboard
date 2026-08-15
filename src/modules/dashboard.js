@@ -88,12 +88,34 @@ window.renderDashboard = function renderDashboard() {
   const prevDs = prevDS(ds.ym);
   const pyDs = typeof sameMonthLastYear === 'function' ? sameMonthLastYear(ds.ym) : null;
 
-  /* ---------- みなし人件費率：委託込み ----------
-     委託除外（ds.pseudoLaborRate）は、分母から委託収入を除外した既存指標。
-     委託込みは分子を同じ ds.laborCost のまま、分母だけ営業収益全体
-     （ds.totalIncome）とする。委託費は分子へ足し戻さない。 */
-  const laborCostBase = Number.isFinite(Number(ds.laborCost)) ? Number(ds.laborCost) : 0;
-  const pseudoLaborRateFull = ds.totalIncome > 0 ? (laborCostBase / ds.totalIncome * 100) : null;
+  /* ---------- みなし人件費率：委託除外／委託込み ----------
+     保存済みデータの ds.laborCost / ds.pseudoLaborRate は、作成時期によって
+     「委託費を含む／含まない」の定義差が残り得るため、ホーム表示では
+     元データ ds.rows から同一基準で再計算する。
+
+     委託除外 = (人件費 + 傭車費 - 委託費) / (営業収益 - 委託収入)
+     委託込み = (人件費 + 傭車費)           / 営業収益
+
+     ※ここでの「傭車費」は CONFIG.YOSHA_KEYS 全体。委託込み側で
+       委託費を別途足し戻すのではなく、元科目を一度だけ集計する。 */
+  const dashboardRows = ds.rows || {};
+  const rowNum = key => {
+    const v = Number(dashboardRows[key]);
+    return Number.isFinite(v) ? v : 0;
+  };
+  const employeeLaborForRate = CONFIG.LABOR_KEYS.reduce((sum, key) => sum + rowNum(key), 0);
+  const yoshaFullForRate = CONFIG.YOSHA_KEYS.reduce((sum, key) => sum + rowNum(key), 0);
+  const consignmentExpenseForRate = rowNum('委託費');
+  const consignmentIncomeForRate = rowNum('委託収入');
+  const laborExcludingConsignment = employeeLaborForRate + yoshaFullForRate - consignmentExpenseForRate;
+  const laborIncludingConsignment = employeeLaborForRate + yoshaFullForRate;
+  const incomeExcludingConsignment = Math.max(0, ds.totalIncome - consignmentIncomeForRate);
+  const pseudoLaborRateExcluded = incomeExcludingConsignment > 0
+    ? (laborExcludingConsignment / incomeExcludingConsignment * 100)
+    : null;
+  const pseudoLaborRateFull = ds.totalIncome > 0
+    ? (laborIncludingConsignment / ds.totalIncome * 100)
+    : null;
 
   /* ---------- 80%判定と表示の丸め不一致の修正（今回追加） ----------
      既存pct()（src/core/format.js）はfmt()経由でMath.round(v)により
@@ -103,8 +125,8 @@ window.renderDashboard = function renderDashboard() {
      共通pct()/fmt()自体は他画面へ影響するため変更せず、ホーム画面
      側だけで表示と同じ丸め処理（Math.round、整数丸め）を判定にも
      適用し、表示値と判定を一致させる。 */
-  const pseudoLaborRateRounded = Math.round(ds.pseudoLaborRate);
-  const pseudoLaborAchieved = pseudoLaborRateRounded <= CONFIG.TARGETS.pseudoLaborRate;
+  const pseudoLaborRateRounded = pseudoLaborRateExcluded == null ? null : Math.round(pseudoLaborRateExcluded);
+  const pseudoLaborAchieved = pseudoLaborRateRounded != null && pseudoLaborRateRounded <= CONFIG.TARGETS.pseudoLaborRate;
 
   area.innerHTML = `
     <div class="kpi-card accent-navy">
@@ -127,7 +149,7 @@ window.renderDashboard = function renderDashboard() {
       <div class="home-labor-rate-breakdown">
         <div class="home-labor-rate-item is-primary">
           <div class="home-labor-rate-label">委託関連を除外</div>
-          <div class="kpi-value ${pseudoLaborAchieved ? 'green' : 'red'}">${pct(ds.pseudoLaborRate)}</div>
+          <div class="kpi-value ${pseudoLaborAchieved ? 'green' : 'red'}">${pseudoLaborRateExcluded == null ? '—' : pct(pseudoLaborRateExcluded)}</div>
         </div>
         <div class="home-labor-rate-item">
           <div class="home-labor-rate-label">委託関連を含む</div>

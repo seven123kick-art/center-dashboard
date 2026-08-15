@@ -194,3 +194,12 @@ PASS
 - 委託込み：ds.laborCost ÷ ds.totalIncome × 100。
 - 2指標の分子は同一とし、委託収入を分母から除外するか、営業収益全体を使うかだけを比較する。
 - KPI表示、他KPI、グラフ、STATE/Repository/Cloud/保存形式には変更なし。
+
+【2026-08-15 みなし人件費率 最終修正（ChatGPT）】
+- 保存済み ds.laborCost / ds.pseudoLaborRate の旧定義差に依存せず、ホームKPIでは ds.rows の元科目から2指標を同一基準で再計算するよう修正。
+- 委託関連を除外 = (人件費 + 傭車費全体 - 委託費) ÷ (営業収益 - 委託収入) × 100。
+- 委託関連を含む = (人件費 + 傭車費全体) ÷ 営業収益 × 100。
+- 「委託関連を含む」側で ds.laborCost に委託費を後付け加算する方式は使用しない。CONFIG.YOSHA_KEYS を元科目から1回だけ集計するため、委託費の二重加算を防止。
+- 「委託関連を除外」側も保存済み ds.pseudoLaborRate を表示に流用せず同時再計算するため、旧保存データでも2基準の定義が揃う。
+- 80%目標判定は再計算後の「委託関連を除外」値を使用。
+- processDataset、STATE、Repository、Cloud、Sync、CSV/PDF取込、他KPI、Chart.jsには変更なし。
