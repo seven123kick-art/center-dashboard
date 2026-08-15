@@ -1,26 +1,24 @@
-配送分析 商品カテゴリ切替時の表示対象ちらつき修正
-2026-08-15
+商品カテゴリ切替時の一瞬の位置ずれ 根本修正 2026-08-15
 
 変更ファイル
+- center.html
 - src/field/field_product.js
 
 原因
-- 商品カテゴリ専用render()が #view-field-product 全体を innerHTML で再描画していた。
-- field_core.js が管理する共通DOM #field-common-selector-box（表示対象）も同じview内に移設されるため、商品カテゴリ再描画時だけ一度破棄され、その後再生成・再配置されていた。
-- この再配置が切替時の一瞬の位置ずれとして見えていた。
+- 商品カテゴリだけ専用render()が #view-field-product 全体を innerHTML 置換していた。
+- その際、共通の「表示対象」DOMを一度 remove() してから再挿入していたため、1フレーム程度レイアウトが変化し得た。
+- さらに navigation.js が直接 render() した後、field_product.js 自身の NAV.onAfterGo が40ms遅延再描画しており、商品カテゴリだけ二段階描画になっていた。
 
 修正
-- 商品カテゴリ再描画前に共通「表示対象」DOMを退避し、再描画直後に同じDOMを先頭へ戻す。
-- 共通セレクタの値・イベント・年度月ロジックは変更しない。
+- center.html に商品カテゴリ専用の固定描画領域 #field-product-final-content を設置。
+- field_product.js は #view-field-product 全体ではなく専用領域だけを再描画。
+- 共通「表示対象」DOMの remove()/insertBefore() を廃止。
+- 商品カテゴリ専用の NAV.onAfterGo 二重描画フックを廃止。
+- refresh用遅延を40msから0msへ変更（同一イベントループ内の重複要求だけまとめる）。
+- 既存集計・分類・金額計算・表示内容は変更なし。
 
-無変更
-- 商品カテゴリ集計ロジック
-- 年度/月選択ロジック
-- field_core.js
-- navigation.js
-- 他の配送分析5タブ
-- STATE / STORE / Cloud / Repository / SyncCoordinator
-
-検証
-- node --check PASS
-- 修正範囲は render() 内の共有DOM保持処理のみ
+確認
+- field_product.js: node --check PASS
+- setTimeout(render, 40): 残存なし
+- keepCommonSelector/remove/reinsert処理: 残存なし
+- NAV.onAfterGo 商品カテゴリ専用フック: 残存なし

@@ -503,20 +503,17 @@
     ensureStyle();
     const view = document.getElementById('view-field-product');
     if (!view) return;
+    const mount = document.getElementById('field-product-final-content');
+    if (!mount) return;
 
-    // 共通の「表示対象」は field_core.js が管理する共有DOM。
-    // 商品カテゴリの再描画で view.innerHTML を置換すると一度破棄され、
-    // 次の共通セレクタ再構築まで位置が瞬間的にずれるため、描画中は退避して戻す。
-    const commonSelector = document.getElementById('field-common-selector-box');
-    const keepCommonSelector = commonSelector && commonSelector.parentElement === view ? commonSelector : null;
-    if (keepCommonSelector) keepCommonSelector.remove();
-
+    // 共通の「表示対象」は field_core.js が管理するため触らない。
+    // 商品カテゴリ固有領域だけを更新し、タブ切替時のDOM退避・再挿入による位置ずれを防ぐ。
     const result = aggregate();
     const maxBig = Math.max(...result.bigs.map(x=>x.amount),1);
     const maxMid = Math.max(...result.mids.slice(0,12).map(x=>x.amount),1);
     const top = result.bigs[0];
 
-    view.innerHTML = `
+    mount.innerHTML = `
       <div class="fp-note">商品カテゴリは、作業内容を優先して分類しています。クレーン・ユニック・手吊り系は最優先でクレーンへ集約し、通常の商品配送は商品名で補完します。</div>
 
       <div class="fp-kpi">
@@ -579,24 +576,15 @@
       </div>
     `;
 
-    if (keepCommonSelector) view.insertBefore(keepCommonSelector, view.firstChild);
-
     view.dataset.fieldProductFinal = '1';
   }
 
   function rerender(){
     clearTimeout(timer);
-    timer = setTimeout(render, 40);
+    timer = setTimeout(render, 0);
   }
 
   function hook(){
-    if (window.NAV && typeof NAV.onAfterGo === 'function' && !window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__) {
-      window.__FIELD_PRODUCT_NAV_FINAL_PATCHED__ = true;
-      NAV.onAfterGo(function(el){
-        if (el && el.dataset && el.dataset.view === 'field-product') rerender();
-      });
-    }
-
     document.addEventListener('change', e=>{
       const id = e.target && e.target.id;
       if (id === 'field-common-month-select' || id === 'field-common-year-select' || id === 'field-common-fy-select') rerender();
@@ -606,7 +594,7 @@
       if (!active()) return;
       const view = document.getElementById('view-field-product');
       if (!view) return;
-      const oldUI = view.dataset.fieldProductFinal !== '1' || view.querySelector('#f-product-tbody') || view.querySelector('#c-product-bar');
+      const oldUI = view.dataset.fieldProductFinal !== '1';
       if (oldUI) render();
     }, 300);
 

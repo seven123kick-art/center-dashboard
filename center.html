@@ -908,26 +908,8 @@
 
     <!-- ▼ 商品カテゴリ分析 -->
     <div class="view" id="view-field-product">
-      <!-- 商品カテゴリ -->
-            <div class="field-pane active" id="fpane-product">
-              <div class="card" style="margin-bottom:14px">
-                <div class="card-header"><span class="card-title">商品カテゴリ別売上</span></div>
-                <div class="card-body">
-                  <div style="height:260px;position:relative"><canvas id="c-product-bar"></canvas></div>
-                </div>
-              </div>
-              <div class="card">
-                <div class="card-header"><span class="card-title">商品カテゴリ別明細</span></div>
-                <div class="scroll-x">
-                  <table class="tbl">
-                    <thead><tr>
-                      <th>商品カテゴリ</th><th class="r">伝票数</th><th class="r">売上（千円）</th><th class="r">構成比</th>
-                    </tr></thead>
-                    <tbody id="f-product-tbody"></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+      <!-- 共通の表示対象は field_core.js が先頭へ配置。商品カテゴリ本体はこの固定mount内だけを再描画する。 -->
+      <div id="field-product-final-content"></div>
     </div>
 
     <!-- ▼ エリア分析 -->
