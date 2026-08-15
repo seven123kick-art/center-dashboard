@@ -1235,6 +1235,22 @@
         </div>
       </div>
 
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header">
+          <span class="card-title">🚛 配達ヘッド傭車料取込</span>
+          <span class="badge badge-info">便別採算・支払補完用</span>
+        </div>
+        <div class="card-body">
+          <div class="upload-zone no-print" id="route-head-payment-upload-zone" onclick="document.getElementById('route-head-payment-file-input').click()">
+            <input type="file" id="route-head-payment-file-input" accept=".xls,.xlsx" multiple style="display:none">
+            <div style="font-size:28px;margin-bottom:8px">🚛</div>
+            <div style="font-weight:700">配達ヘッド傭車料確認 XLS/XLSXをクリック / ドロップ</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:5px">ヘッド番号・配達日・車両所属コード・作業者コード・傭車料を保存します。完全連動できない便も「配達ヘッド」として支払確認できます。</div>
+          </div>
+          <div id="route-head-payment-import-msg" style="margin-top:8px"></div>
+        </div>
+      </div>
+
       <div id="daily-forecast-import-root"></div>
       <!-- 計画データ取込 -->
       <div class="card" style="margin-bottom:14px">

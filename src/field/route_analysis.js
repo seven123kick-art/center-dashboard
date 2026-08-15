@@ -262,6 +262,87 @@
     }
   }
 
+  function normalizeHeadPaymentDate(v){
+    if(v instanceof Date && !Number.isNaN(v.getTime())){
+      const y=v.getFullYear(),m=String(v.getMonth()+1).padStart(2,'0'),d=String(v.getDate()).padStart(2,'0');
+      return `${y}-${m}-${d}`;
+    }
+    const d=String(v??'').replace(/\D/g,'').slice(0,8);
+    return d.length===8 ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}` : '';
+  }
+
+  function parseHeadPaymentSheet(rows){
+    if(!Array.isArray(rows)||!rows.length) return [];
+    const header=(rows[0]||[]).map(v=>String(v??'').replace(/[\s　]/g,''));
+    const col=name=>header.findIndex(v=>v===name);
+    const cHead=col('ヘッド番号'),cDate=col('配達日'),cCompany=col('車両所属コード'),cWorker=col('作業者１');
+    const cFee=col('傭車料'),cCalc=col('傭車計算区分'),cToll=col('通行料'),cDeleted=col('削除フラグ'),cConfirmed=col('支払確定済フラグ');
+    if(cHead<0||cDate<0||cFee<0) throw new Error('必要列（ヘッド番号・配達日・傭車料）を確認できません');
+    const out=[];
+    for(let i=1;i<rows.length;i++){
+      const r=rows[i]||[];
+      if(String(r[cDeleted]??'').trim()==='1') continue;
+      const head=String(r[cHead]??'').replace(/\D/g,'');
+      const date=normalizeHeadPaymentDate(r[cDate]);
+      if(!head||!date) continue;
+      const fee=Number(String(r[cFee]??'').replace(/,/g,'').replace(/[^\d.-]/g,''))||0;
+      const toll=Number(String(r[cToll]??'').replace(/,/g,'').replace(/[^\d.-]/g,''))||0;
+      out.push({
+        headNumber:head,date,
+        vehicleCompanyCode:String(r[cCompany]??'').trim(),
+        workerCode:String(r[cWorker]??'').trim(),
+        yoshaFee:fee,toll,
+        calcType:String(r[cCalc]??'').trim(),
+        paymentConfirmed:String(r[cConfirmed]??'').trim()==='1'
+      });
+    }
+    return out;
+  }
+
+  async function importHeadPaymentFiles(files){
+    const arr=[...files].filter(f=>/\.(xls|xlsx)$/i.test(f.name));
+    const msg=document.getElementById('route-head-payment-import-msg');
+    if(!arr.length) return;
+    try{
+      if(msg) msg.innerHTML='<span style="color:#334155;font-weight:700">配達ヘッド傭車料を解析中です…</span>';
+      if(window.EXPORT_SERVICE?.ensureXLSX) await EXPORT_SERVICE.ensureXLSX();
+      else if(window.ASSETS?.xlsx) await ASSETS.xlsx();
+      if(!window.XLSX) throw new Error('XLSXライブラリを読み込めませんでした');
+      const byYm=new Map(); let total=0;
+      for(const f of arr){
+        const buf=await f.arrayBuffer();
+        const wb=XLSX.read(buf,{type:'array',cellDates:false});
+        for(const sheetName of wb.SheetNames){
+          const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:''});
+          let parsed=[];
+          try{ parsed=parseHeadPaymentSheet(rows); }catch(e){ continue; }
+          for(const rec of parsed){
+            const ym=ymOfDate(rec.date); if(!ym) continue;
+            if(!byYm.has(ym)) byYm.set(ym,[]);
+            byYm.get(ym).push(rec); total++;
+          }
+        }
+      }
+      if(!total) throw new Error('配達ヘッド傭車料データを1件も取得できませんでした');
+      STATE.routeData=Array.isArray(STATE.routeData)?STATE.routeData:[];
+      for(const [ym,items] of byYm){
+        const old=STATE.routeData.find(x=>x.ym===ym)||{ym,routes:[]};
+        const merged=new Map();
+        [...(old.headPayments||[]),...items].forEach(x=>merged.set(`${x.date}|${x.headNumber}`,x));
+        const next={...old,ym,routes:Array.isArray(old.routes)?old.routes:[],headPayments:[...merged.values()],headPaymentsImportedAt:new Date().toISOString()};
+        STATE.routeData=STATE.routeData.filter(x=>x.ym!==ym); STATE.routeData.push(next);
+      }
+      STATE.routeData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
+      Repository.Storage.save();
+      if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(()=>{});
+      window.LEDGER?.invalidate?.();
+      if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルから${total}件の配達ヘッド傭車料を取り込みました。</span>`;
+      render();
+    }catch(e){
+      console.error(e); if(msg) msg.innerHTML=`<span style="color:#991b1b;font-weight:700">取込エラー：${esc(e.message)}</span>`;
+    }
+  }
+
   function setup(){
     const zone=document.getElementById('route-pdf-upload-zone');
     const input=document.getElementById('route-pdf-file-input');
@@ -271,13 +352,22 @@
     ['dragenter','dragover'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.add('dragover');}));
     ['dragleave','drop'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.remove('dragover');}));
     zone.addEventListener('drop',e=>importFiles(e.dataTransfer.files));
+    const hpZone=document.getElementById('route-head-payment-upload-zone');
+    const hpInput=document.getElementById('route-head-payment-file-input');
+    if(hpZone&&hpInput&&!hpZone.dataset.bound){
+      hpZone.dataset.bound='1';
+      hpInput.addEventListener('change',()=>{ importHeadPaymentFiles(hpInput.files); hpInput.value=''; });
+      ['dragenter','dragover'].forEach(ev=>hpZone.addEventListener(ev,e=>{e.preventDefault();hpZone.classList.add('dragover');}));
+      ['dragleave','drop'].forEach(ev=>hpZone.addEventListener(ev,e=>{e.preventDefault();hpZone.classList.remove('dragover');}));
+      hpZone.addEventListener('drop',e=>importHeadPaymentFiles(e.dataTransfer.files));
+    }
   }
 
   let viewMode = 'table';
   let currentRows = [];
 
   function statusClass(status){
-    return status === '原票一致' ? 'ok' : 'warn';
+    return status === '完全連動' ? 'ok' : 'warn';
   }
 
   function marginRate(r){
@@ -355,7 +445,7 @@
             <div class="route-detail-kpi"><span>一次利益 / 利益率</span><strong class="${r.margin>=0?'profit-positive':'profit-negative'}">${fmt(r.margin)}円 / ${rate.toFixed(1)}%</strong></div>
           </div>
           <div class="saas-content-card" style="box-shadow:none">
-            <div class="saas-content-head"><div><strong>原票明細</strong><span>${fmt(slips.length)}件</span></div><span class="route-status ${statusClass(r.status)}">${esc(r.status)}</span></div>
+            <div class="saas-content-head"><div><strong>原票明細</strong><span>${fmt(slips.length)}件</span></div><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span></div>
             <div class="scroll-x"><table class="tbl saas-table"><thead><tr><th>原票番号</th><th>荷主</th><th>商品・カテゴリ</th><th>エリア</th><th class="r">売上</th><th>照合</th></tr></thead><tbody>
               ${slips.length?slips.map(x=>`<tr><td><strong>${esc(x.slip)}</strong></td><td>${esc(x.shipperName||x.shipperCode||'未取得')}</td><td>${esc(x.product||x.category||'未取得')}</td><td>${esc(x.city||x.area||'未取得')}</td><td class="r">${fmt(x.sales)}円</td><td><span class="route-status ${x.workerMatched?'ok':'warn'}">${x.workerMatched?'一致':'未一致'}</span></td></tr>`).join(''):`<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text3)">原票明細を取得できませんでした。</td></tr>`}
             </tbody></table></div>
@@ -481,10 +571,10 @@
       if(!diag.sourceStatus.routePdf) missing.push('配達持出リストPDF');
       if(!diag.sourceStatus.workerCsv) missing.push('作業者別CSV');
       if(!diag.sourceStatus.productCsv) missing.push('荷主別CSV');
-      if(!diag.sourceStatus.skdl0001) missing.push('SKDL0001');
+      if(!diag.sourceStatus.skdl0001 && !diag.sourceStatus.headPayment) missing.push('SKDL0001 または 配達ヘッド傭車料');
       const notices=[];
       if(missing.length) notices.push(`<div class="msg msg-warn">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`);
-      else notices.push(`<div class="msg msg-info">統合率 <strong>${Number(diag.integrationRate||0).toFixed(1)}%</strong>　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　作業者未一致便 ${fmt(diag.routesWithoutWorker)}便　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`);
+      else notices.push(`<div class="msg msg-info">完全連動 <strong>${fmt(diag.fullyLinkedRoutes||0)}便</strong>　配達ヘッド ${fmt(diag.headLinkedRoutes||0)}便　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`);
       if((diag.unregisteredWorkers||[]).length) notices.push(`<div class="msg msg-warn">マスタ未登録：${diag.unregisteredWorkers.map(esc).join('、')}。マスタ管理から所属会社を登録してください。</div>`);
       diagnostic.innerHTML=notices.join('');
     }
@@ -494,13 +584,13 @@
     const body=document.getElementById('route-tbody');
     if(body) body.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<tr onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')">
       <td>${esc(r.date)}</td><td><strong>${esc(r.headNumber)}</strong></td><td>${esc(r.worker||'未取得')}</td><td>${r.workerRegistered?`${esc(r.companyName||'未設定')}<div style="font-size:10px;color:var(--text3);margin-top:2px">${esc(r.operationType||'')}</div>`:'<span class="route-status warn">未登録</span>'}</td>
-      <td class="r">${fmt(r.count)}件</td><td class="r">${fmt(r.sales)}円</td><td class="r">${fmt(r.payment)}円</td><td class="r"><strong class="${r.margin>=0?'profit-positive':'profit-negative'}">${fmt(r.margin)}円</strong></td><td class="r">${rate.toFixed(1)}%</td><td><span class="route-status ${statusClass(r.status)}">${esc(r.status)}</span></td>
+      <td class="r">${fmt(r.count)}件</td><td class="r">${fmt(r.sales)}円</td><td class="r">${fmt(r.payment)}円</td><td class="r"><strong class="${r.margin>=0?'profit-positive':'profit-negative'}">${fmt(r.margin)}円</strong></td><td class="r">${r.sales?rate.toFixed(1)+'%':'—'}</td><td><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span><div style="font-size:10px;color:var(--text3);margin-top:3px">${esc(r.status||'')}</div></td>
     </tr>`}).join(''):`<tr><td colspan="10" style="padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</td></tr>`;
 
     const cards=document.getElementById('route-card-grid');
-    if(cards) cards.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<article class="route-profit-card" onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')"><div class="route-card-top"><div><div class="route-card-date">${esc(r.date)}</div><div class="route-card-title">${esc(r.headNumber)}</div><div class="route-card-worker">${esc(r.companyName||'未設定')} / ${esc(r.worker||'未取得')}</div></div><div><div class="route-card-profit-label">一次利益</div><div class="route-card-profit ${r.margin>=0?'profit-positive':'profit-negative'}">${fmt(r.margin)}円</div><div style="text-align:right;margin-top:5px"><span class="route-status ${statusClass(r.status)}">${esc(r.status)}</span></div></div></div><div class="route-card-metrics"><div>売上<strong>${fmt(r.sales)}円</strong></div><div>傭車支払<strong>${fmt(r.payment)}円</strong></div><div>利益率<strong>${rate.toFixed(1)}%</strong></div></div></article>`}).join(''):`<div style="grid-column:1/-1;padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</div>`;
+    if(cards) cards.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<article class="route-profit-card" onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')"><div class="route-card-top"><div><div class="route-card-date">${esc(r.date)}</div><div class="route-card-title">${esc(r.headNumber)}</div><div class="route-card-worker">${esc(r.companyName||'未設定')} / ${esc(r.worker||'未取得')}</div></div><div><div class="route-card-profit-label">一次利益</div><div class="route-card-profit ${r.margin>=0?'profit-positive':'profit-negative'}">${fmt(r.margin)}円</div><div style="text-align:right;margin-top:5px"><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span></div></div></div><div class="route-card-metrics"><div>売上<strong>${fmt(r.sales)}円</strong></div><div>傭車支払<strong>${fmt(r.payment)}円</strong></div><div>利益率<strong>${rate.toFixed(1)}%</strong></div></div></article>`}).join(''):`<div style="grid-column:1/-1;padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</div>`;
     setView(viewMode);
   }
 
-  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,joinedRows,setView,openDetail,closeDetail,exportExcel,printView};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,joinedRows,setView,openDetail,closeDetail,exportExcel,printView};
 })();

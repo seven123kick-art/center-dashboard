@@ -20,6 +20,9 @@
   function routeRecord(ym){
     return arr(STATE.routeData).find(x => x && x.ym === ym) || null;
   }
+  function headPaymentRows(ym){
+    return arr(routeRecord(ym)?.headPayments);
+  }
   function paymentRows(ym){
     const list = arr(STATE.datasets).filter(x => x && x.ym === ym && Array.isArray(x.routePayments));
     const confirmed = list.find(x => (x.type || 'confirmed') === 'confirmed');
@@ -63,6 +66,12 @@
     return payments.filter(p => digits(p?.headNumber) === head);
   }
 
+  function headPaymentForRoute(headPayments, route){
+    const head=digits(route?.headNumber),d=dateKey(route?.date);
+    return headPayments.find(p=>digits(p?.headNumber)===head && (!d || dateKey(p?.date)===d))
+      || headPayments.find(p=>digits(p?.headNumber)===head) || null;
+  }
+
   function slipsForRoute(route, worker){
     const explicit = [...new Set(arr(route.slips).map(text).filter(Boolean))];
     if (explicit.length) return { slips:explicit, mode:'原票一致' };
@@ -77,7 +86,14 @@
 
   function buildMonth(ym){
     const month = ymKey(ym);
-    const routes = arr(routeRecord(month)?.routes);
+    const sourceRoutes = arr(routeRecord(month)?.routes);
+    const headPayments = headPaymentRows(month);
+    const routeKeys=new Set(sourceRoutes.map(r=>`${dateKey(r?.date)}|${digits(r?.headNumber)}`));
+    const headOnlyRoutes=headPayments.filter(p=>!routeKeys.has(`${dateKey(p?.date)}|${digits(p?.headNumber)}`)).map(p=>{
+      const wm=window.WORKERS?.findByCode ? WORKERS.findByCode(p.workerCode) : null;
+      return {date:p.date,headNumber:p.headNumber,worker:wm?.workerName||'',slips:[],source:'head_payment'};
+    });
+    const routes = [...sourceRoutes,...headOnlyRoutes];
     const workers = workerIndex(month);
     const products = productIndex(month);
     const payments = paymentRows(month);
@@ -94,6 +110,7 @@
       const worker = workers.byName.get(workerName) || null;
       const selected = slipsForRoute(route, worker);
       const payRows = paymentsForRoute(payments, route);
+      const headPay = headPaymentForRoute(headPayments, route);
       payRows.forEach((p, i) => usedPaymentKeys.add(`${digits(p.headNumber)}|${dateKey(p.date)}|${p.accountCode || ''}|${p.amount}|${i}`));
 
       let sales = 0;
@@ -138,13 +155,16 @@
         routeSlipRows.push(ledgerRow);
       });
 
-      const payment = payRows.reduce((s,p)=>s+num(p.amount),0);
+      // 支払は既存SKDL連動を最優先し、取れない便だけ配達ヘッド傭車料で補完する。
+      const paymentSource = payRows.length ? 'SKDL' : (headPay ? '配達ヘッド' : '');
+      const payment = payRows.length ? payRows.reduce((s,p)=>s+num(p.amount),0) : num(headPay?.yoshaFee);
       let status = selected.mode;
-      if (!worker) status = '作業者未一致';
+      if (!worker) status = route.source==='head_payment' ? '配達ヘッドのみ' : '作業者未一致';
       else if (!selected.slips.length) status = '原票未取得';
       else if (!matchedCount) status = '売上未一致';
-      else if (!payRows.length) status = '傭車費なし';
+      else if (!paymentSource) status = '傭車費なし';
       else if (matchedCount < selected.slips.length) status = '一部原票未一致';
+      const linkLevel = matchedCount>0 && matchedCount===selected.slips.length && !!paymentSource ? '完全連動' : (headPay ? '配達ヘッド' : '未照合');
 
       routeRows.push({
         routeId: `${dateKey(route.date)}|${digits(route.headNumber)}`,
@@ -161,6 +181,12 @@
         listedCount: selected.slips.length,
         sales,
         payment,
+        paymentSource,
+        headPayment: headPay ? {...headPay} : null,
+        vehicleCompanyCode: text(headPay?.vehicleCompanyCode),
+        workerCode: text(headPay?.workerCode || master?.workerCode),
+        toll: num(headPay?.toll),
+        linkLevel,
         margin: sales-payment,
         avg: matchedCount ? sales/matchedCount : 0,
         status,
@@ -176,7 +202,8 @@
     const routeSlipTotal = routeRows.reduce((s,r)=>s+r.listedCount,0);
     const matchedRouteSlipCount = routeRows.reduce((s,r)=>s+r.count,0);
     const sourceStatus = {
-      routePdf: routes.length > 0,
+      routePdf: sourceRoutes.length > 0,
+      headPayment: headPayments.length > 0,
       workerCsv: !!workerRecord(month),
       productCsv: !!productRecord(month),
       skdl0001: payments.length > 0
@@ -193,12 +220,15 @@
       productSlipTotal: products.size,
       unmatchedProductSlipCount: Math.max(0, products.size - usedProductSlips.size),
       paymentRowTotal: payments.length,
-      routesWithoutPayment: routeRows.filter(r=>r.status === '傭車費なし').length,
+      routesWithoutPayment: routeRows.filter(r=>!r.paymentSource).length,
       routesWithoutWorker: routeRows.filter(r=>r.status === '作業者未一致').length,
       routesWithUnregisteredWorker: routeRows.filter(r=>r.worker && !r.workerRegistered).length,
       unregisteredWorkers: [...new Set(routeRows.filter(r=>r.worker && !r.workerRegistered).map(r=>r.worker))],
       routesWithoutSales: routeRows.filter(r=>r.status === '売上未一致' || r.status === '原票未取得').length,
-      integrationRate: routeSlipTotal ? matchedRouteSlipCount / routeSlipTotal * 100 : 0
+      integrationRate: routeSlipTotal ? matchedRouteSlipCount / routeSlipTotal * 100 : 0,
+      fullyLinkedRoutes: routeRows.filter(r=>r.linkLevel==='完全連動').length,
+      headLinkedRoutes: routeRows.filter(r=>r.linkLevel==='配達ヘッド').length,
+      headPaymentRowTotal: headPayments.length
     };
 
     return { ym:month, rows:ledgerRows, routes:routeRows, diagnostics };
