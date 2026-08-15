@@ -90,6 +90,15 @@ window.DELIVERY_NAV = {
     if (hub) hub.classList.toggle('active', active);
     const sharedTabs = document.getElementById('delivery-analysis-tabs');
     if (sharedTabs) sharedTabs.hidden = !active;
+
+    // 作業者別・作業内容・商品カテゴリ・エリア別は同一の年度/月セレクターを共有する。
+    // 各view間でDOMを移動させず、共通タブ直下の固定ホストで表示/非表示だけを切り替える。
+    const fieldSelectorHost = document.getElementById('field-common-selector-host');
+    if (fieldSelectorHost) {
+      const usesFieldSelector = new Set(['field-worker','field-content','field-product','field-area']).has(view);
+      fieldSelectorHost.hidden = !usesFieldSelector;
+    }
+
     document.querySelectorAll('[data-delivery-tabs]').forEach(tabs => {
       tabs.querySelectorAll('[data-delivery-view]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.deliveryView === view);

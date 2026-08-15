@@ -952,19 +952,11 @@ IMPORT.deleteFieldData = function(ym) {
   function setupFieldCommonSelectors(){
     ensureState();
 
-    // 現場分析の共通フィルタは、現在表示中のビューへ必ず1つだけ配置する。
-    // 以前は active クラス未反映のタイミングで作業者分析ビューへ配置され、
-    // エリア分析ではフィルタが消えたように見えることがあった。
-    const stateView = String(window.STATE?.view || '');
-    const preferredViewId = stateView && stateView.startsWith('field') ? `view-${stateView}` : '';
-    const view = (preferredViewId ? document.getElementById(preferredViewId) : null)
-      || document.querySelector('#view-field-worker.view.active, #view-field-content.view.active, #view-field-product.view.active, #view-field-area.view.active, #view-field.view.active')
-      || document.getElementById('view-field-worker')
-      || document.getElementById('view-field-content')
-      || document.getElementById('view-field-product')
-      || document.getElementById('view-field-area')
-      || document.getElementById('view-field');
-    if (!view) return;
+    // 現場分析4画面の共通フィルタは、配送分析タブ直下の固定ホストに1つだけ配置する。
+    // view切替のたびにDOMを別viewへ移動すると、再描画タイミング次第で縦位置が一瞬変わるため、
+    // 配置先は固定し、navigation.js側で表示/非表示だけを切り替える。
+    const host = document.getElementById('field-common-selector-host');
+    if (!host) return;
 
     let box = document.getElementById('field-common-selector-box');
     if (!box) {
@@ -972,13 +964,7 @@ IMPORT.deleteFieldData = function(ym) {
       box.id = 'field-common-selector-box';
       box.style.cssText = 'margin-bottom:14px';
     }
-
-    // エリア分析では配送エリアカードの直前に固定する。
-    // firstChild へ入れるだけだと、DOM再構成や旧描画処理の影響で意図しない位置へ移動しやすい。
-    const anchor = view.id === 'view-field-area' ? document.getElementById('fpane-map') : view.firstChild;
-    if (box.parentElement !== view || box.nextSibling !== anchor) {
-      view.insertBefore(box, anchor || view.firstChild);
-    }
+    if (box.parentElement !== host) host.appendChild(box);
 
     const fieldYms = window.FIELD_DATA_ACCESS?.getAllYms ? FIELD_DATA_ACCESS.getAllYms() : fieldAllYms();
     const years = (window.PERIOD_UI?.fiscalYears ? PERIOD_UI.fiscalYears('field') : [...new Set(fieldYms.map(ym=>fiscalFromYM2(ym)))]).sort((a,b)=>Number(b)-Number(a));

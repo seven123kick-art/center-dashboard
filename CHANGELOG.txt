@@ -1,46 +1,25 @@
-Version6 商品カテゴリ切替時「表示対象」ちらつき 根本修正
-日付: 2026-08-15
+配送分析 現場分析4タブ「表示対象」固定化
+2026-08-15
 
-【変更ファイル】
+変更ファイル
 - center.html
-- src/field/field_product.js
-- src/field/field_content.js
+- src/modules/navigation.js
+- src/field/field_core.js
 
-【原因】
-商品カテゴリだけ、配送分析タブ切替時の描画経路が他タブと異なっていました。
-1. navigation.js が FIELD_PRODUCT_UI.render() を正規描画として呼ぶ
-2. field_product.js が NAV.onAfterGo で40ms後に再描画
-3. field_product.js が300ms監視でも条件により再描画
-4. 商品カテゴリrender()が view-field-product 全体のinnerHTMLを置換し、共有DOM「field-common-selector-box」を退避/再挿入
-5. さらに field_content.js のNAV after hookが全画面切替で80ms後に発火し、setupFieldCommonSelectors()を再実行
+変更内容
+1. 配送分析共通6タブ直下に field-common-selector-host を1箇所追加。
+2. 作業者別・作業内容・商品カテゴリ・エリア別の4画面で使用する「表示対象」を、この固定ホストに常設。
+3. 画面切替時に「表示対象」DOMを各viewへ移動する処理を廃止。
+4. navigation.jsで4画面のときだけ固定ホストを表示。便別採算・キャパ分析では非表示。
+5. 年度/月候補、STATE.selYM、STATE.fiscalYear、changeイベント、refreshFieldAll等の選択ロジックは変更なし。
 
-この複数の遅延描画・共有DOM再配置により、商品カテゴリへ切り替えた直後だけ「表示対象」の位置が後から動いて見える状態でした。
+目的
+- 同じ配送分析群で「表示対象」の位置を固定する。
+- 商品カテゴリで発生したようなDOM移動/再描画由来のちらつきを構造的に防止する。
+- 今後4画面側の描画方式が変わっても、共通期間UIの位置が影響を受けない構造にする。
 
-【修正内容】
-1. 商品カテゴリ本体専用の #field-product-render-root を center.html に設置
-2. field_product.js は view-field-product 全体ではなく専用rootだけを更新
-3. 共通の「表示対象」DOMを remove / insert する処理を廃止
-4. 商品カテゴリrender()開始時に setupFieldCommonSelectors() を同期実行し、他タブと同じタイミングで正位置へ配置
-5. 商品カテゴリ固有の40ms遅延再描画を廃止
-6. 商品カテゴリ固有のNAV after hookを廃止（navigation.jsの正規render経路に一本化）
-7. 商品カテゴリ固有の300ms監視再描画を廃止
-8. 商品カテゴリ固有の共通セレクタchange二重監視を廃止（field_core.jsの正規refresh経路に一本化）
-9. field_content.jsのNAV after hook / change hookを「作業内容がactive時のみ」に限定し、商品カテゴリ切替後80msで共有「表示対象」を再構築していた横断副作用を停止
-
-【変更していないもの】
-- 商品カテゴリ分類・集計・金額計算
-- 商品カテゴリ多色バーの配色/幅計算
-- FIELD_DATA_ACCESS / STATE のデータ取得
-- 共通年度/月ロジック
-- field_core.js
-- navigation.js
-- Cloud / Repository / SyncCoordinator
-- 他配送分析タブの業務ロジック
-
-【検証】
-- src/field/field_product.js: node --check PASS
-- src/field/field_content.js: node --check PASS
-- center.html div開閉数: 441 / 441 一致
-- 商品カテゴリ内の setTimeout / setInterval / NAV.onAfterGo / 共通セレクタchange二重監視を除去確認
-- #field-product-render-root は1件のみ
-- 旧 #f-product-tbody / #c-product-bar は専用商品カテゴリUIから除去し、field_core.jsの旧互換renderProduct()は対象DOM不在時に安全にreturnする既存仕様を維持
+検証
+- navigation.js: node --check PASS
+- field_core.js: node --check PASS
+- field-common-selector-host: center.html内1件のみ
+- 業務集計・CSV取込・地図・キャパ・便別採算ロジック変更なし
