@@ -1,32 +1,54 @@
-Version6 D2-4 Master Resolution基盤
+Version6 D2-5 WORKER_ASSIGNMENT履歴解決／未照合解決契約
 作成日: 2026-08-17
 
-変更ファイル
-- center.html: master_resolver.js読込を1行追加
-- src/core/data_catalog/master.js: WORKER_MASTERへemployee_codeを追加。SHIPPER_ACCOUNT.source_shipper_codeの注記を実データ確認済み仕様へ更新
-- src/core/data_catalog/master_resolver.js: 新規。読取専用Master Resolver
+【目的】
+D2-4 Master Resolutionを基礎から改訂し、人物同定と「業務発生日当時の所属会社・センター」の解決を分離する。
+未照合を人が解決した場合も、D2-5では既存マスタ/Aliasへ自動書込みせず、決定情報とAlias候補だけを返す。
 
-確定ルール
-- SHIPPER_AREA荷主コードとSKDLの「荷主基本コード+荷主契約コード」は同一のSHIPPER_ACCOUNT照合キーとして扱える構造にした。
-- 作業者は社員/作業者コード完全一致を最優先。
-- 氏名+会社+センターは高信頼で自動解決可能な構造。
-- 氏名+センターはPROVISIONAL。
-- 氏名のみは候補を返してもresolved_idを確定しない。
-- 同一キーで複数候補が存在する場合はCONFLICT。
-- ResolverはSTATE/IndexedDB/Storage/Cloudへ書き込まない。
+【変更ファイル】
+1. src/core/data_catalog/master.js
+2. src/core/data_catalog/master_resolver.js
+3. CHANGELOG.txt（本ファイル）
 
-未実装
-- 実マスタの永続化
-- 人によるUNMATCHED解決UI
-- Aliasの保存
-- 有効期間(valid_from/valid_to)を使った配送当日時点所属判定
-- SOURCEからマスタを自動新規作成する処理
+【master.js】
+- WORKER_ASSIGNMENTへassignment_type（任意）を追加。将来PRIMARY/WORK_LOCATION等を区別できる余地を確保。D2-5では値を強制しない。
+- MASTER_RESOLUTION_DECISION契約を追加。
+- MASTER_ALIAS_PROPOSAL契約を追加。
+- SOURCEから自動で新規作業者を作らないことを契約上明記。
 
-テスト
-- SHIPPER_ACCOUNTコード一致: PASS
-- employee_code優先照合: PASS
-- 氏名+会社+センター: PASS
-- 氏名のみ自動確定禁止: PASS
-- SKDL荷主基本+契約コード連結: PASS
-- CENTERコード照合: PASS
-- node --check: PASS
+【master_resolver.js】
+- D2-4の氏名+会社+センター固定Index方式を改訂。
+- resolveWorkerIdentity(): 人物同定専用。
+  1) employee_code完全一致 = OK
+  2) WORKER_ALIAS一意一致 = OK
+  3) 氏名のみ一意一致 = PROVISIONAL（人物候補。所属は確定しない）
+  4) 複数候補 = CONFLICT
+- resolveAssignment(worker_id, effective_date): WORKER_ASSIGNMENT.valid_from/valid_toから当時所属を解決。
+- resolveWorker(): 人物同定後、effective_dateがある場合のみ所属履歴を解決。日付なしで現在所属を推測しない。
+- 同一日付に異なるcompany_idが複数有効 = CONFLICT。
+- 同一会社内で複数center_idが有効 = company_idは保持するがcenter_idはnull/PROVISIONAL。センターを推測しない。
+- source.center_idがあり、有効所属の中で一致する場合はそのセンターを優先。
+- makeResolutionDecision(): 人が既存マスタを選択した結果を返す。remember_as_alias=trueでもAliasはPROPOSEDを返すだけで永続化しない。
+
+【重要な非変更】
+- STATE変更なし
+- IndexedDB変更なし
+- localStorage変更なし
+- Supabase/Cloud変更なし
+- 既存UI変更なし
+- center.html変更なし（master_resolver.jsはD2-4で既に読込済み）
+- SOURCEからのマスタ自動作成なし
+- Alias自動保存なし
+
+【テスト】
+- 2026-06-15: A社/C1所属 → PASS
+- 2026-07-15: A社退職後B社/C2所属 → PASS
+- effective_dateなし: 人物のみ解決し所属を推測しない → PASS
+- Aliasによる人物同定 → PASS
+- 同一会社・同一日付で複数センター: 会社のみ確定、センターnull/PROVISIONAL → PASS
+- 人手解決: AliasはPROPOSEDのみ → PASS
+- MASTER_RESOLUTION契約追加 → PASS
+- src配下全JS node --check → PASS
+
+【次段階】
+D2-6では、この読取専用解決結果をSOURCE_LINK/Canonical Builderへ接続する前に、実データでworker_code/employee_code/氏名の照合率を計測し、自動確定可能範囲を決める。

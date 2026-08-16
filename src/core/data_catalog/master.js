@@ -94,6 +94,7 @@
       // 有効期間（valid_from/valid_to）を持つ履歴として表現する。
       valid_from: field('string', false, 'YYYY-MM-DD。未確定ならnull'),
       valid_to: field('string', false, 'YYYY-MM-DD。現在も所属中の場合はnull'),
+      assignment_type: field('string', false, 'PRIMARY/WORK_LOCATION等を将来区別できる余地。D2-5では値を強制しない'),
     },
     business_rule_note: '同一時点で複数会社に同時所属することはない、という制約はD1では強制せず、将来のvalidation実装時の前提として記録するにとどめる（架空の強制ロジックを今回作らない）。',
   };
@@ -243,6 +244,33 @@
     return RESOLVABLE_ENTITY_TYPES.includes(entityType);
   }
 
+  const MASTER_RESOLUTION_DECISION = {
+    entity: 'MASTER_RESOLUTION_DECISION',
+    fields: {
+      resolution_decision_id: field('string', true),
+      entity_type: field('string', true),
+      source_value: field('string', true),
+      source_document_type: field('string', false),
+      source_record_id: field('string', false),
+      selected_master_id: field('string', true, '人が確認して選択した既存マスタID。SOURCEから自動で新規マスタを作らない'),
+      effective_date: field('string', false, '配送日・売上日等。所属履歴を解決する基準日'),
+      remember_as_alias: field('boolean', false, 'trueの場合もD2-5ではAlias候補を返すだけで永続化しない'),
+      decided_at: field('string', false),
+      decided_by: field('string', false),
+    },
+  };
+
+  const MASTER_ALIAS_PROPOSAL = {
+    entity: 'MASTER_ALIAS_PROPOSAL',
+    fields: {
+      entity_type: field('string', true),
+      master_id: field('string', true),
+      alias_label: field('string', true),
+      source_document_type: field('string', false),
+      status: field('string', true, 'PROPOSED。D2-5では保存処理を持たない'),
+    },
+  };
+
   function validateResolutionResult(obj) {
     const errors = [];
     if (!obj || !isValidEntityType(obj.entity_type)) {
@@ -274,6 +302,8 @@
   const MASTER_RESOLUTION = {
     ENTITY_TYPES: RESOLVABLE_ENTITY_TYPES,
     resultContract: MASTER_RESOLUTION_RESULT,
+    decisionContract: MASTER_RESOLUTION_DECISION,
+    aliasProposalContract: MASTER_ALIAS_PROPOSAL,
     isValidEntityType,
     validate: validateResolutionResult,
     makeUnresolvedResult,
