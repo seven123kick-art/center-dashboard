@@ -79,6 +79,7 @@
     fields: {
       worker_id: field('string', true),
       worker_name: field('string', true),
+      employee_code: field('string', false, '自社社員等で利用できる社員/作業者コード。コード体系が存在しない委託作業者はnullを許容する'),
     },
   };
   const WORKER_ASSIGNMENT = {
@@ -142,7 +143,7 @@
     fields: {
       shipper_account_id: field('string', true),
       shipper_id: field('string', true, 'SHIPPER_MASTERへの参照。1荷主企業に複数のSHIPPER_ACCOUNTが存在するのは正常（請求先・料金・契約違い等）'),
-      source_shipper_code: field('string', false, '既存CSVの荷主コードに相当すると考えられる（対応関係は今回断定しない）'),
+      source_shipper_code: field('string', false, '当社管理の荷主コード。実データ検証でSHIPPER_AREA荷主コード = SKDL荷主基本コード+荷主契約コードの一致を確認済み。'),
       billing_condition_label: field('string', false, '請求先・料金・締め日等の契約/請求条件の識別用ラベル。D2時点では未確定（UNSPECIFIED許容）'),
     },
   };

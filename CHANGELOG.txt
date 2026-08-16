@@ -1,36 +1,32 @@
-Version6 D2-3 Accounting SOURCE / Reconciliation
+Version6 D2-4 Master Resolution基盤
 作成日: 2026-08-17
 
-【目的】
-業務売上（WORKER_SALES / SHIPPER_AREA）と会計値（SKDL0002 / SKDL0003）を同一の売上明細へ押し込まず、別レイヤーで保持して原票単位に照合できる読取専用基盤を追加。確定前の数字も表示可能なよう、値と確定度を分離する。
+変更ファイル
+- center.html: master_resolver.js読込を1行追加
+- src/core/data_catalog/master.js: WORKER_MASTERへemployee_codeを追加。SHIPPER_ACCOUNT.source_shipper_codeの注記を実データ確認済み仕様へ更新
+- src/core/data_catalog/master_resolver.js: 新規。読取専用Master Resolver
 
-【追加】
-- src/core/data_catalog/accounting_normalizer.js
-  SKDL0002/0003の49列CSVを行単位ACCOUNTING_SOURCE_RECORDへ正規化。PRELIMINARY/CONFIRMEDを明示し、CONFIRMEDはimmutable=true。0円とnullを区別。原票NO、荷主基本/契約コード、社員コード等を保持。
-- src/core/data_catalog/accounting_reconciliation.js
-  ACCOUNTING_FACT生成、原票単位Operational/Accounting照合、科目別集計。差異は自動補正しない。
+確定ルール
+- SHIPPER_AREA荷主コードとSKDLの「荷主基本コード+荷主契約コード」は同一のSHIPPER_ACCOUNT照合キーとして扱える構造にした。
+- 作業者は社員/作業者コード完全一致を最優先。
+- 氏名+会社+センターは高信頼で自動解決可能な構造。
+- 氏名+センターはPROVISIONAL。
+- 氏名のみは候補を返してもresolved_idを確定しない。
+- 同一キーで複数候補が存在する場合はCONFLICT。
+- ResolverはSTATE/IndexedDB/Storage/Cloudへ書き込まない。
 
-【変更】
-- contract.js: ACCOUNTING_SOURCE_RECORD / ACCOUNTING_RECONCILIATIONを追加。ACCOUNTING_FACTを行単位会計事実＋value_statusを持つ構造へ再定義。
-- center.html: 上記2モジュールのdefer読込を追加。既存画面からは未接続。
+未実装
+- 実マスタの永続化
+- 人によるUNMATCHED解決UI
+- Aliasの保存
+- 有効期間(valid_from/valid_to)を使った配送当日時点所属判定
+- SOURCEからマスタを自動新規作成する処理
 
-【2026年6月実資料確認】
-対象: SKDL0003(202606確定）.csv / 作業者別売上明細表2026.06.csv / 荷主別配送エリア物量202606.csv
-- SKDL0003: 8,691行、原票NOあり8,353行、ユニーク原票3,105件。
-- SKDL0003のヘッド番号列は存在するが、今回ファイルでは値あり0行。HEAD照合SOURCEとしては使用不可。
-- WORKER_SALESの2,315原票はSKDL0003に2,315/2,315=100%存在。
-- SHIPPER_AREAの2,517原票はSKDL0003に2,341件=93.01%存在。
-- 3資料すべてに存在する原票は2,276件。
-- SKDL0003にのみ存在する原票は725件。
-- WORKER_SALESのみでSKDL0003にない原票は0件。SHIPPER_AREAのみでSKDL0003にない原票は176件。
-- SHIPPER_AREA荷主コードは、SKDLの「荷主基本コード+荷主契約コード」と、比較可能な2,341原票すべてで一致（100%）。
-- 家電収入合計20,102,735円をNormalizer→ACCOUNTING_FACT→科目集計で再現。
-
-【重要】
-- 詳細帳票とSKDLの差額・比率から金額を自動補正しない。70%差も観測事実として保持。
-- SKDL0003確定値を変更しない。SKDL0002等の速報値はPRELIMINARYとして表示可能。
-- STATE / IndexedDB / Storage / Cloud / Supabaseへの書込なし。既存parser変更なし。
-- 今回確認したSKDL0003ではHEAD番号が空欄のため、過去の「SKDL0003でHEAD照合できる」との仮説は採用しない。
-
-【累積差分について】
-直前のD1/D2基礎Contract再設計およびD2-2の投入完了が会話上確認できていないため、本ZIPはそれらを含む累積差分として作成。最後に投入確認済みのスナップショット以降に必要なファイルのみを収録。
+テスト
+- SHIPPER_ACCOUNTコード一致: PASS
+- employee_code優先照合: PASS
+- 氏名+会社+センター: PASS
+- 氏名のみ自動確定禁止: PASS
+- SKDL荷主基本+契約コード連結: PASS
+- CENTERコード照合: PASS
+- node --check: PASS
