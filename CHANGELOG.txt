@@ -1,54 +1,49 @@
-Version6 D2-5 WORKER_ASSIGNMENT履歴解決／未照合解決契約
+Version6 D2-6 Attribution Subject Resolution
 作成日: 2026-08-17
 
-【目的】
-D2-4 Master Resolutionを基礎から改訂し、人物同定と「業務発生日当時の所属会社・センター」の解決を分離する。
-未照合を人が解決した場合も、D2-5では既存マスタ/Aliasへ自動書込みせず、決定情報とAlias候補だけを返す。
+■目的
+WORKER_SALES（作業者別売上明細表）の「作業者」欄を人物専用と誤認しない基礎構造へ改訂。
+2026年6月実データと業務確認により、この欄は売上・支払の帰属主体であり、人物・会社・拠点/処理単位・業務処理コード・不明を含むことが確定した。
 
-【変更ファイル】
-1. src/core/data_catalog/master.js
-2. src/core/data_catalog/master_resolver.js
-3. CHANGELOG.txt（本ファイル）
+■変更ファイル
+- center.html
+  - subject_resolver.js 読込を1行追加。
+- src/core/data_catalog/contract.js
+  - SALES_DETAILをworker_id中心からattribution subject中心へ再定義。
+  - source_subject_label / source_subject_company_nameを保持。
+  - ROUTE_WORKER（実運行人物）との責務分離を維持。
+- src/core/data_catalog/canonical_builder.js
+  - WORKER_SALES由来SALES_DETAILへ新subjectフィールドを出力。
+  - 人物/会社等の自動判定は行わずnullのまま（Resolver接続前の安全状態）。
+- src/core/data_catalog/master.js
+  - ATTRIBUTION_SUBJECT_ALIAS / PROCESS_MASTER契約を追加。
+- src/core/data_catalog/subject_resolver.js（新規）
+  - PERSON / ORGANIZATION / OPERATION_UNIT / PROCESS / UNKNOWNを定義。
+  - 個別表記をコードへベタ書きせず、マスタ/Aliasを引数で受ける純粋Resolver。
+  - PERSONのみ既存MASTER_RESOLVERへ接続可能。
 
-【master.js】
-- WORKER_ASSIGNMENTへassignment_type（任意）を追加。将来PRIMARY/WORK_LOCATION等を区別できる余地を確保。D2-5では値を強制しない。
-- MASTER_RESOLUTION_DECISION契約を追加。
-- MASTER_ALIAS_PROPOSAL契約を追加。
-- SOURCEから自動で新規作業者を作らないことを契約上明記。
+■確定業務仕様
+- 個人名: PERSON → WORKER_MASTER候補。
+- 会社名（例: 個人を把握せず会社へ支払を立てるケース）: ORGANIZATION → COMPANY_MASTER。
+- センター等へ売上を帰属: OPERATION_UNIT → CENTER等。
+- 返品/未完了処理等: PROCESS。
+- 空欄/未判定: UNKNOWN。
+- 「習志野リサイクル」のような一括同名コードも人物として扱わない。
+- 会社/拠点/処理主体であることは情報欠落ではなく、業務上意図された正常データになり得る。
 
-【master_resolver.js】
-- D2-4の氏名+会社+センター固定Index方式を改訂。
-- resolveWorkerIdentity(): 人物同定専用。
-  1) employee_code完全一致 = OK
-  2) WORKER_ALIAS一意一致 = OK
-  3) 氏名のみ一意一致 = PROVISIONAL（人物候補。所属は確定しない）
-  4) 複数候補 = CONFLICT
-- resolveAssignment(worker_id, effective_date): WORKER_ASSIGNMENT.valid_from/valid_toから当時所属を解決。
-- resolveWorker(): 人物同定後、effective_dateがある場合のみ所属履歴を解決。日付なしで現在所属を推測しない。
-- 同一日付に異なるcompany_idが複数有効 = CONFLICT。
-- 同一会社内で複数center_idが有効 = company_idは保持するがcenter_idはnull/PROVISIONAL。センターを推測しない。
-- source.center_idがあり、有効所属の中で一致する場合はそのセンターを優先。
-- makeResolutionDecision(): 人が既存マスタを選択した結果を返す。remember_as_alias=trueでもAliasはPROPOSEDを返すだけで永続化しない。
+■安全性
+- STATE / IndexedDB / localStorage / Supabase / Cloud書込変更なし。
+- 既存parser変更なし。
+- 既存業務画面からsubject_resolverは未接続。
+- 2026年6月の個別表記をResolverへハードコードしていない。
+- UNKNOWNを架空のWORKER_MASTERへ登録しない。
 
-【重要な非変更】
-- STATE変更なし
-- IndexedDB変更なし
-- localStorage変更なし
-- Supabase/Cloud変更なし
-- 既存UI変更なし
-- center.html変更なし（master_resolver.jsはD2-4で既に読込済み）
-- SOURCEからのマスタ自動作成なし
-- Alias自動保存なし
-
-【テスト】
-- 2026-06-15: A社/C1所属 → PASS
-- 2026-07-15: A社退職後B社/C2所属 → PASS
-- effective_dateなし: 人物のみ解決し所属を推測しない → PASS
-- Aliasによる人物同定 → PASS
-- 同一会社・同一日付で複数センター: 会社のみ確定、センターnull/PROVISIONAL → PASS
-- 人手解決: AliasはPROPOSEDのみ → PASS
-- MASTER_RESOLUTION契約追加 → PASS
-- src配下全JS node --check → PASS
-
-【次段階】
-D2-6では、この読取専用解決結果をSOURCE_LINK/Canonical Builderへ接続する前に、実データでworker_code/employee_code/氏名の照合率を計測し、自動確定可能範囲を決める。
+■テスト
+- PERSON候補: PASS（氏名のみではPROVISIONALを維持）
+- ORGANIZATION: PASS
+- OPERATION_UNIT: PASS
+- PROCESS: PASS
+- AliasによるOPERATION_UNIT解決: PASS
+- UNKNOWN/空欄: PASS
+- MASTER_CONTRACT新Entity: PASS
+- src配下全JS node --check: PASS

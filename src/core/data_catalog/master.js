@@ -186,11 +186,41 @@
     },
   };
 
+  /* ============================================================
+     ATTRIBUTION SUBJECT
+     ------------------------------------------------------------
+     WORKER_SALESの「作業者」欄は人物専用ではなく、売上・支払の
+     帰属主体。個別表記をコードへベタ書きせず、Alias/マスタで
+     PERSON / ORGANIZATION / OPERATION_UNIT / PROCESS / UNKNOWNへ解決する。
+  ============================================================ */
+  const ATTRIBUTION_SUBJECT_ALIAS = {
+    entity: 'ATTRIBUTION_SUBJECT_ALIAS',
+    fields: {
+      subject_alias_id: field('string', true),
+      alias_label: field('string', true),
+      subject_type: field('string', true, 'PERSON/ORGANIZATION/OPERATION_UNIT/PROCESS/UNKNOWN'),
+      subject_id: field('string', false, '人物/会社/センター等の解決先ID。PROCESS等で別コードを使う場合はnull可'),
+      process_code: field('string', false),
+      active_from: field('string', false),
+      active_to: field('string', false),
+    },
+  };
+  const PROCESS_MASTER = {
+    entity: 'PROCESS_MASTER',
+    fields: {
+      process_code: field('string', true),
+      process_name: field('string', true),
+      process_label: field('string', false, 'SOURCE上の代表表記。表記揺れはATTRIBUTION_SUBJECT_ALIASで管理可能'),
+      is_active: field('boolean', false),
+    },
+  };
+
   const MASTER_ENTRIES = {
     CENTER_MASTER, CENTER_ALIAS,
     COMPANY_MASTER, COMPANY_ALIAS,
     WORKER_MASTER, WORKER_ASSIGNMENT, WORKER_ALIAS,
     SHIPPER_MASTER, SHIPPER_ACCOUNT, SHIPPER_STORE, SHIPPER_LOCATION, SHIPPER_GROUP, SHIPPER_ALIAS,
+    ATTRIBUTION_SUBJECT_ALIAS, PROCESS_MASTER,
 
   };
 
@@ -205,6 +235,7 @@
     }
     return { ok: errors.length === 0, errors };
   }
+
 
   const MASTER_CONTRACT = {
     get(entityName) {
