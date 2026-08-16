@@ -107,7 +107,28 @@
   };
 
   /* ============================================================
-     SHIPPER
+     SHIPPER（今回改訂：荷主コード／荷主NO／店舗の関係を明確化）
+     ------------------------------------------------------------
+     【業務仕様確定】
+     ・荷主コード＝エスラインギフ側が荷主を管理するためのコード。
+       請求先・料金・締め日等の契約/請求条件に関係する。同じ荷主
+       企業でも、請求先違い・料金違い・契約違い・その他管理条件
+       違いにより、荷主コードが複数存在するのが普通である
+       （これはデータ不整合ではなく正しい業務状態）。
+       → SHIPPER_MASTER＝荷主企業そのもの
+       → SHIPPER_ACCOUNT＝エスラインギフ側の荷主コード・契約単位
+         （1 SHIPPER_MASTER : N SHIPPER_ACCOUNT）
+     ・荷主NO＝荷主側が管理する伝票・売上等の番号。主に荷主からの
+       問い合わせ時に使用する。これはマスタではなく配送案件側の
+       参照番号のため、SHIPPER側のEntityではなくDELIVERY_SLIP側
+       （contract.jsのshipper_reference_no）に持たせている。
+     ・店舗は荷主コードと必ず1:1ではない（1荷主コードの中に複数
+       店舗コードを持つ荷主と、荷主コード単位で店舗を分ける荷主の
+       両方がある）。基本集計軸は荷主コード単位（SHIPPER_ACCOUNT）
+       とし、店舗情報が取得できる場合はSHIPPER_STOREで店舗単位
+       集計も可能にする。店舗マスタ照合ができないことを理由に
+       取込不能とする構造にはしない（SHIPPER_STOREへの参照は任意
+       フィールドとする）。
   ============================================================ */
   const SHIPPER_MASTER = {
     entity: 'SHIPPER_MASTER',
@@ -120,8 +141,20 @@
     entity: 'SHIPPER_ACCOUNT',
     fields: {
       shipper_account_id: field('string', true),
-      shipper_id: field('string', true, 'SHIPPER_MASTERへの参照'),
+      shipper_id: field('string', true, 'SHIPPER_MASTERへの参照。1荷主企業に複数のSHIPPER_ACCOUNTが存在するのは正常（請求先・料金・契約違い等）'),
       source_shipper_code: field('string', false, '既存CSVの荷主コードに相当すると考えられる（対応関係は今回断定しない）'),
+      billing_condition_label: field('string', false, '請求先・料金・締め日等の契約/請求条件の識別用ラベル。D2時点では未確定（UNSPECIFIED許容）'),
+    },
+  };
+  /* 荷主コードと店舗は必ず1:1ではないため、独立したEntityとして
+     分離する（SHIPPER_ACCOUNTへ店舗コードを直接埋め込まない）。 */
+  const SHIPPER_STORE = {
+    entity: 'SHIPPER_STORE',
+    fields: {
+      shipper_store_id: field('string', true),
+      shipper_account_id: field('string', false, 'SHIPPER_ACCOUNTへの参照。1荷主コードに複数店舗、または荷主コード単位で店舗を分ける荷主の両方があり得るため任意参照とする'),
+      source_store_code: field('string', false),
+      store_name: field('string', false),
     },
   };
   const SHIPPER_LOCATION = {
@@ -155,7 +188,8 @@
     CENTER_MASTER, CENTER_ALIAS,
     COMPANY_MASTER, COMPANY_ALIAS,
     WORKER_MASTER, WORKER_ASSIGNMENT, WORKER_ALIAS,
-    SHIPPER_MASTER, SHIPPER_ACCOUNT, SHIPPER_LOCATION, SHIPPER_GROUP, SHIPPER_ALIAS,
+    SHIPPER_MASTER, SHIPPER_ACCOUNT, SHIPPER_STORE, SHIPPER_LOCATION, SHIPPER_GROUP, SHIPPER_ALIAS,
+
   };
 
   function validateMaster(entityName, obj) {

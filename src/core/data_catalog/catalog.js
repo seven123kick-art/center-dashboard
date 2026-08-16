@@ -88,8 +88,17 @@
     completion_rule: 'UNSPECIFIED',
     absence_rule: 'UNSPECIFIED',
     states: {
-      PRELIMINARY: { source_label: 'SKDL0002', display_label: '速報' },
-      CONFIRMED:   { source_label: 'SKDL0003', display_label: '確定' }
+      // 【業務仕様確定】CONFIRMED（SKDL0003）は会社として確定した
+      // 会計値であり、決算等にも利用され、確定後に内容が変更される
+      // ことはない（immutable: true）。同一center/year_month/account
+      // について、既にCONFIRMEDが存在する状態で内容の異なる
+      // SKDL0003が来た場合、「新Versionだから上書き」とはせず、
+      // 将来はCONFLICT/ERRORとして止める設計とする（D2時点では
+      // 判定ロジック自体は実装せず、Contract上に不変性の意味を
+      // 表現するにとどめる）。PRELIMINARY（SKDL0002）は速報であり
+      // 修正・更新され得るため immutable: false とする。
+      PRELIMINARY: { source_label: 'SKDL0002', display_label: '速報', immutable: false },
+      CONFIRMED:   { source_label: 'SKDL0003', display_label: '確定', immutable: true }
     },
     // 確定が優先されるが、CONFIRMED取込後もPRELIMINARYのSOURCEを
     // 削除する意味ではない。
@@ -127,6 +136,7 @@
     year_month_detection: 'USER_SELECTED_OR_FILENAME',
     center_detection: 'UNSPECIFIED',
     completion_rule: 'UNSPECIFIED',
+    revision_policy: 'REVISABLE', // 将来Revision管理対象になり得る（D2時点では保存機構未実装）
     absence_rule: 'UNSPECIFIED',
   };
 
@@ -141,7 +151,7 @@
     filename_policy: 'RANDOM',
     target_scope: 'CENTER_MONTH',
     business_role: '荷主・エリア（郵便番号/住所）・商品別の配送実績（物量・金額）を提供する',
-    primary_keys: ['center_id', 'year_month', 'slip_number'],
+    primary_keys: ['center_id', 'year_month', 'slip_no'],
     link_keys: [],
     canonical_fields: [],
     validation: {
@@ -155,6 +165,7 @@
     year_month_detection: 'USER_SELECTED_OR_FILENAME',
     center_detection: 'UNSPECIFIED',
     completion_rule: 'UNSPECIFIED',
+    revision_policy: 'REVISABLE', // 将来Revision管理対象になり得る（D2時点では保存機構未実装）
     absence_rule: 'UNSPECIFIED',
     // 正直な報告：実装（UI）上は「商品・住所CSV」(field-product-file-input)
     // という名称で存在する。列構成（原票番号/郵便番号/住所/商品/作業内容/
@@ -175,8 +186,8 @@
     filename_policy: 'UNSPECIFIED',
     target_scope: 'CENTER_DAY',
     business_role: '配達便（ヘッド番号・配達日・作業者・原票番号）の一覧を提供する',
-    primary_keys: ['center_id', 'delivery_date', 'head_number'],
-    link_keys: ['slip_number'],
+    primary_keys: ['center_id', 'delivery_date', 'head_no'],
+    link_keys: ['slip_no'],
     canonical_fields: [],
     validation: {
       content_check: 'DEFERRED_TO_EXISTING_PARSER',
@@ -191,6 +202,7 @@
     year_month_detection: 'DERIVED_FROM_CONTENT',
     center_detection: 'UNSPECIFIED',
     completion_rule: 'UNSPECIFIED',
+    revision_policy: 'REVISABLE', // 将来Revision管理対象になり得る（D2時点では保存機構未実装）
     absence_rule: 'UNSPECIFIED',
   };
 
@@ -205,8 +217,8 @@
     filename_policy: 'UNSPECIFIED',
     target_scope: 'CENTER_DAY',
     business_role: '配達便（ヘッド番号・配達日）ごとの傭車支払額を提供する',
-    primary_keys: ['center_id', 'delivery_date', 'head_number'],
-    link_keys: ['head_number', 'delivery_date'],
+    primary_keys: ['center_id', 'delivery_date', 'head_no'],
+    link_keys: ['head_no', 'delivery_date'],
     canonical_fields: [],
     validation: {
       content_check: 'DEFERRED_TO_EXISTING_PARSER',
@@ -221,13 +233,18 @@
     year_month_detection: 'DERIVED_FROM_CONTENT',
     center_detection: 'UNSPECIFIED',
     completion_rule: 'UNSPECIFIED',
+    revision_policy: 'REVISABLE', // 将来Revision管理対象になり得る（D2時点では保存機構未実装）
     /* 重要（ご指示に基づく明示的な制約）：
        NO_RECORD（資料に存在しない）とZERO_PAYMENT（0円支払）は別。
        資料に存在しないことを0円支払として扱ってはならない。
        また「支払資料に存在しない＝自社便」とも判定してはならない
        （この業務判定に必要な情報は今回のコード調査だけでは確認
        できないため、prohibited_inferenceとして明示するにとどめ、
-       実際の判定ロジックはD1では実装しない）。 */
+       実際の判定ロジックはD1では実装しない）。
+       【正直な報告】既存parseHeadPaymentSheetはyoshaFeeへ||0を
+       使用しており、Excelに正当に0円と記入された場合とセルが
+       空欄だった場合を既存STATEから区別できない既知の課題がある。
+       本Catalog・Canonical Builderはこれを補正・推測しない。 */
     absence_rule: {
       NO_RECORD: '当該ヘッド番号・配達日の組合せが傭車料確認資料に一切存在しない状態。ZERO_PAYMENTと同一視しない。',
       ZERO_PAYMENT: '傭車料確認資料に存在し、金額として0円が明記されている状態。NO_RECORDとは区別する。',

@@ -1,264 +1,347 @@
-Version6 D1: Data Catalog／データ基盤契約 実装
-（2026-08-16、業務仕様確定に伴う修正反映版）
+Version6 D1契約改訂＋D2-1 Canonical Builder再構成
+（2026-08-16、投入前最終修正版）
 
-【今回の追加修正（業務仕様確定）】
-先行して投入したD1差分について、以下の業務仕様が確定した：
-  新データ基盤（本Catalog）が対象とする収支データは
-    SKDL0002 = 速報（PRELIMINARY）
-    SKDL0003 = 確定（CONFIRMED）
-  SKDL0001（日報）は既存システムの既存機能として現状維持し、
-  現時点で新データ基盤の対象にはしない。
-これに伴い、src/core/data_catalog/catalog.js のPL_ACTUAL定義を
-修正した（PRELIMINARY.source_labelを'SKDL0001'から'SKDL0002'へ
-訂正、display_labelも'日報'から'速報'へ訂正）。前回投入前の
-差分ZIPだったため、既存システムへは一切影響していない。
-既存システムのSKDL0001に関する表示・取込処理
-（center.html／src/app.js）は今回も一切変更していない
-（共存構成）。
+【今回の追加修正（route_id一意化・DELIVERY_ATTEMPT重複防止・center.html同梱）】
 
-【変更ファイル】
-- center.html（前回差分から変更なし。script追加4行のみ）
+■1. DELIVERY_ROUTEの一時ID／一意化をhead_no単独へ変更
+canonical_builder.jsのbuildRoutesFromState()内、route_idの
+生成規則を tempKey('ROUTE', ym, headNo, date) から
+tempKey('ROUTE', headNo) へ変更した。head_noは会社共通・日付を
+跨いだ再利用なし・他センターとの重複なしの強い業務キーである
+ため、同一head_noは常に同一DELIVERY_ROUTEとして扱う。
+ym/delivery_date/center_idは一意性条件から外し、最初に観測された
+値を属性として保持するにとどめた（将来の整合確認／CONFLICT検出
+材料。CONFLICT判定ロジック自体は今回実装していない）。
+ROUTE_WORKERの一時IDもroute_id基準（tempKey('RW', routeId,
+workerLabel)）へ揃えた。
+buildRoutePaymentsFromState()内のroute_id（DELIVERY_ROUTEへの
+参照）も同じ規則（tempKey('ROUTE', headNo)）へ揃え、
+DELIVERY_ROUTEとROUTE_PAYMENTの参照整合性を確保した
+（route_payment_id自体は変更していない）。
 
-【新規追加ファイル】
-- src/core/data_catalog/catalog.js（今回のセッションでPL_ACTUAL
-  のPRELIMINARY/CONFIRMED定義を修正）
-- src/core/data_catalog/contract.js（前回差分から変更なし）
-- src/core/data_catalog/quality.js（前回差分から変更なし）
-- src/core/data_catalog/master.js（前回差分から変更なし）
+■2. DELIVERY_ATTEMPT重複防止
+deliveryAttemptsを配列からMap（キー："slip_no|head_no"）へ変更
+した。同一slip_no+head_noの組合せがSOURCE解析上複数回現れても
+（例：route.slips配列内での重複）、Canonical Attemptは1件のみ
+生成する。異なるhead_noであれば引き続き別Attemptとして区別する
+（潰さない）。これはSOURCE履歴を削除する処理ではなく、今回の
+読取専用Canonical Snapshot上での重複生成防止にとどまる。
 
-============================================================
-① 最新コードで確認した既存構造
-============================================================
-- ES Modulesは使用されていない。全てのJSファイルは
-  <script defer> によるグローバルスクリプトロードで、
-  IIFE + window.X への公開という統一パターンを持つ。
-- src配下は src/app.js（ルート）、src/core/、src/core/repository/
-  （既存のサブディレクトリ構成の前例）、src/modules/、src/field/、
-  src/ui/ という構成。
-- scriptタグは center.html にのみ存在し、index.html /
-  kitasaitama.html / toda.html は src配下のスクリプトを一切
-  ロードしていない（別ページとして独立している）ことを確認した。
-- 既存の src/core/repository/ という「関連する複数ファイルを
-  サブディレクトリへまとめる」前例に倣い、新規モジュールは
-  src/core/data_catalog/ というサブディレクトリへ配置した
-  （「src/core/data と決め打ちしない」という指示に従い、既存
-  構造の前例から自然に導いた配置である）。
+■3. center.htmlを完成ZIPへ同梱
+前回のD2-1差分ZIPが未投入だったため、canonical_builder.jsを
+ロードするscriptタグ（既存D1の4本に続く1行、前回作成済みのもの
+から今回変更なし）を含むcenter.htmlを、今回の完成ZIPへ含めた。
+今回のセッションでcenter.html自体は一切編集していないことを、
+前回のD2-1完成版とのdiffで確認済み（完全一致）。
 
-============================================================
-② 現在の帳票判定処理の所在（調査結果、変更していない）
-============================================================
-1. PL_ACTUAL（SKDL）: src/app.js の CSV.parseSKDL(text, monthCol)
-   （591行目）。IMPORT.processCSV/handleFiles（同ファイル）が
-   拡張子(.csv/.xlsx)の一次判定を行う。
-2. WORKER_SALES（作業者別CSV）: src/field/field_core.js の
-   validateWorkerCsvSignature()（343行目）・
-   assertNotForeignCsv()（307行目）・parseWorkerCsvRows()
-   （475行目）。
-3. SHIPPER_AREA（商品・住所CSV）: 同ファイルの
-   validateProductCsvSignature()（379行目）・
-   parseProductAddressRows()（707行目）。
-4. DELIVERY_LIST（配達持出リストPDF）: src/field/route_analysis.js
-   の parsePdf()（197行目）・parsePageText()（67行目）・
-   importFiles()（236行目、拡張子.pdf判定＋PDFマジックバイト
-   判定を含む）。
-5. ROUTE_PAYMENT（配達ヘッド傭車料確認）: 同ファイルの
-   parseHeadPaymentSheet()（305行目）・
-   importHeadPaymentFiles()（333行目、拡張子.xls/.xlsx判定を
-   含む）。
-これらの既存判定処理は今回一切削除・移動・置換していない
-（diff確認済み、該当ファイルは今回のセッションで一切変更して
-いない）。
+【変更ファイル（今回のセッション分）】
+- src/core/data_catalog/canonical_builder.js（route_id一意化・
+  DELIVERY_ATTEMPT重複防止の修正）
+
+【今回のZIPに含めるファイル（GitHub投入に必要な全ファイル）】
+- src/core/data_catalog/contract.js（前回セッションで改訂、今回
+  変更なし）
+- src/core/data_catalog/master.js（前回セッションで改訂、今回
+  変更なし）
+- src/core/data_catalog/catalog.js（前回セッションで改訂、今回
+  変更なし）
+- src/core/data_catalog/canonical_builder.js（今回修正）
+- center.html（前回作成のcanonical_builder.js読込1行を含む。
+  今回のセッションでは編集していない）
 
 ============================================================
-③ 新規追加ファイル
+追加テスト結果
 ============================================================
-src/core/data_catalog/catalog.js
-src/core/data_catalog/contract.js
-src/core/data_catalog/quality.js
-src/core/data_catalog/master.js
+Node.js環境で、同一head_noが異なる年月・日付で複数回現れる
+ケース、同一slip_no+head_noがroute.slips配列内で重複するケース、
+同一slip_noが異なるhead_noへ現れるケースを含むモックSTATEで、
+以下7項目を確認した：
+1. 同じhead_noで年月・日付が異なる入力を与えてもDELIVERY_ROUTEは
+   1件 → OK（delivery_dateは最初に観測された値を保持）
+2. 同一slip_no+head_noが重複入力されてもDELIVERY_ATTEMPTは1件
+   → OK
+3. 同一slip_noでhead_noが異なればDELIVERY_ATTEMPTは複数件（2件）
+   → OK
+4. ROUTE_PAYMENTのroute_idがDELIVERY_ROUTEと一致
+   → OK（両方とも"ROUTE_3811111111"で一致）
+5. STATE不変 → OK（JSON.stringify比較で完全一致）
+6. 全JS構文正常 → OK（エラー0件）
+7. center.html差分はcanonical_builder.jsのscript追加1行だけ
+   → OK（前回D2-1完成版とdiffで完全一致、今回のセッションで
+   center.html自体は一切編集していないことを確認）
 
 ============================================================
-④ 変更した既存ファイル
-============================================================
-center.html のみ。src/core/loader.js の直後に、新規4ファイルの
-<script defer> タグを4行追加した。
-
-【なぜこの変更が必要だったか】
-本プロジェクトはscriptタグによるグローバルロード方式のため、
-HTMLへの追加なしでは新モジュールがブラウザ上で一切ロードされず、
-指示12にある「Data Catalogから5帳票を取得可能であることの確認」
-というテスト自体が実施不能になる。これは「将来使うから」という
-理由ではなく、「D1のテスト要件を満たすために必須の最小限の
-接続」である。既存モジュールとの依存関係は一切発生させておらず
-（新規4ファイルはwindow.X形式で公開するのみで、既存コードは
-これらを一切参照・呼出ししていない）、ロード順序も既存モジュール
-の直後（読み込まれるだけで実行時に何の副作用も起こさない位置）
-とした。
-
-============================================================
-⑤ 各ファイルの役割
-============================================================
-catalog.js：DATA_CATALOG。PL_ACTUAL/WORKER_SALES/SHIPPER_AREA/
-  DELIVERY_LIST/ROUTE_PAYMENTの5 document typeを中央定義する。
-  get()/has()/list()/all()というアクセサのみを提供し、既存の
-  取込処理・判定処理は一切呼び出さない（既存parserの所在を
-  「参照情報」としてコメント・validation.existing_referenceに
-  記録するにとどめる）。
-
-contract.js：DATA_CONTRACT。SOURCE_FILE/SOURCE_RECORD/
-  IMPORT_BATCH（SOURCE層）、DELIVERY_ROUTE/DELIVERY_SLIP/
-  ROUTE_WORKER/ROUTE_PAYMENT/SALES_DETAIL/PRODUCT_DETAIL/
-  DELIVERY_LOCATION（NORMALIZED層）、ACCOUNTING_FACT
-  （CANONICAL層）という11エンティティの契約を定義する。
-  validate(entityName, obj)という軽量な必須フィールド検証関数を
-  提供する。DBテーブル・IndexedDB schema・Supabase schemaへの
-  変更は一切含まない。
-
-quality.js：DATA_QUALITY。品質ステータス8種
-  （OK/PROVISIONAL/PARTIAL/UNMATCHED/CONFLICT/MISSING_SOURCE/
-  STALE/ERROR）とLink Status4種（FULL/PARTIAL/HEAD_ONLY/
-  UNMATCHED）を中央定義する。isKnownZero()/isUnknown()/
-  describeValue()という、0と未確定値を混同しないための判定
-  専用ヘルパーを提供する（値の補完・デフォルト化は一切行わない）。
-
-master.js：MASTER_CONTRACT（CENTER/COMPANY/WORKER/SHIPPER関連の
-  12エンティティ契約）とMASTER_RESOLUTION（4種のentity_typeに
-  対する共通照合結果構造）を定義する。WORKER_MASTER（人物）・
-  WORKER_ASSIGNMENT（所属履歴、valid_from/valid_to）・
-  ROUTE_WORKER（配送便への参加、contract.js側）を明確に分離した
-  構造とした。
-
-============================================================
-⑥ DATA_CATALOG定義一覧
-============================================================
-PL_ACTUAL / WORKER_SALES / SHIPPER_AREA / DELIVERY_LIST /
-ROUTE_PAYMENT の5件。各定義は document_type / display_name /
-source_system / allowed_extensions / filename_policy /
-target_scope / business_role / primary_keys / link_keys /
-canonical_fields / validation / year_month_detection /
-center_detection / completion_rule / absence_rule を持つ。
-未確定の項目（center_detection・completion_rule等の多く）は
-'UNSPECIFIED' として明示した（推測で埋めていない）。
-
-PL_ACTUAL.states（業務仕様確定版）：
-  PRELIMINARY: { source_label: 'SKDL0002', display_label: '速報' }
-  CONFIRMED:   { source_label: 'SKDL0003', display_label: '確定' }
-既存システムのSKDL0001（日報）は本Catalogの対象外であり、
-既存の取込UI・処理（center.html／src/app.js）はそのまま現状
-維持している。filename_policyは'UNSPECIFIED'のままとし、
-実ファイル名がSKDL0002.csv/SKDL0003.csvと完全一致する前提には
-していない（内容判定に依存する既存方式を踏襲）。
-
-============================================================
-⑦ Data Contract定義一覧
-============================================================
-SOURCE_FILE / SOURCE_RECORD / IMPORT_BATCH / DELIVERY_ROUTE /
-DELIVERY_SLIP / ROUTE_WORKER / ROUTE_PAYMENT / SALES_DETAIL /
-PRODUCT_DETAIL / DELIVERY_LOCATION / ACCOUNTING_FACT の11件。
-
-============================================================
-⑧ Data Quality定義一覧
-============================================================
-STATUS: OK / PROVISIONAL / PARTIAL / UNMATCHED / CONFLICT /
-MISSING_SOURCE / STALE / ERROR
-LINK_STATUS: FULL / PARTIAL / HEAD_ONLY / UNMATCHED
-
-============================================================
-⑨ Master関連契約
-============================================================
-CENTER_MASTER / CENTER_ALIAS / COMPANY_MASTER / COMPANY_ALIAS /
-WORKER_MASTER / WORKER_ASSIGNMENT / WORKER_ALIAS /
-SHIPPER_MASTER / SHIPPER_ACCOUNT / SHIPPER_LOCATION /
-SHIPPER_GROUP / SHIPPER_ALIAS の12件、および
-MASTER_RESOLUTION（entity_type/source_value/normalized_value/
-resolved_id/match_method/match_confidence/status）。
-
-============================================================
-⑩〜⑬ 既存STATE/IndexedDB/Supabase/Cloud/parserへの影響
-============================================================
-いずれも影響なし。新規4ファイルは、window.X形式で定義オブジェクト
-を公開するだけであり、STATE/IndexedDB/Supabase/Cloudへの読み書き
-を一切行わない（コード上、localStorage/indexedDB/CLOUD等への
-参照が一切存在しないことを確認済み）。既存parser
-（CSV.parseSKDL/parseWorkerCsvRows/parseProductAddressRows/
-parsePdf/parseHeadPaymentSheet）は今回のセッションで1文字も
-変更していない。
-
-============================================================
-⑭⑮ UI・業務ロジックへの影響
-============================================================
-いずれも影響なし。center.htmlへの変更はscriptタグの追加のみで、
-既存のHTML要素・CSS・イベントハンドラは一切変更していない。
-既存の業務計算ロジック・便別採算計算・取込処理の判定結果には
-今回のモジュールは一切関与しない。
-
-============================================================
-⑯ テスト結果
-============================================================
-Node.js環境で新規4モジュールを実際にロードし、以下を確認した：
-・全JS構文チェック：エラー0件
-・DATA_CATALOG.get()で5帳票全てが正しく取得できること
-・DATA_CATALOG.list()が5件のdocument_typeを返すこと
-・存在しないdocument_type（"UNKNOWN_TYPE"）に対して、get()は
-  null、has()はfalseを返すこと（例外を投げない明確な挙動）
-・DATA_QUALITY.listStatuses()が8種類の品質ステータスを、
-  listLinkStatuses()が4種類のLink Statusを返すこと
-・describeValue(0)='KNOWN_ZERO'、describeValue(null)=
-  'UNKNOWN_OR_NULL'として、0と未確定値が明確に区別されること
-・DATA_CONTRACT.validate('ROUTE_WORKER', {})で必須フィールド
-  欠落（route_worker_id/route_id）が正しく検知されること
-・DELIVERY_ROUTEがworker_idフィールドを持たず、ROUTE_WORKERとの
-  ONE_TO_MANYリレーションとして表現されていること
-・MASTER_RESOLUTION.validate()で不正なentity_typeが正しく
-  検知されること
-・既存ファイル（src/app.js/field_core.js/route_analysis.js/
-  bulk_import.js等）が今回のセッションで一切変更されていない
-  ことをタイムスタンプ・diff比較で確認した
-
-============================================================
-⑰ D2へ持ち越す事項
-============================================================
-- STATEからCanonicalの本格生成
-- CanonicalのSTATE/IndexedDB/Supabaseへの保存
-- 既存画面のCanonicalへの接続
-- 既存parserのCatalogベースへの全面変更
-- Master Resolverの実装（実際の名寄せロジック）
-- センター判定ロジック・年月自動判定ロジックの精緻化
-  （多くの項目を今回UNSPECIFIEDのまま残した）
-- WORKER_ASSIGNMENTの「同一時点で複数会社に同時所属しない」と
-  いう業務ルールの実際のvalidation実装
-
-============================================================
-⑱ 残課題
-============================================================
-【解消済み事項】
-前回差分ではご指示「SKDL0002/SKDL0003」と実コード確認結果
-「SKDL0001/SKDL0003」の間に相違があったが、業務仕様確定
-（新データ基盤の対象はSKDL0002=速報／SKDL0003=確定、SKDL0001は
-既存システムの既存機能として対象外）を受けて、本差分で
-PL_ACTUAL.statesを修正済みである。既存システムのSKDL0001処理は
-今回も変更していない。
-
-SHIPPER_AREA（14.荷主別配送エリア物量）については、UI実装上の
-名称「商品・住所CSV」との対応関係を、列構成（原票番号/郵便番号/
-商品/作業内容/金額/荷主コード/荷主名）からの推測にとどめており、
-正式帳票名との対応を実コード上で断定できる記述は見つからな
-かった。
-
-ROUTE_PAYMENT（配達ヘッド傭車料確認）のsource_systemは、実コード
-上「月末Excel」という入手経路のみ確認でき、生成元システムは
-確認できなかったため、source_system自体をUNSPECIFIEDとした。
-
-実ブラウザでの最終読み込み確認（Ctrl+F5後の動作確認）は開発環境
-の制約上未実施。
-
-============================================================
-⑲ 最終判定
+最終判定（今回分）
 ============================================================
 PASS
-（既存コードを一切変更せず、新規4ファイル＋center.htmlへの
-最小限のscript追加のみでD1を実装した。既存起動処理・既存取込
-処理・既存STATE/Storage/Cloud処理への影響がないことを確認した。
-5帳票の取得・Data Quality定数・Data Contract validationの
-テストが全て成功した。ご指示との相違点（SKDL番号）は正直に
-報告し、推測で埋めることを避けた）
+（route_idの一意化基準をhead_no単独へ正しく揃え、DELIVERY_ATTEMPT
+の重複生成をMapベースで防止した。ROUTE_PAYMENT側のroute_id生成も
+同じ規則に統一し、DELIVERY_ROUTEとの参照整合性を確認した。
+center.htmlは今回のセッションで編集しておらず、前回作成済みの
+canonical_builder.js読込1行を含む状態のまま完成ZIPへ同梱した。
+既存parser・STATE・Storage・Cloud・UIには一切触れていない）
+
+============================================================
+前回セッションの内容（参考、今回のcanonical_builder.js以外は変更なし）
+============================================================
+
+【位置付け】
+D1（Data Catalog／Data Contract）はGitHub投入済み。D2-1
+（Canonical Builder）は未投入。D2-1実装後に実業務仕様を追加確認
+した結果、D1の一部Contractが実態に合わないことが判明したため、
+本番利用前の今回、互換パッチではなくD1基礎Contract自体を正しい
+業務モデルへ改訂し、D2-1もそのContractへ合わせて再構成した。
+
+【変更ファイル】
+- src/core/data_catalog/contract.js（改訂）
+- src/core/data_catalog/master.js（改訂）
+- src/core/data_catalog/catalog.js（改訂）
+- src/core/data_catalog/canonical_builder.js（再構成）
+- center.html（変更なし、前回D2-1差分のまま。今回は新規追加ファイルなし）
+
+============================================================
+1. 変更ファイル
+============================================================
+src/core/data_catalog/{contract.js, master.js, catalog.js,
+canonical_builder.js} の4ファイルのみ。center.htmlは前回D2-1差分
+から変更なし（新規モジュール追加がなかったため）。app.js /
+bulk_import.js / Repository / IndexedDB schema / Supabase schema
+/ Cloud / 既存parser / 既存業務画面はいずれも変更していない。
+
+============================================================
+2. D1 Contract変更点
+============================================================
+contract.js：
+・DELIVERY_ROUTE：head_number→head_no へ改称（会社共通の強い
+  業務キーであることを明示）。center+delivery_date+head_noは
+  整合確認に利用できるが、一意性の根拠はhead_no自体が持つ、と
+  明記した。
+・DELIVERY_SLIP：slip_number→slip_no へ改称し、資料間LINKの
+  PRIMARY級業務キーと明記。単一route_id直接参照を廃止（同一原票が
+  複数回持ち出される・複数センターに現れることを表現するため）。
+  shipper_reference_no（荷主NO、配送案件側の参照番号）・
+  shipper_source_code（荷主コードのSOURCE生値）を追加。
+  center_id+delivery_date+slip_noを一意キーにしないことを明記。
+・DELIVERY_ATTEMPT（新規Entity）：DELIVERY_SLIPとDELIVERY_ROUTEを
+  仲介する「配送試行」。attempt_id/slip_id/route_id/attempt_date/
+  center_id/attempt_status/source_document_type/source_file_id/
+  source_record_id/quality_status を持つ。
+・ROUTE_WORKER：worker_position（1/2）・worker_role（PRIMARY/
+  SECONDARY）を追加。ただし現STATEからは判定不能なため、Builder
+  側は常にnullとする（後述）。
+・ROUTE_PAYMENT：head_number→head_no へ改称。1ヘッド=1レコード
+  という既存構造自体は業務仕様（1ヘッドにつき支払先会社1社・
+  支払金額1つ）と一致していたため、フィールド構造は維持した。
+・SALES_DETAIL：1 DELIVERY_SLIPが複数center_id・複数amount_type
+  を持てる構造（原票総売上が複数センター・複数売上種別に分かれる
+  実態）へ改訂した。worker_idを売上帰属先として追加。D2-1では
+  実装しない、将来ルールとしての整理にとどめた。
+・PRODUCT_DETAIL：1 DELIVERY_SLIP : N PRODUCT_DETAILを明記。
+  size_categoryフィールドを追加（サイズ区分1〜7を想定、D2時点では
+  未実装）。将来の2段階分類（明細種別→商品名）方針をコメントで
+  整理し、今回は分類ロジック自体を実装しないことを明記した。
+
+master.js：
+・SHIPPER_ACCOUNTへbilling_condition_labelを追加し、「1荷主企業に
+  複数のSHIPPER_ACCOUNTが存在するのは正常（請求先・料金・契約
+  違い等）」という業務仕様をコメントで明記した。
+・SHIPPER_STORE（新規Entity）を追加。荷主コードと店舗は必ず1:1
+  ではないため独立Entityとし、shipper_account_idへの参照は任意
+  とした（店舗マスタ照合ができないことを理由に取込不能とする
+  構造にしないため）。
+
+catalog.js：
+・PL_ACTUAL.statesにimmutableフラグを追加。CONFIRMED（SKDL0003）
+  はimmutable:true、PRELIMINARY（SKDL0002）はimmutable:falseとし、
+  「CONFIRMEDは確定後に変更されない」という業務仕様をContract上に
+  表現した。新しい概念（別体系のフィールド）を追加するのではなく、
+  既存のstates構造への属性追加にとどめた。
+・WORKER_SALES/SHIPPER_AREA/DELIVERY_LIST/ROUTE_PAYMENTへ
+  revision_policy: 'REVISABLE' を追加し、将来Revision管理対象に
+  なり得ることを明示した（D2時点では保存機構自体は実装しない）。
+・primary_keys/link_keysのhead_number→head_no、slip_number→
+  slip_noへの表記統一。
+
+============================================================
+3. 新DELIVERY_ATTEMPT仕様
+============================================================
+DELIVERY_SLIP 1 : N DELIVERY_ATTEMPT、DELIVERY_ATTEMPT N : 1
+DELIVERY_ROUTE という関係で追加した。attempt_statusは、SOURCEから
+完了/不在等を確実に判定できないため常に'UNKNOWN'とする（「配達
+持出予定リストに最後に出現した日＝完了」という推測は行わない）。
+
+============================================================
+4. DELIVERY_SLIPの一意性
+============================================================
+slip_no（原票NO）単独を一意性の根拠とした。center_id・
+delivery_date・routeへは依存しない。同一原票が複数センターの
+資料に現れても（例：戸田で幹線、北埼玉で配送）、同一のDELIVERY_SLIP
+として扱う。
+
+============================================================
+5. head_noの扱い
+============================================================
+DELIVERY_ROUTE・ROUTE_PAYMENTともhead_numberからhead_noへ改称し、
+「会社共通・重複なし・日付を跨いだ再利用なしの強い業務キー」で
+あることをコメントで明記した。内部route_idは引き続き別に維持する。
+
+============================================================
+6. ROUTE_WORKERの実STATE調査結果
+============================================================
+STATE.routeData.routes[].worker（src/field/route_analysis.js
+parsePageText由来）は単一の文字列であり、正規表現も単一の
+「作業者」ラベルのみを抽出する実装で、作業者1/2を区別する仕組みは
+存在しない。
+STATE.routeData.headPayments[].workerCode（parseHeadPaymentSheet
+由来）も「作業者１」列のみを読み、「作業者２」列に対応する読込は
+存在しない。
+したがって、現行STATEからはROUTE_WORKERのworker_position・
+worker_roleを確実に判定できないと結論した。SOURCE情報不足として
+本CHANGELOGで報告し、Canonical Builderはこれらのフィールドを
+推測でPRIMARY確定せず、常にnullとして生成する。
+
+============================================================
+7. 荷主Contract変更
+============================================================
+SHIPPER_MASTER（荷主企業）とSHIPPER_ACCOUNT（エスラインギフ側の
+荷主コード・契約単位）の分離は既存D1で既に存在していたため、
+コメントで業務仕様（1荷主企業に複数コードが存在するのは正常）を
+明記する形で整理した。新規にSHIPPER_STORE（店舗）を追加し、
+荷主コードと店舗が必ず1:1ではないという業務仕様を、
+shipper_account_idへの任意参照という形で表現した。荷主NO
+（shipper_reference_no）は、マスタ側ではなくDELIVERY_SLIP側の
+フィールドとして持たせた（配送案件側の参照番号のため）。
+
+============================================================
+8. SKDL0003 immutable対応
+============================================================
+既存のPL_ACTUAL.statesオブジェクトへimmutable属性を追加する形で
+表現した（新しいトップレベル概念を追加していない）。CONFIRMED
+（SKDL0003）はimmutable:trueとし、「同一center/year_month/account
+について既にCONFIRMEDが存在する状態で内容の異なるSKDL0003が
+来た場合、新Versionだから上書きとはしない」という業務仕様を
+コメントで明記した。ただし、この判定を実際に行うロジック
+（CONFLICT/ERRORとして止める処理）自体はD2以降の課題であり、
+今回はContract上に不変性の意味を表現するにとどめた。
+
+============================================================
+9. Builder変更
+============================================================
+canonical_builder.jsを全面的に再構成した：
+・DELIVERY_SLIP生成をslip_no単独でのMapベース重複排除へ変更
+  （従来はroute単位で暗黙に1件ずつ生成していた）。
+・DELIVERY_ATTEMPT生成を新規追加（slip_no+head_noのdeterministic
+  keyで、同じ原票の再持出を潰さない）。
+・DELIVERY_ROUTE/ROUTE_PAYMENTのフィールド名をhead_noへ統一。
+・ROUTE_WORKERのworker_position/worker_roleを常にnullとし、
+  コメントでSOURCE情報不足の理由を明記した。
+・ROUTE_PAYMENT生成ロジック自体（NO_RECORD/ZERO_PAYMENT判定）は
+  前回から変更していない。
+
+============================================================
+10. ZERO_PAYMENT/NO_RECORD
+============================================================
+前回同様、資料に該当ヘッドが存在しない場合はamount:null/
+absence_status:'NO_RECORD'、資料に存在し金額0円の場合は
+amount:0/absence_status:'ZERO_PAYMENT'として区別する。
+「NO_RECORD＝自社便」という推測は一切行っていない。
+
+【既知のSOURCE品質課題（正直な報告、変更していない）】
+既存parseHeadPaymentSheet（src/field/route_analysis.js）は
+yoshaFeeへNumber(...)||0を使用しており、Excelに正当に0円と
+記入された場合とセルが空欄だった場合を既存STATEから区別できない。
+今回は既存parserを変更せず、Canonical Builderでもこれを復元・
+推測していない（catalog.jsのROUTE_PAYMENT定義コメントおよび
+canonical_builder.jsのコメントに明記した）。
+
+============================================================
+11. SOURCEから判断不能な項目
+============================================================
+・ROUTE_WORKERのworker_position/worker_role（上記6番）
+・DELIVERY_ATTEMPTのattempt_status（完了/不在等、常にUNKNOWN）
+・DELIVERY_SLIPのshipper_reference_no/shipper_source_code
+  （STATE.routeData.routesには保持されていないため常にnull。
+  商品・住所CSV側のデータであり、今回のBuilder対象範囲外）
+・center_id（STATE.routeData自体には保持されておらず、
+  window.CENTERを読み取るのみ。未取得の場合はnull）
+
+============================================================
+12. 副作用確認
+============================================================
+buildSnapshot()はpure関数として実装されており、入力STATEオブジェ
+クト・その配下の配列/オブジェクトを直接書き換える処理は一切ない。
+テストでJSON.stringify比較により、実行前後でSTATEが完全一致する
+ことを確認した。IndexedDB/localStorage/Supabase/Cloudへの読み書き
+コードは本モジュールに一切存在しない。
+
+============================================================
+13. テスト結果
+============================================================
+Node.js環境で、同一原票が3回（別head×3、うち1回は不在相当の別
+head再持出）持ち出されるケースを含むモックSTATEで、ご指示の
+14項目を確認した：
+1. 同一原票が別HEADに複数回存在してもDELIVERY_SLIPは1件 → OK
+2. DELIVERY_ATTEMPTは複数件（3件） → OK
+3. DELIVERY_ATTEMPTから各HEADへ正しく関連 → OK
+   （3件ともattempt_status:'UNKNOWN'であることも確認）
+4. 同一原票が別センターに現れても別原票化しない → OK（1と同じ
+   検証で確認、slip_no単独一意化のため）
+5. head_noを強いキーとして扱える → OK
+   （DELIVERY_ROUTE.head_noに全headが正しく設定されている）
+6. ROUTE_WORKERは最大2名を表現可能（1:N構造） → OK
+   （構造自体が1:Nであることを確認。今回のテストデータでは
+   各ルート1名分のみ生成）
+7. 現STATEで作業者1/2が識別不能なら推測しない → OK
+   （全ROUTE_WORKERのworker_position/worker_roleがnull）
+8. NO_RECORDとZERO_PAYMENTを区別 → OK
+9. UNKNOWNを0で補完しない → OK（NO_RECORDケースでamount:null）
+10. STATE不変 → OK（JSON.stringify比較で完全一致）
+11. 複数回Builder実行で同一結果 → OK
+12. 全JS構文正常 → OK（エラー0件）
+13. 既存画面無変更 → OK（app.js/bulk_import.js/Repository/
+    既存parser/既存業務画面を含む全既存ファイルが今回のセッションで
+    一切変更されていないことを確認した）
+14. Storage/Cloud副作用なし → OK
+
+============================================================
+14. ZIP内容
+============================================================
+center-dashboard-main/CHANGELOG.txt
+center-dashboard-main/src/core/data_catalog/contract.js
+center-dashboard-main/src/core/data_catalog/master.js
+center-dashboard-main/src/core/data_catalog/catalog.js
+center-dashboard-main/src/core/data_catalog/canonical_builder.js
+（center.htmlは前回D2-1差分から変更していないため今回のZIPには
+含めていない。D1として既にGitHub投入済みのquality.jsも今回変更
+していないため含めていない）
+
+============================================================
+15. 残課題
+============================================================
+・DELIVERY_SLIPのshipper_reference_no/shipper_source_codeは
+  現在のBuilder対象データ（STATE.routeData）からは取得できない。
+  将来、商品・住所CSV（productAddressData）由来のPRODUCT_DETAIL/
+  DELIVERY_LOCATION Builderを実装する際に、原票NOをキーとして
+  DELIVERY_SLIPへ補完する設計が必要になる。
+・ROUTE_WORKERのworker_position/worker_role確定には、既存PDF
+  解析（parsePageText）・既存Excel解析（parseHeadPaymentSheet）
+  側で作業者2に対応する抽出を追加する必要があるが、これは既存
+  parserの変更を伴うため、今回のD2-1スコープでは対応していない。
+・CONFIRMED（SKDL0003）のimmutable制約を実際に強制する
+  CONFLICT/ERROR判定ロジックはD2以降の課題。
+・DELIVERY_ATTEMPT_PRODUCT（商品単位の配送日追跡）は、現在の
+  SOURCEから確実に追跡できることが未確認のため、今回推測で追加
+  していない。
+・SALES_DETAIL/PRODUCT_DETAILの実際のBuilder実装（workerCsvData/
+  productAddressData由来）は次回以降の課題。
+
+============================================================
+16. 最終判定
+============================================================
+PASS
+（D1基礎Contractを実業務仕様（原票NO/head_noの強いキー性、
+DELIVERY_ATTEMPTによるSLIPとROUTEの分離、荷主コード/荷主NO/店舗
+の関係、SKDL0003のimmutable性）へ正しく改訂し、D2-1 Canonical
+Builderもこの新Contractへ合わせて再構成した。既存システム
+（app.js/bulk_import.js/Repository/既存parser/既存業務画面）へは
+一切変更を加えておらず、全テスト項目で期待通りの結果を確認した）
