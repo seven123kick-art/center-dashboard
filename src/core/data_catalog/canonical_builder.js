@@ -5,16 +5,20 @@
    目的：
    既存STATE（routeData / workerCsvData / productAddressData）を
    一切変更せずに読み取り、D1改訂後のData Contract
-   （DELIVERY_ROUTE / DELIVERY_SLIP / DELIVERY_ATTEMPT /
+   （DELIVERY_ROUTE / BUSINESS_SLIP / DELIVERY_ATTEMPT /
    ROUTE_WORKER / ROUTE_PAYMENT）に沿った Canonical Snapshot を
    メモリ上に生成する。
 
+   重要：現D2-1 BuilderはSTATE.routeDataを起点にしているため、
+   HEADを作らず原票へ直接完了登録するBUSINESS_SLIPは生成できない。
+   これは異常ではなく、WORKER_SALES等から原票を生成するD2-2で補完する。
+
    【今回の改訂内容（実業務仕様確認に基づく）】
-   - DELIVERY_SLIPの一意性を slip_no 単独に変更した（従来はroute
+   - BUSINESS_SLIPの一意性を slip_no 単独に変更した（従来はroute
      単位で暗黙に1件ずつ生成していたが、原票NOはSKKS会社共通の
      番号であり、同一原票が複数センター・複数便に現れても同じ
      原票として扱う）。
-   - DELIVERY_SLIPへの単一route_id直接参照を廃止し、新規
+   - BUSINESS_SLIPへの単一route_id直接参照を廃止し、新規
      DELIVERY_ATTEMPT（配送試行）を介してDELIVERY_ROUTEと関連付ける
      構造へ変更した。同一原票の複数回の持出（例：不在→再持出）を、
      それぞれ別のDELIVERY_ATTEMPTとして表現する。
@@ -38,7 +42,7 @@
      読むだけである。
    - 生成するIDは、D2時点ではメモリ上Snapshot専用の
      deterministic keyであり、永続IDではない。
-     DELIVERY_SLIPの一時IDは「年月+slip_no」ではなく「slip_no」
+     BUSINESS_SLIPの一時IDは「年月+slip_no」ではなく「slip_no」
      単独に基づく（原票NOは会社共通の強いキーのため）。
      DELIVERY_ATTEMPTの一時IDは「slip_no+head_no」に基づき、
      同じ原票の再持出（異なるhead_no）を同一Attemptへ潰さない。
@@ -76,7 +80,7 @@
   }
 
   /* ------------------------------------------------------------
-     DELIVERY_ROUTE + ROUTE_WORKER + DELIVERY_SLIP + DELIVERY_ATTEMPT
+     DELIVERY_ROUTE + ROUTE_WORKER + BUSINESS_SLIP + DELIVERY_ATTEMPT
      STATE.routeData を読むだけで、直接の書き換えは行わない。
   ------------------------------------------------------------ */
   function buildRoutesFromState(stateRouteData) {
@@ -84,7 +88,7 @@
 
     const deliveryRoutesById = new Map();     // route_id -> DELIVERY_ROUTE
     const routeWorkers = [];
-    const deliverySlipsByNo = new Map();      // slip_no -> DELIVERY_SLIP（原票NO単独で一意化）
+    const businessSlipsByNo = new Map();      // slip_no -> BUSINESS_SLIP（原票NO単独で一意化。配送有無とは独立）
     const deliveryAttemptsByKey = new Map(); // "slip_no|head_no" -> DELIVERY_ATTEMPT（業務キーでの重複防止）
 
     // center_idはSTATE.routeData自体に存在しないため、読み取り専用で
@@ -154,29 +158,33 @@
         // workerLabelが空の場合はROUTE_WORKERを生成しない
         // （0件＝未確定を、架空のレコードで埋めない）。
 
-        // ---- DELIVERY_SLIP（slip_no単独で一意化） + DELIVERY_ATTEMPT ----
+        // ---- BUSINESS_SLIP（slip_no単独で一意化） + DELIVERY_ATTEMPT ----
         for (const slipNoRaw of safeArray(r.slips)) {
           const slipNo = safeString(slipNoRaw).trim();
           if (!slipNo) continue;
 
-          // DELIVERY_SLIP：原票NOはSKKS会社共通の番号であり、
+          // BUSINESS_SLIP：原票NOはSKKS会社共通の番号であり、
           // 同一原票が複数センター・複数便に現れても別原票にしない。
           // 一時IDは年月やcenter・routeに依存させず、slip_no単独から
           // 生成する。
-          if (!deliverySlipsByNo.has(slipNo)) {
-            deliverySlipsByNo.set(slipNo, {
+          if (!businessSlipsByNo.has(slipNo)) {
+            businessSlipsByNo.set(slipNo, {
               slip_id: tempKey('SLIP', slipNo),
               slip_id_is_temporary: true,
               slip_no: slipNo,
               shipper_reference_no: null, // STATE.routeData.routesには保持されていない
               shipper_source_code: null,  // 同上（商品・住所CSV側の情報であり本Builderの対象データには含まれない）
+              transaction_type: null,
+              completion_status: null,
+              completed_at: null,
+              business_pattern: null, // HEADがあるだけでSTANDARD_DELIVERY等を推測しない
               source_document_type: 'DELIVERY_LIST',
               source_file_id: null,
               source_record_id: null,
               quality_status: qualityConst('OK', 'OK'),
             });
           }
-          const slipId = deliverySlipsByNo.get(slipNo).slip_id;
+          const slipId = businessSlipsByNo.get(slipNo).slip_id;
 
           // DELIVERY_ATTEMPT：この原票がこのheadへ持ち出されたこと
           // 自体はroute.slipsから確実に読み取れるため生成する。
@@ -210,7 +218,7 @@
     return {
       deliveryRoutes: [...deliveryRoutesById.values()],
       routeWorkers,
-      deliverySlips: [...deliverySlipsByNo.values()],
+      businessSlips: [...businessSlipsByNo.values()],
       deliveryAttempts: [...deliveryAttemptsByKey.values()],
     };
   }
@@ -309,7 +317,7 @@
     const state = sourceState || (typeof window !== 'undefined' ? window.STATE : null);
     const routeDataInput = state ? state.routeData : [];
 
-    const { deliveryRoutes, routeWorkers, deliverySlips, deliveryAttempts } = buildRoutesFromState(routeDataInput);
+    const { deliveryRoutes, routeWorkers, businessSlips, deliveryAttempts } = buildRoutesFromState(routeDataInput);
     const routePayments = buildRoutePaymentsFromState(routeDataInput);
 
     return {
@@ -317,14 +325,14 @@
       is_persistent: false, // メモリ上のみ。STATE/IndexedDB/Supabaseへは保存していない
       entities: {
         DELIVERY_ROUTE: deliveryRoutes,
-        DELIVERY_SLIP: deliverySlips,
+        BUSINESS_SLIP: businessSlips,
         DELIVERY_ATTEMPT: deliveryAttempts,
         ROUTE_WORKER: routeWorkers,
         ROUTE_PAYMENT: routePayments,
       },
       counts: {
         DELIVERY_ROUTE: deliveryRoutes.length,
-        DELIVERY_SLIP: deliverySlips.length,
+        BUSINESS_SLIP: businessSlips.length,
         DELIVERY_ATTEMPT: deliveryAttempts.length,
         ROUTE_WORKER: routeWorkers.length,
         ROUTE_PAYMENT: routePayments.length,

@@ -120,7 +120,7 @@
          （1 SHIPPER_MASTER : N SHIPPER_ACCOUNT）
      ・荷主NO＝荷主側が管理する伝票・売上等の番号。主に荷主からの
        問い合わせ時に使用する。これはマスタではなく配送案件側の
-       参照番号のため、SHIPPER側のEntityではなくDELIVERY_SLIP側
+       参照番号のため、SHIPPER側のEntityではなくBUSINESS_SLIP側
        （contract.jsのshipper_reference_no）に持たせている。
      ・店舗は荷主コードと必ず1:1ではない（1荷主コードの中に複数
        店舗コードを持つ荷主と、荷主コード単位で店舗を分ける荷主の

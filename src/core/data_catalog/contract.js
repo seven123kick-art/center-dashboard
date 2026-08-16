@@ -70,7 +70,7 @@
   };
 
   /* ============================================================
-     NORMALIZED層：配送実績の正規化構造
+     NORMALIZED層：原票・配送実績の正規化構造
   ============================================================ */
   const DELIVERY_ROUTE = {
     entity: 'DELIVERY_ROUTE',
@@ -89,7 +89,7 @@
     },
     relations: {
       workers: { to: 'ROUTE_WORKER', cardinality: 'ONE_TO_MANY', note: '1便に作業者は最大2名（PRIMARY/SECONDARY）。3名以上は業務上想定されていない' },
-      // 【業務仕様確定】DELIVERY_SLIPへ単一route_idを固定する設計は廃止。
+      // 【業務仕様確定】BUSINESS_SLIPへ単一route_idを固定する設計は廃止。
       // 同一原票が「8/10持出→不在」「8/12再持出→完了」のように複数回
       // 持ち出されることがあるため、SLIPとROUTEの関係はDELIVERY_ATTEMPT
       // を介したN:Mで表現する。
@@ -98,48 +98,55 @@
     },
   };
 
-  /* ---------- DELIVERY_SLIP（今回改訂） ----------
+  /* ---------- BUSINESS_SLIP（原票） ----------
      【業務仕様確定】
-     ・slip_no（原票NO）はSKKS会社共通システム上の番号であり、他
-       センターからも同一原票を検索できる。センターごとの採番では
-       なく、今後も重複は基本的にあり得ない。そのため slip_no を
-       資料間LINKにおけるPRIMARY級の業務キーとする。
-     ・同一原票が複数センターの資料に現れることがある（例：戸田で
-       幹線扱い、北埼玉で配送扱い）。これは別原票ではないため、
-       center_id + delivery_date + slip_no を原票そのものの一意
-       キーにしない。DELIVERY_SLIPの一意性はslip_no単独に基づく。
-     ・route_idを直接持たせる設計は廃止した。route（便）との関係は
-       DELIVERY_ATTEMPTを介して表現する（1原票が複数回持ち出される
-       ケースを表現するため）。
+     ・原票は「配送案件」そのものではなく、SKKS上の業務・売上の基本単位。
+       通常配送だけでなく、固定チャーター、月末集計、継走等の直接完了、
+       0完などにも原票が存在し得る。
+     ・slip_no（原票NO）は会社共通システム上の強い業務キーで、
+       他センターでの再利用・重複は基本的にない。内部PKはslip_idを別に持つ。
+     ・原票が存在しても配送HEADが存在するとは限らない。HEADを作らず原票へ
+       直接完了情報を登録して売上計上する正常ケースがある。
+     ・逆に固定チャーターのようにHEADが存在して実際に車両・作業者が動いても、
+       売上は個別商品配送の積上げではなく日額等で計上される場合がある。
+     ・したがって原票と配送運行を分離し、配送がある場合のみ
+       DELIVERY_ATTEMPTを介してDELIVERY_ROUTEへ関連付ける。
   ---------------------------------------------------- */
-  const DELIVERY_SLIP = {
-    entity: 'DELIVERY_SLIP',
+  const BUSINESS_SLIP = {
+    entity: 'BUSINESS_SLIP',
     layer: 'NORMALIZED',
     fields: {
-      slip_id: field('string', true, '内部ID。将来の移行等を考慮し、slip_noとは別に維持する'),
-      slip_no: field('string', true, 'SKKS会社共通の原票番号。資料間LINKのPRIMARY級業務キー。旧slip_numberから改称'),
-      shipper_reference_no: field('string', false, '荷主側が管理する伝票・売上等の参照番号（マスタではなく配送案件側の参照情報。荷主からの問い合わせ時に使用）'),
-      shipper_source_code: field('string', false, 'SOURCE上の荷主コード表記。SHIPPER_ACCOUNTとの照合前の生値'),
+      slip_id: field('string', true, '内部ID。slip_noとは別に維持する'),
+      slip_no: field('string', true, 'SKKS会社共通の原票番号。資料間LINKのPRIMARY級業務キー'),
+      shipper_account_id: field('string', false, 'SHIPPER_ACCOUNTへの参照。未照合時はnull'),
+      shipper_reference_no: field('string', false, '荷主側が管理する伝票・売上等の参照番号（荷主NO）'),
+      shipper_source_code: field('string', false, 'SOURCE上の荷主コード。MASTER照合前の生値'),
+      transaction_type: field('string', false, '通常/返品/差替/引取等。SOURCE原値を保持し、金額符号とは独立させる'),
+      completion_status: field('string', false, 'SOURCEから確定できる場合のみ。HEADなしを未完了と推測しない'),
+      completed_at: field('string', false, '最終完了日時/日。SOURCEから確定できる場合のみ'),
+      business_pattern: field('string', false, 'STANDARD_DELIVERY/FIXED_CHARTER/DIRECT_COMPLETION等を将来表現可能。ただしD2時点では文字列推測で自動分類しない'),
       source_file_id: field('string', false),
       source_record_id: field('string', false),
-      quality_status: field('string', false, 'DATA_QUALITYのいずれかを想定。原票NOが一致するがSOURCE間で荷主コード等が矛盾する場合はCONFLICTとする将来設計（今回は判定ロジック自体は実装しない）'),
+      quality_status: field('string', false, 'SOURCE有無だけで異常判定しない。業務パターンと期待SOURCEを踏まえて評価する'),
     },
     relations: {
-      attempts: { to: 'DELIVERY_ATTEMPT', cardinality: 'ONE_TO_MANY', note: '同一原票の複数回の持出（不在再持出等）を表現する' },
-      products: { to: 'PRODUCT_DETAIL', cardinality: 'ONE_TO_MANY' },
+      sales: { to: 'SALES_DETAIL', cardinality: 'ONE_TO_MANY', note: 'HEADなしでも正常に存在できる' },
+      attempts: { to: 'DELIVERY_ATTEMPT', cardinality: 'ONE_TO_MANY_OR_NONE', note: '配送持出がある場合のみ。直接完了では0件が正常' },
+      products: { to: 'PRODUCT_DETAIL', cardinality: 'ONE_TO_MANY_OR_NONE', note: '商品を伴わない集計請求等では0件が正常' },
+      locations: { to: 'DELIVERY_LOCATION', cardinality: 'ONE_TO_MANY_OR_NONE' },
     },
   };
 
   /* ---------- DELIVERY_ATTEMPT（今回新規追加） ----------
      【業務仕様確定】
-     DELIVERY_SLIP（原票そのもの）と、実際の配送試行（いつ・どの便
+     BUSINESS_SLIP（原票）と、実際の配送試行（いつ・どの便
      で持ち出したか）を分離するためのEntity。
      例：8/10persist→不在、8/12再持出→配送完了、のように配達持出
      予定リストには同一原票が複数日にわたって正常に存在し得る。
      一方、売上は最終完了時に1回だけ計上される（金額計算は
      D2-1では実装しない、将来のSALES_DETAIL/RECONCILIATIONの課題）。
 
-     関係：DELIVERY_SLIP 1 : N DELIVERY_ATTEMPT
+     関係：BUSINESS_SLIP 1 : N DELIVERY_ATTEMPT
            DELIVERY_ATTEMPT N : 1 DELIVERY_ROUTE
 
      attempt_statusについて：完了・不在等の状態をSOURCEから確実に
@@ -152,7 +159,7 @@
     layer: 'NORMALIZED',
     fields: {
       attempt_id: field('string', true, '内部ID。D2読取Snapshotではslip_no+head_no等、実際の配送試行を区別できる確実なSOURCEキーから生成する（年月+slip_noのような弱いキーには依存しない）'),
-      slip_id: field('string', true, 'DELIVERY_SLIPへの参照'),
+      slip_id: field('string', true, 'BUSINESS_SLIPへの参照。配送がない原票にはDELIVERY_ATTEMPT自体を作らない'),
       route_id: field('string', true, 'DELIVERY_ROUTEへの参照'),
       attempt_date: field('string', false, 'YYYY-MM-DD'),
       center_id: field('string', false),
@@ -163,7 +170,7 @@
       quality_status: field('string', false, 'DATA_QUALITYのいずれかを想定'),
     },
     relations: {
-      slip: { to: 'DELIVERY_SLIP', cardinality: 'MANY_TO_ONE' },
+      slip: { to: 'BUSINESS_SLIP', cardinality: 'MANY_TO_ONE' },
       route: { to: 'DELIVERY_ROUTE', cardinality: 'MANY_TO_ONE' },
     },
   };
@@ -256,7 +263,7 @@
        RECONCILIATION（突合）で確認する将来設計とする。
      ・1原票の売上が複数センター・複数売上種別へ分かれることが
        ある（例：原票総売上6,000円のうち、北埼玉:配送5,000円、
-       戸田:幹線1,000円）。したがって 1 DELIVERY_SLIP = 1 center
+       戸田:幹線1,000円）。したがって 1 BUSINESS_SLIP = 1 center
        ではない。SALES_DETAILはslip_id単位に対し複数のcenter_id・
        amount_typeを持てる構造とする。
      ・分納（1原票に複数商品、完了日が商品ごとに異なる）について、
@@ -270,12 +277,16 @@
     layer: 'NORMALIZED',
     fields: {
       sales_detail_id: field('string', true),
-      slip_id: field('string', false, 'DELIVERY_SLIPへの参照。1原票が複数センター・複数売上種別のSALES_DETAILを持ち得る'),
+      slip_id: field('string', false, 'BUSINESS_SLIPへの参照。1原票が複数センター・複数売上種別のSALES_DETAILを持ち得る'),
       center_id: field('string', false),
-      worker_id: field('string', false, '売上帰属先。原則ROUTE_WORKERのPRIMARYに対応する想定（将来ルール、D2-1では解決しない）'),
+      worker_id: field('string', false, '売上帰属作業者。ROUTE_WORKER（実際の運行参加者）とは別概念。HEADなし売上でも存在し得る'),
+      worker_company_id: field('string', false, '売上帰属作業者の会社。配送HEADの支払先とは独立してSOURCE/MASTERから解決する'),
       year_month: field('string', false),
-      amount_type: field('string', false, "例：'配送'/'幹線'等を想定するが、D2時点では値の集合を固定しない（UNSPECIFIED許容）"),
-      amount: field('number', false, '0とUNKNOWN/NULLを同一視しない'),
+      revenue_class: field('string', false, 'DELIVERY/TRUNK/DIRECT_SALE/WORK/RECYCLE/OTHER等を将来分類可能。ただしD2時点では推測分類しない'),
+      source_detail_name: field('string', false, 'SOURCE上の作業内容・明細名称を原値として保持'),
+      unit_price: field('number', false),
+      quantity: field('number', false),
+      amount: field('number', false, '0は有効値。UNKNOWN/NULLと同一視しない。詳細SOURCE間の70%差等を自動補正しない'),
       worker_source_label: field('string', false),
       source_file_id: field('string', false),
       source_record_id: field('string', false),
@@ -283,7 +294,7 @@
   };
 
   /* ---------- PRODUCT_DETAIL ----------
-     【業務仕様確定】1 DELIVERY_SLIP : N PRODUCT_DETAIL。
+     【業務仕様確定】1 BUSINESS_SLIP : N PRODUCT_DETAIL。
      商品コード・商品名は荷主ごとに表記揺れ・コード揺れがあり、
      SKKSに会社共通の商品マスタは存在しない（荷主別料金表と
      サイズ区分1〜7を利用する既存運用）。将来的に「明細種別
@@ -297,9 +308,12 @@
     layer: 'NORMALIZED',
     fields: {
       product_detail_id: field('string', true),
-      slip_id: field('string', true, 'DELIVERY_SLIPへの参照。1 DELIVERY_SLIP : N PRODUCT_DETAIL'),
-      product_label: field('string', false, 'SOURCE表記のまま。商品分類（2段階分類）は今回未実装'),
-      work_type_label: field('string', false),
+      slip_id: field('string', true, 'BUSINESS_SLIPへの参照。1 BUSINESS_SLIP : N PRODUCT_DETAIL'),
+      source_product_code: field('string', false, '荷主ごとのSOURCE商品コード。会社共通コードとはみなさない'),
+      source_product_name: field('string', false, 'SOURCE表記の商品名・型番'),
+      source_work_name: field('string', false, 'SOURCE表記の作業内容'),
+      detail_nature: field('string', false, 'PRODUCT/WORK/RECYCLE/OTHER/UNCLASSIFIED等を将来分類。D2時点では未分類可'),
+      product_category: field('string', false, '冷蔵庫/洗濯機/テレビ等の業務カテゴリ。detail_natureとは別軸'),
       size_category: field('string', false, '荷主別料金表のサイズ区分1〜7を想定。D2時点では未実装'),
       amount: field('number', false),
       source_file_id: field('string', false),
@@ -319,6 +333,24 @@
       shipper_source_name: field('string', false),
       source_file_id: field('string', false),
       source_record_id: field('string', false),
+    },
+  };
+
+  /* ---------- SOURCE_LINK ----------
+     同じ業務事実が複数帳票へ異なる切り口で出力されるため、
+     Canonical/Normalized Entityと複数SOURCE_RECORDの根拠関係を保持する。
+     例：同じ物販売上をWORKER_SALESとSHIPPER_AREAの双方が表現する。
+     両SOURCEを単純加算せず、LINKして1つの売上事実として扱う。 */
+  const SOURCE_LINK = {
+    entity: 'SOURCE_LINK',
+    layer: 'NORMALIZED',
+    fields: {
+      source_link_id: field('string', true),
+      target_entity: field('string', true),
+      target_id: field('string', true),
+      source_record_id: field('string', true, 'SOURCE_RECORDへの参照'),
+      link_status: field('string', false, 'EXACT/AGGREGATED/SOURCE_VARIANCE/SINGLE_SOURCE等を将来利用。D2時点では自動判定未実装'),
+      link_method: field('string', false, '原票NO等、照合に使用した根拠'),
     },
   };
 
@@ -344,13 +376,14 @@
     SOURCE_RECORD,
     IMPORT_BATCH,
     DELIVERY_ROUTE,
-    DELIVERY_SLIP,
+    BUSINESS_SLIP,
     DELIVERY_ATTEMPT,
     ROUTE_WORKER,
     ROUTE_PAYMENT: ROUTE_PAYMENT_ENTITY,
     SALES_DETAIL,
     PRODUCT_DETAIL,
     DELIVERY_LOCATION,
+    SOURCE_LINK,
     ACCOUNTING_FACT,
   };
 
