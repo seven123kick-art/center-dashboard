@@ -1,140 +1,36 @@
-経営管理システム Version6 - D2-2 明細SOURCE正規化 / SALES_DETAIL・SOURCE_LINK・RECONCILIATION
+Version6 D2-3 Accounting SOURCE / Reconciliation
 作成日: 2026-08-17
 
-■目的
-既存STATE.workerCsvData / productAddressDataは画面集計用に原票・作業者単位へ集約され、元CSVの明細行情報の一部を失うため、これらへ追加パッチを重ねず、元CSV行を直接SOURCE事実として正規化する新基盤を追加した。
-WORKER_SALESとSHIPPER_AREAを二重加算せず、同一原票・同一売上をSOURCE_LINKで関連付け、原票単位の差異をRECONCILIATION_RESULTとして保持する。
+【目的】
+業務売上（WORKER_SALES / SHIPPER_AREA）と会計値（SKDL0002 / SKDL0003）を同一の売上明細へ押し込まず、別レイヤーで保持して原票単位に照合できる読取専用基盤を追加。確定前の数字も表示可能なよう、値と確定度を分離する。
 
-■今回の変更ファイル（2026-08-16 12:01:44アップロード版を基準）
-1. src/core/data_catalog/source_normalizer.js（新規）
-2. src/core/data_catalog/canonical_builder.js
-3. src/core/data_catalog/contract.js
-4. src/core/data_catalog/master.js（前段のBUSINESS_SLIP基礎再設計分を含む）
-5. center.html（source_normalizer.js読込1行追加。既存data_catalog群の直前関係のみ）
-6. CHANGELOG.txt
+【追加】
+- src/core/data_catalog/accounting_normalizer.js
+  SKDL0002/0003の49列CSVを行単位ACCOUNTING_SOURCE_RECORDへ正規化。PRELIMINARY/CONFIRMEDを明示し、CONFIRMEDはimmutable=true。0円とnullを区別。原票NO、荷主基本/契約コード、社員コード等を保持。
+- src/core/data_catalog/accounting_reconciliation.js
+  ACCOUNTING_FACT生成、原票単位Operational/Accounting照合、科目別集計。差異は自動補正しない。
 
-■D2-2の設計
-- 元CSVの行単位SOURCEを保持するWORKER_SALES_SOURCE_RECORD / SHIPPER_AREA_SOURCE_RECORD契約を追加。
-- SOURCE_NORMALIZERは既存parser/STATE/Storage/Cloudを呼ばないpure/read-onlyモジュール。
-- 顧客氏名・電話番号・住所全文は新Normalizer出力へ保持しない。
-- WORKER_SALESが存在する原票は、WORKER_SALES明細をCanonical SALES_DETAILの主SOURCEとする。
-- SHIPPER_AREAの同じ売上を単純加算しない。行単位で安全に一致できる場合のみSALES_DETAILへSOURCE_LINKする。
-- WORKER_SALESが存在しない原票（0完等を含む）はSHIPPER_AREA単独SOURCEのSALES_DETAILを生成可能。金額0は0のまま保持する。
-- 商品名/商品コードは作業内容・料金明細と分離し、同一原票内の同一商品SOURCE表記をPRODUCT_DETAILへ重複生成しない。
-- 商品/作業/リサイクル等の自動分類はまだ実装しない。
-- HEADなし原票もWORKER_SALESからBUSINESS_SLIP + SALES_DETAILとして正常に生成可能。
-- 同じ原票がDELIVERY_LISTにも存在する場合はslip_noで同じBUSINESS_SLIPへ統合する。
+【変更】
+- contract.js: ACCOUNTING_SOURCE_RECORD / ACCOUNTING_RECONCILIATIONを追加。ACCOUNTING_FACTを行単位会計事実＋value_statusを持つ構造へ再定義。
+- center.html: 上記2モジュールのdefer読込を追加。既存画面からは未接続。
 
-■SOURCE_LINK
-行単位の安全な照合のみ行う。
-- EXACT: slip_no + 作業内容 + 単価 + 数量 + 金額が一致
-- SOURCE_VARIANCE: 安全に1候補へ絞れる場合の差異用構造を保持（差額を自動補正しない）
-- SINGLE_SOURCE: 一方の帳票のみで確認できるSOURCE
-同一原票にWORKER_SALESが存在するがSHIPPER_AREA明細を安全に1行へ対応付けられない場合、新しい売上を作らずBUSINESS_SLIPへのLINKだけを残し、二重売上を防ぐ。
+【2026年6月実資料確認】
+対象: SKDL0003(202606確定）.csv / 作業者別売上明細表2026.06.csv / 荷主別配送エリア物量202606.csv
+- SKDL0003: 8,691行、原票NOあり8,353行、ユニーク原票3,105件。
+- SKDL0003のヘッド番号列は存在するが、今回ファイルでは値あり0行。HEAD照合SOURCEとしては使用不可。
+- WORKER_SALESの2,315原票はSKDL0003に2,315/2,315=100%存在。
+- SHIPPER_AREAの2,517原票はSKDL0003に2,341件=93.01%存在。
+- 3資料すべてに存在する原票は2,276件。
+- SKDL0003にのみ存在する原票は725件。
+- WORKER_SALESのみでSKDL0003にない原票は0件。SHIPPER_AREAのみでSKDL0003にない原票は176件。
+- SHIPPER_AREA荷主コードは、SKDLの「荷主基本コード+荷主契約コード」と、比較可能な2,341原票すべてで一致（100%）。
+- 家電収入合計20,102,735円をNormalizer→ACCOUNTING_FACT→科目集計で再現。
 
-■RECONCILIATION_RESULT
-原票単位でWORKER_SALES合計とSHIPPER_AREA合計を比較する契約・生成処理を追加。
-SOURCE値は変更しない。ratioは説明・検証用であり補正ルールには使わない。
+【重要】
+- 詳細帳票とSKDLの差額・比率から金額を自動補正しない。70%差も観測事実として保持。
+- SKDL0003確定値を変更しない。SKDL0002等の速報値はPRELIMINARYとして表示可能。
+- STATE / IndexedDB / Storage / Cloud / Supabaseへの書込なし。既存parser変更なし。
+- 今回確認したSKDL0003ではHEAD番号が空欄のため、過去の「SKDL0003でHEAD照合できる」との仮説は採用しない。
 
-■2026年6月実データ検証
-使用資料:
-- 作業者別売上明細表2026.06.csv
-- 荷主別配送エリア物量202606.csv
-
-Normalizer結果:
-- WORKER_SALES: 8,554明細 / 2,315原票
-- SHIPPER_AREA: 9,730明細 / 2,517原票
-- 両帳票union: 2,556原票
-
-Canonical結果:
-- BUSINESS_SLIP: 2,556件
-- SALES_DETAIL: 9,071件
-- WORKER_SALES金額合計: 20,419,997円
-- Canonical SALES_DETAIL合計: 20,419,997円
-  → SHIPPER_AREAを二重加算していないことを確認。
-- SHIPPER_AREAのみの241原票は合計0円。0円をUNKNOWNへ変換していない。
-- 直収693明細: 693/693がEXACT照合。
-
-原票単位RECONCILIATION:
-- EXACT: 2,256原票
-- SOURCE_VARIANCE: 20原票
-- WORKER_SALESのみ: 39原票
-- SHIPPER_AREAのみ: 241原票
-- SOURCE_VARIANCE 20原票はright/left比率0.7を確認したが、自動補正・70%ルールは実装していない。
-
-■副作用確認
-- 既存parser変更なし
-- STATE書込なし
-- IndexedDB変更なし
-- localStorage変更なし
-- Supabase/Cloud変更なし
-- 既存分析画面から未接続
-- UI表示変更なし（script読込追加のみ）
-
-■既知の制約 / 次工程
-- 現行STATEは明細SOURCEとして情報量が不足するため、新Canonicalの正本SOURCEとしては使用しない。今後の統一取込ではSOURCE_NORMALIZER相当の行単位正規化を入口にする。
-- SOURCE_FILE / SOURCE_RECORDの永続ID・保存方式はまだ未実装。
-- Master Resolution（荷主コード・作業者・会社）未接続。
-- 商品/作業/リサイクルの2軸分類未実装。
-- 便別採算画面へのCanonical接続はまだ行わない。
-
-
-経営管理システム Version6 - D1 Contract基礎再設計 / D2-1 Builder追従
-作成日: 2026-08-16
-
-■目的
-実資料と業務確認で確定した「原票は配送案件そのものではない」「HEADは実際の運行単位」という業務構造に合わせ、未稼働の新Data Contractを基礎から修正した。
-後付けの互換パッチは追加せず、旧DELIVERY_SLIP概念をBUSINESS_SLIPへ置換した。
-
-■変更ファイル
-1. src/core/data_catalog/contract.js
-2. src/core/data_catalog/canonical_builder.js
-3. src/core/data_catalog/master.js
-
-■主な変更
-- DELIVERY_SLIPを廃止し、BUSINESS_SLIP（原票）へ置換。
-- BUSINESS_SLIPは配送HEADの有無に依存しない原票Entityとした。
-- HEADなし直接完了・月末集計売上・0完等を正常に表現可能なContractへ変更。
-- 固定チャーターのようにHEADありでも個別商品売上積上げではないケースを許容。
-- DELIVERY_ATTEMPTは配送持出がある原票だけに存在する関係へ整理。
-- DELIVERY_ROUTEは実際に車両・作業者が動く運行単位という意味を維持。
-- SALES_DETAIL.worker_idを売上帰属作業者として明確化し、ROUTE_WORKERと分離。
-- SALES_DETAILへworker_company_id / revenue_class / source_detail_name / unit_price / quantityを追加。
-- PRODUCT_DETAILを商品・作業・リサイクル等の性質(detail_nature)と商品カテゴリ(product_category)の2軸で将来分類できる契約へ整理。D2時点では自動分類しない。
-- SOURCE_LINKを追加。同一売上事実がWORKER_SALESとSHIPPER_AREA等の複数SOURCEに出る場合、単純加算せず複数SOURCEを1業務事実へ関連付けられる構造とした。
-- master.jsの荷主NO説明をBUSINESS_SLIP参照へ修正。
-- canonical_builder.jsはBUSINESS_SLIP出力へ追従。routeData起点のためHEADなし原票は現D2-1では生成せず、D2-2でWORKER_SALES等から補完することを明記。
-- HEADが存在するだけでSTANDARD_DELIVERY/FIXED_CHARTER等を推測分類しない。
-
-■重要な業務仕様
-- 原票NOは会社共通の強い業務キー。内部PKはslip_idを別に保持。
-- 原票あり≠HEADあり。原票へ直接完了登録し売上計上する正常ケースがある。
-- HEADは売上Entityではなく実運行Entity。
-- SALES_DETAILはHEADなしでも正常に存在可能。
-- ROUTE_WORKERは実運行参加者、SALES_DETAIL.worker_idは売上帰属作業者で別概念。
-- 0円は有効値。null/UNKNOWNと同一視しない。
-- 詳細SOURCE間の金額差（実資料で確認された70%差等）は自動補正しない。
-- SOURCEの有無だけでMISSING_SOURCE/ERRORを決定しない。
-
-■今回変更していないもの
-- STATE
-- IndexedDB
-- Supabase / Cloud
-- 既存parser
-- 既存UI
-- center.html
-- catalog.js
-- quality.js
-- 既存分析画面・業務ロジック
-
-■検証
-- src配下の全JavaScriptを node --check: 全件PASS
-- BUSINESS_SLIP Contract存在: PASS
-- 旧DELIVERY_SLIP Contract不存在: PASS
-- SOURCE_LINK Contract存在: PASS
-- 同一原票S1を別HEADへ2回持出: BUSINESS_SLIP 1件 / DELIVERY_ATTEMPT 2件: PASS
-- 入力STATE実行前後JSON一致: PASS
-- Canonical BuilderはSTATE/Storage/Cloudへ書込みなし: PASS
-
-■次工程
-D2-2ではWORKER_SALESとSHIPPER_AREAを読み、HEADなしBUSINESS_SLIPとSALES_DETAILを生成・照合する読取専用処理を設計する。複数SOURCEの売上は単純加算せずSOURCE_LINKで根拠を保持する。
+【累積差分について】
+直前のD1/D2基礎Contract再設計およびD2-2の投入完了が会話上確認できていないため、本ZIPはそれらを含む累積差分として作成。最後に投入確認済みのスナップショット以降に必要なファイルのみを収録。

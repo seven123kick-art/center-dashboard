@@ -443,6 +443,41 @@
     },
   };
 
+  /* ---------- ACCOUNTING_SOURCE_RECORD（D2-3） ----------
+     SKDL0002/0003の行単位会計事実。業務売上とは別軸で保持する。
+     CONFIRMEDはimmutable、PRELIMINARYは更新され得る。 */
+  const ACCOUNTING_SOURCE_RECORD = {
+    entity: 'ACCOUNTING_SOURCE_RECORD',
+    layer: 'NORMALIZED',
+    fields: {
+      source_record_id: field('string', true), source_file_id: field('string', false), source_row_index: field('number', false),
+      document_state: field('string', true, 'PRELIMINARY/CONFIRMED'), immutable: field('boolean', true),
+      year_month: field('string', false), accounting_date: field('string', false),
+      center_code: field('string', false), center_name: field('string', false),
+      account_code: field('string', true), account_name: field('string', false),
+      subaccount_code: field('string', false), subaccount_name: field('string', false),
+      amount: field('number', false, '0は有効値。空欄はnull'),
+      head_no: field('string', false), slip_no: field('string', false),
+      shipper_base_code: field('string', false), shipper_contract_code: field('string', false),
+      shipper_account_source_code: field('string', false, 'SKDLの荷主基本コード+荷主契約コード。SHIPPER_AREA荷主コードとの照合用'),
+      employee_code: field('string', false), employee_name: field('string', false),
+    },
+  };
+
+  const ACCOUNTING_RECONCILIATION = {
+    entity: 'ACCOUNTING_RECONCILIATION',
+    layer: 'NORMALIZED',
+    fields: {
+      accounting_reconciliation_id: field('string', true),
+      slip_no: field('string', true),
+      operational_value: field('number', false, '業務帳票側。SOURCEなしはnull'),
+      accounting_value: field('number', false, 'SKDL側。SOURCEなしはnull'),
+      difference: field('number', false, 'accounting-operational。自動補正には使わない'),
+      status: field('string', true, 'EXACT/ACCOUNTING_VARIANCE/OPERATIONAL_ONLY/ACCOUNTING_ONLY/UNRESOLVED'),
+      accounting_states: field('array', false), is_confirmed: field('boolean', false),
+    },
+  };
+
   /* ============================================================
      CANONICAL層：会計事実（最も抽象化された集計対象）
   ============================================================ */
@@ -451,12 +486,19 @@
     layer: 'CANONICAL',
     fields: {
       accounting_fact_id: field('string', true),
-      document_type: field('string', true, 'DATA_CATALOGのdocument_typeのいずれか'),
-      center_id: field('string', false),
-      year_month: field('string', false),
-      amount: field('number', false, '0とUNKNOWN/NULLを同一視しない。値が確定できない場合はnullのままにし、quality_statusで理由を表現する'),
-      quality_status: field('string', false, 'DATA_QUALITYのいずれかの値を想定'),
-      source_file_ids: field('array', false),
+      document_type: field('string', true, 'PL_ACTUAL'),
+      document_state: field('string', true, 'PRELIMINARY/CONFIRMED'),
+      value_status: field('string', true, 'PRELIMINARY/CONFIRMED。数字の存在と確定度を分離する'),
+      immutable: field('boolean', true, 'SKDL0003確定はtrue'),
+      center_code: field('string', false), year_month: field('string', false), accounting_date: field('string', false),
+      account_code: field('string', true), account_name: field('string', false),
+      subaccount_code: field('string', false), subaccount_name: field('string', false),
+      amount: field('number', false, '0とUNKNOWN/NULLを同一視しない'),
+      slip_no: field('string', false), head_no: field('string', false),
+      shipper_base_code: field('string', false), shipper_contract_code: field('string', false),
+      shipper_account_source_code: field('string', false, 'SKDLの荷主基本コード+荷主契約コード。SHIPPER_AREA荷主コードとの照合用'),
+      employee_code: field('string', false),
+      source_file_id: field('string', false), source_record_id: field('string', true),
     },
   };
 
@@ -476,6 +518,8 @@
     DELIVERY_LOCATION,
     SOURCE_LINK,
     RECONCILIATION_RESULT,
+    ACCOUNTING_SOURCE_RECORD,
+    ACCOUNTING_RECONCILIATION,
     ACCOUNTING_FACT,
   };
 
