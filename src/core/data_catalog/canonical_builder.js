@@ -1,5 +1,5 @@
 /* ============================================================
-   D2-1（改訂版）: 読取専用 Canonical Builder
+   D2-1/D2-2: 読取専用 Canonical Builder
    src/core/data_catalog/canonical_builder.js
 
    目的：
@@ -9,9 +9,11 @@
    ROUTE_WORKER / ROUTE_PAYMENT）に沿った Canonical Snapshot を
    メモリ上に生成する。
 
-   重要：現D2-1 BuilderはSTATE.routeDataを起点にしているため、
-   HEADを作らず原票へ直接完了登録するBUSINESS_SLIPは生成できない。
-   これは異常ではなく、WORKER_SALES等から原票を生成するD2-2で補完する。
+   D2-1のlegacy入口 buildSnapshot() はSTATE.routeDataを起点にするため、
+   HEADなし原票を生成できない。一方D2-2では、元CSV明細を行単位で
+   正規化したWORKER_SALES/SHIPPER_AREA SOURCEを受け取る
+   buildSnapshotFromNormalizedSources()/buildSnapshotFromRows()を追加し、
+   HEADなし売上を含むBUSINESS_SLIP/SALES_DETAILを生成できる。
 
    【今回の改訂内容（実業務仕様確認に基づく）】
    - BUSINESS_SLIPの一意性を slip_no 単独に変更した（従来はroute
@@ -310,6 +312,373 @@
   }
 
   /* ------------------------------------------------------------
+     D2-2: WORKER_SALES / SHIPPER_AREA 明細SOURCEからの読取Canonical
+
+     既存STATE.workerCsvData / productAddressDataは画面向け集計結果で、
+     元CSVの行単位の単価・数量・金額・請求/直収等を完全には保持しない。
+     そのためD2-2では、SOURCE_NORMALIZERが元CSV行から生成した
+     明細レコードを入力とし、集約済みlegacy STATEを売上正本には使わない。
+
+     売上金額の原則：
+       WORKER_SALESが存在する原票 → WORKER_SALES明細をCanonical売上の主SOURCE
+       WORKER_SALESがない原票    → SHIPPER_AREA明細を単独SOURCEとして保持可能
+     両帳票の金額は単純加算しない。SHIPPER_AREAは原則LINK/照合SOURCEとし、
+     70%差等を自動補正しない。
+  ------------------------------------------------------------ */
+  function normalizedLabel(v) {
+    return safeString(v).normalize('NFKC').replace(/[\s　]/g, '').toLowerCase();
+  }
+  function scalarKey(v) {
+    if (v === null || v === undefined || v === '') return 'NULL';
+    return safeString(v);
+  }
+  function salesExactKey(r) {
+    return [
+      safeString(r && r.slip_no).trim(),
+      normalizedLabel(r && r.source_work_name),
+      scalarKey(r && r.unit_price),
+      scalarKey(r && r.quantity),
+      scalarKey(r && r.amount),
+    ].join('|');
+  }
+  function salesSupportKey(r) {
+    return [
+      safeString(r && r.slip_no).trim(),
+      normalizedLabel(r && r.source_work_name),
+      scalarKey(r && r.unit_price),
+      scalarKey(r && r.quantity),
+    ].join('|');
+  }
+  function pushMapArray(map, key, value) {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(value);
+  }
+  function firstUnconsumed(list, consumed) {
+    for (const x of safeArray(list)) if (!consumed.has(x.sales_detail_id)) return x;
+    return null;
+  }
+  function mergeBusinessSlipField(slip, key, value) {
+    if (value === null || value === undefined || value === '') return;
+    if (slip[key] === null || slip[key] === undefined || slip[key] === '') {
+      slip[key] = value;
+      return;
+    }
+    if (safeString(slip[key]) !== safeString(value)) {
+      slip.quality_status = qualityConst('CONFLICT', 'CONFLICT');
+    }
+  }
+  function ensureBusinessSlip(map, slipNo) {
+    const no = safeString(slipNo).trim();
+    if (!no) return null;
+    if (!map.has(no)) {
+      map.set(no, {
+        slip_id: tempKey('SLIP', no),
+        slip_id_is_temporary: true,
+        slip_no: no,
+        shipper_account_id: null,
+        shipper_reference_no: null,
+        shipper_source_code: null,
+        transaction_type: null,
+        completion_status: null,
+        completed_at: null,
+        business_pattern: null,
+        source_file_id: null,
+        source_record_id: null,
+        quality_status: qualityConst('OK', 'OK'),
+      });
+    }
+    return map.get(no);
+  }
+
+  function buildDetailedEntitiesFromNormalizedSources(workerSalesRecords, shipperAreaRecords, existingBusinessSlips) {
+    const workers = safeArray(workerSalesRecords);
+    const shippers = safeArray(shipperAreaRecords);
+    const businessSlipsByNo = new Map();
+    for (const existing of safeArray(existingBusinessSlips)) {
+      if (!existing || !existing.slip_no) continue;
+      businessSlipsByNo.set(safeString(existing.slip_no).trim(), { ...existing });
+    }
+
+    const salesDetails = [];
+    const productDetailsByKey = new Map();
+    const sourceLinks = [];
+    const workerSalesByExact = new Map();
+    const workerSalesBySupport = new Map();
+    const workerSalesBySlip = new Map();
+    const workerAmountBySlip = new Map();
+    const shipperAmountBySlip = new Map();
+    const consumedWorkerSales = new Set();
+    const matchedStatusBySalesId = new Map();
+
+    // 1) WORKER_SALESをCanonical売上の主SOURCEとして明細単位で生成する。
+    //    HEADなし直接完了・固定/集計請求等でも正常にBUSINESS_SLIP+SALES_DETAILを作れる。
+    workers.forEach((r, idx) => {
+      if (!r) return;
+      const slipNo = safeString(r.slip_no).trim();
+      if (!slipNo) return;
+      const slip = ensureBusinessSlip(businessSlipsByNo, slipNo);
+      mergeBusinessSlipField(slip, 'shipper_reference_no', r.shipper_reference_no);
+      mergeBusinessSlipField(slip, 'transaction_type', r.transaction_type);
+      if (r.delivery_date) {
+        mergeBusinessSlipField(slip, 'completed_at', r.delivery_date);
+        mergeBusinessSlipField(slip, 'completion_status', 'COMPLETED');
+      }
+
+      const salesDetailId = tempKey('SALE', 'WORKER', r.source_record_id || idx, slipNo);
+      const detail = {
+        sales_detail_id: salesDetailId,
+        sales_detail_id_is_temporary: true,
+        slip_id: slip.slip_id,
+        center_id: r.center_id || null,
+        worker_id: null,
+        worker_company_id: null,
+        year_month: r.year_month || null,
+        revenue_class: null, // 作業名称文字列からの自動分類はまだ行わない
+        billing_type: r.billing_type || null,
+        transaction_type: r.transaction_type || null,
+        source_detail_name: r.source_work_name || null,
+        unit_price: (r.unit_price === undefined ? null : r.unit_price),
+        quantity: (r.quantity === undefined ? null : r.quantity),
+        amount: (r.amount === undefined ? null : r.amount),
+        worker_source_label: r.source_worker_name || null,
+        source_document_type: 'WORKER_SALES',
+        source_file_id: r.source_file_id || null,
+        source_record_id: r.source_record_id || null,
+      };
+      salesDetails.push(detail);
+      pushMapArray(workerSalesByExact, salesExactKey(r), detail);
+      pushMapArray(workerSalesBySupport, salesSupportKey(r), detail);
+      pushMapArray(workerSalesBySlip, slipNo, detail);
+      if (r.amount !== null && r.amount !== undefined && Number.isFinite(Number(r.amount))) {
+        workerAmountBySlip.set(slipNo, (workerAmountBySlip.get(slipNo) || 0) + Number(r.amount));
+      }
+    });
+
+    // 2) SHIPPER_AREAは荷主コード・商品・作業明細SOURCEとして利用する。
+    //    WORKER_SALESと一致する売上を再加算せず、SOURCE_LINKで根拠を束ねる。
+    shippers.forEach((r, idx) => {
+      if (!r) return;
+      const slipNo = safeString(r.slip_no).trim();
+      if (!slipNo) return;
+      const slip = ensureBusinessSlip(businessSlipsByNo, slipNo);
+      if (r.amount !== null && r.amount !== undefined && Number.isFinite(Number(r.amount))) {
+        shipperAmountBySlip.set(slipNo, (shipperAmountBySlip.get(slipNo) || 0) + Number(r.amount));
+      }
+      mergeBusinessSlipField(slip, 'shipper_reference_no', r.shipper_reference_no);
+      mergeBusinessSlipField(slip, 'shipper_source_code', r.source_shipper_code);
+      if (r.delivery_date) {
+        mergeBusinessSlipField(slip, 'completed_at', r.delivery_date);
+        mergeBusinessSlipField(slip, 'completion_status', 'COMPLETED');
+      }
+
+      // 商品名/商品コードは作業内容とは別のSOURCE事実として保持する。
+      // 同一原票で同じ商品が料金明細ごとに反復されてもPRODUCT_DETAILを重複生成しない。
+      if (r.source_product_name || r.source_product_code) {
+        const productKey = [slipNo, normalizedLabel(r.source_product_code), normalizedLabel(r.source_product_name)].join('|');
+        if (!productDetailsByKey.has(productKey)) {
+          productDetailsByKey.set(productKey, {
+            product_detail_id: tempKey('PRODUCT', slipNo, r.source_product_code || '', r.source_product_name || ''),
+            product_detail_id_is_temporary: true,
+            slip_id: slip.slip_id,
+            source_product_code: r.source_product_code || null,
+            source_product_name: r.source_product_name || null,
+            source_work_name: null,
+            detail_nature: null,
+            product_category: null,
+            size_category: null,
+            amount: null, // 商品名自体の価格とは限らないため作業明細金額を転記しない
+            source_file_id: r.source_file_id || null,
+            source_record_id: r.source_record_id || null,
+          });
+        }
+      }
+
+      const exact = firstUnconsumed(workerSalesByExact.get(salesExactKey(r)), consumedWorkerSales);
+      let matched = exact;
+      let matchStatus = exact ? 'EXACT' : null;
+      let method = exact ? 'SLIP+WORK+UNIT_PRICE+QUANTITY+AMOUNT' : null;
+      if (!matched) {
+        const supportCandidates = safeArray(workerSalesBySupport.get(salesSupportKey(r))).filter(x => !consumedWorkerSales.has(x.sales_detail_id));
+        // 金額だけ違う候補が1件に絞れる場合のみSOURCE_VARIANCEとして結ぶ。
+        // 70%差等の理由推測・金額補正は一切しない。
+        if (supportCandidates.length === 1) {
+          matched = supportCandidates[0];
+          matchStatus = 'SOURCE_VARIANCE';
+          method = 'SLIP+WORK+UNIT_PRICE+QUANTITY';
+        }
+      }
+
+      if (matched) {
+        consumedWorkerSales.add(matched.sales_detail_id);
+        matchedStatusBySalesId.set(matched.sales_detail_id, matchStatus);
+        sourceLinks.push({
+          source_link_id: tempKey('SLINK', matched.sales_detail_id, r.source_record_id || idx),
+          target_entity: 'SALES_DETAIL',
+          target_id: matched.sales_detail_id,
+          source_record_id: r.source_record_id || tempKey('SHIPPER_AREA', idx),
+          link_status: matchStatus,
+          link_method: method,
+        });
+        return;
+      }
+
+      const workerSlipDetails = safeArray(workerSalesBySlip.get(slipNo));
+      if (workerSlipDetails.length === 0) {
+        // WORKER_SALESに原票自体が無い場合のみ、SHIPPER_AREAの0円を含む
+        // 売上事実を単独SOURCEとしてCanonicalへ保持する。
+        const salesDetailId = tempKey('SALE', 'SHIPPER', r.source_record_id || idx, slipNo);
+        salesDetails.push({
+          sales_detail_id: salesDetailId,
+          sales_detail_id_is_temporary: true,
+          slip_id: slip.slip_id,
+          center_id: r.center_id || null,
+          worker_id: null,
+          worker_company_id: null,
+          year_month: r.year_month || null,
+          revenue_class: null,
+          billing_type: null,
+          transaction_type: null,
+          source_detail_name: r.source_work_name || null,
+          unit_price: (r.unit_price === undefined ? null : r.unit_price),
+          quantity: (r.quantity === undefined ? null : r.quantity),
+          amount: (r.amount === undefined ? null : r.amount),
+          worker_source_label: null,
+          source_document_type: 'SHIPPER_AREA',
+          source_file_id: r.source_file_id || null,
+          source_record_id: r.source_record_id || null,
+        });
+        sourceLinks.push({
+          source_link_id: tempKey('SLINK', salesDetailId, r.source_record_id || idx),
+          target_entity: 'SALES_DETAIL',
+          target_id: salesDetailId,
+          source_record_id: r.source_record_id || tempKey('SHIPPER_AREA', idx),
+          link_status: 'SINGLE_SOURCE',
+          link_method: 'SHIPPER_AREA_ONLY_FOR_SLIP',
+        });
+      } else {
+        // 同じ原票のWORKER_SALESは存在するが行単位で安全に対応付けられない。
+        // 二重売上を避けるため新しいSALES_DETAILは作らず、原票へのSOURCE_LINKだけ残す。
+        sourceLinks.push({
+          source_link_id: tempKey('SLINK', slip.slip_id, r.source_record_id || idx),
+          target_entity: 'BUSINESS_SLIP',
+          target_id: slip.slip_id,
+          source_record_id: r.source_record_id || tempKey('SHIPPER_AREA', idx),
+          link_status: 'SINGLE_SOURCE',
+          link_method: 'SLIP_MATCH_ONLY_SALES_LINE_UNRESOLVED',
+        });
+      }
+    });
+
+    // 3) WORKER_SALES側の根拠LINK。SHIPPER_AREAと一致/差異LINKしたものは
+    //    同じstatus、相手がないものはSINGLE_SOURCEとする。
+    salesDetails.filter(x => x.source_document_type === 'WORKER_SALES').forEach(detail => {
+      sourceLinks.push({
+        source_link_id: tempKey('SLINK', detail.sales_detail_id, detail.source_record_id || 'WORKER'),
+        target_entity: 'SALES_DETAIL',
+        target_id: detail.sales_detail_id,
+        source_record_id: detail.source_record_id || tempKey('WORKER_SALES', detail.sales_detail_id),
+        link_status: matchedStatusBySalesId.get(detail.sales_detail_id) || 'SINGLE_SOURCE',
+        link_method: matchedStatusBySalesId.has(detail.sales_detail_id) ? 'WORKER_SALES_PRIMARY_WITH_SHIPPER_AREA_SUPPORT' : 'WORKER_SALES_ONLY',
+      });
+    });
+
+    const reconciliations = [];
+    for (const [slipNo, slip] of businessSlipsByNo.entries()) {
+      const hasWorker = workerAmountBySlip.has(slipNo);
+      const hasShipper = shipperAmountBySlip.has(slipNo);
+      const left = hasWorker ? workerAmountBySlip.get(slipNo) : null;
+      const right = hasShipper ? shipperAmountBySlip.get(slipNo) : null;
+      let status = 'SINGLE_SOURCE';
+      let difference = null;
+      let ratio = null;
+      if (hasWorker && hasShipper) {
+        difference = right - left;
+        status = difference === 0 ? 'EXACT' : 'SOURCE_VARIANCE';
+        if (left !== 0) ratio = right / left;
+      }
+      reconciliations.push({
+        reconciliation_id: tempKey('RECON', 'SALES_AMOUNT', slipNo),
+        reconciliation_id_is_temporary: true,
+        target_entity: 'BUSINESS_SLIP',
+        target_id: slip.slip_id,
+        metric: 'SALES_AMOUNT',
+        left_document_type: hasWorker ? 'WORKER_SALES' : null,
+        right_document_type: hasShipper ? 'SHIPPER_AREA' : null,
+        left_value: left,
+        right_value: right,
+        difference,
+        ratio,
+        status,
+      });
+    }
+
+    return {
+      businessSlips: [...businessSlipsByNo.values()],
+      salesDetails,
+      productDetails: [...productDetailsByKey.values()],
+      sourceLinks,
+      reconciliations,
+    };
+  }
+
+  function buildCanonicalSnapshotFromNormalizedSources(input) {
+    const opt = input || {};
+    const routeDataInput = opt.routeData || (opt.state && opt.state.routeData) || [];
+    const routePart = buildRoutesFromState(routeDataInput);
+    const routePayments = buildRoutePaymentsFromState(routeDataInput);
+    const detailed = buildDetailedEntitiesFromNormalizedSources(
+      opt.workerSalesRecords,
+      opt.shipperAreaRecords,
+      routePart.businessSlips
+    );
+
+    return {
+      generated_at: new Date().toISOString(),
+      is_persistent: false,
+      source_granularity: 'ROW_LEVEL_NORMALIZED_SOURCE',
+      entities: {
+        DELIVERY_ROUTE: routePart.deliveryRoutes,
+        BUSINESS_SLIP: detailed.businessSlips,
+        DELIVERY_ATTEMPT: routePart.deliveryAttempts,
+        ROUTE_WORKER: routePart.routeWorkers,
+        ROUTE_PAYMENT: routePayments,
+        SALES_DETAIL: detailed.salesDetails,
+        PRODUCT_DETAIL: detailed.productDetails,
+        SOURCE_LINK: detailed.sourceLinks,
+        RECONCILIATION_RESULT: detailed.reconciliations,
+      },
+      counts: {
+        DELIVERY_ROUTE: routePart.deliveryRoutes.length,
+        BUSINESS_SLIP: detailed.businessSlips.length,
+        DELIVERY_ATTEMPT: routePart.deliveryAttempts.length,
+        ROUTE_WORKER: routePart.routeWorkers.length,
+        ROUTE_PAYMENT: routePayments.length,
+        SALES_DETAIL: detailed.salesDetails.length,
+        PRODUCT_DETAIL: detailed.productDetails.length,
+        SOURCE_LINK: detailed.sourceLinks.length,
+        RECONCILIATION_RESULT: detailed.reconciliations.length,
+      },
+    };
+  }
+
+  function buildCanonicalSnapshotFromRows(input) {
+    const opt = input || {};
+    if (!window.SOURCE_NORMALIZER) throw new Error('SOURCE_NORMALIZERがロードされていません');
+    const workerSalesRecords = opt.workerSales && Array.isArray(opt.workerSales.rows)
+      ? window.SOURCE_NORMALIZER.normalizeWorkerSalesRows(opt.workerSales.rows, opt.workerSales.meta || {})
+      : [];
+    const shipperAreaRecords = opt.shipperArea && Array.isArray(opt.shipperArea.rows)
+      ? window.SOURCE_NORMALIZER.normalizeShipperAreaRows(opt.shipperArea.rows, opt.shipperArea.meta || {})
+      : [];
+    return buildCanonicalSnapshotFromNormalizedSources({
+      state: opt.state || null,
+      routeData: opt.routeData || null,
+      workerSalesRecords,
+      shipperAreaRecords,
+    });
+  }
+
+  /* ------------------------------------------------------------
      Canonical Snapshot 全体の組み立て（pure関数）
      入力STATEオブジェクト自体・その配下は一切変更しない。
   ------------------------------------------------------------ */
@@ -345,10 +714,15 @@
        既存画面（便別採算・データ確認・データ取込等）からは
        今回一切呼び出されていない。 */
     buildSnapshot: buildCanonicalSnapshot,
+    buildSnapshotFromNormalizedSources: buildCanonicalSnapshotFromNormalizedSources,
+    buildSnapshotFromRows: buildCanonicalSnapshotFromRows,
     _internal: {
       buildRoutesFromState,
       buildRoutePaymentsFromState,
+      buildDetailedEntitiesFromNormalizedSources,
       tempKey,
+      salesExactKey,
+      salesSupportKey,
     },
   };
 

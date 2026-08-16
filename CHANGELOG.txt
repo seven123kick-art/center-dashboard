@@ -1,3 +1,84 @@
+経営管理システム Version6 - D2-2 明細SOURCE正規化 / SALES_DETAIL・SOURCE_LINK・RECONCILIATION
+作成日: 2026-08-17
+
+■目的
+既存STATE.workerCsvData / productAddressDataは画面集計用に原票・作業者単位へ集約され、元CSVの明細行情報の一部を失うため、これらへ追加パッチを重ねず、元CSV行を直接SOURCE事実として正規化する新基盤を追加した。
+WORKER_SALESとSHIPPER_AREAを二重加算せず、同一原票・同一売上をSOURCE_LINKで関連付け、原票単位の差異をRECONCILIATION_RESULTとして保持する。
+
+■今回の変更ファイル（2026-08-16 12:01:44アップロード版を基準）
+1. src/core/data_catalog/source_normalizer.js（新規）
+2. src/core/data_catalog/canonical_builder.js
+3. src/core/data_catalog/contract.js
+4. src/core/data_catalog/master.js（前段のBUSINESS_SLIP基礎再設計分を含む）
+5. center.html（source_normalizer.js読込1行追加。既存data_catalog群の直前関係のみ）
+6. CHANGELOG.txt
+
+■D2-2の設計
+- 元CSVの行単位SOURCEを保持するWORKER_SALES_SOURCE_RECORD / SHIPPER_AREA_SOURCE_RECORD契約を追加。
+- SOURCE_NORMALIZERは既存parser/STATE/Storage/Cloudを呼ばないpure/read-onlyモジュール。
+- 顧客氏名・電話番号・住所全文は新Normalizer出力へ保持しない。
+- WORKER_SALESが存在する原票は、WORKER_SALES明細をCanonical SALES_DETAILの主SOURCEとする。
+- SHIPPER_AREAの同じ売上を単純加算しない。行単位で安全に一致できる場合のみSALES_DETAILへSOURCE_LINKする。
+- WORKER_SALESが存在しない原票（0完等を含む）はSHIPPER_AREA単独SOURCEのSALES_DETAILを生成可能。金額0は0のまま保持する。
+- 商品名/商品コードは作業内容・料金明細と分離し、同一原票内の同一商品SOURCE表記をPRODUCT_DETAILへ重複生成しない。
+- 商品/作業/リサイクル等の自動分類はまだ実装しない。
+- HEADなし原票もWORKER_SALESからBUSINESS_SLIP + SALES_DETAILとして正常に生成可能。
+- 同じ原票がDELIVERY_LISTにも存在する場合はslip_noで同じBUSINESS_SLIPへ統合する。
+
+■SOURCE_LINK
+行単位の安全な照合のみ行う。
+- EXACT: slip_no + 作業内容 + 単価 + 数量 + 金額が一致
+- SOURCE_VARIANCE: 安全に1候補へ絞れる場合の差異用構造を保持（差額を自動補正しない）
+- SINGLE_SOURCE: 一方の帳票のみで確認できるSOURCE
+同一原票にWORKER_SALESが存在するがSHIPPER_AREA明細を安全に1行へ対応付けられない場合、新しい売上を作らずBUSINESS_SLIPへのLINKだけを残し、二重売上を防ぐ。
+
+■RECONCILIATION_RESULT
+原票単位でWORKER_SALES合計とSHIPPER_AREA合計を比較する契約・生成処理を追加。
+SOURCE値は変更しない。ratioは説明・検証用であり補正ルールには使わない。
+
+■2026年6月実データ検証
+使用資料:
+- 作業者別売上明細表2026.06.csv
+- 荷主別配送エリア物量202606.csv
+
+Normalizer結果:
+- WORKER_SALES: 8,554明細 / 2,315原票
+- SHIPPER_AREA: 9,730明細 / 2,517原票
+- 両帳票union: 2,556原票
+
+Canonical結果:
+- BUSINESS_SLIP: 2,556件
+- SALES_DETAIL: 9,071件
+- WORKER_SALES金額合計: 20,419,997円
+- Canonical SALES_DETAIL合計: 20,419,997円
+  → SHIPPER_AREAを二重加算していないことを確認。
+- SHIPPER_AREAのみの241原票は合計0円。0円をUNKNOWNへ変換していない。
+- 直収693明細: 693/693がEXACT照合。
+
+原票単位RECONCILIATION:
+- EXACT: 2,256原票
+- SOURCE_VARIANCE: 20原票
+- WORKER_SALESのみ: 39原票
+- SHIPPER_AREAのみ: 241原票
+- SOURCE_VARIANCE 20原票はright/left比率0.7を確認したが、自動補正・70%ルールは実装していない。
+
+■副作用確認
+- 既存parser変更なし
+- STATE書込なし
+- IndexedDB変更なし
+- localStorage変更なし
+- Supabase/Cloud変更なし
+- 既存分析画面から未接続
+- UI表示変更なし（script読込追加のみ）
+
+■既知の制約 / 次工程
+- 現行STATEは明細SOURCEとして情報量が不足するため、新Canonicalの正本SOURCEとしては使用しない。今後の統一取込ではSOURCE_NORMALIZER相当の行単位正規化を入口にする。
+- SOURCE_FILE / SOURCE_RECORDの永続ID・保存方式はまだ未実装。
+- Master Resolution（荷主コード・作業者・会社）未接続。
+- 商品/作業/リサイクルの2軸分類未実装。
+- 便別採算画面へのCanonical接続はまだ行わない。
+
+
 経営管理システム Version6 - D1 Contract基礎再設計 / D2-1 Builder追従
 作成日: 2026-08-16
 

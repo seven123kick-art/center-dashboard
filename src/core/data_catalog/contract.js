@@ -69,6 +69,70 @@
     },
   };
 
+
+  /* ---------- 帳票別の明細SOURCE契約（D2-2） ----------
+     既存STATE.workerCsvData / productAddressData は画面集計用に原票・
+     作業者単位へ集約されており、元CSVの明細行（単価・数量・金額・
+     請求/直収等）の一部を失う。新データ基盤ではその集約済みSTATEを
+     Canonicalの正本SOURCEにせず、元CSVの行単位事実をこの契約で
+     正規化してからLINK/Canonical化する。
+     顧客氏名・電話番号・住所全文は本契約の必須SOURCE項目に含めない。 */
+  const WORKER_SALES_SOURCE_RECORD = {
+    entity: 'WORKER_SALES_SOURCE_RECORD',
+    layer: 'NORMALIZED',
+    fields: {
+      source_record_id: field('string', true),
+      source_file_id: field('string', false),
+      source_row_index: field('number', false),
+      year_month: field('string', false),
+      center_id: field('string', false),
+      delivery_date: field('string', false),
+      transaction_type: field('string', false),
+      slip_no: field('string', true, '会社共通の強い原票業務キー'),
+      shipper_reference_no: field('string', false),
+      source_shipper_name: field('string', false),
+      source_store_name: field('string', false),
+      source_product_name: field('string', false),
+      source_worker_company_name: field('string', false),
+      source_worker_name: field('string', false),
+      billing_type: field('string', false, '請求/直収等。SOURCE原値を保持'),
+      source_work_name: field('string', false),
+      unit_price: field('number', false),
+      quantity: field('number', false),
+      amount: field('number', false, '0は有効値。空欄/UNKNOWNと同一視しない'),
+    },
+  };
+
+  const SHIPPER_AREA_SOURCE_RECORD = {
+    entity: 'SHIPPER_AREA_SOURCE_RECORD',
+    layer: 'NORMALIZED',
+    fields: {
+      source_record_id: field('string', true),
+      source_file_id: field('string', false),
+      source_row_index: field('number', false),
+      year_month: field('string', false),
+      center_id: field('string', false),
+      delivery_date: field('string', false),
+      slip_no: field('string', true, '会社共通の強い原票業務キー'),
+      source_shipper_code: field('string', false, '当社管理の荷主コードSOURCE値'),
+      source_shipper_name: field('string', false),
+      source_store_code: field('string', false),
+      source_store_name: field('string', false),
+      source_delivery_center_code: field('string', false),
+      source_delivery_center_name: field('string', false),
+      shipper_reference_no: field('string', false),
+      zip_code: field('string', false),
+      source_product_name: field('string', false),
+      source_product_code: field('string', false),
+      source_work_name: field('string', false),
+      unit_price: field('number', false),
+      quantity: field('number', false),
+      amount: field('number', false, '0は有効値。空欄/UNKNOWNと同一視しない'),
+      recycle_ticket_no: field('string', false),
+      recycle_completed_date: field('string', false),
+    },
+  };
+
   /* ============================================================
      NORMALIZED層：原票・配送実績の正規化構造
   ============================================================ */
@@ -283,11 +347,14 @@
       worker_company_id: field('string', false, '売上帰属作業者の会社。配送HEADの支払先とは独立してSOURCE/MASTERから解決する'),
       year_month: field('string', false),
       revenue_class: field('string', false, 'DELIVERY/TRUNK/DIRECT_SALE/WORK/RECYCLE/OTHER等を将来分類可能。ただしD2時点では推測分類しない'),
+      billing_type: field('string', false, 'WORKER_SALESの付帯区分（請求/直収等）のSOURCE原値。revenue_classとは別軸'),
+      transaction_type: field('string', false, '通常/返品/差替/引取等のSOURCE原値。金額符号とは独立'),
       source_detail_name: field('string', false, 'SOURCE上の作業内容・明細名称を原値として保持'),
       unit_price: field('number', false),
       quantity: field('number', false),
       amount: field('number', false, '0は有効値。UNKNOWN/NULLと同一視しない。詳細SOURCE間の70%差等を自動補正しない'),
       worker_source_label: field('string', false),
+      source_document_type: field('string', false, 'Canonical金額の採用元帳票。D2-2ではWORKER_SALESを原則優先し、WORKER_SALESがない原票のみSHIPPER_AREAを単独SOURCEとして利用可能'),
       source_file_id: field('string', false),
       source_record_id: field('string', false),
     },
@@ -354,6 +421,28 @@
     },
   };
 
+  /* ---------- RECONCILIATION_RESULT ----------
+     複数SOURCEが同じ業務事実を異なる切り口で表す場合の突合結果。
+     SOURCE値を上書き・補正せず、差異そのものを正式データとして保持する。
+     D2-2では原票単位のWORKER_SALES合計とSHIPPER_AREA合計を比較する。 */
+  const RECONCILIATION_RESULT = {
+    entity: 'RECONCILIATION_RESULT',
+    layer: 'NORMALIZED',
+    fields: {
+      reconciliation_id: field('string', true),
+      target_entity: field('string', true),
+      target_id: field('string', true),
+      metric: field('string', true, '例：SALES_AMOUNT'),
+      left_document_type: field('string', false),
+      right_document_type: field('string', false),
+      left_value: field('number', false, '0は有効値。SOURCEなしはnull'),
+      right_value: field('number', false, '0は有効値。SOURCEなしはnull'),
+      difference: field('number', false, 'right-left。両SOURCEが存在する場合のみ'),
+      ratio: field('number', false, 'leftが0でなく両SOURCEが存在する場合のright/left。補正ルールには使わない'),
+      status: field('string', true, 'EXACT/SOURCE_VARIANCE/SINGLE_SOURCE'),
+    },
+  };
+
   /* ============================================================
      CANONICAL層：会計事実（最も抽象化された集計対象）
   ============================================================ */
@@ -375,6 +464,8 @@
     SOURCE_FILE,
     SOURCE_RECORD,
     IMPORT_BATCH,
+    WORKER_SALES_SOURCE_RECORD,
+    SHIPPER_AREA_SOURCE_RECORD,
     DELIVERY_ROUTE,
     BUSINESS_SLIP,
     DELIVERY_ATTEMPT,
@@ -384,6 +475,7 @@
     PRODUCT_DETAIL,
     DELIVERY_LOCATION,
     SOURCE_LINK,
+    RECONCILIATION_RESULT,
     ACCOUNTING_FACT,
   };
 
