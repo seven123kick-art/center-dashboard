@@ -848,16 +848,37 @@ function upsertDataset(ds) {
 
 // 確定CSVが入った月は、速報（daily）を残さず削除する。
 // 「確定が優先」ではなく「確定が入った時点で速報自体を消す」という運用要望に合わせる。
-async function supersedeDailyWithConfirmed(ym) {
+async function supersedeDailyWithConfirmed(ym, opt={}) {
   const daily = STATE.datasets.find(d => d.ym === ym && (d.type || 'confirmed') === 'daily' && d.source !== 'history');
   if (!daily) return false;
   if (typeof markDataDeleted === 'function') markDataDeleted('datasets', dataDeleteKey(ym, 'daily'));
   STATE.datasets = STATE.datasets.filter(d => !(d.ym === ym && (d.type || 'confirmed') === 'daily' && d.source !== 'history'));
-  try { if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('dataset', `${ym}_daily`); } catch(e) {}
-  try { if (window.CLOUD?.deleteFile) await CLOUD_REPOSITORY.deleteFile(CLOUD.datasetKey(ym, 'daily')); } catch(e) {}
+  if (opt.deferCloudDelete) {
+    // 一括取込中だけの動作：STATE側の変更（tombstone記録＋datasets配列からの
+    // 除外）はここで即座に行うが、Cloudへの不可逆な削除（IDB_CACHE.remove／
+    // CLOUD_REPOSITORY.deleteFile）は呼出元（bulk_import.js）が全グループの
+    // 成功を確認するまで実行しない。新しい削除方式は作らず、既存のCloud削除
+    // 呼出しを後から同じ形で呼び出せるよう、実行のタイミングだけを分離した。
+    return { deferred: true, ym };
+  }
+  await finalizeSupersedeDailyCloudDelete(ym);
   return true;
 }
 window.supersedeDailyWithConfirmed = supersedeDailyWithConfirmed;
+
+async function finalizeSupersedeDailyCloudDelete(ym, opt={}) {
+  const errors = [];
+  try { if (window.IDB_CACHE?.remove) await IDB_CACHE.remove('dataset', `${ym}_daily`); } catch(e) { errors.push(e); }
+  try { if (window.CLOUD?.deleteFile) await CLOUD_REPOSITORY.deleteFile(CLOUD.datasetKey(ym, 'daily')); } catch(e) { errors.push(e); }
+  // opt.throwOnErrorは一括取込側だけが使用する。個別通常取込
+  // （supersedeDailyWithConfirmedのデフォルト呼出）はoptを渡さないため、
+  // 従来通りエラーを握りつぶすだけの挙動を維持する。
+  if (opt.throwOnError && errors.length) {
+    throw new Error(errors.map(e => e.message || String(e)).join('; '));
+  }
+  return { ok: errors.length === 0, errors };
+}
+window.finalizeSupersedeDailyCloudDelete = finalizeSupersedeDailyCloudDelete;
 
 /* ════════ §7 IMPORT ════════════════════════════════════════════ */
 const IMPORT = {
@@ -868,8 +889,26 @@ const IMPORT = {
   handleFiles(files) {
     const arr = Array.from(files);
     if (!arr.length) return;
+    const MSG='upload-msg', ZONE='upload-zone';
+    window.IMPORT_FEEDBACK?.notifyReceived(MSG, ZONE, arr.length===1?arr[0].name:`${arr.length}件のファイル`);
+
     const csv  = arr.filter(f=>/\.csv$/i.test(f.name));
     const xlsx = arr.filter(f=>/\.(xlsx|xls)$/i.test(f.name));
+    // この取込欄はCSV（収支）とXLSX（キャパ）の両方を正式に受け付ける複合入口。
+    // どちらの拡張子にも該当しないファイルが1件でも含まれていれば、
+    // 正常なファイルだけを抽出して続行せず、全体を中止する。
+    const invalidExt = arr.filter(f=>!/\.(csv|xlsx|xls)$/i.test(f.name));
+    if (invalidExt.length) {
+      window.IMPORT_FEEDBACK?.notifyError(MSG, ZONE, `この取込欄ではCSVまたはExcel（xls/xlsx）ファイルのみ使用できます。登録は行っていません。不正ファイル：${invalidExt.map(f=>f.name).join('、')}`);
+      return;
+    }
+    // CSV（収支）とXLSX（キャパ）は同時に取り込めない。どちらも単独では
+    // 正しい形式だが、混在した場合はどちらを優先すべきか一意に決まらず、
+    // 従来はCSV側が優先されXLSX側が黙って無視されていたため、明示的に拒否する。
+    if (csv.length && xlsx.length) {
+      window.IMPORT_FEEDBACK?.notifyError(MSG, ZONE, `CSVとExcelを同時に取り込むことはできません。種類ごとに分けて取り込んでください。登録は行っていません。`);
+      return;
+    }
 
     // 入替モード：年月選択モーダルを出さず、指定済みYMへ直接差替
     if (csv.length && this._replaceYM) {
@@ -879,12 +918,12 @@ const IMPORT = {
       this._replaceType = null;
       // 入替時は元の区分を維持する
       document.querySelectorAll('input[name="manual-import-type"]').forEach(r => { r.checked = (r.value === type); });
-      this.processCSV(csv, ym, { replace:true }).catch(e=>UI.toast(e.message,'error'));
+      this.processCSV(csv, ym, { replace:true }).catch(e=>{ UI.toast(e.message,'error'); window.IMPORT_FEEDBACK?.notifyError(MSG, ZONE, e.message); });
       return;
     }
 
     if (csv.length)  { this._pending = csv; MODAL.openYM(csv); return; }
-    if (xlsx.length) { this.importCapacityExcel(xlsx[0]).catch(e=>UI.toast(e.message,'error')); return; }
+    if (xlsx.length) { this.importCapacityExcel(xlsx[0]).catch(e=>{ UI.toast(e.message,'error'); window.IMPORT_FEEDBACK?.notifyError(MSG, ZONE, e.message); }); return; }
     UI.toast('対応形式：CSV（収支・現場明細）・XLSX（キャパ）','warn');
   },
 
@@ -905,11 +944,15 @@ const IMPORT = {
     }
 
     let imported = 0;
+    const strictFailures = [];
     for (const f of files) {
       try {
         const text = await CSV.read(f);
         const rows = CSV.parseSKDL(text, monthCol);
-        if (!rows) { UI.toast(`${f.name}: データ行が見つかりません`,'warn'); continue; }
+        if (!rows) {
+          if (opt.strict) { strictFailures.push(`${f.name}: データ行が見つかりません`); continue; }
+          UI.toast(`${f.name}: データ行が見つかりません`,'warn'); continue;
+        }
         const type = importType;
         const ds = processDataset(ym, type, rows);
         ds.routePayments = CSV.parseRoutePayments(text);
@@ -923,13 +966,32 @@ const IMPORT = {
         STATE.datasets = STATE.datasets.filter(d => !(d.ym === ym && (d.type || 'confirmed') === type && d.source !== 'history'));
         upsertDataset(ds);
         imported++;
-      } catch(e) { UI.toast(`${f.name}: ${e.message}`,'error'); }
+      } catch(e) {
+        if (opt.strict) { strictFailures.push(`${f.name}: ${e.message}`); continue; }
+        UI.toast(`${f.name}: ${e.message}`,'error');
+      }
     }
+
+    /* ---------- bulk_import.js専用のstrictモード（今回追加） ----------
+       通常の個別取込（opt.strict省略時）は、1ファイルの失敗を警告表示
+       するだけで処理を続け、imported>0であれば「一部成功」として
+       扱う従来の挙動を完全に維持している（このifブロック自体、
+       strict時にしか実行されない）。
+       strict時は、1ファイルでも失敗があれば、あるいはimported件数が
+       選択ファイル数と一致しなければ、この関数はSTATEへの変更を
+       行った可能性があっても例外を投げる。呼出元（bulk_import.js）
+       は、この例外をcatchしてPhase2ロールバック（STATEスナップショット
+       復元）を実行するため、「一部成功をそのまま成功として扱う」
+       ことはない。 */
+    if (opt.strict && (strictFailures.length || imported === 0 || imported !== files.length)) {
+      throw new Error(strictFailures.length ? strictFailures.join('; ') : `${ymLabel(ym)}：登録可能なデータが1件もありませんでした`);
+    }
+
     if (imported > 0) {
       Repository.Storage.save();
       // 確定CSVが入った月は速報を残さず削除する
       if (importType === 'confirmed') {
-        try { await supersedeDailyWithConfirmed(ym); Repository.Storage.save(); } catch(e) {}
+        try { await supersedeDailyWithConfirmed(ym, opt.strict ? { deferCloudDelete: true } : {}); Repository.Storage.save(); } catch(e) {}
       }
       // 単体取込では従来通り取込月だけ同期する。
       // 一括取込では opt.awaitCloud === false を指定し、ループ後に pushAll() を1回だけ実行する。
@@ -941,10 +1003,13 @@ const IMPORT = {
       } else if (opt.awaitCloud !== false) {
         SYNC_COORDINATOR.syncMonth(ym).catch(()=>{}); // 取込月だけ自動同期
       }
-      NAV.refresh();
-      UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`);
-      UI.updateSaveStatus();
+      if (!opt.strict) {
+        NAV.refresh();
+        UI.toast(`${imported}件取込完了（${ymLabel(ym)}）`);
+        UI.updateSaveStatus();
+      }
     }
+    return imported;
   },
 
   async importCapacityExcel(file) {

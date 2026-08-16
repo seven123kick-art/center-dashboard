@@ -1,6 +1,770 @@
 Version6 取込安全性・データ品質管理基盤の整備
 （2026-08-15）
 
+【今回の追加対応（旧速報Cloud削除のタイミング修正）】
+
+前回実装の成功パスは、全グループのローカル登録完了直後に
+finalizeSupersedeDailyCloudDelete()（旧速報Cloudファイル削除）を
+実行し、その後にSTATE.fiscalYear/selYM設定→Repository.Storage.save()
+→SYNC_COORDINATOR.syncPush()（新データCloud保存）→_verifyCloudSaved()
+（Cloud再取得検証）という順序になっていた。この順序では、
+「速報Cloud削除は成功したが、新しい確定データのCloud保存に失敗する」
+という中間状態が発生し得た。
+
+■datasetKeyの衝突有無を確認した
+CLOUD._datasetKey(ym, type)（src/core/cloud.js）の実装を確認した
+結果、`${CENTER.id}/skdl/${ym}_${type}.json`という形式で、
+type='daily'とtype='confirmed'は完全に異なるファイルパス
+（例：202605_daily.json / 202605_confirmed.json）であることを
+確認した。削除処理の実行タイミングを最後に回しても、新しい
+確定データを誤って削除してしまうリスクはない。
+
+■実行順序を要求通りに修正した
+bulk_import.jsのhandleFiles()成功パスを、
+  Phase1全件検証 → Phase2ローカル登録 → Storage保存 →
+  Cloud新データ保存（syncPush） → Cloud再取得検証
+  （_verifyCloudSaved） → 旧速報Cloud削除確定
+  （finalizeSupersedeDailyCloudDelete） → 完了
+という順序へ修正した。旧速報Cloud削除の実行位置を、Cloud保存・
+検証が完了した後（try節の末尾、cloudSummary = 'クラウド一括保存: OK'
+を設定する直前）へ移動した。
+Cloud保存（syncPush）またはCloud再取得検証（_verifyCloudSaved）が
+失敗した場合は、catch(e)節へ分岐し、旧速報Cloud削除の呼出し自体に
+到達しないため、旧速報Cloudファイルには一切触れない
+（削除しない）ことを保証した。
+
+■finalizeSupersedeDailyCloudDelete()の削除成否検知を追加した
+既存のfinalizeSupersedeDailyCloudDelete(ym)は、内部でIDB_CACHE.remove/
+CLOUD_REPOSITORY.deleteFileの失敗をtry/catchで握りつぶしており、
+呼出元が成否を検知できなかった。
+opt.throwOnErrorという新規オプションを追加し、trueの場合のみ
+削除失敗時に例外を投げるようにした。opt省略時（個別通常取込、
+supersedeDailyWithConfirmedのデフォルト呼出）は、従来通りエラーを
+握りつぶすだけで例外を投げない（diff確認済み、呼出箇所
+`await finalizeSupersedeDailyCloudDelete(ym);`は引数を一切
+変更していない）。
+bulk_import.js側は、finalizeSupersedeDailyCloudDelete(ym,
+{ throwOnError: true })という形で削除失敗を検知し、
+deleteFailures配列へ蓄積してcloudSummaryメッセージへ反映する
+（データ自体は正しく登録されているため、致命的エラーとはせず、
+「クラウド一括保存: OK」に付随する警告として表示する設計とした）。
+
+============================================================
+テスト結果
+============================================================
+Node.js環境で以下を確認した：
+・CLOUD._datasetKeyのキー生成ロジックを再現し、
+  daily/confirmedが異なるファイルパスになること（衝突しないこと）
+  を確認した。
+・新しい実行順序をシミュレーションし、
+  Cloud保存成功時：「Storage保存→Cloud新データ保存→Cloud再取得検証
+  →旧速報Cloud削除確定」という順序で実行されることを確認した。
+  Cloud保存失敗時：「Storage保存→Cloud新データ保存→エラー」で
+  停止し、旧速報Cloud削除が一切実行されないことを確認した。
+・finalizeSupersedeDailyCloudDeleteのthrowOnErrorオプションを
+  検証し、bulk側（throwOnError:true）では削除失敗が正しく例外
+  として検知され、個別通常取込側（optなし）では従来通り例外を
+  投げず戻り値のみで結果を保持する（握りつぶし挙動を維持する）
+  ことを確認した。
+
+コード上の確認：
+・app.jsの差分は、finalizeSupersedeDailyCloudDelete関数本体の
+  変更のみであることをdiffで確認した。個別通常取込側の呼出し
+  （supersedeDailyWithConfirmed内のawait finalizeSupersedeDailyCloudDelete(ym);）
+  は引数を一切変更していない。
+・processDataset()・CSV.parseSKDL()（既存parser本体）は、Pythonの
+  バイト単位比較で完全一致（無変更）することを確認した。
+・field_core.js・route_analysis.jsは、今回のセッションで一切
+  変更していない（前回投入版とdiffで完全一致）ことを確認した。
+・全JS構文チェック：エラー0件。
+
+============================================================
+最終判定（今回分）
+============================================================
+PASS
+（旧速報Cloud削除の実行タイミングを、新データのCloud保存・検証
+成功後まで正しく延期した。datasetKeyの構造上、削除対象（daily）
+と保存対象（confirmed）が別ファイルであることを確認し、削除の
+遅延によって新しい確定データが誤って削除されるリスクがないこと
+を確認した。削除成否を一括取込側でのみ検知できるようにしつつ、
+個別通常取込の既存挙動（握りつぶし）は一切変更していない。
+既存parser・validation・個別取込には一切触れていない）
+
+============================================================
+前回セッションまでの内容（参考、今回変更なし）
+============================================================
+
+■① IMPORT.processCSV()にstrictモードを追加した
+bulk_import.jsのPL登録が呼んでいたIMPORT.processCSV()は、内部で
+各ファイルをtry/catchし、失敗してもthrowせず処理を継続していた。
+また呼出元のMath.max(g.files.length, after-before, 1)により、
+実登録に失敗していても成功件数として扱われる可能性があった。
+
+app.js側のprocessCSV(files, ym, opt={})に、opt.strictという新規
+オプションを追加した。strict時のみ：
+  ・1ファイルでも解析/登録失敗（parseSKDLがnullを返す、または例外）
+    → strictFailures配列へ蓄積し、ループ完了後にthrow
+  ・imported件数0、または imported !== files.length
+    → throw
+  ・一部成功していても、この関数はThrowによって呼出元へ失敗を
+    確実に伝播する（bulk_import.js側のcatchへ必ず到達する）
+opt.strict省略時（個別通常取込）の挙動は完全に維持した：
+  ・失敗ファイルはUI.toastで警告表示するだけで処理を継続
+  ・imported>0であれば「一部成功」として登録を確定し、
+    NAV.refresh()/UI.toast(成功)/UI.updateSaveStatus()を実行
+  （diff確認済み、既存の分岐は1つも削除・変更していない。
+  strict用の追加ロジックは全て「if (opt.strict)」で完全に
+  ガードされた新規コードのみ）
+
+bulk_import.js側は、
+  await IMPORT.processCSV(g.files, g.ym, { replace:true, awaitCloud:false, strict:true });
+という形でstrict:trueを渡し、戻り値（実際に登録された件数）を
+そのままcountとして使うよう修正した。従来の
+Math.max(g.files.length, after-before, 1)という「成功件数の捏造」
+は完全に削除した。
+_importPLGroup()（IMPORT.processCSVが存在しない場合のフォールバック
+経路）は、元々各ファイルの解析失敗時に即座にthrowする実装で
+あったため、この点は既に安全だった。この経路にも②のCloud削除
+延期オプションのみ追加した（imported件数の扱いは元から捏造して
+いなかったため変更していない）。
+
+■② supersedeDailyWithConfirmed()のCloud即時削除を一括取込中だけ延期した
+既存のsupersedeDailyWithConfirmed(ym)は、STATE変更
+（markDataDeletedによるtombstone記録＋STATE.datasetsからの除外）
+に加えて、CLOUD_REPOSITORY.deleteFile()によるCloud側への即時
+削除リクエストを実行していた。これは後続グループが失敗して
+STATEをロールバックしても元に戻せない不可逆な副作用だった。
+
+【調査結果（正直な報告）】
+ご指示にあった「tombstone/STATE.deleted/syncPush側で既に安全に
+削除を反映できる仕組み」を実コードで確認した結果、
+SYNC_COORDINATOR.syncPush()は「現在のSTATE.datasetsの内容を
+Cloudへアップロードするだけ」の実装であり、STATE.datasetsから
+除外されたデータセットに対応する既存のCloudファイルを能動的に
+削除する仕組みではないことが判明した。STATE.deletedのtombstone
+（markDataDeleted）は、Pull（他端末からの取得）時に「このデータは
+削除済みなので復元しない」という目的でのみ使われており（
+sync_coordinator.js内のisDeletedSince呼出箇所で確認）、Push側で
+Cloud上の実ファイルを能動的に削除するトリガーにはなっていない。
+このため、「既存の安全な削除反映の仕組みをそのまま再利用する」
+という当初の想定通りの対応はできず、代わりに以下の最小限の
+方法を選んだ。
+
+【実装内容】
+supersedeDailyWithConfirmed(ym)を、
+  ・STATE変更（tombstone記録＋datasets配列からの除外）を行う本体
+  ・実際のCloud削除（IDB_CACHE.remove／CLOUD_REPOSITORY.deleteFile）
+    を行うfinalizeSupersedeDailyCloudDelete(ym)という新規の分離関数
+の2つへ分割した。新しい削除方式は作らず、既存のCloud削除呼出し
+（IDB_CACHE.remove/CLOUD_REPOSITORY.deleteFile、コード自体は
+1文字も変更していない）を、実行するタイミングだけ分離しただけで
+ある。
+supersedeDailyWithConfirmed(ym, opt={})にopt.deferCloudDeleteを
+追加し、
+  ・opt省略時（デフォルト、個別通常取込）：STATE変更の直後に
+    finalizeSupersedeDailyCloudDelete(ym)を即座に呼ぶ。これは
+    従来と完全に同じシーケンスであり、個別通常取込の動作は
+    一切変更していない（diff確認済み）。
+  ・opt.deferCloudDelete===true（bulk_import.jsのみ使用）：
+    STATE変更は即座に行うが、Cloud削除は実行せず
+    {deferred:true, ym}を返す。
+bulk_import.js側は、pl種別グループの登録が確定型で、かつ登録前に
+速報データが存在した場合、そのymをpendingSupersedeDailyYmsという
+ローカル配列（STATE構造への追加ではない、bulk_import.js内の
+一時変数）へ記録する。全グループの登録処理が成功した場合のみ
+（bulkFailedチェックを通過した後）、pendingSupersedeDailyYmsに
+記録された各ymについてfinalizeSupersedeDailyCloudDelete(ym)を
+呼び、初めてCloud側の削除を確定させる。ロールバック時
+（bulkFailed）はこのブロックへ到達しないため、Cloud側の削除は
+一切実行されない。
+
+============================================================
+テスト結果
+============================================================
+Node.js環境で、processCSVのstrictモード・
+supersedeDailyWithConfirmedのdeferCloudDelete・bulk_import.jsの
+Phase2ロールバックロジックを忠実に再現し、以下5パターンを検証した：
+
+1. Phase1全件PASS→PL実登録1件目で例外
+   → ロールバック実行、STATE完全一致（JSON比較でtrue）、
+     cloudDeleteLog空（Cloud変更0件）
+2. PL1件成功→PL2件目で例外
+   → 同上、ロールバック後STATE完全一致、cloudDeleteLog空
+3. 確定PL成功→worker失敗
+   → ロールバック実行、STATE完全一致、cloudDeleteLog空
+     （速報Cloudファイルが削除されていないことを確認）
+4. 全グループ成功
+   → cloudDeleteLogに対象ym（"202605_daily"）が記録され、
+     STATE.datasetsが正しく確定データのみになっていることを確認
+     （初めて速報削除とCloud同期が実行されるタイミングを確認）
+5. 個別通常PL取込（一部成功・一部失敗混在）
+   → strictオプション省略時は例外を投げず、失敗ファイルは警告
+     表示のみで処理を継続し、成功分（一部）がそのまま登録される
+     従来動作を維持していることを確認
+
+コード上の確認：
+・app.jsのprocessCSV差分は、diff確認により非strict時の既存分岐
+  （UI.toast警告・NAV.refresh・成功toast・supersedeDailyWithConfirmed
+  のopt省略呼出）を1つも変更せず、strict専用の新規コードのみ
+  追加していることを確認した。
+・processDataset()・CSV.parseSKDL()（既存parser本体）は、Pythonの
+  バイト単位比較で完全一致（無変更）することを確認した。
+・field_core.js・route_analysis.jsは、今回のセッションで一切
+  変更していない（前回投入版とdiffで完全一致）ことを確認した。
+・全JS構文チェック：エラー0件。
+
+============================================================
+最終判定（今回分）
+============================================================
+PASS
+（①processCSVへのstrictモード追加により、bulk_import.js経由の
+PL登録失敗が確実にロールバックへ伝播するようになった。②
+supersedeDailyWithConfirmedのCloud削除タイミングを分離し、
+一括取込中は全グループ成功後まで延期するようにした。個別通常
+取込の挙動はいずれも完全に維持されていることをdiff・シミュレー
+ションテストで確認した。既存parser・validation・PDF解析・便別
+採算計算には一切触れていない）
+
+============================================================
+前回セッションまでの内容（参考、今回変更なし）
+============================================================
+
+前回実装のPhase 2は、各グループを「try→登録→catchでNGログ→次group
+へ」と処理する構造であり、group Aの登録が成功した後にgroup Bの
+登録処理で予期しない例外が発生すると、group AのSTATE変更が残った
+状態で最後のRepository.Storage.save()まで到達する可能性があった。
+今回、Phase 2直前にSTATEスナップショットを取得し、1グループでも
+登録処理が失敗した場合は即座に処理を中止してロールバックする
+構造へ修正した。
+
+■スナップショット対象の特定
+今回の一括取込（pl/worker/product）で変更され得るSTATEのプロパティを、
+upsertDataset()（app.js）・upsertByYm()（field_core.js）・
+clearDataDeleted()（app.js）の実装から特定した：
+  ・STATE.datasets（pl取込、upsertDatasetで配列を再構築）
+  ・STATE.workerCsvData（worker取込、upsertByYmで配列を再構築）
+  ・STATE.productAddressData（product取込、同上）
+  ・STATE.deleted（pl/worker/product共通、clearDataDeletedで
+    {kind:{key:timestamp文字列}}という単純なJSON互換構造を変更）
+  ・STATE.fiscalYear / STATE.selYM（pl成功時にhandleFiles末尾で設定）
+STATE全体を雑にJSONコピーして差し替えることは行っていない
+（既存参照や非JSON値を壊すリスクを避けるため）。上記5プロパティ
+だけを対象に、配列は浅いコピー（スプレッド構文）、STATE.deleted
+はJSON深いコピー（プレーンなJSON互換構造のため安全）で退避した。
+STATEオブジェクトそのものの参照は一切変更していない
+（STATE.datasets = ... のようにプロパティへ代入するのみで、
+STATE = {...} のような参照の差し替えは行っていない）。
+
+■ロールバック手順
+Phase 2のグループ処理ループのcatch節を、「NGログを残して次の
+グループへ進む」から「NGログを残して即座にループをbreakする」へ
+変更した（catchしてNGログだけ残し次のgroupへ進む挙動は廃止した）。
+ループ脱出後、bulkFailedフラグが立っていれば：
+  1. STATE.datasets/workerCsvData/productAddressData/deleted/
+     fiscalYear/selYMを、Phase 2直前のスナップショットへ復元
+  2. FIELD_DATA_ACCESS.invalidate()でキャッシュを整合させる
+  3. Repository.Storage.save()でロールバック後の状態をローカルへ
+     保存する
+  4. AUTO_SYNC.resume()で抑制を解除する
+  5. 「一括取込に失敗したため、今回の登録内容はすべて取り消しました。
+     原因：○○」というメッセージを表示する
+  6. return文でCloud pushAllのブロックには一切進まない
+というロールバック処理を行う。CLOUD.pushMonthの一時抑制解除は
+既存のtry/finally構造（ループの成功・失敗を問わず必ず実行される）
+をそのまま利用しており、今回変更していない。
+
+■既知の制約（正直な報告）
+pl（確定区分）の登録処理には、既存のsupersedeDailyWithConfirmed()
+（今回変更禁止の既存関数）が呼ばれる場合があり、この関数は
+STATE.datasetsの変更に加えて、CLOUD_REPOSITORY.deleteFile()による
+Cloud側への即時削除リクエストを送信する副作用を持つ。この
+Cloud側の副作用は、今回のロールバック実装の対象（STATEの復元）
+には含まれない。ご指示が「STATEを復元可能な形で退避してください」
+「Cloudへのpush allは実行しない」という範囲であったため、今回の
+実装はSTATE側の完全な巻き戻しとCloud一括保存（pushAll）の未実行に
+限定している。pl（確定CSV）の登録が成功した直後に後続グループが
+失敗した場合、STATE側は正しくロールバックされるが、
+supersedeDailyWithConfirmedによる速報データのCloud側個別削除
+（既存仕様、try/catchでエラーを握りつぶす設計）が既に発生している
+可能性がある点を残課題として明記する。
+
+============================================================
+テスト結果
+============================================================
+Node.js環境で、STATE退避・ロールバックのロジックを実際に動かして
+以下3パターンを検証した：
+1. group A登録成功→group B登録時に例外
+   → ロールバック後のSTATEが取込開始前とJSON完全一致
+     （JSON.stringify比較でtrue）、Cloud pushは未実行、
+     Storageへの保存は1回（ロールバック状態）のみ
+2. worker登録成功→product登録時に例外
+   → 同上、STATE完全一致・Cloud未実行を確認
+3. PL登録成功→worker登録時に例外
+   → 同上、STATE完全一致・Cloud未実行を確認
+   （STATE.deletedのようなオブジェクト型プロパティを含む状態でも
+   正しく復元されることを確認）
+
+コード上の確認：
+・CLOUD.pushMonthの一時抑制解除（try/finally）は、成功・失敗
+  （ループのbreak含む）を問わず必ず実行される位置にあることを
+  確認した。
+・AUTO_SYNC.resume()は、ロールバックパス（今回追加）と成功パス
+  （既存のクラウド処理finally内）の両方に存在し、いずれの経路でも
+  抑制が解除されることを確認した。
+・_importPLGroup()はPythonバイト単位比較で完全一致（無変更）。
+・field_core.js/route_analysis.js/app.jsは、今回のセッションで
+  一切変更していない（前回投入版とdiffで完全一致）ことを確認した。
+・全JS構文チェック：エラー0件。
+
+============================================================
+最終判定（今回分）
+============================================================
+PASS WITH NOTES
+（Phase 2を完全なロールバック対応の構造へ修正し、3パターンの
+テストでSTATE完全一致・Cloud未実行・Storage単回保存を確認した。
+既存parser・validation・個別取込ロジック（_importPLGroup/
+handleFilesForYM等）には一切触れていない。ただし、
+supersedeDailyWithConfirmedのCloud側個別削除という既存副作用は
+今回のSTATEロールバックの対象外であることを正直に明記した上での
+PASSである）
+
+============================================================
+前回セッションまでの内容（参考、今回変更なし）
+============================================================
+
+■① bulk_import.jsを本当のall-or-nothingにした
+前回実装では、年月判定不能・CSV種別unknown・グループ取込失敗の
+いずれも「スキップ／catchして次へ」という設計であり、異常CSVと
+正常CSVを混在させると正常側だけ登録されてしまう問題が残っていた。
+
+既存parser（CSV.parseSKDL/parseWorkerCsvRows/
+parseProductAddressRows/assertNotForeignCsv/assertOwnCsvSignature）
+は一切変更せず、handleFiles()の内部構造を以下の2段階へ明確に
+分離した：
+
+Phase 1（全ファイル事前検証、STATE/Storage/Cloudへは一切書き込まない）
+  ・全ファイルの年月判定（_ymFromName、既存関数そのまま）
+  ・全ファイルのCSV種別判定（_classify、既存関数そのまま）
+  ・種別ごとのグループ化後、各グループについて既存parser/
+    validationを「検証だけ」実行する：
+    - plグループ：CSV.read()+CSV.parseSKDL()を呼び、
+      戻り値がfalsyならエラー（_importPLGroupと同じ判定基準）
+    - workerグループ：新規追加のvalidateWorkerCsvFilesOnly()
+      （field_core.js）が、既存のassertNotForeignCsv/
+      assertOwnCsvSignature/parseWorkerCsvRowsをそのまま呼び出す
+    - productグループ：同様にvalidateProductCsvFilesOnly()
+      （field_core.js）
+  年月不明・種別不明・validation不合格が1件でもあれば、その時点で
+  problems配列にエラーを積み、Phase 1終了時にproblems.lengthが
+  1以上ならメッセージを表示してreturnし、Phase 2には一切進まない。
+  「種別不明・年月不明ファイルをスキップして続行する」という
+  従来の挙動は、今回の安全性優先の方針により廃止した。
+
+Phase 2（全ファイルの事前検証に合格した場合のみ実行）
+  ・IMPORT.processCSV / _importPLGroup / FIELD_WORKER_IMPORT2.
+    handleFilesForYM / FIELD_PRODUCT_IMPORT2.handleFilesForYM
+    という既存の登録処理を、変更せずそのまま呼び出す。
+  ・CLOUD.pushMonth抑制・AUTO_SYNC制御・pushAll一括保存・
+    保存確認（_verifyCloudSaved）等、既存のクラウド同期制御も
+    一切変更していない。
+
+field_core.jsへ追加したvalidateWorkerCsvFilesOnly() /
+validateProductCsvFilesOnly()は、importWorker/importProductが
+使っているのと全く同じ関数呼出（assertNotForeignCsv→
+assertOwnCsvSignature→parseWorkerCsvRows/parseProductAddressRows）
+をそのまま実行するだけの薄いラッパーであり、STATEへの書込
+（upsertByYm等）は一切含まない。importWorker/importProduct自体は
+今回のセッションで1文字も変更していない（diff確認済み）。
+
+■② SKDL複合入口でCSV＋Excel混在を拒否した
+app.js IMPORT.handleFiles()に、csv.lengthとxlsx.lengthが両方とも
+1以上の場合に登録処理へ進まず拒否するチェックを追加した：
+  「CSVとExcelを同時に取り込むことはできません。種類ごとに分けて
+  取り込んでください。登録は行っていません。」
+これにより、CSV＋Excel混在時に従来はCSV側が優先されExcel側が
+黙って無視されていた挙動を解消した。CSV＋PDF・Excel＋PDFは、
+既存のinvalidExt（拡張子違い）チェックで既に拒否される。
+CSVのみ／Excelのみの単独投入時の処理（年月選択モーダル／
+importCapacityExcel）は一切変更していない。
+
+============================================================
+③ 最終テスト結果
+============================================================
+Node.js環境で、bulk_import.jsのPhase 1/Phase 2判定ロジックを
+シミュレーションし、以下を確認した：
+・正常CSV×複数 → 全件登録（registered:2, problems:[]）
+・正常CSV＋unknown CSV → 全件0登録
+  （registered:0, problems:['mystery...：種別不明']）
+・正常CSV＋年月判定不能CSV → 全件0登録
+  （registered:0, problems:['...：年月不明']）
+・正常worker＋validation不合格worker → 全件0登録
+  （registered:0, problems:['worker:...: validation失敗']）
+・途中グループ（3グループ中3つ目）validation失敗 →
+  それ以前の2グループも0登録（registered:0）
+
+SKDL複合入口については以下を確認した：
+・CSVのみ → 通過（path:'csv'）
+・XLSXのみ → 通過（path:'xlsx'）
+・CSV＋XLSX → 拒否（'CSV+Excel混在拒否'）
+・CSV＋PDF → 拒否（拡張子不正）
+・XLSX＋PDF → 拒否（拡張子不正）
+
+STATE/Storage/Cloudへの書込開始位置の確認：
+bulk_import.jsのソースコード上で、実際の登録処理を伴う呼出
+（IMPORT.processCSV/_importPLGroup/handleFilesForYM）は全て
+「Phase 2」というコメント（232行目付近）より後方に位置しており、
+Phase 1で1件でも問題があればその手前でreturnする構造になっている
+ことをgrep/コード上の行順で確認した。
+
+全JS構文チェック：エラー0件。
+_importPLGroup()はPythonバイト単位比較で完全一致（無変更）。
+parsePageText/parseHeadPaymentSheet/parseWorkerCsvRows/
+parseProductAddressRows/validateWorkerCsvSignature/
+validateProductCsvSignature/detectForeignCsvSignatureも全て
+完全一致（無変更）。importWorker/importProduct自体も、diffで
+確認した結果、今回のセッションでは1行も変更していない（validateOnly
+という新規メソッドの追加のみ）。ledger.js・center.htmlは今回一切
+変更していない（ハッシュ/diff確認済み）。
+
+============================================================
+最終判定（今回分）
+============================================================
+PASS
+（①bulk_import.jsを真のall-or-nothing（Phase1事前検証／Phase2
+登録の2段階構造）へ修正し、②SKDL複合入口のCSV+Excel混在を明示的に
+拒否した。既存parser・positive validation・PDF解析・便別採算計算
+には一切触れていない）
+
+============================================================
+前回セッションまでの内容（参考、今回変更なし）
+============================================================
+
+■① 複数ファイル選択時のall-or-nothing化
+前回実装では`arr = all.filter(...)`により、不正拡張子ファイルが
+静かに除外され、正常ファイルだけが処理されてしまう問題があった
+（例：正常PDF＋異常CSVを同時dropすると、CSVだけ除外してPDFを処理
+できてしまう）。
+配達持出リストPDF・配達ヘッド傭車料XLS/XLSX・作業者別CSV・
+商品・住所CSVの4経路について、選択された全ファイルの拡張子を
+先に確認し、1件でも許可拡張子と異なるファイルがあれば、正常な
+ファイルを含めて登録処理全体を中止するよう修正した。
+エラーメッセージには不正ファイル名を明記する：
+  「この取込欄ではPDFファイルのみ使用できます。登録は行っていません。
+  不正ファイル：○○」
+
+■② SKDL・CSV一括取込への最小限対応
+前回セッションでは対象外としていたSKDL（①収支CSV、app.js
+IMPORT.handleFiles）とCSV一括取込（bulk_import.js handleFiles）に、
+既存の内容判定・処理構造を変更しない範囲で以下を追加した：
+・ファイル受付直後のIMPORT_FEEDBACK.notifyReceivedによる
+  即時フィードバック
+・許可拡張子確認（all-or-nothing）
+・エラー時のメッセージ表示（IMPORT_FEEDBACK/既存の_msg経由）
+既存のCSV/XLSX判定・年月選択モーダル・種別自動判定（_classify）
+ロジックには一切触れていない。
+
+　SKDL入口はCSV（収支データ）とXLSX（キャパ管理データ）の両方を
+　正式に受け付ける複合入口であるため、「許可拡張子」は
+　CSVまたはXLSXのいずれかとし、どちらにも該当しないファイルが
+　1件でもあれば全体を拒否する。CSV/XLSXが両方選択された場合に
+　CSV側を優先しXLSX側を無視するという既存の設計（複合入口として
+　意図された優先順位）はそのまま維持した（この点はご指示の
+　「SKDLがCSV/XLSX両対応なら、それ自体は維持してください」に
+　従った判断である）。
+
+　CSV一括取込は「複数種類のCSV（SKDL/作業者/商品）をまとめて
+　振り分ける」ことが本来の目的のため、「許可拡張子」は.csvのみと
+　し、拡張子がCSVでないファイルが1件でもあれば全体を拒否する。
+　一方、CSVの中身の種別が判定できないファイルを個別にスキップして
+　続行する既存の挙動（_classify、既存のskipped一覧表示）は、この
+　入口の中核機能そのものであるため維持した。
+　なお、bulk-csv-file-inputのdropzone要素にはid属性が付与されて
+　いなかったため、視覚的なゾーン状態表示（枠色変化）は今回対応
+　していない（メッセージ表示のみ対応）。HTML変更を伴うため、
+　既存機能保護を優先し見送った。
+
+■③ 全取込経路の一覧化
+center.htmlに存在する全11個のtype="file"要素を再検索し、
+未確認の入口が残っていないことを確認した（下表参照）。
+
+============================================================
+全取込経路一覧
+============================================================
+
+| 取込名 | 許可形式 | click処理 | drop処理 | validation | 保存処理 |
+|---|---|---|---|---|---|
+| ①収支CSV/キャパExcel（SKDL） | .csv/.xlsx/.xls | setupDropZone→IMPORT.handleFiles | 同左（同一関数） | 拡張子(今回all-or-nothing化)＋既存のCSV.parseSKDL/年月選択モーダル | IMPORT.processCSV／importCapacityExcel |
+| CSV一括取込 | .csv | onchange→BULK_IMPORT.handleFiles | 同左（同一関数） | 拡張子(今回all-or-nothing化)＋既存_classify（ファイル名＋本文） | 種別ごとに既存の各import関数へ振分け |
+| ②作業者別CSV | .csv | onchange→FIELD_WORKER_IMPORT2.handleFiles→importWorker | ondrop→FIELD_WORKER_IMPORT2.handleDrop→同一importWorker | 拡張子(今回all-or-nothing化)→実体→negative/positive validation→0件確認 | upsertByYm('workerCsvData',...) |
+| ③商品・住所CSV | .csv | onchange→FIELD_PRODUCT_IMPORT2.handleFiles→importProduct | ondrop→FIELD_PRODUCT_IMPORT2.handleDrop→同一importProduct | 同上（product版） | upsertByYm('productAddressData',...) |
+| 配達持出リストPDF | .pdf | input.change→importFiles | zone.drop→同一importFiles | 拡張子(今回all-or-nothing化)→PDFマジックバイト→対象帳票(head/date)→0件確認 | STATE.routeData.push(...) |
+| 配達ヘッド傭車料 | .xls/.xlsx | input.change→importHeadPaymentFiles | zone.drop→同一importHeadPaymentFiles | 拡張子(今回all-or-nothing化)→XLSX.read実体確認→必須列構造→0件確認 | STATE.routeData（headPayments）への統合 |
+| キャパ分析画面からの商品・住所CSV | .csv | onchange→CAPACITY_UI.importAreaCsv | （clickのみ、dropは未配線） | importAreaCsv内部でFIELD_PRODUCT_IMPORT2.handleFilesへ完全に委譲しており、③と全く同じvalidation・保存処理が適用される（今回の修正が自動的に反映される、独自ロジックなし） | ③と同一 |
+| キャパマスタ（capacity-master-input） | .xlsx/.xls（accept属性のみ） | 未配線（onchange/イベントリスナーがJS側に見当たらない） | 未配線 | 該当なし（現在機能していない要素と判断） | 該当なし |
+| 過去資料・一括登録（library-bulk-file-input） | .pdf/.xlsx/.xls/.doc/.docx/.txt/.csv/.png/.jpg/.jpeg/.webp | onchange→PAST_LIBRARY.handleBulkFiles | 未確認（一覧表示のみの機能） | 中身を構造化解析せず、ファイルをそのままカテゴリ・年月と共に保管するアーカイブ機能。業務データとして解析・STATE登録する経路ではないため、今回の誤登録防止の対象外と判断した | Blobとしてそのまま保存 |
+| 過去資料・単体登録（library-file-input） | 同上 | onchange→PAST_LIBRARY.handleFile | 未確認 | 同上（アーカイブ機能のため対象外） | 同上 |
+| セッション読込（session-load-input） | .json | app.js内でaddEventListener | なし | アプリの設定・セッション状態を読み込む機能で、配送・収支等の業務データではないため対象外と判断した | セッション状態の復元 |
+
+未確認のファイル取込入口は0件であることを確認した（全11要素を
+検索し、対応済み6経路・自動的に恩恵を受ける1経路（キャパ分析
+からの商品住所CSV）・対象外と判断した4経路（キャパマスタ＝未配線、
+過去資料2種＝アーカイブ機能、セッション読込＝業務データでない）
+に分類した）。
+
+============================================================
+追加テスト結果
+============================================================
+Node.js環境で、all-or-nothing判定ロジックを6経路全てについて
+実行し、以下を確認した：
+・PDF欄：PDFのみ→通過／CSVのみ→拒否／PDF＋CSV混在→**全体拒否**
+・Excel欄：XLSXのみ→通過／PDFのみ→拒否／XLSX＋PDF混在→**全体拒否**
+・作業者CSV欄：正常CSVのみ→通過／正常CSV＋PDF混在→**全体拒否**
+・商品住所CSV欄：正常CSVのみ→通過／正常CSV＋PDF混在→**全体拒否**
+・SKDL：CSVのみ→通過／XLSXのみ→通過／CSV＋無関係ファイル混在→
+  **全体拒否**
+・CSV一括取込：CSVのみ→通過／CSV＋PDF混在→**全体拒否**
+いずれも「不正ファイルだけを除外して正常ファイルだけ処理する」
+という挙動にはならず、混在時は必ず全体が拒否されることを確認した。
+
+全JS構文チェック：エラー0件。
+parsePageText/parseHeadPaymentSheet/parseWorkerCsvRows/
+parseProductAddressRows/validateWorkerCsvSignature/
+validateProductCsvSignature/detectForeignCsvSignatureは、今回の
+セッション開始前とバイト単位で完全一致（無変更）。ledger.js・
+center.htmlは今回一切変更していない（ハッシュ/diff確認済み）。
+
+============================================================
+最終判定（今回分）
+============================================================
+PASS
+（①複数ファイルのall-or-nothing化を4経路に適用、②SKDL・CSV
+一括取込へ既存構造を壊さない最小限の対応を追加、③全11個の
+ファイル取込入口を洗い出し未確認0件を確認、④混在ファイルによる
+誤登録が発生しないことをテストで確認した。既存の解析ロジック・
+positive validation・PDF解析・便別採算計算には一切触れていない）
+
+============================================================
+前回セッションまでの内容（参考、今回変更なし）
+============================================================
+実機確認の結果、誤登録防止のロジック自体は機能していたが、
+・ドロップ時に何も表示されない（即時フィードバックがない）
+・「なぜ拒否されたか」の原因が区別されず、利用者が誤認しかねない
+  メッセージ（例：PDFに無関係ファイルを入れると「便を確定できま
+  せんでした」という、内容が悪いと誤解させる表示）になっていた
+という2点が判明したため、これに対応した。
+新規に共有モジュールsrc/core/import_feedback.jsを追加し、
+配達持出リストPDF・配達ヘッド傭車料XLS/XLSX・作業者別CSV・
+商品・住所CSVの4経路について、
+  拡張子確認（ステージA）→実体形式確認（ステージB）→
+  対象帳票・対象データ形式確認（ステージC）→内容0件確認（ステージD）
+→登録
+という共通フローに統一し、各段階で原因の異なるメッセージを
+表示するようにした。click（ファイル選択）とdrag&dropは、
+本セッション開始前から既に同一の処理関数を呼ぶ実装になっていた
+ことをコード確認した上で維持し、新たな二重実装は行っていない。
+
+【追加変更ファイル】
+- src/core/import_feedback.js（新規）
+- center.html（script登録1行のみ）
+- src/field/route_analysis.js（importFiles/importHeadPaymentFiles
+  のメッセージ・状態管理部分のみ再構成。parsePageText/
+  parseHeadPaymentSheet等の解析ロジックは今回のセッションでバイト
+  単位比較して完全一致を確認済み、無変更）
+- src/field/field_core.js（importWorker/importProductのメッセージ・
+  状態管理部分のみ再構成、msg()関数を拡張。
+  parseWorkerCsvRows/parseProductAddressRows/
+  validateWorkerCsvSignature/validateProductCsvSignature/
+  detectForeignCsvSignatureは今回のセッションでバイト単位比較して
+  完全一致を確認済み、無変更）
+
+============================================================
+各取込経路の判定フロー（今回統一）
+============================================================
+
+【配達持出リストPDF（route_analysis.js importFiles）】
+ステージA（拡張子）：`.pdf`以外は即座に
+  「この取込欄ではPDFファイルのみ使用できます。選択したファイル：
+  ○○」で拒否。STATE等には一切触れない。
+ステージB（実体形式）：先頭5バイトの"%PDF-"マジックバイト検査。
+  不一致は「PDFファイルとして確認できません。登録は行っていません。」
+ステージC（対象帳票）：v7解析で全ページを通じてヘッド番号・配達日の
+  いずれも一度も取得できなかった場合は「PDFとして読み込めましたが
+  「配達持出リスト」として確認できません。登録は行っていません。」
+ステージD（0件）：一部フィールドは取得できたが登録可能な便が0件の
+  場合は「配達持出リストを確認しましたが、登録可能な便がありません
+  でした。登録は行っていません。」
+  ※ステージC/Dの判定はallDiagnostics（既存の診断情報、ページ単位の
+  head/date取得状況）を使って区別しており、新しい解析ロジックの
+  追加は行っていない。
+成功：STATE.routeDataへの書込・Repository.Storage.save()・
+  クラウド同期は、上記A〜Dを全てクリアした後にのみ実行される
+  （既存のマージロジック自体は無変更）。
+
+【配達ヘッド傭車料（route_analysis.js importHeadPaymentFiles）】
+ステージA（拡張子）：`.xls/.xlsx`以外は即座に
+  「この取込欄ではExcel（xls/xlsx）ファイルのみ使用できます。
+  選択したファイル：○○」で拒否。
+ステージB（実体形式）：XLSX.read()が全ファイルで失敗した場合は
+  「Excelファイルとして確認できません。登録は行っていません。」
+ステージC（対象帳票）：Excelとしては読めたが、全シートを通じて
+  必須列（ヘッド番号・配達日・傭車料、既存のparseHeadPaymentSheet
+  が要求する列）が一度も揃わなかった場合は「Excelとして読み込め
+  ましたが「配達ヘッド傭車料」として確認できません。登録は行って
+  いません。」
+ステージD（0件）：必須列は揃ったが登録可能な行が0件の場合は
+  「配達ヘッド傭車料を確認しましたが、登録可能なデータがありません
+  でした。登録は行っていません。」
+成功：STATE.routeDataへの書込は上記A〜Dを全てクリアした後にのみ
+  実行される（既存のマージロジックは無変更）。
+
+【作業者別CSV（field_core.js importWorker）】
+ステージA（拡張子）：`.csv`以外は即座に
+  「この取込欄ではCSVファイルのみ使用できます。選択したファイル：
+  ○○」で拒否（従来はHTML側accept属性のみで、JS側の明示チェックは
+  無かった箇所を今回追加）。
+ステージB（実体形式）：CSVとして読み込んだ結果、見出し行が完全に
+  空の場合は「○○：CSVファイルとして確認できません。登録は行って
+  いません。」
+ステージC（対象データ形式）：既存のassertNotForeignCsv()
+  （他形式でないこと）とassertOwnCsvSignature()
+  （作業者別CSVとして成立していること、前回セッションで実装した
+  positive validation）を、パース処理の直前で実行する。いずれかが
+  失敗した場合、そのエラーメッセージをそのまま表示して停止する。
+ステージD（0件）：正しい作業者別CSVとして成立したが、
+  combined.workerCount（登録される作業者数）が0の場合は
+  「作業者別CSVを確認しましたが、登録可能なデータがありませんでした。
+  登録は行っていません。」
+成功：STATE.workerCsvDataへの書込（upsertByYm）は、A〜Dを全て
+  クリアした後にのみ実行される。
+
+【商品・住所CSV（field_core.js importProduct）】
+作業者別CSVと同じ4段階。ステージC/Dの判定条件のみ対象形式に
+合わせて置き換え（assertOwnCsvSignature('product', ...)、ステージD
+は再ユニーク化後のtickets.length===0で判定）。
+成功：STATE.productAddressDataへの書込（upsertByYm）は、A〜Dを
+  全てクリアした後にのみ実行される。
+
+【SKDL CSV（①収支CSV、app.js IMPORT.handleFiles）／
+CSV一括取込（bulk_import.js）について】
+今回のセッションでは、この2経路には変更を加えていない。理由：
+・SKDL（①収支CSV）の入口は、CSVとXLSX（キャパ管理用Excel）の
+  両方を受け付ける複合入口であり、かつ年月選択モーダル（ym-modal）
+  を経由する固有のフロー構造を持つ。これを他4経路と同じ4段階構造へ
+  作り替えるのは、年月選択モーダルとの相互作用を含む大きな構造変更
+  になり、既存機能を壊すリスクが高いと判断した。
+・CSV一括取込（bulk_import.js）は、既にファイル名＋本文サンプルの
+  二段階判定（_classify）を持ち、判定不能ファイルは登録せず
+  スキップ一覧として報告する設計が既にある。今回はこの既存の安全な
+  挙動を変更するリスクを避けた。
+・setupDropZone()（src/core/loader.js、今回変更していない）は、
+  SKDLも含め全ての入口でclickとdropが同一のhandler関数を呼ぶ
+  既存の共通実装であることをコード確認した。
+この2経路についても、原因を区別したステージ別メッセージへ統一
+することが望ましいが、今回は範囲外とし、次回以降の課題として
+明記する。
+
+============================================================
+失敗時に保存しないことの確認
+============================================================
+4経路（PDF/XLS/作業者別CSV/商品住所CSV）とも、ステージA〜Dの
+チェックはいずれも「STATEへの書込・Repository.Storage.save()・
+クラウド同期呼出」よりも前のコード位置に配置されており、
+いずれかの段階で拒否・エラーとなった場合はreturn文で関数を
+即座に終了する。これにより、STATE/Repository/Storage/Cloudの
+いずれにも、対象ファイルのデータは一切書き込まれない。
+コード上、各関数内でSTATE書込に関する行（upsertDataset/
+upsertByYm/STATE.routeData.push等）が、全てのvalidationステージの
+後方に位置していることを確認した（route_analysis.js/field_core.js
+のソース上の行順で確認）。
+
+複数ファイル選択時の挙動：現在の実装は、複数ファイルをまとめて
+1回のループで処理し、いずれか1ファイルでもステージA〜Cで失敗した
+場合、その時点でメッセージを表示して関数全体を終了する
+（それまでに処理済みだった他のファイルの内容もメモリ上の一時変数
+にとどまり、STATEへは書き込まれない）。この「1ファイルでも失敗
+すれば全体を中断する」という挙動は、前回セッションから継続して
+いる既存の設計判断であり、今回変更していない。
+
+============================================================
+UI状態の統一
+============================================================
+IMPORT_FEEDBACK.setZoneState()により、各dropzone要素へ
+import-zone-checking/import-zone-success/import-zone-errorの
+いずれかのクラスを付与する（既存の.upload-zoneクラスへの追加
+スタイルのみ、新しいグローバルクラスの再定義は行っていない）。
+新しい取込操作（成功・エラーいずれも）が発生するたびに、まず
+既存のcheckingへ状態がリセットされてから最終状態（success/error）
+へ遷移するため、「エラー後に別の正常ファイルを取り込んだ場合に
+古い赤エラー表示が残る」ことは起きない。
+
+============================================================
+回帰テスト
+============================================================
+Node.js環境で以下を確認した：
+・parsePageText() / parseHeadPaymentSheet() / parseWorkerCsvRows() /
+  parseProductAddressRows() / validateWorkerCsvSignature() /
+  validateProductCsvSignature() / detectForeignCsvSignature()：
+  今回のセッション開始前とバイト単位で完全一致（無変更）
+・ledger.js：ハッシュ完全一致（今回一切変更していない）
+・center.htmlの差分：script登録1行のみ
+・ステージA判定（CSVをPDF欄へ／ExcelをPDF欄へ／正常PDFファイル名）
+  を実行し、期待通りの拒否・通過結果を確認
+・全JS構文チェック：エラー0件
+
+新規テスト項目（今回のUI統一分）は以下の観点で確認した：
+1. 正常ファイル → 各経路とも従来の解析ロジック無変更のため、
+   従来通り取込可能（解析本体のバイト単位一致により保証）
+2. 別種類CSV（作業者⇔商品住所）→ ステージCで拒否
+   （既存positive/negative validationがそのまま機能）
+3. PDFをCSV欄へ／CSVをPDF欄へ／ExcelをPDF欄へ／PDFをExcel欄へ →
+   いずれもステージAの拡張子確認で即座に拒否され、拒否ファイル名を
+   含む明確なメッセージが表示される
+4. 拡張子だけ偽装（他形式ファイルの拡張子だけ.pdf/.xlsに変更）→
+   PDF欄はステージB（マジックバイト）で拒否、XLS欄はステージB
+   （XLSX.read失敗）で拒否
+5. 空ファイル → PDF/XLSはステージC（対象帳票として確認できない）、
+   CSVはステージB（見出し行が空）で拒否
+6. 正しい形式だが別帳票（例：配達持出リスト以外のPDFで見出しは
+   PDFとして正常）→ PDF欄はステージC、XLS欄は必須列不足により
+   ステージCで拒否
+7. drag&dropとクリック選択の同一処理到達：
+   ・PDF/XLS：setup()関数内でinput.addEventListener('change',...)
+     とzone.addEventListener('drop',...)が同一のimportFiles/
+     importHeadPaymentFilesを呼ぶことをコード確認済み
+   ・作業者別/商品住所CSV：FIELD_WORKER_IMPORT2.handleFiles/
+     handleDropが同一のimportWorkerを、FIELD_PRODUCT_IMPORT2側も
+     同一のimportProductを呼ぶことをコード確認済み
+   （両方とも今回のセッションで新たな重複実装を作っていない）
+
+全JS構文チェック：エラー0件
+
+============================================================
+残課題
+============================================================
+- SKDL CSV（①収支CSV）・CSV一括取込（bulk_import.js）は、
+  今回のステージ別メッセージ統一の対象外とした（理由は上記参照）。
+  次回以降、既存の年月選択モーダル・一括判定の仕組みを壊さない
+  形での統一を検討する必要がある。
+- 実ブラウザでの最終目視確認（dropzoneの視覚状態遷移含む）は
+  開発環境の制約上未実施。
+- センター誤登録防止・取込履歴管理・登録前プレビューUIは、
+  前回セッションから引き続き未実装（既存機能保護を優先したため）。
+
+============================================================
+最終判定
+============================================================
+PASS
+（PDF・配達ヘッド傭車料・作業者別CSV・商品住所CSVの4主要経路に
+ついて、ドロップ時の即時フィードバック・原因を区別したステージ別
+メッセージ・失敗時の未保存・UI状態統一を実装し、業務解析ロジック・
+positive/negative validation・便別採算計算・PDFノイズ修正には
+一切触れていないことをバイト単位比較で確認した。SKDL/一括取込は
+スコープ外とした判断理由を明記した上でのPASSである）
+
+============================================================
+前回セッションからの内容（参考、変更なし）
+============================================================
+
 【目的】
 配達持出リストPDF・作業者別CSV・商品住所CSV・配達ヘッド傭車料の
 取込経路を横断確認し、誤ファイル投入の防止、6月便別採算で
