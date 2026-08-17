@@ -318,7 +318,7 @@ const CONFIG = {
     variableRateMax:  80,
   },
 
-  COLORS: ['#1a4d7c','#e05b4d','#1a7a52','#b45309','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#d97706'],
+  COLORS: ['#79B99A','#E58FA9','#9B8AD3','#E5C65D','#79B9D0','#D89B6C','#75BDB4','#C58DB8','#A6C27D','#E3A076'],
   VIEW_TITLES: {
     dashboard:'ホーム', pl:'月次収支表', 'profit-structure':'経営分析', 'landing-forecast':'着地予測', trend:'売上推移',
     shipper:'荷主分析', indicators:'経営指標', annual:'年次サマリー',

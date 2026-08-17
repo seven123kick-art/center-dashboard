@@ -1,27 +1,20 @@
-Version6 D4-11 / Parallel Verified Startup
+Version6 D4-12 / Shared Pastel Data Palette
 Date: 2026-08-17
 
 PURPOSE
-- Improve normal first launch without weakening D4-6/D4-10 verification rules.
-- Preserve verified revisions across browser restarts via the existing IndexedDB marker.
-- Remove serial waiting between Cloud Manifest verification and IndexedDB restoration.
+- Align revenue composition, expense breakdown, and shipper sales colors with the approved bright modern pastel + refined UI.
+- Keep chart/data colors identical across Kitasaitama and Toda so numeric meaning/readability remains shared.
 
 CHANGE
-1. Cloud Manifest verification starts as soon as local Storage restoration completes.
-2. IndexedDB state restoration runs while the Cloud Manifest request is in flight.
-3. syncBoot() reuses the already-started Manifest request instead of issuing another request.
-4. Figures remain hidden until IndexedDB restoration, Manifest verification, revision/local checks, and READY all complete.
-5. If Cloud revisions changed, D4-10 differential fetch behavior remains unchanged.
-
-SAFETY
-- No cache-first numeric rendering.
-- No skipping Cloud Manifest verification.
-- No business calculation, Canonical, Data Catalog, or Supabase schema changes.
+- Replaced the legacy high-saturation CONFIG.COLORS palette (dark navy/red/green/orange/blue/purple) with a softer shared pastel data palette.
+- The new palette is inspired by the ReGLOSS / hololive GAMERS color family, but adjusted for business-dashboard readability rather than using full-strength official colors.
+- This affects existing components that already consume CONFIG.COLORS, including revenue composition, expense category bars, shipper rankings, and related analysis charts.
+- Semantic KPI colors (income / expense / profit / labor) and center-specific accent colors are unchanged.
 
 FILES
 - src/app.js
-- src/core/repository/sync_coordinator.js
 - CHANGELOG.txt
 
 VALIDATION
-- node --check PASS for changed JS files.
+- node --check src/app.js PASS.
+- No calculation, data, startup, Canonical, Data Catalog, or Supabase changes.
