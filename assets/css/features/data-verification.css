@@ -30,3 +30,10 @@
 #view-data-verification .dv-pill.is-attention{color:#b91c1c;background:#fef2f2}
 #view-data-verification .dv-pill.is-observation{color:#b45309;background:#fffbeb}
 #view-data-verification .dv-empty-inline{padding:20px;text-align:center;color:var(--text3)}
+/* D3-4 Resolver候補・保存前プレビュー */
+#view-data-verification .dv-candidate{min-width:150px;max-width:220px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);padding:5px 7px;font-size:10px}
+#view-data-verification .dv-preview-btn{padding:5px 8px;font-size:10px;white-space:nowrap}
+#view-data-verification .dv-muted{font-size:10px;color:var(--text3)}
+#view-data-verification .dv-preview-box{margin:12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-soft);font-size:11px;line-height:1.7}
+#view-data-verification .dv-preview-box b{display:block;margin-bottom:4px}
+#view-data-verification .dv-preview-box small{display:block;margin-top:5px;color:var(--text3)}

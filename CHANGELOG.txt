@@ -1,34 +1,36 @@
-Version6 D3-3 データ確認 詳細・解決準備（2026-08-17）
+D3-4 Resolver候補表示・保存前プレビュー
+作成日: 2026-08-17
 
-■目的
-D3-2の集計画面から、確認対象の具体的なレコードへ読取専用で掘り下げられるようにする。
-Master紐付け・Alias登録・SOURCE修正などの保存操作はまだ実装しない。
+目的
+- D3-3の読取専用詳細画面に、SUBJECT_RESOLVER / MASTER_RESOLVERによる候補・根拠・信頼度を表示する。
+- 人が候補を選択した場合に、保存されるResolution Decision / Alias案を保存前に確認できるようにする。
+- 本フェーズではMaster/Alias/STATE/Storage/Cloud/Supabaseへ一切書き込まない。
 
-■変更ファイル
-- center.html
-  - verification_detail.js の読込を1行追加。
-- src/core/data_catalog/verification_detail.js（新規）
-  - SUBJECT要確認、金額UNKNOWN、SOURCE差異、HEADなし原票をCanonical Snapshotから詳細化。
-  - 現行STATE.workerCsvDataから作業者欄の原表記・原票件数・既知金額を読取専用で一覧化。
-  - 人物/会社/拠点/処理の自動確定は行わない。
-- src/modules/data_verification.js
-  - D3-2画面をD3-3へ更新。
-  - 「確認詳細」タブを追加。
-  - 帰属主体表記 / HEADなし原票 / 金額UNKNOWN / SOURCE差異を表示。
-  - UI側では判定・保存を行わず、DATA_VERIFICATION_DETAILを参照。
-- assets/css/features/data-verification.css
-  - 同画面の既存スコープ内に詳細テーブル/タブの構造を統合。
+変更ファイル
+1. center.html
+   - resolution_preview.js のscript読込を1行追加。
+2. src/core/data_catalog/resolution_preview.js（新規）
+   - 既存作業者/会社マスタを新Resolverの参照形へ読取専用変換。
+   - analysisTarget=falseの旧「作業者」レコードを人物候補にしない。
+   - Resolver結果と保存時Decision/Alias案を生成するpure preview層を追加。
+3. src/core/data_catalog/verification_detail.js
+   - 帰属主体表記へresolution_previewを付加。
+4. src/modules/data_verification.js
+   - Resolver結果、照合根拠、信頼度、候補選択、保存時プレビューを表示。
+   - 保存処理は追加していない。
+5. assets/css/features/data-verification.css
+   - D3-4表示用の画面スコープCSSを追加。
 
-■重要仕様
-- HEADなし原票は正常ケースを含むためERROR扱いしない。
-- 0円とUNKNOWNは別。詳細の金額UNKNOWNにはamount=null/undefinedのみを出す。
-- 作業者CSVの作業者欄は人物専用ではないため、現行保存データから得た表記を勝手にWORKER_MASTERへ紐付けない。
-- D3-3は完全読取専用。STATE / IndexedDB / Storage / Cloud / Supabaseへの書込みなし。
-- Resolverによる解決結果の保存は次段階。誤Master紐付け防止のため今回実装しない。
+重要な安全設計
+- 既存WORKERS.all()/COMPANIES.all()はensureDefaults経由でSTATEを書き換え得るため、D3-4プレビューでは呼び出さず、STATEの既存配列をコピーして参照する。
+- analysisTarget=falseは人物ではないことしか確定できず、ORGANIZATION/OPERATION_UNIT/PROCESSのどれかは旧マスタだけでは判別不能なため、自動推測しない。
+- 候補がない表記はUNKNOWN/UNMATCHEDのまま表示する。
+- makeResolutionDecisionはプレビュー用途のみ。生成結果を保存しない。
 
-■検証
-- verification_detail.js 構文PASS。
-- data_verification.js 構文PASS。
-- src配下全JS node --check PASS。
-- モックSnapshotでHEADなし、UNKNOWN、SOURCE差異、作業者原表記の詳細生成を確認。
-- D3-2投入済みコードを基準に変更ファイルを限定。
+検証
+- src配下全JS node --check: PASS
+- PERSON候補（河本 龍哉）: PERSON / PROVISIONAL / worker_id取得: PASS
+- 非人物旧レコード（返品）をPERSONへ誤分類しない: PASS
+- 入力master data不変: PASS
+- Alias proposalはPROPOSED表示のみ: PASS
+- 既存STATE/Storage/Cloud/Supabase書込追加なし: PASS

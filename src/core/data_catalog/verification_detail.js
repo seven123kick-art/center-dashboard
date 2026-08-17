@@ -51,11 +51,13 @@
   }
   function build(input={}){
     const snapshot=input.canonical_snapshot||input.snapshot||{};
+    const labels=legacyWorkerLabels(input.worker_csv_data,input.year_month);
+    const resolutionPreview=window.RESOLUTION_PREVIEW?.build?.({labels,context:input.resolution_context})||null;
     return Object.freeze({
       center_id:input.center_id||null,year_month:input.year_month||null,generated_at:new Date().toISOString(),
       subject_attention:subjectDetails(snapshot), value_attention:valueDetails(snapshot),
       reconciliation_observations:reconciliationDetails(snapshot), headless_observations:headlessDetails(snapshot),
-      legacy_worker_labels:legacyWorkerLabels(input.worker_csv_data,input.year_month),
+      legacy_worker_labels:labels, resolution_preview:resolutionPreview,
       read_only:true
     });
   }
