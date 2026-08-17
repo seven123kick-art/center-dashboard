@@ -131,11 +131,33 @@
     if(!window.IDB_CACHE?.get) return null;
     return IDB_CACHE.get('startup','verified_manifest');
   }
+  function sourceRevision(meta){
+    if(!meta || typeof meta!=='object') return '';
+    return String(meta.importedAt||meta.updatedAt||meta.savedAt||'');
+  }
+  function datasetRevisionMap(manifest){
+    const out={};
+    for(const m of (Array.isArray(manifest?.datasets)?manifest.datasets:[])){
+      if(!m?.ym) continue;
+      out[`${m.ym}|${m.type||'confirmed'}`]=sourceRevision(m);
+    }
+    return out;
+  }
+  function fullStateRevision(manifest){
+    if(!manifest) return '';
+    if(manifest.fullStateUpdatedAt) return String(manifest.fullStateUpdatedAt);
+    if(Number(manifest.version||0)>=33 && manifest.savedAt) return String(manifest.savedAt);
+    return '';
+  }
   async function saveVerifiedMarker(manifest, verifiedAt){
     if(!window.IDB_CACHE?.set) return false;
     return IDB_CACHE.set('startup','verified_manifest',{
       centerId:window.CENTER?.id||null,
       fingerprint:manifestFingerprint(manifest),
+      datasetRevisions:datasetRevisionMap(manifest),
+      fullStateRevision:fullStateRevision(manifest),
+      planRevision:String(manifest?.planDataUpdatedAt||''),
+      capacityRevision:String(manifest?.capacityUpdatedAt||''),
       verifiedAt:verifiedAt||new Date().toISOString()
     });
   }
@@ -146,5 +168,6 @@
     return localMatchesManifest(manifest);
   }
   window.STARTUP_READINESS={ setProgress, showFailure, markVerified, withTimeout,
-    manifestFingerprint, localMatchesManifest, getVerifiedMarker, saveVerifiedMarker, canUseVerifiedLocal };
+    manifestFingerprint, localMatchesManifest, getVerifiedMarker, saveVerifiedMarker, canUseVerifiedLocal,
+    sourceRevision, datasetRevisionMap, fullStateRevision };
 })();

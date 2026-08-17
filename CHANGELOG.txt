@@ -1,35 +1,26 @@
-Version6 D4-7 / Verified Read Model Fast Startup
+Version6 D4-10 / Verified Revision Skip
 Date: 2026-08-17
 
-PURPOSE
-- Keep D4-6 safety rule: management figures are never shown before startup verification.
-- Reduce repeated cloud downloads when the locally stored state is already the same version that was verified on the previous successful startup.
+実測根拠:
+- D4-9 2回目 READY 4.28秒 / Startup同期 3.69秒
+- 過去13か月のconfirmed datasetが依然Cloud.fetchDatasetされていた。
+- 並列化で速くなったが、通信自体は残っていた。
 
-DESIGN
-- Cloud Manifest is still checked on every startup.
-- After a full successful startup, a verified-manifest marker is stored in IndexedDB.
-- On the next startup, the current Cloud Manifest is fingerprinted and compared with that marker.
-- Fast path is allowed only when center matches, Manifest fingerprint matches, and required local data is present/current.
-- If any check fails, the existing D4-6 full synchronization runs.
-- Failure/timeout remains blocking; unverified figures are not displayed.
+修正:
+1. 前回READY時の月次SOURCE RevisionをdatasetRevisionsとして保存。
+2. 現在ManifestのSOURCE Revisionと一致し、ローカル実体が存在する月はfetchDatasetを実行しない。
+3. full_stateも前回READY Revisionと一致する場合はCloud再取得せず、IndexedDB復元済みRead Modelを利用。
+4. planもRevision一致時は再取得しない。
+5. D4-9以前のmarkerとの初回互換としてsummary照合経路を残す。
+6. Cloud Manifest確認とD4-6 Readiness Gateは維持。Cloud未確認で数字を表示しない。
+7. D4-8 Profilerは継続して再計測可能。
 
-PERFORMANCE
-- Matching verified state skips full_state and monthly dataset downloads.
-- Normal full sync reuses the already fetched full_state for dailyRecords instead of downloading it twice.
-
-IMPORTANT
-- This is not unconditional cache-first display.
-- Lightweight Cloud Manifest verification always happens before figures are shown.
-- Another device changing data changes the Manifest fingerprint and forces full refresh.
-- Verified marker is written only after successful READY synchronization.
-
-FILES
+変更:
 - src/core/startup_readiness.js
 - src/core/repository/sync_coordinator.js
 - CHANGELOG.txt
 
-VALIDATION
-- node --check: all src/**/*.js PASS.
-- No business calculation changes.
-- No Data Catalog / Canonical schema changes.
-- No Supabase schema changes.
+検証:
+- node --check PASS
+- 業務計算ロジック変更なし
+- Data Catalog / Canonical / Supabase schema変更なし

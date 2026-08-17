@@ -216,20 +216,32 @@ TODO(V6以降)
                 // 起動同期でここを取得しないと、別端末・キャッシュ消失後に便別採算だけ
                 // 「配達持出PDFなし」「所属会社なし」になるため、月別CSV取得より先に復元する。
                 let bootCloudFull = null;
-                try {
-                    const cloudFull = await CR.fetchFullState();
-                    bootCloudFull = cloudFull;
-                    if (!cloudFull || typeof cloudFull !== 'object') {
-                        return { ok:false, stage:'FULL_STATE', readiness:'MISSING', error:'クラウドの主要状態データを確認できませんでした' };
+                const verifiedMarker = window.STARTUP_READINESS?.getVerifiedMarker
+                    ? await STARTUP_READINESS.getVerifiedMarker() : null;
+                const markerForCenter = verifiedMarker && verifiedMarker.centerId === window.CENTER?.id ? verifiedMarker : null;
+                const cloudFullRevision = window.STARTUP_READINESS?.fullStateRevision
+                    ? STARTUP_READINESS.fullStateRevision(manifest) : '';
+                const localFullReusable = !!(markerForCenter && cloudFullRevision
+                    && markerForCenter.fullStateRevision === cloudFullRevision);
+                if (localFullReusable) {
+                    // 前回READY時と同じfull_state Revision。IndexedDB復元済みSTATEをそのままRead Modelとして利用する。
+                    bootCloudFull = CR.buildFullState();
+                } else {
+                    try {
+                        const cloudFull = await CR.fetchFullState();
+                        bootCloudFull = cloudFull;
+                        if (!cloudFull || typeof cloudFull !== 'object') {
+                            return { ok:false, stage:'FULL_STATE', readiness:'MISSING', error:'クラウドの主要状態データを確認できませんでした' };
+                        }
+                        const localFull = CR.buildFullState();
+                        const mergedFull = (typeof mergeFullState === 'function')
+                            ? mergeFullState(localFull, cloudFull)
+                            : cloudFull;
+                        CR.applyFullState(mergedFull);
+                    } catch (e) {
+                        console.warn('[SyncCoordinator.syncBoot] full_state取得失敗:', e?.message || e);
+                        return { ok:false, stage:'FULL_STATE', readiness:'LOAD_FAILED', error:e?.message || String(e) };
                     }
-                    const localFull = CR.buildFullState();
-                    const mergedFull = (typeof mergeFullState === 'function')
-                        ? mergeFullState(localFull, cloudFull)
-                        : cloudFull;
-                    CR.applyFullState(mergedFull);
-                } catch (e) {
-                    console.warn('[SyncCoordinator.syncBoot] full_state取得失敗:', e?.message || e);
-                    return { ok:false, stage:'FULL_STATE', readiness:'LOAD_FAILED', error:e?.message || String(e) };
                 }
 
                 let changed = 0;
@@ -270,6 +282,16 @@ TODO(V6以降)
                     if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return false;
                     const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
                     if (!local) return true;
+
+                    // D4-10: 前回READY時に検証したSOURCE Revisionと現在ManifestのRevisionが同じなら、
+                    // summary表現差に影響されず再fetchしない。ローカル実体の存在は上で確認済み。
+                    const key = `${meta.ym}|${metaType}`;
+                    const currentRevision = window.STARTUP_READINESS?.sourceRevision
+                        ? STARTUP_READINESS.sourceRevision(meta) : String(meta.importedAt||meta.updatedAt||'');
+                    const verifiedRevision = markerForCenter?.datasetRevisions?.[key] || '';
+                    if (currentRevision && verifiedRevision && currentRevision === verifiedRevision) return false;
+
+                    // 旧marker（D4-9以前）との初回互換。内容サマリーが一致する場合も再取得不要。
                     const sameSummary = Number(local.totalIncome || 0) === Number(meta.totalIncome || 0)
                         && Number(local.totalExpense || 0) === Number(meta.totalExpense || 0)
                         && Number(local.profit || 0) === Number(meta.profit || 0);
@@ -296,12 +318,17 @@ TODO(V6以降)
                 }
 
                 if (manifest.hasPlanData) {
+                    const planRevision=String(manifest.planDataUpdatedAt||'');
+                    const canReusePlan=!!(markerForCenter && planRevision && markerForCenter.planRevision===planRevision
+                        && STATE.planData && Object.keys(STATE.planData).length);
                     try {
-                        const cloudPlan = await CR.fetchPlan();
+                        const cloudPlan = canReusePlan ? null : await CR.fetchPlan();
+                        if (canReusePlan) { /* verified local plan */ } else {
                         if (!cloudPlan || typeof cloudPlan !== 'object') return { ok:false, stage:'PLAN', readiness:'MISSING', error:'予算データを確認できませんでした' };
                         if (typeof mergePlanDataByUpdatedAt === 'function') {
                             STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
                             changed++;
+                        }
                         }
                     } catch(e) { return { ok:false, stage:'PLAN', readiness:'LOAD_FAILED', error:e?.message || String(e) }; }
                 }
