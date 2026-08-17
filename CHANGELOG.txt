@@ -1,47 +1,34 @@
-Version6 D3-2 データ確認画面
-作成日: 2026-08-17
+Version6 D3-3 データ確認 詳細・解決準備（2026-08-17）
 
-目的
-- D3-1 DATA_VERIFICATION_SUMMARYを画面側の唯一の集計入口として利用する「データ確認」画面を追加。
-- SOURCEの有無、Canonical件数、要確認、差異観測、0/UNKNOWNを管理者が同一画面で確認できるようにする。
+■目的
+D3-2の集計画面から、確認対象の具体的なレコードへ読取専用で掘り下げられるようにする。
+Master紐付け・Alias登録・SOURCE修正などの保存操作はまだ実装しない。
 
-変更ファイル
+■変更ファイル
 - center.html
-  - サイドバー「システム」に「データ確認」を追加。
-  - view-data-verificationを追加。
-  - data_verification.jsのscript読込を追加。
-- src/modules/data_verification.js（新規）
-  - センター×年月の読取専用UIアダプタ。
-  - DATA_VERIFICATION_SUMMARY.build()の結果だけをDOM描画に使用。
-  - 現行STATEからSOURCE availabilityと対象月routeDataを読み取り、Canonical Builder/D3-1 Summaryへ渡す。
-  - SKDL0001（日報）はPL_ACTUAL PRELIMINARYとして扱わない。現行STATE上confirmedのみCONFIRMED表示。
-  - SOURCE欠落を自動ERRORにしない。
-- src/modules/navigation.js
-  - data-verification描画caseを追加。
-- src/app.js
-  - VIEW_TITLESへ「データ確認」を追加。
-- assets/css/features/data-verification.css（新規）
-  - データ確認画面専用CSS。#view-data-verification配下へスコープ。
-- assets/css/app.css
-  - data-verification.cssのimportを追加。
+  - verification_detail.js の読込を1行追加。
+- src/core/data_catalog/verification_detail.js（新規）
+  - SUBJECT要確認、金額UNKNOWN、SOURCE差異、HEADなし原票をCanonical Snapshotから詳細化。
+  - 現行STATE.workerCsvDataから作業者欄の原表記・原票件数・既知金額を読取専用で一覧化。
+  - 人物/会社/拠点/処理の自動確定は行わない。
+- src/modules/data_verification.js
+  - D3-2画面をD3-3へ更新。
+  - 「確認詳細」タブを追加。
+  - 帰属主体表記 / HEADなし原票 / 金額UNKNOWN / SOURCE差異を表示。
+  - UI側では判定・保存を行わず、DATA_VERIFICATION_DETAILを参照。
+- assets/css/features/data-verification.css
+  - 同画面の既存スコープ内に詳細テーブル/タブの構造を統合。
 
-表示内容
-- 必要資料5系統の登録有無
-- DELIVERY_ROUTE / BUSINESS_SLIP / DELIVERY_ATTEMPT / HEADなし原票
-- Subject CONFLICT / UNMATCHED / NOT_EVALUATED
-- 金額UNKNOWN
-- SOURCE_VARIANCE / SINGLE_SOURCE / Accounting差異観測
-- 売上・傭車料の既知値 / 明示0 / UNKNOWN
+■重要仕様
+- HEADなし原票は正常ケースを含むためERROR扱いしない。
+- 0円とUNKNOWNは別。詳細の金額UNKNOWNにはamount=null/undefinedのみを出す。
+- 作業者CSVの作業者欄は人物専用ではないため、現行保存データから得た表記を勝手にWORKER_MASTERへ紐付けない。
+- D3-3は完全読取専用。STATE / IndexedDB / Storage / Cloud / Supabaseへの書込みなし。
+- Resolverによる解決結果の保存は次段階。誤Master紐付け防止のため今回実装しない。
 
-重要な制約
-- 現在永続STATEに保持される既存解析済みworkerCsvData/productAddressDataを、新Canonical行レベルSOURCEへ逆変換する処理は追加していない。
-- そのため未接続の詳細SOURCEは「0件だった」と断定せず、D3-1のNOT_EVALUATED思想を維持する。
-- Accounting明細FACTも既存集計済みSTATEから推測復元しない。
-- STATE / IndexedDB / Storage / Cloud / Supabaseへの書込処理なし。
-- 既存parser変更なし。
-- 既存分析画面のロジック変更なし。
-
-検証
-- node --check: data_verification.js / navigation.js / app.js PASS
-- data-verification view/nav/script/style参照の存在確認 PASS
-- 新CSSは画面ID配下へスコープ（共通UIへの上書きなし）
+■検証
+- verification_detail.js 構文PASS。
+- data_verification.js 構文PASS。
+- src配下全JS node --check PASS。
+- モックSnapshotでHEADなし、UNKNOWN、SOURCE差異、作業者原表記の詳細生成を確認。
+- D3-2投入済みコードを基準に変更ファイルを限定。
