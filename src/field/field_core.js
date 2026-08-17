@@ -836,6 +836,32 @@ IMPORT.deleteFieldData = function(ym) {
     STATE[listName].sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
   }
 
+  /* D3-6B: legacy取込とNORMALIZED SOURCE保存の境界。
+     既存STATE/Cloud同期を正本化せず、新基盤側は独立Repositoryへ保存する。
+     NORMALIZED保存失敗で従来取込を巻き戻さない（双方の状態を利用者へ明示する）。 */
+  function normalizedBatchId(documentType, ym){
+    const suffix = (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
+      ? globalThis.crypto.randomUUID().replace(/-/g,'')
+      : `${Date.now()}_${Math.random().toString(36).slice(2,10)}`;
+    return `${String(documentType||'SOURCE').toUpperCase()}_${ym}_${suffix}`;
+  }
+
+  async function persistNormalizedSource(documentType, ym, records, fileNames){
+    if (!window.Repository?.NormalizedSource?.saveBatch) {
+      return { ok:false, skipped:true, error:'NORMALIZED_SOURCE_REPOSITORY_UNAVAILABLE' };
+    }
+    const rows = Array.isArray(records) ? records : [];
+    if (!rows.length) return { ok:false, skipped:true, error:'NO_NORMALIZED_RECORDS' };
+    return Repository.NormalizedSource.saveBatch({
+      document_type: documentType,
+      period: ym,
+      batch_id: normalizedBatchId(documentType, ym),
+      source_file_id: null,
+      records: rows,
+      meta: { source_file_names: Array.from(fileNames || []), imported_at: new Date().toISOString() }
+    });
+  }
+
   async function importWorker(files){
     ensureState(); setupYmSelects();
     const ym = selectedWorkerYM();
@@ -860,12 +886,17 @@ IMPORT.deleteFieldData = function(ym) {
     };
     const allDays = new Set();
     const allSlips = new Set();
+    const normalizedRows = [];
 
     for (const file of Array.from(files || [])) {
       const text = await readCsvFile(file);
       const rows0 = csvRowsFromText(text);
       assertNotForeignCsv(rows0, text, 'worker', file.name, '作業者別CSV');
       assertOwnCsvSignature(rows0, file.name, 'worker', '作業者別CSV');
+      if (!window.SOURCE_NORMALIZER?.normalizeWorkerSalesRows) throw new Error('SOURCE_NORMALIZERがロードされていません');
+      normalizedRows.push(...SOURCE_NORMALIZER.normalizeWorkerSalesRows(rows0, {
+        file_name:file.name, year_month:ym, center_id:window.CENTER?.id || null
+      }));
       const parsed = parseWorkerCsvRows(rows0, file.name);
       combined.lineRowCount += parsed.lineRowCount || 0;
       combined.includedAmount += Number(parsed.includedAmount || 0);
@@ -968,8 +999,17 @@ IMPORT.deleteFieldData = function(ym) {
       cloudMsg = ' / クラウド保存未確認';
       msg(`作業者CSVはローカル保存済みですが、クラウド保存に失敗しました：${e.message}`, 'warn');
     }
+    let normalizedMsg = '';
+    try {
+      const nr = await persistNormalizedSource('WORKER_SALES', ym, normalizedRows, combined.files);
+      normalizedMsg = nr?.ok ? ' / 正規化SOURCE保存済' : ' / 正規化SOURCE保存未確認';
+      if (!nr?.ok) console.warn('[D3-6B] WORKER_SALES normalized save skipped/failed', nr);
+    } catch(e) {
+      normalizedMsg = ' / 正規化SOURCE保存失敗';
+      msg(`従来の作業者CSV取込は完了しましたが、正規化SOURCEの保存に失敗しました：${e.message}`, 'warn');
+    }
     refreshFieldAll();
-    msg(`${ymText(ym)} 作業者別CSVを入替完了：配送${combined.rowCount.toLocaleString()}件 / 作業者${combined.workerCount.toLocaleString()}名 / 金額${Math.round(combined.includedAmount/1000).toLocaleString()}千円（除外${Math.round(combined.excludedAmount/1000).toLocaleString()}千円）${cloudMsg}`);
+    msg(`${ymText(ym)} 作業者別CSVを入替完了：配送${combined.rowCount.toLocaleString()}件 / 作業者${combined.workerCount.toLocaleString()}名 / 金額${Math.round(combined.includedAmount/1000).toLocaleString()}千円（除外${Math.round(combined.excludedAmount/1000).toLocaleString()}千円）${cloudMsg}${normalizedMsg}`);
   }
 
   async function importProduct(files){
@@ -977,11 +1017,16 @@ IMPORT.deleteFieldData = function(ym) {
     const ym = selectedProductYM();
     let allTickets = [];
     let rawRows = 0, detailRows = 0, filesUsed = [];
+    const normalizedRows = [];
     for (const file of Array.from(files || [])) {
       const text = await readCsvFile(file);
       const rows0 = csvRowsFromText(text);
       assertNotForeignCsv(rows0, text, 'product', file.name, '商品・住所CSV');
       assertOwnCsvSignature(rows0, file.name, 'product', '商品・住所CSV');
+      if (!window.SOURCE_NORMALIZER?.normalizeShipperAreaRows) throw new Error('SOURCE_NORMALIZERがロードされていません');
+      normalizedRows.push(...SOURCE_NORMALIZER.normalizeShipperAreaRows(rows0, {
+        file_name:file.name, year_month:ym, center_id:window.CENTER?.id || null
+      }));
       const parsed = parseProductAddressRows(rows0, file.name);
       rawRows += parsed.rawRows;
       detailRows += parsed.detailRows;
@@ -1037,8 +1082,17 @@ IMPORT.deleteFieldData = function(ym) {
       cloudMsg = ' / クラウド保存未確認';
       msg(`商品・住所CSVはローカル保存済みですが、クラウド保存に失敗しました：${e.message}`, 'warn');
     }
+    let normalizedMsg = '';
+    try {
+      const nr = await persistNormalizedSource('SHIPPER_AREA', ym, normalizedRows, filesUsed);
+      normalizedMsg = nr?.ok ? ' / 正規化SOURCE保存済' : ' / 正規化SOURCE保存未確認';
+      if (!nr?.ok) console.warn('[D3-6B] SHIPPER_AREA normalized save skipped/failed', nr);
+    } catch(e) {
+      normalizedMsg = ' / 正規化SOURCE保存失敗';
+      msg(`従来の商品・住所CSV取込は完了しましたが、正規化SOURCEの保存に失敗しました：${e.message}`, 'warn');
+    }
     refreshFieldAll();
-    msg(`${ymText(ym)} 商品・住所CSVを入替完了：原票${record.uniqueCount.toLocaleString()}件 / 明細${record.detailRows.toLocaleString()}行 / 重複除外${record.duplicateExcluded.toLocaleString()}行${cloudMsg}`);
+    msg(`${ymText(ym)} 商品・住所CSVを入替完了：原票${record.uniqueCount.toLocaleString()}件 / 明細${record.detailRows.toLocaleString()}行 / 重複除外${record.duplicateExcluded.toLocaleString()}行${cloudMsg}${normalizedMsg}`);
   }
 
   async function importWorkerForYM(files, ym){

@@ -1,33 +1,39 @@
-Version6 D3-6A NORMALIZED SOURCE正式永続化基盤 (2026-08-17)
+Version6 D3-6B - Existing import -> NORMALIZED SOURCE integration
+Date: 2026-08-17
 
-■目的
-Resolution保存後にCanonicalを再構築できるよう、NORMALIZED SOURCEをSTATE/full_stateとは分離して永続化する正式Repository境界を追加。
+Purpose
+- Connect the existing import entry points to the D3-6A NormalizedSourceRepository without replacing or bypassing legacy behavior.
+- Preserve SOURCE -> NORMALIZED facts so Canonical can later be rematerialized after Resolution changes.
 
-■新規
-- src/core/repository/normalized_source_repository.js
-  - 対象: WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT
-  - Supabase center_realtime_stateを正本として利用
-  - batch本体をimmutableな独立state_keyで保存
-  - manifestがCURRENT batchを指す
-  - 訂正版は旧batchを削除せずSUPERSEDEDとして保持
-  - batch保存成功後にのみmanifestを切替
-  - IndexedDBは表示用cacheのみ
-  - 0とnullを変換せずNORMALIZED値を保持
+Changed files
+1. src/field/field_core.js
+   - WORKER_SALES import: normalize the validated original CSV rows and save a new immutable NORMALIZED SOURCE batch for the selected YYYYMM.
+   - SHIPPER_AREA import: same pattern.
+   - Legacy STATE update, Repository.Storage.save(), existing Cloud synchronization, UI refresh and existing parsers remain in place.
+   - NORMALIZED save failure does not roll back a successful legacy import; the user is warned separately.
+   - Each re-import creates a new batch; D3-6A manifest logic marks the previous CURRENT batch SUPERSEDED.
 
-■変更
-- src/core/repository/registry.js
-  Repository.NormalizedSource getterを追加。
-- center.html
-  normalized_source_repository.jsの読込を1行追加。
+2. src/field/route_analysis.js
+   - ROUTE_PAYMENT Excel import now also passes the original worksheet rows to SOURCE_NORMALIZER.normalizeRoutePaymentRows().
+   - Uses file name + sheet name in source_record_id material to avoid row-ID collision across sheets.
+   - Groups normalized records by delivery month and saves one immutable batch per YYYYMM.
+   - Existing parseHeadPaymentSheet and existing STATE.routeData behavior are unchanged. Therefore legacy yoshaFee still follows the old parser, while NORMALIZED SOURCE preserves blank amount as null and explicit zero as 0.
 
-■未接続（意図した段階実装）
-- 既存取込UIからの自動保存はまだ行わない。
-- Canonical Builderからの自動load/re-materializeもまだ行わない。
-- STATE/full_state/既存parser/既存画面の業務ロジックは変更しない。
+Safety / behavior
+- No change to existing business calculation rules.
+- No change to STATE schema, full_state, IndexedDB schema, Supabase table schema, existing Cloud sync API, or UI navigation.
+- New NORMALIZED persistence is additive and uses Repository.NormalizedSource only.
+- Existing import success is not falsely rolled back if the new parallel persistence fails.
+- SOURCE_NORMALIZER missing is treated as an import error before legacy mutation, preventing a half-normalized new import path.
 
-■検証
-- B1保存→CURRENT読込 PASS
-- amount:null と amount:0 の区別保持 PASS
-- B2訂正版保存→B1 SUPERSEDED / B2 CURRENT PASS
-- B1旧batchが正本から消えないこと PASS
-- src配下全JavaScript node --check PASS
+Verification
+- node --check: all src/**/*.js PASS.
+- 2026-06 real CSV normalization recheck:
+  WORKER_SALES 8,554 rows; SHIPPER_AREA 9,730 rows.
+- Explicit zero remains numeric 0 (WORKER_SALES 60 rows; SHIPPER_AREA 1,796 rows in the checked June files).
+- No code converts null/blank NORMALIZED amounts to zero.
+
+Not included yet
+- Automatic Canonical rematerialization from persisted NORMALIZED SOURCE.
+- Automatic reload of persisted NORMALIZED SOURCE during application boot.
+- PL_ACTUAL and DELIVERY_LIST normalized persistence (their SOURCE paths require separate contracts/normalizers).

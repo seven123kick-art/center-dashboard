@@ -343,7 +343,9 @@
       if(window.EXPORT_SERVICE?.ensureXLSX) await EXPORT_SERVICE.ensureXLSX();
       else if(window.ASSETS?.xlsx) await ASSETS.xlsx();
       if(!window.XLSX) throw new Error('XLSXライブラリを読み込めませんでした');
-      const byYm=new Map(); let total=0;
+      const byYm=new Map();
+      const normalizedByYm=new Map();
+      let total=0;
       for(const f of arr){
         const buf=await f.arrayBuffer();
         const wb=XLSX.read(buf,{type:'array',cellDates:false});
@@ -351,6 +353,16 @@
           const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:''});
           let parsed=[];
           try{ parsed=parseHeadPaymentSheet(rows); }catch(e){ continue; }
+          if(!window.SOURCE_NORMALIZER?.normalizeRoutePaymentRows) throw new Error('SOURCE_NORMALIZERがロードされていません');
+          const normalized=SOURCE_NORMALIZER.normalizeRoutePaymentRows(rows,{
+            file_name:`${f.name}#${sheetName}`, center_id:window.CENTER?.id||null
+          });
+          for(const rec of normalized){
+            const nym=ymOfDate(rec.delivery_date); if(!nym) continue;
+            rec.year_month=nym;
+            if(!normalizedByYm.has(nym)) normalizedByYm.set(nym,[]);
+            normalizedByYm.get(nym).push(rec);
+          }
           for(const rec of parsed){
             const ym=ymOfDate(rec.date); if(!ym) continue;
             if(!byYm.has(ym)) byYm.set(ym,[]);
@@ -370,8 +382,29 @@
       STATE.routeData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
       Repository.Storage.save();
       if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(()=>{});
+
+      let normalizedSaved=0, normalizedFailed=0;
+      if(!window.Repository?.NormalizedSource?.saveBatch) {
+        normalizedFailed=normalizedByYm.size;
+      } else {
+        for(const [ym,records] of normalizedByYm){
+          try{
+            const suffix=(globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function')
+              ? globalThis.crypto.randomUUID().replace(/-/g,'')
+              : `${Date.now()}_${Math.random().toString(36).slice(2,10)}`;
+            const nr=await Repository.NormalizedSource.saveBatch({
+              document_type:'ROUTE_PAYMENT', period:ym, batch_id:`ROUTE_PAYMENT_${ym}_${suffix}`,
+              source_file_id:null, records, meta:{source_file_names:arr.map(x=>x.name),imported_at:new Date().toISOString()}
+            });
+            if(nr?.ok) normalizedSaved++; else normalizedFailed++;
+          }catch(e){ normalizedFailed++; console.warn('[D3-6B] ROUTE_PAYMENT normalized save failed',ym,e); }
+        }
+      }
       window.LEDGER?.invalidate?.();
-      if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルから${total}件の配達ヘッド傭車料を取り込みました。</span>`;
+      const normalizedNote=normalizedFailed
+        ? ` <span style="color:#92400e">/ 正規化SOURCE保存未確認 ${normalizedFailed}ヶ月</span>`
+        : ` / 正規化SOURCE保存済 ${normalizedSaved}ヶ月`;
+      if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルから${total}件の配達ヘッド傭車料を取り込みました。${normalizedNote}</span>`;
       render();
     }catch(e){
       console.error(e); if(msg) msg.innerHTML=`<span style="color:#991b1b;font-weight:700">取込エラー：${esc(e.message)}</span>`;
