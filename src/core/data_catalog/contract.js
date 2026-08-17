@@ -545,6 +545,33 @@
     },
   };
 
+
+
+  /* ---------- DATA_VERIFICATION_SUMMARY（D3-1） ----------
+     「データ確認」画面がSOURCE/Canonicalを直接数え始めないよう、
+     センター×対象期間の確認結果を読取専用の派生データとして統一する。
+     SOURCEが存在しないこと自体を即MISSING_SOURCEとは判定しない。
+     固定チャーター・HEADなし直接完了等、業務パターンにより正常な欠落が
+     あるため、SOURCE availabilityとData Qualityは別軸で保持する。 */
+  const DATA_VERIFICATION_SUMMARY = {
+    entity: 'DATA_VERIFICATION_SUMMARY',
+    layer: 'DERIVED',
+    fields: {
+      center_id: field('string', false),
+      year_month: field('string', false),
+      generated_at: field('string', true),
+      source_status: field('object', true, '帳票別の有無・document_state・revision等。欠落だけで品質異常と断定しない'),
+      entity_counts: field('object', true, 'BUSINESS_SLIP/DELIVERY_ROUTE/DELIVERY_ATTEMPT等の件数'),
+      link_summary: field('object', true, '原票・SOURCE_LINK・RECONCILIATIONの観測結果'),
+      subject_summary: field('object', true, 'PERSON/ORGANIZATION/OPERATION_UNIT/PROCESS/UNKNOWNと解決状態の集計'),
+      value_summary: field('object', true, 'KNOWN_ZERO/UNKNOWN/KNOWN_VALUEを区別した集計'),
+      accounting_summary: field('object', true, '速報/確定の状態とOperational↔Accounting照合結果'),
+      issue_summary: field('object', true, 'CONFLICT/UNMATCHED/UNKNOWN等。業務パターン未確定のSOURCE欠落は自動異常化しない'),
+      observation_summary: field('object', true, 'SOURCE_VARIANCE/ACCOUNTING_VARIANCE等の観測差異。業務上正常な差を含み得るためissueとは別軸'),
+      overall_status: field('string', true, 'OK/PROVISIONAL/PARTIAL/CONFLICT/NO_DATA等の画面向け派生状態'),
+    },
+  };
+
   const CONTRACT_ENTRIES = {
     SOURCE_FILE,
     SOURCE_RECORD,
@@ -565,6 +592,7 @@
     ACCOUNTING_SOURCE_RECORD,
     ACCOUNTING_RECONCILIATION,
     ACCOUNTING_FACT,
+    DATA_VERIFICATION_SUMMARY,
   };
 
   /* ---------- 最低限のvalidation関数 ----------

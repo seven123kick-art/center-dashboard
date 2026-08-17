@@ -1,3 +1,55 @@
+================================================================
+2026-08-17 D3-1 データ確認サマリー基盤
+================================================================
+
+目的
+- 「データ確認」画面が各SOURCE/STATEを直接数える場当たり実装にならないよう、
+  センター×対象期間の確認情報を読取専用の共通サマリーとして生成する基盤を追加。
+- UIはまだ実装・接続しない。
+
+変更
+1. src/core/data_catalog/verification_summary.js 新規
+   - SOURCE帳票の有無・速報/確定状態
+   - Canonical Entity件数
+   - BUSINESS_SLIP / DELIVERY_ATTEMPT / SOURCE_LINK / RECONCILIATION集計
+   - Subject Resolutionの実行状況・主体種別・解決状態
+   - 0円 / UNKNOWN / 有効値の件数を分離
+   - Operational↔Accounting照合状態
+   - issueとvariance observationを別軸で集計
+   - SOURCEが存在しないだけでMISSING_SOURCE/ERRORと自動判定しない
+   - HEADなし原票を自動異常扱いしない
+   - pure/read-only。STATE/Storage/Cloud/DOM変更なし
+
+2. src/core/data_catalog/contract.js
+   - DATA_VERIFICATION_SUMMARY Contractを追加。
+   - observation_summaryをData Quality issueと分離。
+
+3. center.html
+   - verification_summary.js のscript読込1行のみ追加。
+   - 画面表示・DOM・既存UIロジック変更なし。
+
+重要な設計判断
+- SOURCE_VARIANCE / ACCOUNTING_VARIANCE / SINGLE_SOURCEは、正常な業務差異を含み得るため
+  自動的にData Quality issueへ昇格しない。observation_summaryとして保持する。
+- Resolver未実行はUNKNOWNとは別にNOT_EVALUATEDとして集計する。
+- PRELIMINARY/CONFIRMED等の値確定度とData Qualityを混同しない。
+
+検証
+- src配下全JavaScript node --check PASS
+- 0円とUNKNOWNの分離 PASS
+- HEADなしBUSINESS_SLIPをissue化しないこと PASS
+- Resolver未実行をUNKNOWNではなくNOT_EVALUATEDへ分離 PASS
+- PRELIMINARYをvalue_statusとして別軸管理 PASS
+- 2026年6月実CSVで以下を再現確認：
+  WORKER_SALES 8,554行 / SHIPPER_AREA 9,730行 / SKDL0003 8,691行
+  BUSINESS_SLIP 2,556件
+  WORKER_SALES⇔SHIPPER_AREA EXACT 2,256原票 / SOURCE_VARIANCE 20原票 / SINGLE_SOURCE 280原票
+  SALES_DETAIL既知金額合計 20,419,997円
+  SKDL0003 document_state CONFIRMED
+- STATE / IndexedDB / localStorage / Supabase / Cloud 書込なし
+
+次工程
+- D3-2でこのサマリーを参照する「データ確認」UIを設計・実装する。
 Version6 D2-7 Subject Resolution Integration
 Date: 2026-08-17
 
