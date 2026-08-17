@@ -256,7 +256,30 @@
     },
   };
 
+  /* ------------------------------------------------------------
+     PLAN_BUDGET（年度予算計画）
+     対象：SKFL0001 月次収支一覧表（計画）PDF / 既存貼付テキスト
+  ------------------------------------------------------------ */
+  const PLAN_BUDGET = {
+    document_type: 'PLAN_BUDGET',
+    display_name: '年度予算計画（SKFL0001）',
+    source_system: 'SKKS',
+    allowed_extensions: ['.pdf'],
+    filename_policy: 'CONTENT_VALIDATED',
+    target_scope: 'CENTER_FISCAL_YEAR',
+    business_role: '4月から翌3月までの科目別月次予算を提供する',
+    source_link_fields: ['center_id','fiscal_year','account_label'],
+    canonical_fields: ['fiscal_year','account_label','month','amount'],
+    validation: { content_check:'SKFL0001_LAYOUT_AND_REQUIRED_ACCOUNTS', existing_reference:{file:'src/modules/plan_pdf_import.js',function:'parseFile(file)',note:'PDF内部の年度・月列・主要科目を検証し、単位は千円のまま既存planDataへ保存する。'} },
+    year_month_detection: 'FISCAL_YEAR_DERIVED_FROM_CONTENT',
+    center_detection: 'DERIVED_FROM_CONTENT',
+    completion_rule: 'FULL_FISCAL_YEAR_12_MONTHS',
+    revision_policy: 'FULL_REPLACE_WITH_CONFIRMATION',
+    absence_rule: 'MISSING_ACCOUNT_IS_NOT_ZERO',
+  };
+
   const DATA_CATALOG_ENTRIES = {
+    PLAN_BUDGET,
     PL_ACTUAL,
     WORKER_SALES,
     SHIPPER_AREA,

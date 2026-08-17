@@ -2546,46 +2546,33 @@ const PUBLISH = { go() { UI.toast('GitHub Pages での公開はHTMLファイル�
 
 // 計画データ取込（PLAN）
 const PLAN = {
-  importFromPaste() {
-    const fy = getSelectedFiscalYear('plan-year-sel');
-    const text = document.getElementById('plan-paste-area')?.value||'';
-    const msg  = document.getElementById('plan-import-msg');
-    if (!text.trim()) {
-      UI.toast('貼付欄が空です','warn');
-      if (msg) msg.textContent = '貼付欄が空です';
-      return;
-    }
-    const plan = CSV.parsePlan(text);
-    if (!plan) {
-      UI.toast('計画データを解析できませんでした。タブ区切りでペーストしてください。','warn');
-      if (msg) msg.textContent = '解析失敗';
-      return;
-    }
+  async importParsed(plan, fy, sourceMeta={}) {
+    fy = String(fy || getSelectedFiscalYear('plan-year-sel'));
+    if (!plan || typeof plan !== 'object' || !Object.keys(plan).length) { UI.toast('計画データを解析できませんでした','warn'); return false; }
     if (STATE.planData[fy]) {
-      const ok = confirm(`${fy}年度の計画データは既に登録されています。\n\n今回の貼付データで、${fy}年度の計画データをすべて入れ替えますか？\n\n※差分追加ではありません。既存の${fy}年度計画を削除してから登録します。`);
-      if (!ok) return;
+      const src = sourceMeta.source_type === 'SKFL0001_PDF' ? 'SKFL0001 PDF' : '今回のデータ';
+      const ok = confirm(`${fy}年度の計画データは既に登録されています。\n\n${src}で、${fy}年度の計画データをすべて入れ替えますか？\n\n※差分追加ではありません。既存の${fy}年度計画を削除してから登録します。`);
+      if (!ok) return false;
       delete STATE.planData[fy];
     }
     clearDataDeleted('planFiscalYears', fy);
-    STATE.planData[fy] = {
-      rows: plan,
-      fiscalYear: fy,
-      importedAt: new Date().toISOString(),
-      itemCount: Object.keys(plan).length,
-      unit:'千円',
-      mode:'full_replace'
-    };
+    STATE.planData[fy] = { rows: plan, fiscalYear: fy, importedAt: new Date().toISOString(), itemCount: Object.keys(plan).length, unit:'千円', mode:'full_replace', sourceMeta: Object.assign({}, sourceMeta||{}) };
     Repository.Storage.save();
-    const area = document.getElementById('plan-paste-area');
-    if (area) area.value = '';
     const count = Object.keys(plan).length;
-    if (msg) msg.textContent = `${fy}年度 完全入替完了: ${count}科目`;
-    renderImport();
-    NAV.refresh();
-    SYNC_COORDINATOR.syncSmart().then(r => {
-      if (r && r.ok) UI.toast(`${fy}年度 計画データを完全入替し、クラウド同期しました（${count}科目）`);
-      else UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`, 'warn');
-    }).catch(() => UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`, 'warn'));
+    renderImport(); NAV.refresh();
+    try { const r=await SYNC_COORDINATOR.syncSmart(); if(r&&r.ok) UI.toast(`${fy}年度 計画データを完全入替し、クラウド同期しました（${count}科目）`); else UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`,'warn'); }
+    catch(_e){ UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`,'warn'); }
+    return true;
+  },
+  async importFromPaste() {
+    const fy = getSelectedFiscalYear('plan-year-sel');
+    const text = document.getElementById('plan-paste-area')?.value||'';
+    const msg  = document.getElementById('plan-import-msg');
+    if (!text.trim()) { UI.toast('貼付欄が空です','warn'); if (msg) msg.textContent = '貼付欄が空です'; return; }
+    const plan = CSV.parsePlan(text);
+    if (!plan) { UI.toast('計画データを解析できませんでした。タブ区切りでペーストしてください。','warn'); if (msg) msg.textContent = '解析失敗'; return; }
+    const ok=await this.importParsed(plan,fy,{source_type:'PASTE_TEXT'});
+    if(ok!==false){ const area=document.getElementById('plan-paste-area'); if(area)area.value=''; if(msg)msg.textContent=`${fy}年度 完全入替完了: ${Object.keys(plan).length}科目`; }
   },
   clear() {
     const fy = getSelectedFiscalYear('plan-year-sel');

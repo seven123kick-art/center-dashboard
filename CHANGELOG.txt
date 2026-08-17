@@ -1,41 +1,62 @@
-Version6 D3-10 / D3-11
+Version6 D3-12 / D3-13
 Date: 2026-08-17
 
 PURPOSE
-- Add a dedicated SKDL0002 PRELIMINARY import path without misusing legacy SKDL0001 daily data.
-- Make NORMALIZED SOURCE current/revision status visible from the import screen.
-- Prevent accounting state from moving backward from CONFIRMED to PRELIMINARY.
-- Correct legacy UI wording that called SKDL0001 daily data "速報".
+- Add direct SKFL0001 budget-plan PDF import.
+- Keep legacy copy/paste as a fallback, while making PDF the recommended budget source.
+- Include budget-plan status in the Data Import status view.
+- Register PLAN_BUDGET in the central Data Catalog.
 
-CHANGES
-1. Dedicated SKDL0002 import
-- Separate month + CSV input for SKDL0002.
-- Saves through ACCOUNTING_IMPORT_BRIDGE as PL_ACTUAL / PRELIMINARY.
-- Does not write SKDL0002 into legacy STATE.datasets as daily.
+IMPLEMENTATION
+1. PLAN_BUDGET / SKFL0001
+- Added PLAN_BUDGET to DATA_CATALOG.
+- Scope: CENTER_FISCAL_YEAR.
+- Source: SKFL0001 monthly P/L plan PDF.
+- Fiscal year and center metadata are read from PDF content.
+- Monthly amounts remain in thousand-yen units, matching existing planData.
 
-2. Confirmed accounting downgrade protection
-- CURRENT CONFIRMED rejects later PRELIMINARY with CONFIRMED_CANNOT_DOWNGRADE_TO_PRELIMINARY.
-- Existing CONFIRMED immutability remains in force.
-- PRELIMINARY can still be revised until CONFIRMED is registered.
+2. Direct PDF parser
+- New src/modules/plan_pdf_import.js.
+- Reads the two SKFL0001 pages with PDF.js.
+- Page 1 maps April-September; page 2 maps October-March.
+- Extracts account labels and monthly values using PDF coordinates rather than flattened parsed-text order.
+- Validates major accounts before allowing import.
+- Does not silently turn a missing account into zero.
 
-3. Import status / revision visibility
-- Read-only status panel for PL_ACTUAL, WORKER_SALES, SHIPPER_AREA, DELIVERY_LIST, ROUTE_PAYMENT.
-- Shows CURRENT batch, accounting state, row count and retained revision history.
+3. Existing PLAN save path refactored
+- Added PLAN.importParsed() as the single save path for parsed budget data.
+- Both PDF import and legacy paste import use the same full-replace / Storage / Cloud sync behavior.
+- Source metadata is retained in planData.
 
-4. SKDL0001 wording correction
-- Existing SKDL0001 behavior is unchanged.
-- UI now calls SKDL0001 日報, not 速報.
-- SKDL0002=PRELIMINARY, SKDL0003=CONFIRMED remain the new Data Catalog definitions.
+4. Import UI
+- SKFL0001 PDF is now the recommended budget import method.
+- Legacy copy/paste remains available under a collapsible fallback section.
+- Data Import status includes the fiscal-year budget registration and source type.
+
+ATTACHED PDF VALIDATION
+- Fiscal year: 2026
+- Center shown: 110203 北埼玉C
+- Unit: 千円
+- Page 1: April-September plan
+- Page 2: October-March plan (all monthly plan values shown as 0 in this supplied file)
+Verified examples:
+- 営業収益計: 25,661 / 22,153 / 22,608 / 25,112 / 25,559 / 24,507
+- 人件費計: 4,949 / 4,627 / 4,763 / 4,969 / 4,883 / 4,894
+- 傭車費計: 16,965 / 14,117 / 14,425 / 16,617 / 16,952 / 15,975
+- 水道光熱費: 340 / 340 / 340 / 410 / 410 / 410
+- 営業利益: 622 / 262 / 211 / 298 / 483 / 413
 
 VALIDATION
-- node --check PASS for all src/**/*.js.
-- No direct STATE/full_state mutation added for SKDL0002.
+- All src/**/*.js: node --check PASS.
+- Supplied PDF rendered and layout-inspected.
+- Coordinate extraction prototype verified the supplied PDF's key monthly figures.
+- Existing paste parser retained.
+- No Supabase schema migration.
 
 FILES
 - center.html
 - src/app.js
-- src/modules/data_import_management.js (new)
-- src/core/repository/normalized_source_repository.js
-- assets/css/app.css
-- assets/css/features/data-import-management.css (new)
+- src/modules/plan_pdf_import.js (new)
+- src/modules/data_import_management.js
+- src/core/data_catalog/catalog.js
 - CHANGELOG.txt
