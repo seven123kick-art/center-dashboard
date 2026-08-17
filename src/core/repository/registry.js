@@ -85,7 +85,8 @@ TODO(V3)
         get Storage() { return window.STORAGE_REPOSITORY; },
         get Cloud() { return window.CLOUD_REPOSITORY; },
         get Sync() { return window.SYNC_COORDINATOR; },
-        get Resolution() { return window.RESOLUTION_REPOSITORY; }
+        get Resolution() { return window.RESOLUTION_REPOSITORY; },
+        get NormalizedSource() { return window.NORMALIZED_SOURCE_REPOSITORY; }
     };
 
 })();

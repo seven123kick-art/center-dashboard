@@ -1,100 +1,33 @@
-Version6 D3-5C Resolution Save Integration
-Date: 2026-08-17
-
-Purpose
-- Connect D3-4 resolution preview to D3-5B ResolutionRepository.
-- Persist only human-confirmed attribution resolution decisions.
-- Re-fetch from Cloud after save, rebuild active aliases, and re-evaluate Resolver results.
-- Keep SOURCE and Master data immutable.
-
-Changed files
-1. src/modules/data_verification.js
-   - Loads persisted Resolution Decisions through Repository.Resolution.
-   - Adds explicit confirmation + save action from the existing preview.
-   - Save sequence: create decision -> Cloud save -> Cloud re-fetch -> verify decision -> rebuild UI/Resolver context.
-   - Avoids duplicate active decisions when the exact same mapping is already active.
-   - When a mapping is changed, the new decision supersedes the prior active decision instead of overwriting/deleting it.
-   - Does not mutate STATE, workerMaster, companyMaster, SOURCE, or legacy FullState.
-
-2. src/core/data_catalog/resolution_ledger.js
-   - Materialized aliases now conform to ATTRIBUTION_SUBJECT_ALIAS / SUBJECT_RESOLVER shape:
-     subject_type + subject_id / process_code.
-   - Existing ledger history semantics remain ACTIVE/REVOKED/supersedes.
-
-3. src/core/data_catalog/resolution_preview.js
-   - Accepts persisted resolutionDecisions.
-   - Rebuilds effective subject aliases from active decisions before SUBJECT_RESOLVER index creation.
-
-4. src/core/repository/resolution_repository.js
-   - Documentation updated to reflect D3-5C UI integration. Runtime persistence behavior unchanged.
-
-5. assets/css/features/data-verification.css
-   - Minimal styles for save action and save/reload status message.
-
-Important limitation
-- The current legacy STATE does not retain the row-level normalized WORKER_SALES / SHIPPER_AREA records needed to rebuild the full detailed Canonical Snapshot from persisted decisions after a page reload.
-- D3-5C therefore performs persisted Alias reconstruction + Resolver re-evaluation in the verification flow.
-- It does NOT pretend that detailed Canonical SALES_DETAIL has been rebuilt when the required normalized SOURCE rows are unavailable.
-- Full Canonical re-materialization belongs to the later normalized SOURCE persistence/migration step.
-
-Verification
-- node --check: all src/*.js PASS.
-- Resolution Ledger alias materialization -> SUBJECT_RESOLVER persisted alias lookup PASS.
-- ResolutionRepository mock Cloud save -> Cloud reload -> decision verification PASS.
-- Explicit 0/UNKNOWN, accounting, parser, STATE, Storage FullState logic not changed in this phase.
-
-
-============================================================
-Previous changelog follows
-============================================================
-Version6 D3-5B Resolution正式永続化基盤
-作成日: 2026-08-17
+Version6 D3-6A NORMALIZED SOURCE正式永続化基盤 (2026-08-17)
 
 ■目的
-D3-5Aで確定したRESOLUTION_DECISION履歴を、既存STATE/full_stateへ混在させず、Supabaseを正本・IndexedDBを表示用キャッシュとして扱えるRepository境界へ接続する。
+Resolution保存後にCanonicalを再構築できるよう、NORMALIZED SOURCEをSTATE/full_stateとは分離して永続化する正式Repository境界を追加。
 
-■変更ファイル
-- src/core/cloud.js
-  - center_realtime_stateの特定state_keyを読み書きする公開API getRealtimeState()/putRealtimeState() を追加。
-  - 既存private APIへ外部から直接アクセスさせないための公開通信プリミティブ。
-- src/core/repository/cloud_repository.js
-  - fetchRealtimeState()/pushRealtimeState() を追加。CLOUD公開APIへの薄い委譲のみ。
+■新規
+- src/core/repository/normalized_source_repository.js
+  - 対象: WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT
+  - Supabase center_realtime_stateを正本として利用
+  - batch本体をimmutableな独立state_keyで保存
+  - manifestがCURRENT batchを指す
+  - 訂正版は旧batchを削除せずSUPERSEDEDとして保持
+  - batch保存成功後にのみmanifestを切替
+  - IndexedDBは表示用cacheのみ
+  - 0とnullを変換せずNORMALIZED値を保持
+
+■変更
 - src/core/repository/registry.js
-  - Repository.Resolution getterを追加。
-- src/core/repository/resolution_repository.js（新規）
-  - Resolution Decision専用Repository。
-  - Supabase正本 state_key: resolution_decisions_v1
-  - IndexedDB cache kind/id: resolution / decisions_v1
-  - load/save/appendDecision/revokeDecisionを提供。
-  - Supabase保存成功後のみcacheを更新。
-  - full_state/STATE/localStorageへ混在させない。
+  Repository.NormalizedSource getterを追加。
 - center.html
-  - resolution_repository.js読込1行追加。
+  normalized_source_repository.jsの読込を1行追加。
 
-■保存単位
-center_realtime_stateの既存(center_key,state_key)一意制約を利用し、各センターのresolution_decisions_v1を独立payloadとして保存する。新しいSupabaseテーブル・SQL migrationは不要。
+■未接続（意図した段階実装）
+- 既存取込UIからの自動保存はまだ行わない。
+- Canonical Builderからの自動load/re-materializeもまだ行わない。
+- STATE/full_state/既存parser/既存画面の業務ロジックは変更しない。
 
-■履歴ルール
-DecisionはRESOLUTION_LEDGER契約に従いACTIVE/REVOKED/supersedesで保持する。取消時にSOURCEやMasterを削除・上書きしない。
-
-■安全性
-- D3-5BではUI保存ボタンへ未接続。既存操作から新Repositoryへの書込みは発生しない。
-- 既存STATE/full_state/workerMaster/companyMasterへResolutionを追加しない。
-- CloudRepository自身にSTATE変更ロジックを追加していない。
-- IndexedDB cache失敗はSupabase正本保存の失敗として扱わない。
-- 保存前に全Decisionをvalidationし、ID重複も拒否する。
-
-■テスト
-Nodeスタブで以下を実行しPASS。
-1. 不正Decisionの保存拒否
-2. Supabase正本保存→cache更新
-3. Cloudからの再読込
-4. Decision取消→REVOKED保存
-5. activeDecisionsが取消後0件
-6. 変更JSのnode --check 全PASS
-
-■未実装（意図的）
-- D3-4 UIの「保存」操作との接続
-- Master/Aliasの直接書換え
-- 保存後Canonical再計算
-これらはD3-5C以降で行う。
+■検証
+- B1保存→CURRENT読込 PASS
+- amount:null と amount:0 の区別保持 PASS
+- B2訂正版保存→B1 SUPERSEDED / B2 CURRENT PASS
+- B1旧batchが正本から消えないこと PASS
+- src配下全JavaScript node --check PASS
