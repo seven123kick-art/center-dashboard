@@ -175,7 +175,7 @@ TODO(V6以降)
          * 【重要】この時点ではまだ既存画面へ接続していない
          * （Case A〜Nの比較検証結果は別途報告）。
          */
-        async syncBoot(preferredView = 'dashboard') {
+        async syncBoot(preferredView = 'dashboard', options = {}) {
             if (!_repositoriesReady()) return { ok: false, reason: 'repositories_not_ready' };
             const STATE = window.STATE;
             const CR = window.CLOUD_REPOSITORY;
@@ -183,7 +183,12 @@ TODO(V6以降)
             try {
                 let manifest;
                 try {
-                    manifest = await CR.fetchManifestWithDbFallback();
+                    // D4-11: IndexedDB復元とCloud Manifest取得は互いに独立しているため、
+                    // app.js側で先行開始したPromise/取得済みManifestを再利用する。
+                    // これにより安全確認を省略せず、通常起動の直列待ちだけを削減する。
+                    if (options.manifestPromise) manifest = await options.manifestPromise;
+                    else if (options.manifest) manifest = options.manifest;
+                    else manifest = await CR.fetchManifestWithDbFallback();
                 } catch (e) {
                     if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('error');
                     return { ok:false, error:e?.message || String(e), stage:'MANIFEST', readiness:'LOAD_FAILED' };

@@ -2725,6 +2725,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     Repository.Storage.load();
     window.STARTUP_PROFILER?.end?.('ローカルStorage復元');
     if (window.APP_BOOT_STATE) APP_BOOT_STATE.cloudSyncPending = true;
+
+    // D4-11: 通常起動で必須の「Cloud Manifest確認」と「IndexedDB復元」は独立処理。
+    // 先にManifest取得を開始し、IndexedDB復元と並列で進める。
+    // 数字の描画は従来どおり両方の検証完了後なのでReadiness Gateは弱めない。
+    window.STARTUP_PROFILER?.wrapCloudRepository?.();
+    const _bootManifestPromise = (window.CLOUD_REPOSITORY?.fetchManifestWithDbFallback)
+      ? Promise.resolve().then(() => CLOUD_REPOSITORY.fetchManifestWithDbFallback())
+      : null;
+
     if (window.IDB_CACHE?.hydrateState) await window.STARTUP_PROFILER?.measure?.('IndexedDB復元', () => IDB_CACHE.hydrateState()) ?? await IDB_CACHE.hydrateState();
     if (window.APP_BOOT_STATE) {
       APP_BOOT_STATE.renderedFromCache = false;
@@ -2764,12 +2773,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 2. 主要Cloudデータを確認。ここが完了するまで数値画面は一切表示しない。
     STARTUP_READINESS?.setProgress(2, '最新データを確認しています', 'クラウドのCURRENTデータと主要状態を確認しています。');
-    window.STARTUP_PROFILER?.wrapCloudRepository?.();
     let pullResult = await window.STARTUP_PROFILER?.measure?.('Startup同期合計', () => STARTUP_READINESS.withTimeout(
-      () => AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView)),
+      () => AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView, { manifestPromise:_bootManifestPromise })),
       45000
     )) ?? await STARTUP_READINESS.withTimeout(
-      () => AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView)),
+      () => AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView, { manifestPromise:_bootManifestPromise })),
       45000
     );
 
