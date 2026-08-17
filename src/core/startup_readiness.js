@@ -94,21 +94,33 @@
       .filter(x=>x&&x.ym).map(x=>({ym:String(x.ym),importedAt:x.importedAt||x.updatedAt||x.savedAt||null}))
       .sort((a,b)=>a.ym.localeCompare(b.ym));
     return JSON.stringify({
-      version:manifest.version||null, savedAt:manifest.savedAt||null,
+      // 通常manifest(v33+)はsavedAt自体がCloud更新Revision。
+      // DBフォールバックmanifest(v32)はsavedAtが再構築時刻なので使用せず、
+      // DB rowのupdated_atから作った各Revisionを使う。
+      version:manifest.version||null,
+      manifestRevision:Number(manifest.version||0)>=33 ? (manifest.savedAt||null) : null,
+      fullStateUpdatedAt:manifest.fullStateUpdatedAt||null,
       datasets, workers, products,
       hasPlanData:!!manifest.hasPlanData, planDataUpdatedAt:manifest.planDataUpdatedAt||null,
-      hasCapacity:!!manifest.hasCapacity, hasDailyRecords:!!manifest.hasDailyRecords
+      hasCapacity:!!manifest.hasCapacity, capacityUpdatedAt:manifest.capacityUpdatedAt||null,
+      hasDailyRecords:!!manifest.hasDailyRecords
     });
   }
   function localMatchesManifest(manifest){
     if(!manifest || !window.STATE) return false;
     const ds=Array.isArray(STATE.datasets)?STATE.datasets:[];
+    const num=v=>Number.isFinite(Number(v))?Number(v):0;
     for(const m of (Array.isArray(manifest.datasets)?manifest.datasets:[])){
       if(!m?.ym) continue;
       const type=m.type||'confirmed';
       const local=ds.find(x=>x&&x.ym===m.ym&&(x.type||'confirmed')===type);
       if(!local) return false;
-      if(String(local.importedAt||'') < String(m.importedAt||m.updatedAt||'')) return false;
+      // DB由来Manifestではrow.updated_atとSOURCE内importedAtが異なる場合がある。
+      // importedAtの大小だけで再取得判定せず、Manifestにある会計サマリーと
+      // ローカル実体が一致することを検証する。これにより確定済み月の無駄な再取得を防ぐ。
+      if ('totalIncome' in m && num(local.totalIncome)!==num(m.totalIncome)) return false;
+      if ('totalExpense' in m && num(local.totalExpense)!==num(m.totalExpense)) return false;
+      if ('profit' in m && num(local.profit)!==num(m.profit)) return false;
     }
     if(manifest.hasPlanData && !(STATE.planData && Object.keys(STATE.planData).length)) return false;
     if(manifest.hasCapacity && !STATE.capacity) return false;

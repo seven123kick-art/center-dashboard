@@ -263,18 +263,36 @@ TODO(V6以降)
                     }
                 }
 
-                for (const meta of targetMetas) {
-                    try {
+                // D4-9: 更新が必要な月だけ抽出し、独立した月次SOURCEは並列取得する。
+                // 1件失敗した場合はREADYにせず従来どおりブロックする。
+                const metasToFetch = targetMetas.filter(meta => {
+                    const metaType = meta.type || 'confirmed';
+                    if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) return false;
+                    const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
+                    if (!local) return true;
+                    const sameSummary = Number(local.totalIncome || 0) === Number(meta.totalIncome || 0)
+                        && Number(local.totalExpense || 0) === Number(meta.totalExpense || 0)
+                        && Number(local.profit || 0) === Number(meta.profit || 0);
+                    return !sameSummary;
+                });
+                if (metasToFetch.length) {
+                    const fetched = await Promise.all(metasToFetch.map(async meta => {
                         const metaType = meta.type || 'confirmed';
-                        if (isDeletedSince('datasets', dataDeleteKey(meta.ym, metaType), meta.importedAt || meta.updatedAt || '')) continue;
-                        const local = STATE.datasets.find(d => d.ym === meta.ym && (d.type || 'confirmed') === metaType);
-                        if (local && String(meta.importedAt || '') <= String(local.importedAt || '')) continue;
-                        const ds = await CR.fetchDataset(meta.ym, metaType);
-                        if (ds && ds.ym) { window.DATASET_REPOSITORY.upsert(ds); changed++; }
-                    } catch (e) {
-                        console.warn('[SyncCoordinator.syncBoot] 月別データ取得失敗:', meta.ym, e?.message || e);
-                        return { ok:false, stage:'DATASET', ym:meta.ym, readiness:'LOAD_FAILED', error:e?.message || String(e) };
+                        try {
+                            const ds = await CR.fetchDataset(meta.ym, metaType);
+                            if (!ds || !ds.ym) throw new Error('月次データ本体を確認できませんでした');
+                            return { meta, ds };
+                        } catch (e) {
+                            e.__datasetYm = meta.ym;
+                            throw e;
+                        }
+                    })).catch(e => ({ __error:e }));
+                    if (fetched && fetched.__error) {
+                        const e=fetched.__error;
+                        console.warn('[SyncCoordinator.syncBoot] 月別データ取得失敗:', e.__datasetYm, e?.message || e);
+                        return { ok:false, stage:'DATASET', ym:e.__datasetYm, readiness:'LOAD_FAILED', error:e?.message || String(e) };
                     }
+                    for (const item of fetched) { window.DATASET_REPOSITORY.upsert(item.ds); changed++; }
                 }
 
                 if (manifest.hasPlanData) {

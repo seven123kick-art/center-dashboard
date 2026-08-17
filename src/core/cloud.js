@@ -296,6 +296,9 @@ var CLOUD = window.CLOUD = {
       hasMemos: false,
       hasLibrary: false,
       hasDailyRecords: false,
+      fullStateUpdatedAt: null,
+      planDataUpdatedAt: null,
+      capacityUpdatedAt: null,
       deleted: STATE.deleted || {}
     };
     const dsSeen = new Set();
@@ -348,8 +351,12 @@ var CLOUD = window.CLOUD = {
         });
         return;
       }
-      if (key === this._dbStateKey(this._planKey())) manifest.hasPlanData = true;
-      if (key === this._dbStateKey(this._capacityKey())) manifest.hasCapacity = true;
+      if (key === this._dbStateKey(this._fullStateKey())) {
+        manifest.fullStateUpdatedAt = updatedAt;
+        manifest.hasDailyRecords = !!(payload && Array.isArray(payload.dailyRecords) && payload.dailyRecords.length);
+      }
+      if (key === this._dbStateKey(this._planKey())) { manifest.hasPlanData = true; manifest.planDataUpdatedAt = updatedAt; }
+      if (key === this._dbStateKey(this._capacityKey())) { manifest.hasCapacity = true; manifest.capacityUpdatedAt = updatedAt; }
       if (key === this._dbStateKey(this._memosKey())) manifest.hasMemos = true;
       if (key === this._dbStateKey(this._libraryKey())) manifest.hasLibrary = true;
     });
