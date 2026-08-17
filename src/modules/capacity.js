@@ -1506,7 +1506,7 @@ window.CAPACITY_UI = {
         updatedAt: new Date().toISOString()
       });
       Repository.Storage.save();
-      CLOUD.pushCapacity().catch(()=>{});
+      Repository.Cloud.pushCapacityFull().catch(e=>console.warn('[Capacity] Cloud push failed', e));
       UI.toast('キャパ区分を追加しました');
       this.render();
     });
@@ -1516,7 +1516,7 @@ window.CAPACITY_UI = {
       if (!confirm('このキャパ区分を削除しますか？')) return;
       STATE.capacity.capacityGroups = (STATE.capacity.capacityGroups || []).filter(g=>g.id !== id);
       Repository.Storage.save();
-      CLOUD.pushCapacity().catch(()=>{});
+      Repository.Cloud.pushCapacityFull().catch(e=>console.warn('[Capacity] Cloud push failed', e));
       this.render();
     }));
 
@@ -1528,7 +1528,7 @@ window.CAPACITY_UI = {
       cg[inp.dataset.capxCapgroupField] = inp.value;
       cg.updatedAt = new Date().toISOString();
       Repository.Storage.save();
-      CLOUD.pushCapacity().catch(()=>{});
+      Repository.Cloud.pushCapacityFull().catch(e=>console.warn('[Capacity] Cloud push failed', e));
       this.render();
     }));
 
@@ -1544,7 +1544,7 @@ window.CAPACITY_UI = {
       cg.capacity[key][field] = this.n(inp.value);
       cg.updatedAt = new Date().toISOString();
       Repository.Storage.save();
-      CLOUD.pushCapacity().catch(()=>{});
+      Repository.Cloud.pushCapacityFull().catch(e=>console.warn('[Capacity] Cloud push failed', e));
       this.render();
     }));
 

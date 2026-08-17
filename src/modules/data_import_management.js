@@ -24,7 +24,14 @@
       if(document.getElementById('preliminary-pl-file'))document.getElementById('preliminary-pl-file').value='';
       const status=document.getElementById('normalized-status-month');if(status)status.value=month;
       await refresh();
-      try{await window.CANONICAL_MATERIALIZER?.materialize?.({period});}catch(_e){}
+      if(window.CANONICAL_MATERIALIZER?.materialize){
+        try{
+          await CANONICAL_MATERIALIZER.materialize({period});
+        }catch(e){
+          console.error('[DataImportManagement] Canonical rebuild failed after preliminary import',e);
+          setMsg(`SKDL0002速報は登録済みですが、表示用データの再構築に失敗しました。データ確認画面で再構築してください。${e?.message?`（${e.message}）`:''}`,'error');
+        }
+      }
     }catch(e){setMsg(e?.message||String(e),'error');}
   }
   async function refresh(){
