@@ -1002,7 +1002,7 @@ const IMPORT = {
       }
       // 確定CSVが入った月は速報を残さず削除する
       if (importType === 'confirmed') {
-        try { await supersedeDailyWithConfirmed(ym, opt.strict ? { deferCloudDelete: true } : {}); Repository.Storage.save(); } catch(e) {}
+        try { await supersedeDailyWithConfirmed(ym, opt.strict ? { deferCloudDelete: true } : {}); Repository.Storage.save(); } catch(e) { console.warn('[D4-16] confirmed supersede cleanup failed', ym, e); if(!opt.strict) UI.toast(`${ymLabel(ym)}：確定データは保存しましたが、旧速報データの整理に失敗しました`,'warn'); }
       }
       // 単体取込では従来通り取込月だけ同期する。
       // 一括取込では opt.awaitCloud === false を指定し、ループ後に pushAll() を1回だけ実行する。
@@ -1012,7 +1012,7 @@ const IMPORT = {
           if (!r || !r.ok) throw new Error(r?.error || 'クラウド保存に失敗しました');
         }
       } else if (opt.awaitCloud !== false) {
-        SYNC_COORDINATOR.syncMonth(ym).catch(()=>{}); // 取込月だけ自動同期
+        SYNC_COORDINATOR.syncMonth(ym).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド保存に失敗しました'); }).catch(e=>{ console.warn('[D4-16] month background sync failed',ym,e); UI.toast(`${ymLabel(ym)}：ローカル取込は完了しましたが、クラウド保存に失敗しました`,'warn'); }); // 取込月だけ自動同期
       }
       if (!opt.strict) {
         NAV.refresh();
@@ -1100,7 +1100,7 @@ const IMPORT = {
       STATE.capacity.calendar = STATE.capacity.calendar || {};
 
       Repository.Storage.save();
-      SYNC_COORDINATOR.syncCapacity().catch(()=>{});
+      SYNC_COORDINATOR.syncCapacity().then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド保存に失敗しました'); }).catch(e=>{ console.warn('[D4-16] capacity background sync failed',e); UI.toast('キャパはローカル保存済みですが、クラウド保存に失敗しました','warn'); });
       NAV.refresh();
       UI.toast(`キャパ取込完了: ${Object.keys(areas).length}地区 / ${rowCount}行`);
       if (window.CAPACITY_UI?.render) CAPACITY_UI.render();

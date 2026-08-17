@@ -1649,7 +1649,7 @@ IMPORT.deleteFieldData = function(ym) {
     STATE.areaData = [];
     if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
     Repository.Storage.save();
-    if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).catch(()=>{});
+    if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(e=>{ console.warn('[D4-16] field reset cloud sync failed',e); msg('現場明細はローカル削除済みですが、クラウド同期に失敗しました','warn'); });
     refreshFieldAll();
     msg('現場明細データを全削除しました', 'warn');
   };

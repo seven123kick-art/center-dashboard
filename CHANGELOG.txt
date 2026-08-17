@@ -1,33 +1,26 @@
-Version6 D4-15 / Repository Boundary + Import Trust
+Version6 D4-16 / Sync Failure Visibility
 Date: 2026-08-17
 
 PURPOSE
-- Continue moving feature modules away from direct CLOUD calls without changing business behavior.
-- Prevent a successful source import from silently hiding a failed Canonical rebuild.
+- Do not silently treat Cloud sync failures as complete success after local save/delete succeeds.
+- Distinguish local completion from Cloud reflection for the user.
 
 CHANGES
-1. src/modules/capacity.js
-   - Replaced four direct CLOUD.pushCapacity() calls with Repository.Cloud.pushCapacityFull().
-   - Existing behavior remains Capacity + Manifest + FullState push through the repository boundary.
-   - Cloud push failures are now logged instead of being completely swallowed.
+- Monthly PL import: warn when background Cloud sync fails; warn when old preliminary cleanup fails after confirmed import.
+- Capacity import: warn when Cloud sync fails after local save.
+- Landing forecast daily actuals: warn when Cloud sync fails after import/delete.
+- Delivery list PDF / route payment import: warn when Cloud sync fails after local save.
+- Field detail full reset: warn when Cloud sync fails after local deletion.
+- {ok:false} sync results are also treated as failures.
 
-2. src/modules/data_import_management.js
-   - After SKDL0002 preliminary import, Canonical rebuild errors are no longer silently ignored.
-   - The source import remains registered, but the UI explicitly warns that display-data rebuild failed and directs the user to the data verification screen.
-   - Successful rebuild behavior is unchanged.
-
-NOT CHANGED
-- D4-11 verified startup / differential sync behavior
-- D4-12 shared pastel UI palette
-- Business calculations
-- STATE schema
-- Canonical schema
-- Data Catalog
-- Supabase schema
-- Legacy compatibility internals in cloud.js / field_core.js
+FILES
+- src/app.js
+- src/modules/landing_forecast.js
+- src/field/route_analysis.js
+- src/field/field_core.js
+- CHANGELOG.txt
 
 VALIDATION
-- node --check src/modules/capacity.js: PASS
-- node --check src/modules/data_import_management.js: PASS
-- capacity.js direct CLOUD.pushCapacity calls: 0
-- silent Canonical materialize catch in preliminary import: 0
+- node --check PASS for all 4 changed JS files.
+- Silent SYNC_COORDINATOR catch(()=>{}) in the targeted app/modules/field scope: 0.
+- No business calculation, Canonical, Data Catalog, Supabase schema, D4-11 startup, or D4-12 UI changes.

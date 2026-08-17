@@ -285,7 +285,7 @@
       }
       STATE.routeData.sort((a,b)=>a.ym.localeCompare(b.ym));
       Repository.Storage.save();
-      if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(()=>{});
+      if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(e=>{ console.warn('[D4-16] delivery list cloud sync failed',e); window.UI?.toast?.('配達持出データはローカル保存済みですが、クラウド同期に失敗しました','warn'); });
       let normalizedDeliverySaved=0, normalizedDeliveryFailed=0;
       if(window.Repository?.NormalizedSource?.saveBatch){
         for(const [ym,records] of normalizedDeliveryByYm){
@@ -397,7 +397,7 @@
       }
       STATE.routeData.sort((a,b)=>String(a.ym).localeCompare(String(b.ym)));
       Repository.Storage.save();
-      if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(()=>{});
+      if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(e=>{ console.warn('[D4-16] route payment cloud sync failed',e); window.UI?.toast?.('配達ヘッド傭車料はローカル保存済みですが、クラウド同期に失敗しました','warn'); });
 
       let normalizedSaved=0, normalizedFailed=0;
       if(!window.Repository?.NormalizedSource?.saveBatch) {

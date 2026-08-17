@@ -243,7 +243,7 @@
         }
       }
       Repository.Storage.save();
-      if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:true }).catch(()=>{});
+      if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:true }).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(e=>{ console.warn('[D4-16] landing forecast cloud sync failed',e); UI.toast('日別実績はローカル保存済みですが、クラウド同期に失敗しました','warn'); });
       this.renderImportPanel();
       this.render();
       if (msg) msg.innerHTML = `<div style="white-space:pre-wrap;font-size:12px;font-weight:700;color:#065f46">${escLocal(`日別実績取込：${imported}日分\n` + logs.join('\n'))}</div>`;
@@ -253,7 +253,7 @@
       if (!confirm(`${ymLabelLocal(ym)}の日別実績を削除しますか？`)) return;
       STATE.dailyRecords = (STATE.dailyRecords || []).filter(r=>r.ym !== ym);
       Repository.Storage.save();
-      if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:true }).catch(()=>{});
+      if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:true }).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(e=>{ console.warn('[D4-16] landing forecast delete cloud sync failed',e); UI.toast('日別実績はローカル削除済みですが、クラウド同期に失敗しました','warn'); });
       this.renderImportPanel();
       this.render();
       UI.toast(`${ymLabelLocal(ym)}の日別実績を削除しました`);
