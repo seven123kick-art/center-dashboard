@@ -182,9 +182,19 @@ var STORE = window.STORE = {
       sanitizePersonalDataState(STATE);
       applyDeletionTombstonesToState(STATE);
       this.save();
-      if (CLOUD?.pushAll) await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).catch(()=>{});
+      let cloudSynced=true;
+      if (CLOUD?.pushAll) {
+        try {
+          const syncResult=await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true });
+          if (!syncResult?.ok) throw new Error(syncResult?.error||'クラウド同期に失敗しました');
+        } catch(e) {
+          cloudSynced=false;
+          console.warn('[D4-21] backup restore cloud sync failed',e);
+        }
+      }
       NAV.refresh();
-      UI.toast('バックアップを復元しました');
+      if(cloudSynced) UI.toast('バックアップを復元しました');
+      else UI.toast('バックアップはローカル復元済みですが、クラウド同期に失敗しました', 'warn');
     } catch(e) { UI.toast('読込エラー: '+e.message, 'error'); }
   },
 

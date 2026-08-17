@@ -1,38 +1,30 @@
-Version6 D4-20 / Actionable Data Check
+Version6 D4-21 / Recovery Speed & Sync Integrity
 Date: 2026-08-17
 
 目的
-- データ確認画面を「状態を見る」から「対応すべきものが分かる」画面へ進化。
-- FAILED / PARTIAL / 未確認を優先し、正常項目の羅列で異常を埋もれさせない。
+- D4-20のデータ確認・復旧を待たせすぎない。
+- Cloud同期が {ok:false} を返した場合も「成功」に見せない。
+- 特にバックアップ復元で、ローカル復元成功とCloud反映成功を明確に分離する。
 
 変更
-1. データ処理状況の上部に「要対応」一覧を追加。
-   - 資料名
-   - 問題がある段階
-   - 状態
-   - 記録されている原因
-   - 最終正常時刻
-   - 推奨対応
-2. 優先順:
-   FAILED → PARTIAL → 未確認。
-3. 全段階の詳細チップは折りたたみへ移動。
-   普段は要対応だけを見ればよい構成に変更。
-4. Pipeline Statusの各stageに last_ok_at を保持。
-   失敗状態へ変わっても最後に正常確認できた時刻を失わない。
-5. 要対応がない場合は「要対応なし」と明示。
-
-判定原則
-- SOURCE未確認は自動で正常扱いしない。
-- SOURCE自体に問題がある場合のみ再取込を案内。
-- NORMALIZED/CLOUD/CANONICAL/SNAPSHOTは再確認・再構築で復旧可能な経路として案内。
-- 自動修復の可否を推測で成功扱いしない。
+1. Pipeline Recovery高速化
+   - 主要5資料のCURRENT Cloud検証は互いに独立しているため並列実行。
+   - 全検証完了後にCanonical/Snapshotを1回だけ再構築。
+   - 検証内容・整合条件は変更しない。
+2. バックアップ復元
+   - syncPushの例外だけでなく {ok:false} もCloud失敗として扱う。
+   - Cloud失敗時は「ローカル復元済み / Cloud同期失敗」と警告。
+   - 「バックアップを復元しました」という完全成功表示を出さない。
+3. app.jsに残っていたCloud同期警告経路
+   - ローカル削除、収支補完等で {ok:false} も警告対象へ統一。
 
 変更ファイル
-- src/core/data_catalog/pipeline_status.js
-- src/modules/data_import_management.js
-- assets/css/foundation/theme.css
+- src/core/data_catalog/pipeline_recovery.js
+- src/core/store.js
+- src/app.js
 - CHANGELOG.txt
 
 検証
 - 全 src/**/*.js node --check PASS
-- 業務計算 / Canonical schema / Data Catalog / Supabase schema / D4-11高速起動は変更なし
+- Pipeline検証条件、業務計算、Canonical schema、Data Catalog、Supabase schema変更なし
+- D4-11高速起動 / D4-12 UI変更なし

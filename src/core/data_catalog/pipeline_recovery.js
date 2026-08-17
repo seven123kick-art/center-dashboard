@@ -33,14 +33,13 @@
 
   async function verifyAndRebuild(period){
     const p=clean(period); if(!/^\d{6}$/.test(p)) throw new Error('period must be YYYYMM');
-    const results=[];
-    for(const type of TYPES){
-      try{ results.push(await verifyCurrent(p,type)); }
+    const results=await Promise.all(TYPES.map(async type=>{
+      try{ return await verifyCurrent(p,type); }
       catch(e){
         await DATA_PIPELINE_STATUS.setStage(p,type,'CLOUD','FAILED',{message:e?.message||String(e)});
-        results.push({ok:false,document_type:type,error:e?.message||String(e)});
+        return {ok:false,document_type:type,error:e?.message||String(e)};
       }
-    }
+    }));
     let materialized=null;
     try{
       if(window.CANONICAL_MATERIALIZER?.materialize) materialized=await CANONICAL_MATERIALIZER.materialize({period:p});

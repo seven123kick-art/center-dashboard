@@ -2599,7 +2599,7 @@ const PLAN = {
     if (msg) msg.textContent = `${fy}年度の計画データを削除しました`;
     renderImport();
     NAV.refresh();
-    if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).catch(()=>UI.toast('ローカル削除は完了しましたが、クラウド同期に失敗しました', 'warn'));
+    if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(()=>UI.toast('ローカル削除は完了しましたが、クラウド同期に失敗しました', 'warn'));
     UI.toast(`${fy}年度の計画データを削除しました`);
   },
 };
@@ -2657,7 +2657,7 @@ const TSV_IMPORT = {
     Repository.Storage.save();
     NAV.refresh();
     if (msg) msg.textContent = `${fy}年度 完全入替完了: ${imported}ヶ月`;
-    if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).catch(()=>UI.toast('収支補完は保存しましたが、クラウド同期に失敗しました', 'warn'));
+    if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(()=>UI.toast('収支補完は保存しましたが、クラウド同期に失敗しました', 'warn'));
     UI.toast(`${fy}年度 収支補完 ${imported}ヶ月を完全入替しました`);
   },
   doClearHistory() {
@@ -2673,7 +2673,7 @@ const TSV_IMPORT = {
     const deleted = before - STATE.datasets.length;
     renderImport();
     NAV.refresh();
-    if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).catch(()=>UI.toast('ローカル削除は完了しましたが、クラウド同期に失敗しました', 'warn'));
+    if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true }).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(()=>UI.toast('ローカル削除は完了しましたが、クラウド同期に失敗しました', 'warn'));
     UI.toast(`${fy}年度 収支補完 ${deleted}件を削除しました`);
   }
 };
