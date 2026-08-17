@@ -73,6 +73,12 @@
 
   function collectRecords(){
     const out = { product:[], worker:[] };
+    const requestedYM=normYM(document.getElementById('fp-product-month-select')?.value||document.getElementById('field-common-month-select')?.value||window.STATE?.selYM);
+    const canonicalState=requestedYM&&window.CANONICAL_ANALYSIS_READ_MODELS?.peek?.(requestedYM);
+    if(canonicalState?.status==='READY'&&canonicalState.fieldProductArea){
+      out.product.push({...canonicalState.fieldProductArea,__source:'CANONICAL.SHIPPER_AREA'});
+      return out;
+    }
     const seen = new Set();
 
     function pushProduct(x, source){
@@ -497,6 +503,10 @@
 
 
   function render(){
+    const preloadYM=normYM(document.getElementById('fp-product-month-select')?.value||document.getElementById('field-common-month-select')?.value||window.STATE?.selYM);
+    if(preloadYM&&window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth&&!CANONICAL_ANALYSIS_READ_MODELS.peek(preloadYM)){
+      CANONICAL_ANALYSIS_READ_MODELS.loadMonth(preloadYM).then(()=>requestRender?.()).catch(e=>console.warn('[ProductAnalysis] canonical read model failed',e));
+    }
     if (!active()) return;
 
     ensureStyle();

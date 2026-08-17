@@ -260,6 +260,11 @@
 
   function rawRecords(){
     const out = [];
+    const requestedYM=normYM(document.getElementById('field-common-month-select')?.value||window.STATE?.selYM||selectedYMState);
+    const canonicalState=requestedYM&&window.CANONICAL_ANALYSIS_READ_MODELS?.peek?.(requestedYM);
+    if(canonicalState?.status==='READY'&&canonicalState.fieldProductArea){
+      return [{...canonicalState.fieldProductArea,__source:'CANONICAL.SHIPPER_AREA'}];
+    }
 
     function pushRecord(x, source){
       if (!obj(x)) return;
@@ -849,6 +854,10 @@
   }
 
   async function render(force=false){
+    const preloadYM=normYM(document.getElementById('field-common-month-select')?.value||window.STATE?.selYM||selectedYMState);
+    if(preloadYM&&window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth&&!CANONICAL_ANALYSIS_READ_MODELS.peek(preloadYM)){
+      CANONICAL_ANALYSIS_READ_MODELS.loadMonth(preloadYM).then(()=>requestRender(true)).catch(e=>console.warn('[AreaAnalysis] canonical read model failed',e));
+    }
     if (!active()) return;
     const box = document.getElementById('field-map');
     if (!box) return;

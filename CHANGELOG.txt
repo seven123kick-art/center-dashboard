@@ -1,46 +1,38 @@
-Version6 D4-23 / Canonical Analysis Read Models
+Version6 D4-24 / Product & Area Analysis Verified Read Path
 Date: 2026-08-17
 
-PURPOSE
-- Extend the D4-22 Canonical-first read path from route profitability to shipper and worker analysis.
-- Keep analysis UI code from directly joining Canonical entities.
-- Never mix Canonical and Legacy rows within the same displayed month.
+目的
+- D4-22便別採算、D4-23荷主/作業者分析に続き、商品カテゴリ分析・エリア分析を
+  Verified CURRENT SHIPPER_AREA経路へ移行する。
+- 画面ごとに旧STATEのCSV集計結果へ固定しない。
 
-CHANGES
-1. Added src/core/data_catalog/canonical_analysis_read_models.js
-- Builds dedicated read models for WORKER analysis and SHIPPER analysis from CANONICAL_MATERIALIZER output.
-- Reuses one materialization per YYYYMM and caches the read model.
-- Cache is invalidated when normalized-source-updated fires.
+変更
+1. CanonicalAnalysisReadModelsを拡張
+   - materialize時に取得済みのVerified CURRENT SHIPPER_AREA normalized recordsから
+     商品/住所分析用Read Modelを生成。
+   - 原票単位へまとめ、郵便番号・商品名・作業明細・金額を保持。
+2. 商品カテゴリ分析
+   - 対象月にCanonical Read Modelがある場合はそれだけを使用。
+   - Legacy STATEとCanonicalを同月内で混在集計しない。
+   - 未移行月は既存FIELD_DATA_ACCESS/STATEへfallback。
+3. エリア分析
+   - 同じVerified SHIPPER_AREA Read Modelを優先。
+   - 郵便番号→市区町村の既存判定ロジックは変更しない。
+4. 金額UNKNOWN
+   - normalized SOURCEのnull金額を0円SOURCE事実へ変換しない。
+   - Read ModelにamountKnown/unknownAmountRowsを保持。
+   - 既存画面の確定集計ロジック自体は変更しないため、今後UNKNOWN表示強化可能。
 
-2. Worker analysis Canonical-first
-- Uses Canonical SALES_DETAIL whose primary source is WORKER_SALES.
-- Recreates unique-slip counts, work days, sales/direct-sales split and work-item counts.
-- Preserves the existing worker-analysis business rule: trunk/relay fee lines are excluded from worker amount analysis.
-- Trunk/relay excluded amount remains separately tracked.
-- If normalized WORKER_SALES is not registered, the whole month uses the existing Legacy worker record instead of mixing sources.
-- UI states which data path is in use.
+重要
+- Canonical Entity schemaには郵便番号を新設せず、materializerが返すVerified normalized sourceをRead Model境界で利用。
+- SOURCE/Canonical schema/Data Catalog/Supabase schema変更なし。
+- D4-11高速起動変更なし。
 
-3. Shipper analysis Canonical-first
-- Revenue amounts come from Canonical SALES_DETAIL.
-- Shipper code/name metadata is supported by the verified CURRENT SHIPPER_AREA normalized source.
-- Counts are unique BUSINESS_SLIP counts.
-- Full shipper code provides contract level; first 3 digits provide the existing group level.
-- A slip with conflicting/missing shipper code or UNKNOWN Canonical amount is not silently treated as zero; it is excluded from confirmed totals and a warning is shown.
-- If normalized SHIPPER_AREA is not registered, the whole month uses the existing Legacy shipper analysis instead of mixing sources.
-- UI states which data path is in use.
+変更ファイル
+- src/core/data_catalog/canonical_analysis_read_models.js
+- src/field/field_product.js
+- src/field/field_area.js
+- CHANGELOG.txt
 
-4. center.html
-- Loads the new Canonical analysis read-model adapter after Canonical Route Ledger.
-
-IMPORTANT
-- Legacy analysis code is retained only as a compatibility fallback for months not yet migrated to normalized CURRENT SOURCE.
-- No Canonical schema, Data Catalog, Supabase schema, startup synchronization or business SOURCE values are changed.
-- Canonical and Legacy values are never combined into one monthly result.
-
-VALIDATION
-- node --check PASS for all src/**/*.js.
-- Canonical Analysis Read Model mock execution PASS after verifying:
-  * worker unique-slip count
-  * sales/direct-sales split
-  * trunk-fee exclusion for worker analysis
-  * shipper group/contract aggregation from canonical sales + SHIPPER_AREA metadata
+検証
+- 全 src/**/*.js node --check PASS

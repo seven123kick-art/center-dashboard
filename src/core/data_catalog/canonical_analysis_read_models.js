@@ -117,6 +117,40 @@
     return {ym:period,groups:groupList,contracts:contractList,issues,source:'CANONICAL',dataPath:'CANONICAL',current_batch_id:snap?.materialization?.current_batches?.SHIPPER_AREA||null};
   }
 
+
+  function makeFieldProductAreaReadModel(materialized,period){
+    const records=safe(materialized?.normalized?.SHIPPER_AREA?.records);
+    const ticketsBySlip=new Map();
+    let unknownAmountRows=0;
+    records.forEach((r,idx)=>{
+      const slip=clean(r.slip_no); if(!slip)return;
+      if(!ticketsBySlip.has(slip)) ticketsBySlip.set(slip,{
+        slip,slipNo:slip,date:clean(r.delivery_date),zip:clean(r.zip_code),
+        product:clean(r.source_product_name),productName:clean(r.source_product_name),
+        productCode:clean(r.source_product_code),amount:0,amountKnown:true,workDetails:[],works:{}
+      });
+      const t=ticketsBySlip.get(slip);
+      if(!t.zip&&r.zip_code)t.zip=clean(r.zip_code);
+      if(!t.product&&r.source_product_name){t.product=t.productName=clean(r.source_product_name);}
+      const work=clean(r.source_work_name);
+      const amount=numberOrNull(r.amount);
+      if(amount===null){t.amountKnown=false;unknownAmountRows++;}
+      else t.amount+=amount;
+      if(work){
+        t.workDetails.push({work,amount:amount===null?null:amount,quantity:numberOrNull(r.quantity),unitPrice:numberOrNull(r.unit_price)});
+        if(amount!==null)t.works[work]=(t.works[work]||0)+amount;
+        else if(!(work in t.works))t.works[work]=null;
+      }
+    });
+    const tickets=[...ticketsBySlip.values()];
+    return {
+      ym:period,tickets,uniqueCount:tickets.length,detailRows:records.length,
+      amount:tickets.filter(t=>t.amountKnown).reduce((a,t)=>a+t.amount,0),
+      unknownAmountRows,source:'CANONICAL',dataPath:'CANONICAL',
+      current_batch_id:materialized?.snapshot?.materialization?.current_batches?.SHIPPER_AREA||null
+    };
+  }
+
   async function loadMonth(period,{force=false}={}){
     const ym=clean(period); if(!/^\d{6}$/.test(ym))return {status:'EMPTY',period:ym};
     if(!force&&monthCache.has(ym))return monthCache.get(ym);
@@ -127,7 +161,7 @@
         const m=await CANONICAL_MATERIALIZER.materialize({period:ym});
         const batches=m?.snapshot?.materialization?.current_batches||{};
         if(!batches.WORKER_SALES&&!batches.SHIPPER_AREA){const out={status:'LEGACY_FALLBACK',period:ym,reason:'Normalized CURRENT source not registered'};monthCache.set(ym,out);return out;}
-        const out={status:'READY',period:ym,materialized:m,worker:batches.WORKER_SALES?makeWorkerReadModel(m,ym):null,shipper:batches.SHIPPER_AREA?makeShipperReadModel(m,ym):null};
+        const out={status:'READY',period:ym,materialized:m,worker:batches.WORKER_SALES?makeWorkerReadModel(m,ym):null,shipper:batches.SHIPPER_AREA?makeShipperReadModel(m,ym):null,fieldProductArea:batches.SHIPPER_AREA?makeFieldProductAreaReadModel(m,ym):null};
         monthCache.set(ym,out);return out;
       }catch(e){const out={status:'LEGACY_FALLBACK',period:ym,reason:e?.message||String(e)};monthCache.set(ym,out);return out;}
       finally{loading.delete(ym);}
