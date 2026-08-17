@@ -1,58 +1,55 @@
-Version6 D3-14 / D3-15
+Version6 D3-16 / D3-17
 Date: 2026-08-17
 
 PURPOSE
-- Correct SKFL0001 budget semantics: future half-year not yet budgeted is not a zero budget.
-- Prevent budget/actual screens from displaying NOT_PLANNED_YET months as 0.
-- Reframe the import UI around Data Catalog document roles instead of file extensions.
+- Consolidate the seven principal Data Catalog sources into one operational import hub.
+- Make target period, registration state, CURRENT/revision status and file selection available from one screen.
+- Reuse the already-tested import/save paths instead of creating duplicate parsers.
 
-BUSINESS RULE CORRECTION
-For the supplied 2026 SKFL0001, April-September are the currently prepared budget months. October-March are not yet budgeted. The zeros printed in the future half-year of SKFL0001 must therefore not be treated as explicit zero-yen budgets.
+IMPLEMENTATION
+1. Unified Data Import Hub
+- New src/modules/data_import_hub.js.
+- One target-month selector controls the operational import context.
+- Seven source cards:
+  PLAN_BUDGET / SKFL0001
+  PL_ACTUAL PRELIMINARY / SKDL0002
+  PL_ACTUAL CONFIRMED / SKDL0003
+  WORKER_SALES
+  SHIPPER_AREA
+  DELIVERY_LIST
+  ROUTE_PAYMENT
+- Each card shows source role, current registration state and revision count where applicable.
+- File selection is launched from the card while the existing import handler remains the single processing/save path.
 
-PLAN MODEL
-- PLANNED: a budget exists; amount may legitimately be 0.
-- NOT_PLANNED_YET: budget has not been prepared yet; no amount is materialized.
-- UNKNOWN: source cannot establish the budget state.
-- The supplied first-half-only SKFL0001 is stored with coverage=FIRST_HALF_ONLY.
-- October-March keys are removed from plan rows for this case; they are not stored as zero.
-- monthStatus is retained in planData and source metadata.
+2. Period synchronization
+- Hub month synchronizes SKDL0002, WORKER_SALES and SHIPPER_AREA legacy selectors.
+- Fiscal year for SKFL0001 is synchronized from the selected month.
+- DELIVERY_LIST continues to derive delivery dates from its source PDF; no false month is injected.
 
-DETECTION
-- For SKFL0001, if all required major accounts on the second-half page are zero while the first half contains non-zero budget values, the second half is classified NOT_PLANNED_YET.
-- Missing required accounts still stop import; they are never filled with zero.
+3. Source-of-truth status
+- Normalized source status is read from Repository.NormalizedSource manifests/CURRENT batches.
+- PL_ACTUAL distinguishes PRELIMINARY and CONFIRMED.
+- If CONFIRMED is CURRENT, the preliminary card is shown as superseded rather than missing.
+- Budget status uses STATE.planData fiscal-year coverage and preserves FIRST_HALF_ONLY / NOT_PLANNED_YET semantics.
 
-DISPLAY / CALCULATION
-- getPlanRowsForFiscalYear exposes month status to plan readers without changing the persisted row schema.
-- getPlanValueK returns null for NOT_PLANNED_YET / UNKNOWN months.
-- pl.js and budget_actual.js stop derived expense/profit calculations for a month that is not budgeted, preventing null inputs from collapsing to a displayed 0.
+4. Legacy/detail controls
+- Existing tested upload controls remain below the hub for compatibility and detailed operations.
+- The new hub does not duplicate parser, STATE, Storage, Cloud or Supabase write logic.
+- No business logic was moved into the UI.
 
-DATA CATALOG
-- PLAN_BUDGET canonical fields now include plan_status.
-- Completion rule now covers only months whose budget is actually planned.
-- NOT_PLANNED_YET is explicitly distinct from zero.
-
-IMPORT UI
-- Primary data-management tab is renamed "データ取込".
-- Secondary legacy/miscellaneous area is renamed "補助取込・設定".
-- Added a Data Catalog based entry panel for the seven principal sources:
-  SKFL0001 budget, SKDL0002 preliminary, SKDL0003 confirmed,
-  worker sales, shipper area, delivery list, route payment.
-- Existing import handlers are reused; no duplicate parser or save path was created.
-- Budget status shows "上期策定済・下期未策定" for the supplied first-half-only plan.
+5. UI scope
+- Added only the import-hub structural CSS needed for this function.
+- Full product-wide color/sidebar/login/design-system unification is intentionally deferred to D4, after D3 data/import foundations are closed.
 
 VALIDATION
-- node --check PASS for all src/**/*.js.
-- No Supabase schema change.
-- Existing actual/import parsers are unchanged except the SKFL0001 plan parser.
-- Explicit planned amount 0 remains 0; only NOT_PLANNED_YET months have no materialized amount.
+- node --check PASS for every src/**/*.js file.
+- New hub has no direct STATE/full_state/Supabase write path.
+- Existing input IDs and handlers remain present.
+- No Supabase schema migration.
 
 FILES
 - center.html
-- assets/css/features/data-import-management.css
-- src/app.js
-- src/modules/plan_pdf_import.js
-- src/modules/data_import_management.js
-- src/modules/pl.js
-- src/modules/budget_actual.js
-- src/core/data_catalog/catalog.js
+- assets/css/app.css
+- assets/css/features/data-import-hub.css (new)
+- src/modules/data_import_hub.js (new)
 - CHANGELOG.txt

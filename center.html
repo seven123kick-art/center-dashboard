@@ -1061,18 +1061,12 @@
         <button type="button" data-management-view="library" onclick="DATA_MANAGEMENT_NAV.go('library')">過去資料</button>
       </div>
       <div class="card dim-card" style="margin-bottom:14px">
-        <div class="card-header"><span class="card-title">主要データ取込</span><span class="badge badge-info">Data Catalog</span></div>
+        <div class="card-header"><span class="card-title">データ取込</span><span class="badge badge-info">Data Catalog</span></div>
         <div class="card-body">
-          <div class="dim-note" style="margin-bottom:10px">予算・速報・確定・現場明細・配達・傭車料を同じデータ基盤で管理します。ファイル形式ではなく資料の役割を基準に選択してください。</div>
-          <div class="dim-import-catalog">
-            <div><b>SKFL0001 予算</b><span>年度予算 / PDF</span><button class="btn" onclick="NAV.go('import')">予算PDF取込</button></div>
-            <div><b>SKDL0002 速報</b><span>月次速報 / CSV</span><button class="btn" onclick="document.getElementById('preliminary-pl-file')?.click()">速報CSV選択</button></div>
-            <div><b>SKDL0003 確定</b><span>月次確定 / CSV</span><button class="btn" onclick="document.getElementById('file-input')?.click()">確定CSV選択</button></div>
-            <div><b>作業者別売上明細</b><span>原票・作業者売上 / CSV</span><button class="btn" onclick="document.getElementById('field-worker-file-input')?.click()">CSV選択</button></div>
-            <div><b>荷主別配送エリア物量</b><span>原票・荷主売上 / CSV</span><button class="btn" onclick="document.getElementById('field-product-file-input')?.click()">CSV選択</button></div>
-            <div><b>配達持出予定リスト</b><span>HEAD・原票 / PDF</span><button class="btn" onclick="NAV.go('import')">PDF取込</button></div>
-            <div><b>配達ヘッド傭車料確認</b><span>HEAD支払 / Excel</span><button class="btn" onclick="NAV.go('import')">Excel取込</button></div>
-          </div>
+          <div class="dim-note" style="margin-top:0">必要資料の登録状態を確認して、そのまま取込できます。ファイル形式ではなく資料の役割を基準に管理します。</div>
+          <div class="dim-toolbar" style="margin-top:10px"><label class="dim-field"><span>対象年月</span><input type="month" id="data-import-hub-month"></label><button type="button" class="btn" onclick="DATA_IMPORT_HUB.refresh()">状態を更新</button></div>
+          <div id="data-import-hub-root"><div class="dih-empty">登録状態を確認しています…</div></div>
+          <div class="dih-legacy-note">下部の従来取込欄は互換・詳細操作用として残しています。通常は上の資料一覧からファイルを選択してください。</div>
         </div>
       </div>
 
@@ -1546,6 +1540,7 @@
 <script src="src/modules/trend.js" defer></script>
 <script src="src/modules/landing_forecast.js" defer></script>
 <script src="src/modules/data_verification.js" defer></script>
+<script src="src/modules/data_import_hub.js" defer></script>
 <script src="src/modules/data_import_management.js" defer></script>
 <script src="src/modules/plan_pdf_import.js" defer></script>
 <script src="src/modules/navigation.js" defer></script>
