@@ -1346,17 +1346,17 @@ function renderShipper() {
       .shipper-up{color:#059669;font-weight:900}
       .shipper-down{color:#dc2626;font-weight:900}
       .shipper-flat{color:#64748b;font-weight:800}
-      .dashboard-compare-mini{margin-top:10px;padding:12px;border:1px solid #dbeafe;background:#eff6ff;border-radius:10px;font-size:12px;color:#1e3a8a;line-height:1.7}
+      .dashboard-compare-mini{margin-top:10px;padding:10px 2px 0;border-top:1px solid var(--border,#e3e2da);font-size:12px;color:var(--text2,#58615b);line-height:1.55}
       .dashboard-compare-mini strong{font-weight:900}
-      .dashboard-unit-title{font-weight:900;margin-bottom:6px;color:#1e3a8a}
-      .dashboard-unit-list{display:grid;gap:4px}
-      .dashboard-unit-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-      .dashboard-unit-rank{width:18px;height:18px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:#fff;background:#64748b;flex:0 0 auto}
-      .dashboard-unit-rank.rank-1{background:#1a4d7c}
-      .dashboard-unit-rank.rank-2{background:#e05b4d}
-      .dashboard-unit-rank.rank-3{background:#1a7a52}
-      .dashboard-unit-name{font-weight:900;color:#0f172a;min-width:86px}
-      .dashboard-unit-formula{color:#1e3a8a}
+      .dashboard-unit-title{font-weight:800;margin-bottom:7px;color:var(--text2,#58615b);font-size:11px;letter-spacing:.04em}
+      .dashboard-unit-list{display:grid;gap:2px}
+      .dashboard-unit-row{display:grid;grid-template-columns:22px minmax(82px,1fr) auto;align-items:center;gap:7px;padding:3px 0}
+      .dashboard-unit-rank{width:18px;height:18px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--text2,#58615b);background:var(--surface-muted,#f3f4ef);flex:0 0 auto}
+      .dashboard-unit-rank.rank-1{background:var(--income-soft,#edf9f3);color:var(--income,#3DBB83)}
+      .dashboard-unit-rank.rank-2{background:var(--expense-soft,#fdf0f4);color:var(--expense,#D85A78)}
+      .dashboard-unit-rank.rank-3{background:var(--profit-soft,#f4f0fc);color:var(--profit,#8C72D6)}
+      .dashboard-unit-name{font-weight:750;color:var(--text,#303832);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .dashboard-unit-formula{color:var(--text2,#58615b);font-variant-numeric:tabular-nums;white-space:nowrap}
     `;
     document.head.appendChild(style);
   }
@@ -1445,17 +1445,17 @@ function renderShipper() {
       if (shipArea.parentNode) shipArea.parentNode.appendChild(mini);
     }
     if (!rows.length) {
-      mini.innerHTML = '<div class="dashboard-unit-title">単価×件数</div><div class="dashboard-unit-list">表示対象なし</div>';
+      mini.innerHTML = '<div class="dashboard-unit-title">上位3社の件数・平均単価</div><div class="dashboard-unit-list">表示対象なし</div>';
       return;
     }
     mini.innerHTML = `
-      <div class="dashboard-unit-title">単価×件数</div>
+      <div class="dashboard-unit-title">上位3社の件数・平均単価</div>
       <div class="dashboard-unit-list">
         ${rows.map((r,i)=>`
           <div class="dashboard-unit-row">
             <span class="dashboard-unit-rank rank-${i+1}">${i+1}</span>
             <span class="dashboard-unit-name">${escCmp(r.name)}</span>
-            <span class="dashboard-unit-formula">${fmtKCmp(r.income)}千 = ${fmtCmp(r.count)}件 × ${fmtCmp(r.unit)}円</span>
+            <span class="dashboard-unit-formula">${fmtCmp(r.count)}件 ・ 平均 ${fmtCmp(r.unit)}円/件</span>
           </div>
         `).join('')}
       </div>`;

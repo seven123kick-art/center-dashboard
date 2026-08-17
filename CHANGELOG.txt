@@ -1,73 +1,39 @@
-Version6 D4-4 Pastel Theme Refinement
-Date: 2026-08-17
-
-- Rebuilt D4 theme tokens around the supplied official member colors.
-- Kitasaitama: Raden #3DBB83 primary; Kanade #F9E03C, Ririka #E63291, Hajime #A77BE8 as supporting accents.
-- Toda: Korone #FEE039 primary; Fubuki #43BFEF, Mio #C71E3E, Okayu #B190FC as supporting accents.
-- Removed the remaining blue/navy product-shell emphasis from the D4 preview.
-- Increased text contrast one step without returning to hard black enterprise UI styling.
-- Refined sidebar active/hover states, topbar, KPI surfaces, buttons, form focus and dashboard section accents.
-- Dashboard main chart now reads center theme colors from CSS tokens instead of hard-coded navy/red/green.
-- Center selection cards now share the same product design system while expressing each center through its own palette.
-- Business logic, data structures, repositories and Supabase behavior unchanged.
-
-Validation: all src/**/*.js node --check PASS; modified CSS brace checks PASS.
-
-Version6 D4-1 / D4-2 — Design System foundation and shell unification
+Version6 D4-5 — semantic color consistency + dashboard shipper refinement
 Date: 2026-08-17
 
 PURPOSE
-- Start D4 by fixing the root cause of the visual mismatch between the center-selection screen and the logged-in application shell.
-- Rebuild shared design tokens and shell styles instead of layering another visual patch on top.
-- Preserve all business/data logic.
+- Keep numerical information semantics identical between Kitasaitama and Toda.
+- Use ReGLOSS / GAMERS colors as center personality, not as competing meanings for business numbers.
+- Remove the visually separate blue "unit price x count" panel from the dashboard shipper card.
 
-AUDIT FINDINGS
-- index.html used landing.css with an independent green/orange palette and independent radii/shadows.
-- center.html used foundation/base.css + shell.css + theme.css with a separate navy palette.
-- shell colors were also duplicated as hard-coded values in features/version2.css.
-- center.html still contained many inline styles; D4-1 removes only shell-level inline styling. Feature-specific inline styles remain for later screen-by-screen cleanup.
-- app.css already had a sensible foundation/features loading architecture, so D4 keeps that architecture and rewrites the shared foundation instead of adding a new override stylesheet.
+DESIGN RULE CONFIRMED
+Priority:
+1. Readability / usability / meaning of business information
+2. Bright modern hololive-inspired pastel + refined appearance
+3. ReGLOSS / GAMERS member colors
 
 CHANGES
-1. foundation/base.css
-- Rebuilt as the single shared Version6 token source.
-- Added shared brand/surface/border/text/radius/shadow tokens.
-- Center-specific accent remains supported: North Saitama uses blue, Toda uses orange.
-- The center accent is no longer allowed to redefine the entire product visual language.
+1. Shared semantic palette
+- Revenue/income, expense, profit/trend and labor-related information now use shared semantic tokens across centers.
+- Toda no longer changes chart meaning colors just because its center accent is Korone yellow.
+- Center identity remains in shell/navigation/selection/focus and subtle decorative accents.
 
-2. foundation/shell.css
-- Rebuilt sidebar/topbar/content shell from shared tokens.
-- Reduced unrelated purple/navy remnants.
-- Unified spacing, radii, typography and active/hover behavior.
-- Added reusable shell classes for brand, cloud status, session message and topbar hint.
+2. Dashboard shipper card
+- Removed the separate blue information-box treatment.
+- The top-3 count/average-unit information is visually integrated into the same shipper card.
+- Changed formula-like text from "sales = count x unit" to the lighter supporting expression "count / average yen per case" because sales is already shown in the ranking above.
+- Rank markers use soft semantic tints instead of dark navy/red/green circles.
 
-3. foundation/theme.css
-- Rebuilt shared cards/KPI/buttons/forms/tables/messages/upload areas around the same token set.
-- Removed the previous purple-tinted control styling that conflicted with the shell.
+3. Dashboard legend
+- Removed hard-coded old navy/red/green legend colors.
+- Legend now follows the same semantic chart tokens used by Chart.js.
 
-4. landing.css
-- Rebuilt center selection on the SAME foundation tokens as center.html.
-- Center cards still retain their center identity through accent color and character art, but typography, surfaces, borders, controls and spacing now match the application.
-- North Saitama changes from the isolated green landing palette to the same blue product accent used after entry.
-- Toda retains orange as its center accent, matching html[data-center="toda"] in the application.
-
-5. center.html
-- Removed shell-level inline style definitions for logo mark, cloud status, session message and topbar layout.
-- These are now owned by foundation/shell.css.
-- Business views and behavior are unchanged.
-
-6. features/version2.css
-- Navigation group/subitem colors now reference shared shell tokens rather than a second hard-coded sidebar palette.
-
-NOT CHANGED
-- No JS business logic.
-- No Data Catalog / Canonical / Repository / Supabase changes.
-- No feature screen redesign yet.
-- No center character images changed.
-- Existing feature-specific inline styles are intentionally left for the next D4 passes rather than hidden by a global override patch.
+UNCHANGED
+- Center-selection design.
+- Business calculations and source data.
+- Shipper ranking/order/calculation logic.
+- Repository / Canonical / Supabase.
 
 VALIDATION
-- All src/**/*.js node --check PASS.
-- center.html/index.html parsed successfully.
-- CSS brace balance PASS.
-- Existing center query behavior preserved (kitasaitama/toda).
+- All src/**/*.js: node --check PASS.
+- center.html parsed without structural edits beyond legend token references.
