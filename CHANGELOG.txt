@@ -1,39 +1,34 @@
-Version6 D4-5 — semantic color consistency + dashboard shipper refinement
+Version6 D4-6 / Startup Readiness Gate
 Date: 2026-08-17
 
 PURPOSE
-- Keep numerical information semantics identical between Kitasaitama and Toda.
-- Use ReGLOSS / GAMERS colors as center personality, not as competing meanings for business numbers.
-- Remove the visually separate blue "unit price x count" panel from the dashboard shipper card.
+- Prevent cached/partial management figures from appearing before current cloud data is verified.
+- Make visible figures mean startup verification completed successfully.
+- On failure, missing data, or timeout, block numeric display and explain the state.
 
-DESIGN RULE CONFIRMED
-Priority:
-1. Readability / usability / meaning of business information
-2. Bright modern hololive-inspired pastel + refined appearance
-3. ReGLOSS / GAMERS member colors
+DISPLAY RULE
+1. Center selected.
+2. Local settings/cache may load internally, but numeric screens are not rendered.
+3. Startup sync verifies manifest, full_state, required fiscal-year datasets, and manifest-declared plan/capacity/daily data.
+4. Only READY renders the requested screen.
+5. LOAD_FAILED / MISSING / timeout keeps figures hidden and shows a blocking dialog.
+6. Successful startup shows a small "データ確認済" timestamp badge.
 
-CHANGES
-1. Shared semantic palette
-- Revenue/income, expense, profit/trend and labor-related information now use shared semantic tokens across centers.
-- Toda no longer changes chart meaning colors just because its center accent is Korone yellow.
-- Center identity remains in shell/navigation/selection/focus and subtle decorative accents.
+IMPORTANT
+- Removed the former 45-second fallback that displayed local cache.
+- Removed cache-first rendering followed by cloud number replacement.
+- full_state/monthly fetch failures are no longer silently ignored.
+- Missing cloud data without a valid fallback is MISSING, not successful empty startup.
+- Business calculations and schemas are unchanged.
 
-2. Dashboard shipper card
-- Removed the separate blue information-box treatment.
-- The top-3 count/average-unit information is visually integrated into the same shipper card.
-- Changed formula-like text from "sales = count x unit" to the lighter supporting expression "count / average yen per case" because sales is already shown in the ranking above.
-- Rank markers use soft semantic tints instead of dark navy/red/green circles.
-
-3. Dashboard legend
-- Removed hard-coded old navy/red/green legend colors.
-- Legend now follows the same semantic chart tokens used by Chart.js.
-
-UNCHANGED
-- Center-selection design.
-- Business calculations and source data.
-- Shipper ranking/order/calculation logic.
-- Repository / Canonical / Supabase.
+FILES
+- center.html
+- src/app.js
+- src/core/startup_readiness.js (new)
+- src/core/repository/sync_coordinator.js
+- assets/css/foundation/theme.css
+- CHANGELOG.txt
 
 VALIDATION
-- All src/**/*.js: node --check PASS.
-- center.html parsed without structural edits beyond legend token references.
+- node --check: all src/**/*.js PASS.
+- center.html HTML parse PASS.

@@ -185,14 +185,15 @@ TODO(V6以降)
                 try {
                     manifest = await CR.fetchManifestWithDbFallback();
                 } catch (e) {
-                    manifest = null;
+                    if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('error');
+                    return { ok:false, error:e?.message || String(e), stage:'MANIFEST', readiness:'LOAD_FAILED' };
                 }
 
                 if (!manifest) {
                     const legacy = await this.syncLegacy();
-                    if (legacy && legacy.ok) return legacy;
-                    if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('ok');
-                    return { ok: true, changed: false, source: 'no_cloud_data', noData: true, note: legacy?.error || 'クラウドに対象センターのデータがありません' };
+                    if (legacy && legacy.ok) return { ...legacy, readiness:'READY' };
+                    if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('error');
+                    return { ok:false, noData:true, stage:'MANIFEST', readiness:'MISSING', error:legacy?.error || 'クラウドに対象センターの主要データが登録されていません' };
                 }
 
                 // manifest.deleted は古い削除フラグ汚染の原因になるためマージしない（既存仕様を踏襲）。
@@ -202,15 +203,17 @@ TODO(V6以降)
                 // 「配達持出PDFなし」「所属会社なし」になるため、月別CSV取得より先に復元する。
                 try {
                     const cloudFull = await CR.fetchFullState();
-                    if (cloudFull && typeof cloudFull === 'object') {
-                        const localFull = CR.buildFullState();
-                        const mergedFull = (typeof mergeFullState === 'function')
-                            ? mergeFullState(localFull, cloudFull)
-                            : cloudFull;
-                        CR.applyFullState(mergedFull);
+                    if (!cloudFull || typeof cloudFull !== 'object') {
+                        return { ok:false, stage:'FULL_STATE', readiness:'MISSING', error:'クラウドの主要状態データを確認できませんでした' };
                     }
+                    const localFull = CR.buildFullState();
+                    const mergedFull = (typeof mergeFullState === 'function')
+                        ? mergeFullState(localFull, cloudFull)
+                        : cloudFull;
+                    CR.applyFullState(mergedFull);
                 } catch (e) {
                     console.warn('[SyncCoordinator.syncBoot] full_state取得失敗:', e?.message || e);
+                    return { ok:false, stage:'FULL_STATE', readiness:'LOAD_FAILED', error:e?.message || String(e) };
                 }
 
                 let changed = 0;
@@ -254,28 +257,36 @@ TODO(V6以降)
                         if (ds && ds.ym) { window.DATASET_REPOSITORY.upsert(ds); changed++; }
                     } catch (e) {
                         console.warn('[SyncCoordinator.syncBoot] 月別データ取得失敗:', meta.ym, e?.message || e);
+                        return { ok:false, stage:'DATASET', ym:meta.ym, readiness:'LOAD_FAILED', error:e?.message || String(e) };
                     }
                 }
 
                 if (manifest.hasPlanData) {
-                    const cloudPlan = await CR.fetchPlan();
-                    if (cloudPlan && typeof cloudPlan === 'object' && typeof mergePlanDataByUpdatedAt === 'function') {
-                        STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
-                        changed++;
-                    }
+                    try {
+                        const cloudPlan = await CR.fetchPlan();
+                        if (!cloudPlan || typeof cloudPlan !== 'object') return { ok:false, stage:'PLAN', readiness:'MISSING', error:'予算データを確認できませんでした' };
+                        if (typeof mergePlanDataByUpdatedAt === 'function') {
+                            STATE.planData = mergePlanDataByUpdatedAt(STATE.planData, cloudPlan);
+                            changed++;
+                        }
+                    } catch(e) { return { ok:false, stage:'PLAN', readiness:'LOAD_FAILED', error:e?.message || String(e) }; }
                 }
 
                 if (manifest.hasCapacity && !STATE.capacity) {
-                    const cap = await CR.fetchCapacity();
-                    if (cap) { STATE.capacity = cap; changed++; }
+                    try {
+                        const cap = await CR.fetchCapacity();
+                        if (!cap) return { ok:false, stage:'CAPACITY', readiness:'MISSING', error:'キャパデータを確認できませんでした' };
+                        STATE.capacity = cap; changed++;
+                    } catch(e) { return { ok:false, stage:'CAPACITY', readiness:'LOAD_FAILED', error:e?.message || String(e) }; }
                 }
 
                 if (manifest.hasDailyRecords) {
-                    const full = await CR.fetchFullState();
-                    if (full && Array.isArray(full.dailyRecords)) {
+                    try {
+                        const full = await CR.fetchFullState();
+                        if (!full || !Array.isArray(full.dailyRecords)) return { ok:false, stage:'DAILY_RECORDS', readiness:'MISSING', error:'日次データを確認できませんでした' };
                         STATE.dailyRecords = full.dailyRecords;
                         changed++;
-                    }
+                    } catch(e) { return { ok:false, stage:'DAILY_RECORDS', readiness:'LOAD_FAILED', error:e?.message || String(e) }; }
                 }
 
                 if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
@@ -284,7 +295,7 @@ TODO(V6以降)
                 if (changed) window.STORAGE_REPOSITORY.save();
 
                 if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('ok');
-                return { ok: true, changed: !!changed, source: 'boot_fiscal_year_skdl_only' };
+                return { ok: true, changed: !!changed, source: 'boot_fiscal_year_skdl_only', readiness:'READY', verifiedAt:new Date().toISOString() };
             } catch (e) {
                 if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('error');
                 return { ok: false, error: e.message || String(e) };

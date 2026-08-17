@@ -67,8 +67,8 @@ const CONFIG = {
   SUPABASE_BUCKET: (window.SUPABASE_CONFIG||{}).bucket || 'center-data',
 
   CENTERS: [
-    { id: 'kitasaitama', name: '北埼玉センター', color: '#78a783' },
-    { id: 'toda',        name: '戸田センター',   color: '#d39b55' },
+    { id: 'kitasaitama', name: '北埼玉センター', color: '#1a4d7c' },
+    { id: 'toda',        name: '戸田センター',   color: '#1a7a52' },
   ],
   COMPANY: 'エスラインギフ　家電物流事業部',
   FISCAL_START: 4,
@@ -318,7 +318,7 @@ const CONFIG = {
     variableRateMax:  80,
   },
 
-  COLORS: ['#78a783','#d9a6b3','#b8acd8','#e7c979','#9fcbd0','#d8a47f','#9fc49b','#c6a7c8','#aebf78','#e6ae8d'],
+  COLORS: ['#1a4d7c','#e05b4d','#1a7a52','#b45309','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#d97706'],
   VIEW_TITLES: {
     dashboard:'ホーム', pl:'月次収支表', 'profit-structure':'経営分析', 'landing-forecast':'着地予測', trend:'売上推移',
     shipper:'荷主分析', indicators:'経営指標', annual:'年次サマリー',
@@ -2278,12 +2278,14 @@ function renderFieldViewAfterCloud(view, renderFn) {
 // IDB_CACHE は src/field/field_core.js・src/core/store.js・
 // src/core/cloud.js からも参照される共有インフラのため、
 // 将来的には core/idb_cache.js 等への分離を検討する。
-/* ════════ 起動状態（先表示・バックグラウンド同期のUI制御） ════════════ */
+/* ════════ 起動状態（Readiness Gate / 確認済み表示Snapshot） ════════════ */
 window.APP_BOOT_STATE = window.APP_BOOT_STATE || {
   cloudSyncPending: false,
   initialRendered: false,
   renderedFromCache: false,
-  lastCloudSyncAt: null
+  lastCloudSyncAt: null,
+  displayVerified: false,
+  displaySnapshotAt: null
 };
 
 /* ════════ IndexedDB 高速キャッシュ（Supabase正本・PC内即時表示用） ════════════ */
@@ -2710,52 +2712,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     _hideOverlay();
   }
 
-  // 起動停止防止：クラウド読込を待つが、異常時はローカルデータで起動する
-  const _bootSafetyTimer = setTimeout(() => {
-    try {
-      const v = (() => {
-        try {
-          const last = sessionStorage.getItem('lastView') || 'dashboard';
-          return document.getElementById('view-' + last) ? last : 'dashboard';
-        } catch(e){ return 'dashboard'; }
-      })();
-      _bootRender(v);
-      const banner = document.getElementById('js-error-banner');
-      if (banner) {
-        banner.style.display = 'block';
-        banner.textContent = 'クラウド読込に時間がかかっているため、ローカルキャッシュで起動しました。';
-        setTimeout(() => { banner.style.display = 'none'; }, 6000);
-      }
-    } catch(e) {}
-  }, 45000);
-
   try {
-    // 0. 画面別モジュール読込（荷主分析など）
-    try {
-      await loadScreenModules();
-    } catch(e) {
-      console.warn(e);
-      UI.toast('一部画面モジュールの読み込みに失敗しました', 'warn');
-    }
+    STARTUP_READINESS?.setProgress(1, '起動準備中です', '画面機能とローカル設定を準備しています。');
 
-    // 1. localStorageから軽量設定だけ読込。CSV本体はDBから復元する。
+    // 0. 画面別モジュール読込
+    await loadScreenModules();
+
+    // 1. ローカル設定・キャッシュは復元するが、起動Gate通過前には画面へ描画しない。
     Repository.Storage.load();
-
-    // 1.1 IndexedDBキャッシュを先に復元し、Supabase待ちの「データなし」ちらつきを防ぐ。
     if (window.APP_BOOT_STATE) APP_BOOT_STATE.cloudSyncPending = true;
     if (window.IDB_CACHE?.hydrateState) await IDB_CACHE.hydrateState();
     if (window.APP_BOOT_STATE) {
-      APP_BOOT_STATE.renderedFromCache = !!((STATE.datasets || []).length || (STATE.workerCsvData || []).length || (STATE.productAddressData || []).length);
+      APP_BOOT_STATE.renderedFromCache = false;
+      APP_BOOT_STATE.displayVerified = false;
     }
 
-    // 1.5 保存・取込・更新時の自動同期を有効化
     AUTO_SYNC.install();
-
-    // 2. センター情報を画面に反映
     document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
     document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent='補助取込・設定');
 
-    // 3. ドロップゾーン設定
     setupDropZone('upload-zone', 'file-input', f=>IMPORT.handleFiles(f));
     setupDropZone('field-upload-zone', 'field-file-input', f=>{
       if (window.FIELD_WORKER_IMPORT2 && FIELD_WORKER_IMPORT2.handleFiles) FIELD_WORKER_IMPORT2.handleFiles(f);
@@ -2766,21 +2741,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       else IMPORT.handleFiles(f);
     });
 
-    // 4. ファイル復元用
     const loadInput = document.getElementById('session-load-input');
     if (loadInput) loadInput.onchange = () => { STORE.restoreJSON(loadInput.files[0]); loadInput.value=''; };
-
-    // 5. キャパ月選択
     CAPACITY_UI.populateYMSel();
-
-    // 6. 計画取込
     setupPlanImport();
-
-    // 7. 年度Select全初期化・年度変更ガード
     initFiscalYearSelects();
     setupFieldImportYMControls();
 
-    // 8. 前回ページを復元（F5対応）
     const _lastView = (() => {
       try {
         const v = sessionStorage.getItem('lastView') || 'dashboard';
@@ -2788,490 +2755,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       } catch(e){ return 'dashboard'; }
     })();
 
-    // 9. クラウド設定フォームとバッジを初期化
     CLOUD.renderForm();
     UI.updateSaveStatus();
 
-    // 9.5 ここで先に画面を表示する。
-    // IndexedDB/localStorageのキャッシュを即表示し、Supabase取得はバックグラウンドで反映する。
-    clearTimeout(_bootSafetyTimer);
-    _bootRender(_lastView);
-
-    // 10. 起動専用の軽量読込をバックグラウンドで実行する
-    // full pull を待つと、作業者CSV・商品住所CSV・資料まで取得して起動が重くなるため、
-    // 初回表示に必要な収支・計画・キャパだけを先に取得する。
-    let pullResult = null;
-    try {
-      pullResult = await AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView));
-    } catch(e) {
-      console.warn('[BOOT] Supabase軽量読込失敗:', e?.message || e);
-      pullResult = { ok:false, error:e };
-    }
+    // 2. 主要Cloudデータを確認。ここが完了するまで数値画面は一切表示しない。
+    STARTUP_READINESS?.setProgress(2, '最新データを確認しています', 'クラウドのCURRENTデータと主要状態を確認しています。');
+    let pullResult = await STARTUP_READINESS.withTimeout(
+      () => AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView)),
+      45000
+    );
 
     if (window.APP_BOOT_STATE) {
       APP_BOOT_STATE.cloudSyncPending = false;
-      APP_BOOT_STATE.lastCloudSyncAt = new Date().toISOString();
+      if (pullResult?.ok) APP_BOOT_STATE.lastCloudSyncAt = pullResult.verifiedAt || new Date().toISOString();
     }
 
-    if (pullResult && pullResult.ok) {
-      if (window.IDB_CACHE?.persistStateSoon) IDB_CACHE.persistStateSoon();
-      setTimeout(() => { try { NAV.refresh(); } catch(e){} }, 0);
+    // 3. 失敗・不足・タイムアウト時はキャッシュ数値を見せず、状況を明示して停止する。
+    if (!pullResult || !pullResult.ok || pullResult.readiness !== 'READY') {
+      UI.updateCloudBadge?.('error');
+      STARTUP_READINESS.showFailure(pullResult || {stage:'BOOT',readiness:'LOAD_FAILED',error:'起動結果を確認できませんでした'});
+      return;
     }
 
-    if (pullResult && pullResult.ok && pullResult.changed) {
-      setTimeout(() => UI.toast('クラウドの主要データを反映しました'), 300);
-    } else if (pullResult && pullResult.error) {
-      setTimeout(() => UI.toast('クラウドに接続できないため、キャッシュ表示を継続しています。通信状況・Supabase設定を確認してください', 'warn'), 300);
-    }
+    STARTUP_READINESS?.setProgress(3, '表示データを確定しています', '取得したデータを反映し、表示スナップショットを固定しています。');
+    if (window.IDB_CACHE?.persistStateSoon) IDB_CACHE.persistStateSoon();
 
-    // 起動後の全量クラウド取得は行わない。
-    // 作業者CSV・商品住所CSV・過去資料などは、該当画面または手動同期で取得する。
-    // ここで CLOUD.pull() を走らせると、表示後に二重読込のように見えるため停止する。
+    // Gate通過後に初めて画面を描画する。以後この表示は起動時Snapshotとして扱う。
+    STARTUP_READINESS.markVerified(pullResult.verifiedAt || new Date().toISOString());
+    STARTUP_READINESS?.setProgress(4, '準備ができました', '確認済みデータで画面を表示します。');
+    _bootRender(_lastView);
+
   } catch(e) {
     console.error('[BOOT] 起動処理エラー:', e);
-    clearTimeout(_bootSafetyTimer);
-    try {
-      _bootRender('dashboard');
-      UI.toast('起動処理でエラーが発生しました', 'error');
-    } catch(_) {
-      _hideOverlay();
-    }
+    if (window.APP_BOOT_STATE) APP_BOOT_STATE.cloudSyncPending = false;
+    UI.updateCloudBadge?.('error');
+    STARTUP_READINESS?.showFailure({stage:'BOOT',readiness:'LOAD_FAILED',error:e?.message || String(e)});
   }
 });
-
-
-/* =====================================================================
-   現場明細 CSV完全再構築版（field.jsへ分割）
-===================================================================== */
-
-
-  function capacityDailyCauseHtml(row){
-    if (!row) return '<div class="capx-empty">対象データがありません</div>';
-
-    const over = Number(row.count || 0) - Number(row.cap || 0);
-    const cities = Array.isArray(row.cities) ? row.cities : [];
-    const cityHtml = cities.length
-      ? cities.map((c,i)=>`
-          <div class="capx-cause-row">
-            <b>${i+1}</b>
-            <span>${esc(c.city || '')}</span>
-            <em>${fmt(c.count || 0)}件</em>
-          </div>
-        `).join('')
-      : '<div class="capx-empty">市区町村内訳なし</div>';
-
-    return `
-      <div class="capx-cause-box">
-        <div class="capx-cause-head">
-          <div>
-            <h3>${esc(row.date || '')} / ${esc(row.area || '')}</h3>
-            <p>日別超過の原因を、市区町村別の件数で確認します。</p>
-          </div>
-          <button type="button" class="capx-cause-close" id="capx-cause-close">閉じる</button>
-        </div>
-        <div class="capx-cause-kpis">
-          <div><span>実績</span><b>${fmt(row.count || 0)}件</b></div>
-          <div><span>日キャパ</span><b>${fmt(row.cap || 0)}件</b></div>
-          <div class="${over > 0 ? 'danger' : 'ok'}"><span>差分</span><b>${over > 0 ? '+' : ''}${fmt(over)}件</b></div>
-          <div><span>使用率</span><b>${row.cap > 0 ? pct(row.rate || 0) : '-'}</b></div>
-        </div>
-        <div class="capx-cause-list">
-          ${cityHtml}
-        </div>
-      </div>
-    `;
-  }
-
-  function openCapacityDailyCause(key){
-    const parts = String(key || '').split('__');
-    const date = parts[0] || '';
-    const area = parts.slice(1).join('__') || '';
-
-    let rows = [];
-    try {
-      if (window.CAPACITY_UI && typeof CAPACITY_UI.dailyRows === 'function') {
-        rows = CAPACITY_UI.dailyRows();
-      }
-    } catch(e) {}
-
-    if (!Array.isArray(rows) || !rows.length) {
-      rows = window.__CAPACITY_LAST_DAILY_ROWS || [];
-    }
-
-    const row = rows.find(r => String(r.date) === date && String(r.area) === area);
-    let panel = document.getElementById('capx-cause-panel');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'capx-cause-panel';
-      document.body.appendChild(panel);
-    }
-    panel.innerHTML = capacityDailyCauseHtml(row);
-    panel.classList.add('open');
-
-    const close = document.getElementById('capx-cause-close');
-    if (close) close.addEventListener('click', ()=>panel.classList.remove('open'));
-  }
-
-
-(function(){
-  if (window.__CAPACITY_DAILY_CAUSE_BIND__) return;
-  window.__CAPACITY_DAILY_CAUSE_BIND__ = true;
-  document.addEventListener('click', function(e){
-    const btn = e.target && e.target.closest ? e.target.closest('[data-capx-daily-detail]') : null;
-    if (!btn) return;
-    e.preventDefault();
-    if (typeof openCapacityDailyCause === 'function') {
-      openCapacityDailyCause(btn.getAttribute('data-capx-daily-detail'));
-    }
-  });
-})();
-
-
-(function(){
-  if (document.getElementById('capacity-cause-drill-style')) return;
-  const st = document.createElement('style');
-  st.id = 'capacity-cause-drill-style';
-  st.textContent = `
-    .capx-mini-detail{
-      margin-left:8px;
-      border:1px solid #cbd5e1;
-      background:#fff;
-      color:#1d4ed8;
-      border-radius:999px;
-      padding:4px 9px;
-      font-size:11px;
-      font-weight:900;
-      cursor:pointer;
-    }
-    #capx-cause-panel{
-      position:fixed;
-      right:24px;
-      top:84px;
-      width:min(460px, calc(100vw - 48px));
-      max-height:calc(100vh - 120px);
-      overflow:auto;
-      z-index:9999;
-      display:none;
-    }
-    #capx-cause-panel.open{display:block;}
-    .capx-cause-box{
-      background:#fff;
-      border:1px solid #dbe3ee;
-      border-radius:20px;
-      box-shadow:0 24px 60px rgba(15,23,42,.22);
-      overflow:hidden;
-      color:#0f172a;
-      font-family:'Meiryo','Yu Gothic',sans-serif;
-    }
-    .capx-cause-head{
-      display:flex;
-      justify-content:space-between;
-      gap:12px;
-      align-items:flex-start;
-      padding:18px 20px;
-      background:#f8fafc;
-      border-bottom:1px solid #e5e7eb;
-    }
-    .capx-cause-head h3{margin:0;font-size:17px;font-weight:950;}
-    .capx-cause-head p{margin:5px 0 0;color:#64748b;font-size:12px;font-weight:850;}
-    .capx-cause-close{
-      border:1px solid #cbd5e1;
-      background:#fff;
-      border-radius:999px;
-      padding:7px 12px;
-      font-weight:900;
-      cursor:pointer;
-      white-space:nowrap;
-    }
-    .capx-cause-kpis{
-      display:grid;
-      grid-template-columns:repeat(4,1fr);
-      gap:8px;
-      padding:14px;
-      background:#fff;
-    }
-    .capx-cause-kpis>div{
-      border:1px solid #e5e7eb;
-      border-radius:14px;
-      padding:10px;
-      background:#f8fafc;
-    }
-    .capx-cause-kpis>div.danger{background:#fef2f2;border-color:#fecaca;}
-    .capx-cause-kpis>div.ok{background:#ecfdf5;border-color:#bbf7d0;}
-    .capx-cause-kpis span{display:block;color:#64748b;font-size:11px;font-weight:900;margin-bottom:5px;}
-    .capx-cause-kpis b{font-size:17px;font-weight:950;}
-    .capx-cause-list{display:grid;gap:8px;padding:14px;}
-    .capx-cause-row{
-      display:grid;
-      grid-template-columns:32px 1fr 72px;
-      gap:8px;
-      align-items:center;
-      border:1px solid #eef2f7;
-      border-radius:12px;
-      padding:9px 10px;
-      background:#fff;
-    }
-    .capx-cause-row b{
-      width:24px;height:24px;border-radius:999px;
-      background:#eaf3ff;color:#1d4ed8;
-      display:flex;align-items:center;justify-content:center;
-      font-size:12px;
-    }
-    .capx-cause-row span{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-    .capx-cause-row em{text-align:right;font-style:normal;font-weight:950;}
-  `;
-  document.head.appendChild(st);
-})();
-
-
-(function(){
-  if (document.getElementById('capacity-decision-ui-style')) return;
-  const st = document.createElement('style');
-  st.id = 'capacity-decision-ui-style';
-  st.textContent = `
-    .capx-section-head{
-      display:flex;
-      justify-content:space-between;
-      gap:16px;
-      align-items:flex-start;
-      margin-bottom:12px;
-    }
-    .capx-mini-detail{
-      border:1px solid #cbd5e1;
-      background:#fff;
-      color:#1d4ed8;
-      border-radius:999px;
-      padding:5px 10px;
-      font-size:12px;
-      font-weight:900;
-      cursor:pointer;
-      white-space:nowrap;
-    }
-    .capx-weekday-grid{
-      display:grid;
-      grid-template-columns:repeat(7,minmax(150px,1fr));
-      gap:10px;
-    }
-    .capx-weekday-card{
-      border:1px solid #dbe3ee;
-      border-radius:18px;
-      padding:14px;
-      background:#fff;
-      box-shadow:0 8px 18px rgba(15,23,42,.045);
-      display:grid;
-      gap:10px;
-    }
-    .capx-weekday-card.over{background:#fef2f2;border-color:#fecaca;}
-    .capx-weekday-card.full{background:#fff7ed;border-color:#fed7aa;}
-    .capx-weekday-card.good{background:#eff6ff;border-color:#bfdbfe;}
-    .capx-weekday-card.ok{background:#ecfdf5;border-color:#bbf7d0;}
-    .capx-weekday-card.unset{background:#f8fafc;border-color:#cbd5e1;}
-    .capx-weekday-top{
-      display:flex;
-      justify-content:space-between;
-      gap:8px;
-      align-items:center;
-    }
-    .capx-weekday-top b{font-size:15px;font-weight:950;}
-    .capx-weekday-main strong{display:block;font-size:26px;font-weight:950;line-height:1.1;}
-    .capx-weekday-main span{display:block;margin-top:5px;color:#64748b;font-size:12px;font-weight:900;}
-    .capx-weekday-sub{display:grid;gap:4px;color:#475569;font-size:12px;font-weight:850;}
-    .capx-cause-inner{display:grid;gap:14px;}
-    .capx-cause-title h4{margin:0;font-size:17px;font-weight:950;}
-    .capx-cause-title p{margin:5px 0 0;color:#64748b;font-size:12px;font-weight:850;}
-    .capx-cause-kpis{
-      display:grid;
-      grid-template-columns:repeat(4,1fr);
-      gap:8px;
-    }
-    .capx-cause-kpis>div{
-      border:1px solid #e5e7eb;
-      border-radius:14px;
-      padding:10px;
-      background:#f8fafc;
-    }
-    .capx-cause-kpis>div.danger{background:#fef2f2;border-color:#fecaca;}
-    .capx-cause-kpis>div.ok{background:#ecfdf5;border-color:#bbf7d0;}
-    .capx-cause-kpis span{display:block;color:#64748b;font-size:11px;font-weight:900;margin-bottom:5px;}
-    .capx-cause-kpis b{font-size:17px;font-weight:950;}
-    .capx-cause-inner h5{margin:0;font-size:14px;font-weight:950;}
-    .capx-cause-list{display:grid;gap:8px;}
-    .capx-cause-row{
-      display:grid;
-      grid-template-columns:32px 1fr 72px;
-      gap:8px;
-      align-items:center;
-      border:1px solid #eef2f7;
-      border-radius:12px;
-      padding:9px 10px;
-      background:#fff;
-    }
-    .capx-cause-row b{
-      width:24px;height:24px;border-radius:999px;
-      background:#eaf3ff;color:#1d4ed8;
-      display:flex;align-items:center;justify-content:center;
-      font-size:12px;
-    }
-    .capx-cause-row span{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-    .capx-cause-row em{text-align:right;font-style:normal;font-weight:950;}
-    @media(max-width:1200px){
-      .capx-weekday-grid{grid-template-columns:repeat(2,minmax(150px,1fr));}
-      .capx-section-head{flex-direction:column;}
-    }
-  `;
-  document.head.appendChild(st);
-})();
-
-
-(function(){
-  if (document.getElementById('capacity-final-decision-style')) return;
-  const st = document.createElement('style');
-  st.id = 'capacity-final-decision-style';
-  st.textContent = `
-    .capacity-status.alert{
-      background:#fed7aa!important;
-      color:#9a3412!important;
-      border:1px solid #fdba74!important;
-    }
-    .capx-risk-alert td{background:#fff7ed!important;}
-    .capx-kpi.alert:before{background:#f97316!important;}
-    .capx-day.alert{background:#fff7ed!important;}
-    .capx-weekday-card.alert{background:#fff7ed!important;border-color:#fdba74!important;}
-    .capx-action-box{
-      border:1px solid #fed7aa;
-      background:#fff7ed;
-      border-radius:16px;
-      padding:12px 14px;
-      display:grid;
-      gap:7px;
-    }
-    .capx-action-box h5{
-      margin:0;
-      font-size:14px;
-      font-weight:950;
-      color:#9a3412;
-    }
-    .capx-action-item{
-      font-size:13px;
-      font-weight:850;
-      color:#7c2d12;
-      line-height:1.5;
-    }
-    .capx-city-hint{
-      border:1px solid #bfdbfe;
-      background:#eff6ff;
-      color:#1e3a8a;
-      border-radius:14px;
-      padding:12px 14px;
-      font-size:13px;
-      font-weight:900;
-      line-height:1.5;
-      margin-bottom:10px;
-    }
-  `;
-  document.head.appendChild(st);
-})();
-
-
-(function(){
-  if (document.getElementById('capacity-final-color-row-style')) return;
-  const st = document.createElement('style');
-  st.id = 'capacity-final-color-row-style';
-  st.textContent = `
-    .capacity-status.collapse{
-      background:#7f1d1d!important;
-      color:#fff!important;
-      border:1px solid #7f1d1d!important;
-    }
-    .capacity-status.over{
-      background:#fee2e2!important;
-      color:#991b1b!important;
-      border:1px solid #fecaca!important;
-    }
-    .capacity-status.full{
-      background:#ffedd5!important;
-      color:#9a3412!important;
-      border:1px solid #fed7aa!important;
-    }
-    .capacity-status.good{
-      background:#dbeafe!important;
-      color:#1e40af!important;
-      border:1px solid #bfdbfe!important;
-    }
-    .capacity-status.ok{
-      background:#dcfce7!important;
-      color:#166534!important;
-      border:1px solid #bbf7d0!important;
-    }
-    .capacity-status.unset{
-      background:#f1f5f9!important;
-      color:#64748b!important;
-      border:1px solid #cbd5e1!important;
-    }
-    .capx-risk-collapse td{background:#fff1f2!important;}
-    .capx-risk-over td{background:#fff7f7!important;}
-    .capx-risk-full td{background:#fffaf0!important;}
-    .capx-risk-good td{background:#eff6ff!important;}
-    .capx-risk-ok td{background:#f0fdf4!important;}
-    .capx-risk-unset td{background:#f8fafc!important;}
-    .capx-click-row{cursor:pointer;}
-    .capx-click-row:hover td{outline:1px solid #bfdbfe;background:#eff6ff!important;}
-    .capx-click-row.selected td{
-      background:#eaf3ff!important;
-      box-shadow:inset 4px 0 0 #2563eb;
-    }
-    .capx-cal-summary{
-      display:flex;
-      gap:8px;
-      align-items:center;
-      flex-wrap:wrap;
-      justify-content:flex-end;
-    }
-    .capx-cal-summary span{
-      display:inline-flex;
-      border-radius:999px;
-      border:1px solid #cbd5e1;
-      background:#fff;
-      padding:7px 10px;
-      font-size:12px;
-      font-weight:950;
-      color:#334155;
-    }
-    .capx-cal-summary span.danger{background:#fee2e2;color:#991b1b;border-color:#fecaca;}
-    .capx-cal-summary span.full{background:#fff7ed;color:#9a3412;border-color:#fed7aa;}
-    .capx-cal-summary span.good{background:#eff6ff;color:#1e40af;border-color:#bfdbfe;}
-    .capx-cause-kpis>div.danger{background:#fef2f2!important;border-color:#fecaca!important;}
-    .capx-cause-kpis>div.ok{background:#ecfdf5!important;border-color:#bbf7d0!important;}
-  `;
-  document.head.appendChild(st);
-})();
-
-
-(function(){
-  if (document.getElementById('capacity-diff-focus-style')) return;
-  const st = document.createElement('style');
-  st.id = 'capacity-diff-focus-style';
-  st.textContent = `
-    .capx-diff{
-      display:inline-flex;
-      justify-content:flex-end;
-      min-width:54px;
-      font-weight:950;
-      font-size:14px;
-    }
-    .capx-diff.plus{
-      color:#991b1b;
-    }
-    .capx-diff.minus{
-      color:#166534;
-    }
-    .capx-cause-kpis div:nth-child(3){
-      background:#fef2f2;
-      border-color:#fecaca;
-    }
-    .capx-kpi.amber em{
-      line-height:1.35;
-    }
-  `;
-  document.head.appendChild(st);
-})();
