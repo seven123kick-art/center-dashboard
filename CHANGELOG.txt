@@ -1,53 +1,51 @@
-D3-5A Resolution永続化契約・取消基盤
+Version6 D3-5B Resolution正式永続化基盤
 作成日: 2026-08-17
 
-目的
-- D3-4の保存前プレビューの次段階として、Resolution Decisionを上書き/削除せず履歴管理する契約を確定する。
-- 誤紐付けを取消可能にし、AliasをDecisionから再構成できるpure Ledgerを追加する。
-- 現行Repository/SupabaseにResolution専用schema/APIが確認できないため、推測で既存FullStateへ保存しない。
+■目的
+D3-5Aで確定したRESOLUTION_DECISION履歴を、既存STATE/full_stateへ混在させず、Supabaseを正本・IndexedDBを表示用キャッシュとして扱えるRepository境界へ接続する。
 
-変更
-- master.js: MASTER_RESOLUTION_DECISIONへACTIVE/REVOKED、取消監査、再決定参照を追加。
-- resolution_ledger.js（新規）: validate / activeDecisions / materializeAliases / revoke。
-- center.html: resolution_ledger.js読込1行追加。
+■変更ファイル
+- src/core/cloud.js
+  - center_realtime_stateの特定state_keyを読み書きする公開API getRealtimeState()/putRealtimeState() を追加。
+  - 既存private APIへ外部から直接アクセスさせないための公開通信プリミティブ。
+- src/core/repository/cloud_repository.js
+  - fetchRealtimeState()/pushRealtimeState() を追加。CLOUD公開APIへの薄い委譲のみ。
+- src/core/repository/registry.js
+  - Repository.Resolution getterを追加。
+- src/core/repository/resolution_repository.js（新規）
+  - Resolution Decision専用Repository。
+  - Supabase正本 state_key: resolution_decisions_v1
+  - IndexedDB cache kind/id: resolution / decisions_v1
+  - load/save/appendDecision/revokeDecisionを提供。
+  - Supabase保存成功後のみcacheを更新。
+  - full_state/STATE/localStorageへ混在させない。
+- center.html
+  - resolution_repository.js読込1行追加。
 
-重要
-- STATE/IndexedDB/localStorage/Cloud/Supabaseへの書込はまだ0件。
-- D3-5BではSupabase正本・IndexedDBキャッシュの正式schema/APIを決めてからRepository接続する。
-- 既存RepositoryへResolutionデータを便宜的に混入させない。
-D3-4 Resolver候補表示・保存前プレビュー
-作成日: 2026-08-17
+■保存単位
+center_realtime_stateの既存(center_key,state_key)一意制約を利用し、各センターのresolution_decisions_v1を独立payloadとして保存する。新しいSupabaseテーブル・SQL migrationは不要。
 
-目的
-- D3-3の読取専用詳細画面に、SUBJECT_RESOLVER / MASTER_RESOLVERによる候補・根拠・信頼度を表示する。
-- 人が候補を選択した場合に、保存されるResolution Decision / Alias案を保存前に確認できるようにする。
-- 本フェーズではMaster/Alias/STATE/Storage/Cloud/Supabaseへ一切書き込まない。
+■履歴ルール
+DecisionはRESOLUTION_LEDGER契約に従いACTIVE/REVOKED/supersedesで保持する。取消時にSOURCEやMasterを削除・上書きしない。
 
-変更ファイル
-1. center.html
-   - resolution_preview.js のscript読込を1行追加。
-2. src/core/data_catalog/resolution_preview.js（新規）
-   - 既存作業者/会社マスタを新Resolverの参照形へ読取専用変換。
-   - analysisTarget=falseの旧「作業者」レコードを人物候補にしない。
-   - Resolver結果と保存時Decision/Alias案を生成するpure preview層を追加。
-3. src/core/data_catalog/verification_detail.js
-   - 帰属主体表記へresolution_previewを付加。
-4. src/modules/data_verification.js
-   - Resolver結果、照合根拠、信頼度、候補選択、保存時プレビューを表示。
-   - 保存処理は追加していない。
-5. assets/css/features/data-verification.css
-   - D3-4表示用の画面スコープCSSを追加。
+■安全性
+- D3-5BではUI保存ボタンへ未接続。既存操作から新Repositoryへの書込みは発生しない。
+- 既存STATE/full_state/workerMaster/companyMasterへResolutionを追加しない。
+- CloudRepository自身にSTATE変更ロジックを追加していない。
+- IndexedDB cache失敗はSupabase正本保存の失敗として扱わない。
+- 保存前に全Decisionをvalidationし、ID重複も拒否する。
 
-重要な安全設計
-- 既存WORKERS.all()/COMPANIES.all()はensureDefaults経由でSTATEを書き換え得るため、D3-4プレビューでは呼び出さず、STATEの既存配列をコピーして参照する。
-- analysisTarget=falseは人物ではないことしか確定できず、ORGANIZATION/OPERATION_UNIT/PROCESSのどれかは旧マスタだけでは判別不能なため、自動推測しない。
-- 候補がない表記はUNKNOWN/UNMATCHEDのまま表示する。
-- makeResolutionDecisionはプレビュー用途のみ。生成結果を保存しない。
+■テスト
+Nodeスタブで以下を実行しPASS。
+1. 不正Decisionの保存拒否
+2. Supabase正本保存→cache更新
+3. Cloudからの再読込
+4. Decision取消→REVOKED保存
+5. activeDecisionsが取消後0件
+6. 変更JSのnode --check 全PASS
 
-検証
-- src配下全JS node --check: PASS
-- PERSON候補（河本 龍哉）: PERSON / PROVISIONAL / worker_id取得: PASS
-- 非人物旧レコード（返品）をPERSONへ誤分類しない: PASS
-- 入力master data不変: PASS
-- Alias proposalはPROPOSED表示のみ: PASS
-- 既存STATE/Storage/Cloud/Supabase書込追加なし: PASS
+■未実装（意図的）
+- D3-4 UIの「保存」操作との接続
+- Master/Aliasの直接書換え
+- 保存後Canonical再計算
+これらはD3-5C以降で行う。

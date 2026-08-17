@@ -166,6 +166,42 @@ var CLOUD = window.CLOUD = {
     if (!row) return null;
     return row.payload;
   },
+  // Version6 D3-5B: center_realtime_state を特定state_key単位で扱う公開API。
+  // Resolution等の独立した正本データを full_state に混在させず保存するために使用する。
+  // payloadの意味・マージ判断は呼び出し側Repositoryの責務とし、本APIは通信だけを担当する。
+  async getRealtimeState(stateKey, centerKey = CENTER.id) {
+    const key = String(stateKey || '').trim();
+    if (!key) throw new Error('stateKey is required');
+    const sb = await this._client();
+    if (!sb) return null;
+    const { data, error } = await sb
+      .from('center_realtime_state')
+      .select('payload,updated_at')
+      .eq('center_key', centerKey)
+      .eq('state_key', key)
+      .order('updated_at', { ascending:false })
+      .limit(1);
+    if (error) throw error;
+    const row = Array.isArray(data) && data.length ? data[0] : null;
+    return row ? { payload: row.payload, updated_at: row.updated_at || null } : null;
+  },
+  async putRealtimeState(stateKey, payload, centerKey = CENTER.id) {
+    const key = String(stateKey || '').trim();
+    if (!key) throw new Error('stateKey is required');
+    const sb = await this._client();
+    if (!sb) return { ok:false, error:'Supabase未設定' };
+    const row = {
+      center_key: centerKey,
+      state_key: key,
+      payload,
+      client_id: this._clientId(),
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await sb.from('center_realtime_state').upsert(row, { onConflict:'center_key,state_key' });
+    if (error) throw error;
+    return { ok:true, updated_at:row.updated_at };
+  },
+
   async loadState(centerKey = CENTER.id) {
     // DevTools確認用。CLOUD.loadState('toda') / CLOUD.loadState('kitasaitama') でDB上の保存行を確認できる。
     const sb = await this._client();

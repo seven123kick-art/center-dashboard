@@ -486,6 +486,18 @@ TODO(V6)
             return CLOUD.pushCapacity();
         },
 
+        /* ---------- 汎用Realtime State：D3-5B ---------- */
+        // full_stateへ混在させない独立正本データ用。通信以外の判断は持たない。
+        async fetchRealtimeState(stateKey, centerKey) {
+            const CLOUD = _requireCloud();
+            return CLOUD.getRealtimeState(stateKey, centerKey);
+        },
+
+        async pushRealtimeState(stateKey, payload, centerKey) {
+            const CLOUD = _requireCloud();
+            return CLOUD.putRealtimeState(stateKey, payload, centerKey);
+        },
+
         /* ---------- ファイル系：実装済み（既存の同名公開APIへ委譲） ---------- */
 
         async uploadFile(key, file) {
