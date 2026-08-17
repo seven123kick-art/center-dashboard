@@ -1,30 +1,40 @@
-Version6 D4-21 / Recovery Speed & Sync Integrity
+Version6 D4-22 / Route Profitability Canonical Read Path
 Date: 2026-08-17
 
 目的
-- D4-20のデータ確認・復旧を待たせすぎない。
-- Cloud同期が {ok:false} を返した場合も「成功」に見せない。
-- 特にバックアップ復元で、ローカル復元成功とCloud反映成功を明確に分離する。
+- 便別採算を、旧STATE/LEDGER直読みに固定された画面からCanonical優先の読取経路へ移行。
+- UI自身にCanonical Entity結合ロジックを持たせず、専用Read Adapterで分離する。
 
 変更
-1. Pipeline Recovery高速化
-   - 主要5資料のCURRENT Cloud検証は互いに独立しているため並列実行。
-   - 全検証完了後にCanonical/Snapshotを1回だけ再構築。
-   - 検証内容・整合条件は変更しない。
-2. バックアップ復元
-   - syncPushの例外だけでなく {ok:false} もCloud失敗として扱う。
-   - Cloud失敗時は「ローカル復元済み / Cloud同期失敗」と警告。
-   - 「バックアップを復元しました」という完全成功表示を出さない。
-3. app.jsに残っていたCloud同期警告経路
-   - ローカル削除、収支補完等で {ok:false} も警告対象へ統一。
+1. CanonicalRouteLedger新設
+   - CANONICAL_MATERIALIZERのVerified CURRENT SOURCEから便別採算用Read Modelを生成。
+   - DELIVERY_ROUTE / ROUTE_WORKER / DELIVERY_ATTEMPT / BUSINESS_SLIP /
+     SALES_DETAIL / ROUTE_PAYMENTを結合。
+2. 便別採算
+   - 月表示時にCanonicalRouteLedgerを優先。
+   - Canonical SOURCEが存在しない移行前月のみLegacy LEDGERへfallback。
+   - Canonical再構築失敗時も画面を完全停止せずLegacy互換表示へfallbackし、理由を明示。
+3. データ経路を画面上に表示
+   - Canonical
+   - 旧データ互換表示 + fallback理由
+4. 取込後はCanonical Route cacheもinvalidate。
+5. 採算確定条件
+   - 売上明細がCanonicalで確認できる
+   - ROUTE_PAYMENTがNO_RECORDでない
+   - 原票が便へ結合されている
+   上記を満たす便のみ一次利益を確定表示。
+   UNKNOWN/未連動を0円扱いしない。
+
+重要
+- Legacy LEDGERは削除しない。正規化SOURCE未登録の過去月互換用として保持。
+- SOURCE/Canonical schema/Data Catalog/Supabase schemaは変更なし。
+- D4-11高速起動は変更なし。
 
 変更ファイル
-- src/core/data_catalog/pipeline_recovery.js
-- src/core/store.js
-- src/app.js
+- center.html
+- src/core/data_catalog/canonical_route_ledger.js (new)
+- src/field/route_analysis.js
 - CHANGELOG.txt
 
 検証
 - 全 src/**/*.js node --check PASS
-- Pipeline検証条件、業務計算、Canonical schema、Data Catalog、Supabase schema変更なし
-- D4-11高速起動 / D4-12 UI変更なし

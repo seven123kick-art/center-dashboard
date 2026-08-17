@@ -416,7 +416,7 @@
           }catch(e){ normalizedFailed++; console.warn('[D3-6B] ROUTE_PAYMENT normalized save failed',ym,e); }
         }
       }
-      window.LEDGER?.invalidate?.();
+      window.LEDGER?.invalidate?.(); window.CANONICAL_ROUTE_LEDGER?.invalidate?.();
       const normalizedNote=normalizedFailed
         ? ` <span style="color:#92400e">/ 正規化SOURCE保存未確認 ${normalizedFailed}ヶ月</span>`
         : ` / 正規化SOURCE保存済 ${normalizedSaved}ヶ月`;
@@ -627,7 +627,9 @@
     });
   }
 
-  function render(){
+  let renderToken=0;
+  async function render(){
+    const token=++renderToken;
     setup();
     const sel=document.getElementById('route-ym-select');
     const yms=window.LEDGER?.availableMonths ? LEDGER.availableMonths() : [...new Set([...(STATE.routeData||[]).map(x=>x.ym), ...(STATE.workerCsvData||[]).map(x=>x.ym), ...(STATE.datasets||[]).map(x=>x.ym)])].filter(Boolean).sort();
@@ -637,7 +639,15 @@
       sel.value=yms.includes(cur)?cur:(STATE.selYM&&yms.includes(STATE.selYM)?STATE.selYM:(yms.at(-1)||''));
     }
     const ym=sel?.value||'';
-    const ledger=window.LEDGER?.buildMonth ? LEDGER.buildMonth(ym) : {routes:joinedRows(ym),diagnostics:null};
+    let ledger;
+    if(window.CANONICAL_ROUTE_LEDGER?.buildMonth){
+      const diagnostic=document.getElementById('route-diagnostic');
+      if(diagnostic) diagnostic.innerHTML='<div class="msg msg-info">確認済みデータを読み込んでいます…</div>';
+      ledger=await CANONICAL_ROUTE_LEDGER.buildMonth(ym);
+      if(token!==renderToken)return;
+    }else{
+      ledger=window.LEDGER?.buildMonth ? LEDGER.buildMonth(ym) : {routes:joinedRows(ym),diagnostics:null,source:'LEGACY_FALLBACK'};
+    }
     const allRows=enrichRouteRows(ledger.routes || []);
     const diag=ledger.diagnostics;
 
@@ -676,6 +686,8 @@
       if(!diag.sourceStatus.productCsv) missing.push('荷主別CSV');
       if(!diag.sourceStatus.skdl0001 && !diag.sourceStatus.headPayment) missing.push('SKDL0001 または 配達ヘッド傭車料');
       const notices=[];
+      if(ledger.source==='CANONICAL') notices.push('<div class="msg msg-info">データ経路：Canonical（確認済みCURRENT SOURCEから再構築）</div>');
+      else if(ledger.source==='LEGACY_FALLBACK') notices.push(`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${esc(ledger.fallbackReason||'正規化SOURCE未登録')}</div>`);
       if(missing.length) notices.push(`<div class="msg msg-warn">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`);
       else notices.push(`<div class="msg msg-info">完全連動 <strong>${fmt(diag.fullyLinkedRoutes||0)}便</strong>　配達ヘッド ${fmt(diag.headLinkedRoutes||0)}便　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`);
       if((diag.unregisteredWorkers||[]).length) {
