@@ -63,3 +63,15 @@ select,input,textarea{border-radius:10px!important;border:1px solid var(--border
 .dim-pipeline-all-ok{display:flex;align-items:center;gap:9px;margin:10px 0 12px;padding:11px 12px;border-radius:12px;background:#edf9f3;color:#287a5c;font-size:11px}.dim-pipeline-all-ok strong{font-size:12px}
 .dim-pipeline-detail{margin-top:8px}.dim-pipeline-detail>summary{cursor:pointer;color:var(--text2);font-size:11px;font-weight:800;user-select:none}.dim-pipeline-detail[open]>summary{margin-bottom:10px}
 @media(max-width:900px){.dim-issue-row{grid-template-columns:1fr}.dim-issue-meta{align-items:flex-start;text-align:left}}
+
+/* D4-26 Accounting Parity Diagnostic */
+.dim-parity{margin-top:18px;padding:16px;border:1px solid rgba(167,123,232,.14);border-radius:18px;background:rgba(255,255,255,.62)}
+.dim-parity-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.dim-parity-head>div{display:flex;flex-direction:column;gap:3px}.dim-parity-head b{font-size:14px}.dim-parity-head span{font-size:11px;color:var(--muted)}
+.dim-parity-summary{padding:5px 9px;border-radius:999px;font-size:10px!important;font-weight:800}.dim-parity-summary.is-ready{background:#e7f6ef;color:#287a5c!important}.dim-parity-summary.is-review{background:#fff4d8;color:#8a6617!important}
+.dim-parity-counts{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 10px}.dim-parity-counts span{padding:4px 8px;border-radius:999px;background:#f4f5f4;color:var(--text2);font-size:10px;font-weight:700}
+.dim-parity-months{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+.dim-parity-month{min-height:58px;padding:9px 10px;border:1px solid rgba(31,58,48,.07);border-radius:12px;background:#fafbfa}.dim-parity-month>div{display:flex;align-items:center;justify-content:space-between;gap:6px}.dim-parity-month strong{font-size:12px}.dim-parity-month span{font-size:10px;font-weight:800;color:var(--text2)}.dim-parity-month small{display:block;margin-top:5px;font-size:9px;line-height:1.45;color:var(--text2)}
+.dim-parity-month.is-ready{background:#f0faf5;border-color:rgba(61,187,131,.16)}.dim-parity-month.is-mismatch{background:#fff8f9;border-color:rgba(217,122,136,.18)}.dim-parity-month.is-unknown{background:#fffaf0;border-color:rgba(225,189,88,.2)}
+.dim-parity-note{margin:10px 0 0;font-size:10px;color:var(--muted);line-height:1.5}.dim-parity-error{margin-top:10px;color:#a34850;font-size:11px}
+@media(max-width:900px){.dim-parity-months{grid-template-columns:repeat(2,minmax(0,1fr))}.dim-parity-head{align-items:flex-start}}

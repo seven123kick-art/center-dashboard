@@ -82,6 +82,34 @@
     cache.set(ym,out); return out;
   }
 
+  function fiscalMonths(fiscalYear){
+    const fy=Number(fiscalYear);
+    if(!Number.isInteger(fy)||fy<2000||fy>2100)return [];
+    return [
+      `${fy}04`,`${fy}05`,`${fy}06`,`${fy}07`,`${fy}08`,`${fy}09`,
+      `${fy}10`,`${fy}11`,`${fy}12`,`${fy+1}01`,`${fy+1}02`,`${fy+1}03`
+    ];
+  }
+
+  async function checkFiscalYear(fiscalYear,{force=false}={}){
+    const fy=String(fiscalYear||'').trim();
+    const months=fiscalMonths(fy);
+    if(!months.length)return {status:'INVALID_FISCAL_YEAR',fiscalYear:fy,months:[]};
+    const results=await Promise.all(months.map(ym=>checkMonth(ym,{force})));
+    const counts={READY:0,MISMATCH:0,UNKNOWN_AMOUNT:0,PL_ACTUAL_NOT_NORMALIZED:0,LEGACY_MISSING:0,CANONICAL_FAILED:0,CANONICAL_UNAVAILABLE:0,OTHER:0};
+    results.forEach(r=>{const k=Object.prototype.hasOwnProperty.call(counts,r.status)?r.status:'OTHER';counts[k]++;});
+    const readyMonths=results.filter(r=>r.ready).map(r=>r.period);
+    const blockedMonths=results.filter(r=>!r.ready).map(r=>({period:r.period,status:r.status,error:r.error||null}));
+    return {
+      status:blockedMonths.length?'REVIEW_REQUIRED':'READY',
+      fiscalYear:fy,months:results,counts,readyMonths,blockedMonths,
+      migrationReady:blockedMonths.length===0,
+      note:blockedMonths.length
+        ?'READY月のみ移行候補。不一致・UNKNOWN・未正規化月は現行Datasetを維持する。'
+        :'年度12か月すべてでCanonical PL_ACTUALと既存Datasetが一致。'
+    };
+  }
+
   function invalidate(period){ if(period) cache.delete(clean(period)); else cache.clear(); }
-  window.ACCOUNTING_PARITY=Object.freeze({checkMonth,invalidate,canonicalRows});
+  window.ACCOUNTING_PARITY=Object.freeze({checkMonth,checkFiscalYear,fiscalMonths,invalidate,canonicalRows});
 })();

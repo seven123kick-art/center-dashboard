@@ -1,47 +1,34 @@
-Version6 D4-25 / State Ownership Audit & Accounting Parity Guard
+Version6 D4-26 / Fiscal Accounting Parity Diagnostic
 Date: 2026-08-17
 
 目的
-- キャパ管理／年度集計・推移／ホームKPIの旧STATE依存を横断確認し、
-  「STATEに残すべきもの」と「Canonicalへ移すべきもの」を整理する。
-- ホーム・年度推移を根拠なくCanonicalへ切り替えず、実データ同値確認の
-  ガードを先に追加する。
+- ホーム/年度推移をCanonicalへ切り替える前に、年度12か月を実データで比較できるようにする。
+- READY月と移行禁止月を明確に分離し、不一致を自動補正しない。
 
-棚卸し結果
-1. ホームKPI・月次推移・予実
-   - 現在は activeDataset*() 経由で Repository.Dataset.getActive() を使用。
-   - confirmed > daily > history の既存優先順位が組み込まれており、
-     旧STATE.datasets直読みではない。
-   - すぐ置換せず、PL_ACTUAL Canonicalと既存Datasetの同値検証後に移行する。
-
-2. キャパ設定
-   - calendar / shipperGroups / capacityGroups 等は利用者が設定する計画・設定値。
-   - SOURCE由来Canonicalへ移す対象ではなくSTATE/Repository.Storage保持が妥当。
-   - 商品・住所の実績部分は将来Verified SHIPPER_AREA Read Modelへ移行候補だが、
-     現キャパロジックが必要とする荷主/住所/日付属性を完全再現できるまでは変更しない。
-
-3. キャパ内の確定荷主照合
-   - STATE.datasets直接参照が1箇所残っていたため Repository.Dataset.getActive()へ移行。
-
-新規 Accounting Parity Guard
-- Verified PL_ACTUAL Canonicalと現在のRepository.Datasetを月単位で比較。
-- CONFIG.INCOME_KEYS / EXPENSE_KEYSの各科目、および営業収益・費用・利益を比較。
-- UNKNOWN金額は0へ変換しない。
-- MISMATCHを自動補正しない。
-- READYになった月だけ、将来ホーム/年度推移をCanonicalへ切替可能と判断できる。
+変更
+1. AccountingParity.checkFiscalYear()を追加
+   - 4月～翌3月の12か月を並列診断。
+   - READY / MISMATCH / UNKNOWN_AMOUNT / PL_ACTUAL_NOT_NORMALIZED /
+     LEGACY_MISSING / CANONICAL_FAILED等を月別集計。
+2. データ確認画面へ「収支データ移行診断」を追加
+   - 年度12か月を一覧表示。
+   - 一致、差異、金額不明、未正規化、現行Datasetなしを件数表示。
+   - MISMATCHは勘定科目、現行値、Canonical値、差額を最大3件表示。
+3. 年度全月一致時のみ「12か月一致」。
+   それ以外は「確認が必要」とし、表示参照先はまだ切り替えない。
 
 重要
-- 今回ホーム／年度推移の表示経路自体は変更しない。
-- 「Canonical化すること」を目的に既存の正常な会計表示を壊さない。
-- 計画・設定・手入力データはSTATEに残す。
+- ホームKPI/年度推移の参照先は変更していない。
+- READY月だけが今後のCanonical移行候補。
+- UNKNOWNを0円に変換しない。
+- 差異を自動修正しない。
 
 変更ファイル
-- center.html
-- src/core/data_catalog/accounting_parity.js (new)
-- src/modules/capacity.js
+- src/core/data_catalog/accounting_parity.js
+- src/modules/data_import_management.js
+- assets/css/foundation/theme.css
 - CHANGELOG.txt
 
 検証
 - 全 src/**/*.js node --check PASS
-- Canonical schema / Data Catalog / Supabase schema変更なし
-- D4-11高速起動 / D4-12 UI変更なし
+- Canonical schema / Data Catalog / Supabase schema / D4-11高速起動変更なし

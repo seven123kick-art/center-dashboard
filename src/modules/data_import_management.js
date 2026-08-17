@@ -103,6 +103,30 @@
       :`<section class="dim-pipeline-all-ok"><strong>要対応なし</strong><span>確認できた処理はすべて正常です。</span></section>`;
     return `<section class="dim-pipeline-status"><div class="dim-pipeline-head"><div><b>データ処理状況</b><span>SOURCE → NORMALIZED → CANONICAL → SNAPSHOT → CLOUD</span></div><button id="pipeline-verify-rebuild-btn" class="btn-secondary dim-pipeline-action" type="button">状態を再確認・再構築</button></div><div id="pipeline-action-msg" class="dim-pipeline-action-msg"></div>${issueHtml}<details class="dim-pipeline-detail"><summary>全データの処理状況を表示</summary><div class="dim-pipeline-status-body">${rows.join('')}</div></details></section>`;
   }
+  const PARITY_LABEL=Object.freeze({
+    READY:'一致',MISMATCH:'差異あり',UNKNOWN_AMOUNT:'金額不明',
+    PL_ACTUAL_NOT_NORMALIZED:'PL未正規化',LEGACY_MISSING:'現行Datasetなし',
+    CANONICAL_FAILED:'Canonical失敗',CANONICAL_UNAVAILABLE:'Canonical未利用'
+  });
+  const yen=v=>Number.isFinite(Number(v))?`${Math.round(Number(v)).toLocaleString('ja-JP')}円`:'—';
+  async function accountingParityHtml(period){
+    if(!window.ACCOUNTING_PARITY?.checkFiscalYear)return '';
+    const fy=Number(period.slice(4))>=4?period.slice(0,4):String(Number(period.slice(0,4))-1);
+    let report;
+    try{report=await ACCOUNTING_PARITY.checkFiscalYear(fy);}
+    catch(e){return `<section class="dim-parity"><div class="dim-parity-head"><b>収支データ移行診断</b><span>${esc(fy)}年度</span></div><div class="dim-parity-error">${esc(e?.message||String(e))}</div></section>`;}
+    const monthCards=(report.months||[]).map(r=>{
+      const mm=Number(String(r.period||'').slice(4));
+      const cls=r.status==='READY'?'is-ready':r.status==='MISMATCH'?'is-mismatch':r.status==='UNKNOWN_AMOUNT'?'is-unknown':'is-pending';
+      const diffs=(r.mismatches||[]).slice(0,3).map(x=>`${esc(x.key)} ${yen(x.legacy)} → ${yen(x.canonical)}（差 ${yen(x.difference)}）`).join('<br>');
+      const totalDiffs=(r.total_mismatches||[]).slice(0,2).map(x=>`${esc(x.key)} ${yen(x.legacy)} → ${yen(x.canonical)}`).join('<br>');
+      const detail=diffs||totalDiffs||(r.error?esc(r.error):'');
+      return `<div class="dim-parity-month ${cls}"><div><strong>${mm}月</strong><span>${esc(PARITY_LABEL[r.status]||r.status)}</span></div>${detail?`<small>${detail}</small>`:''}</div>`;
+    }).join('');
+    const c=report.counts||{};
+    return `<section class="dim-parity"><div class="dim-parity-head"><div><b>収支データ移行診断</b><span>${esc(fy)}年度 · Canonical PL_ACTUAL ↔ 現行Dataset</span></div><span class="dim-parity-summary ${report.migrationReady?'is-ready':'is-review'}">${report.migrationReady?'12か月一致':'確認が必要'}</span></div><div class="dim-parity-counts"><span>一致 ${c.READY||0}</span><span>差異 ${c.MISMATCH||0}</span><span>金額不明 ${c.UNKNOWN_AMOUNT||0}</span><span>未正規化 ${c.PL_ACTUAL_NOT_NORMALIZED||0}</span><span>現行なし ${c.LEGACY_MISSING||0}</span></div><div class="dim-parity-months">${monthCards}</div><p class="dim-parity-note">${esc(report.note||'')}</p></section>`;
+  }
+
   async function refresh(){
     const root=document.getElementById('normalized-source-status');if(!root)return;
     const input=document.getElementById('normalized-status-month');
@@ -124,7 +148,8 @@
     const coverage=plan?.coverage||plan?.sourceMeta?.coverage||'UNKNOWN'; const coverageLabel=coverage==='FIRST_HALF_ONLY'?'上期策定済・下期未策定':coverage==='FULL_FISCAL_YEAR'?'12か月策定済':'登録済';
     const budgetRow=`<tr><td><b>予算計画</b><div class="dim-history">SKFL0001 / PLAN_BUDGET</div></td><td>${plan?`<span class="dim-state is-current">${esc(coverageLabel)}</span>`:'<span class="dim-state is-missing">未登録</span>'}</td><td>${plan?esc(`${fy}年度`):'—'}</td><td>${plan?esc(plan.itemCount??Object.keys(plan.rows||{}).length):'—'}</td><td><div class="dim-history">${plan?`${esc(plan.sourceMeta?.source_type||'LEGACY_PASTE')} · ${esc(plan.importedAt||'')}`:'—'}</div></td></tr>`;
     const pipeline=await pipelineHtml(period);
-    root.innerHTML=`<table class="dim-source-table"><thead><tr><th>資料</th><th>状態</th><th>CURRENT</th><th>行数</th><th>改訂履歴</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(LABEL[x.type]||x.type)}</b><div class="dim-history">${esc(x.type)}</div></td><td>${x.error?`<span class="dim-state is-missing">ERROR</span>`:x.current?`<span class="dim-state is-current">${esc(x.state==='—'?'CURRENT':x.state)}</span>`:'<span class="dim-state is-missing">未登録</span>'}</td><td>${x.current?esc(x.current):'—'}</td><td>${x.count==null?'—':esc(x.count)}</td><td><div class="dim-history">${x.error?esc(x.error):(x.history||[]).slice().reverse().map(h=>`${esc(h.revision_status||'—')} · ${esc(h.record_count??'—')}行 · ${esc(h.saved_at||'')}`).join('<br>')||'—'}</div></td></tr>`).join('')}${budgetRow}</tbody></table>${pipeline}`;
+    const parity=await accountingParityHtml(period);
+    root.innerHTML=`<table class="dim-source-table"><thead><tr><th>資料</th><th>状態</th><th>CURRENT</th><th>行数</th><th>改訂履歴</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(LABEL[x.type]||x.type)}</b><div class="dim-history">${esc(x.type)}</div></td><td>${x.error?`<span class="dim-state is-missing">ERROR</span>`:x.current?`<span class="dim-state is-current">${esc(x.state==='—'?'CURRENT':x.state)}</span>`:'<span class="dim-state is-missing">未登録</span>'}</td><td>${x.current?esc(x.current):'—'}</td><td>${x.count==null?'—':esc(x.count)}</td><td><div class="dim-history">${x.error?esc(x.error):(x.history||[]).slice().reverse().map(h=>`${esc(h.revision_status||'—')} · ${esc(h.record_count??'—')}行 · ${esc(h.saved_at||'')}`).join('<br>')||'—'}</div></td></tr>`).join('')}${budgetRow}</tbody></table>${pipeline}${parity}`;
   }
   document.addEventListener('DOMContentLoaded',()=>{const p=defaultPeriod();['preliminary-pl-month','normalized-status-month'].forEach(id=>{const el=document.getElementById(id);if(el&&!el.value&&p)el.value=monthFromPeriod(p);});document.addEventListener('click',e=>{if(e.target?.id==='pipeline-verify-rebuild-btn')verifyAndRebuildCurrent();});refresh().catch(()=>{});});
   window.DATA_IMPORT_MANAGEMENT=Object.freeze({importPreliminary,refresh,verifyAndRebuildCurrent});
