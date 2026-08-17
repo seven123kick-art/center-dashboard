@@ -1,32 +1,51 @@
-Version6 D4-33 / Accounting Actual Read-Path Proof
+Version6 D4-34 / Canonical Route Profitability Safety
 Date: 2026-08-17
-Base: GitHub main after D4-32 (commit 3bd62058f591ccecbc212a287eaffec6d63fe60e)
+Base GitHub main: 10649ef02856df72a40a48f42ffeb282a039d5d2
 
-目的
-- D4-32で追加したCanonical収支Read Modelが、実際にどの経路を選択しているかを証明する。
-- Parityの「一致」と、実表示経路の「Canonical利用中」を別々に確認する。
+実コード確認で判明した問題
+- D4-22 CANONICAL_ROUTE_LEDGER は PL_ACTUAL等を含む「どれか1つのCURRENT batch」があれば
+  Canonical便集計へ切り替えていた。
+- そのためDELIVERY_LISTがない月でもCanonical便側へ入る可能性があり、
+  便0件化や不完全な表示に切り替わる余地があった。
+- ROUTE_PAYMENTのNO_RECORDは利益確定には使われていなかったが、
+  route row上のpayment値は0へ補完されており、ZERO_PAYMENTとの意味の違いが弱かった。
 
-変更
-- accounting_parity.js の既存D4-32 Read Modelは変更しない。
-- 同ファイル末尾に読取専用のD4-33診断を追加。
-- データ確認画面の「収支データ移行診断」直下に「収支読取経路」を表示。
-- 各月を以下で表示:
-  CANONICAL -> Canonical利用中
-  PRELIMINARY_FALLBACK -> 日報Dataset利用中
-  HISTORY_FALLBACK -> 収支補完Dataset利用中
-  LEGACY_FALLBACK -> 現行Dataset利用中
-- 診断はACCOUNTING_DATASET_READ_MODEL.inspect()/warmMonth()だけを使用。
-- Dataset / Canonical / Cloudへの書込、自動補正は行わない。
-- 新規JS/CSSファイルを増やさず、既存読込済みファイル内へ統合。
-
-現在期待する実機結果
-- 2026年4月: Canonical利用中
-- 2026年5月: Canonical利用中
-- 2026年6月: 日報Dataset利用中
+D4-34修正
+1. Canonical便集計へ切り替える必須条件を DELIVERY_LIST CURRENT に限定。
+2. DELIVERY_LISTがなければ月全体をLegacyへfallback。
+3. CanonicalとLegacyを同一便集計内で混在させない。
+4. PAYMENT状態を正式に区別:
+   - KNOWN
+   - ZERO_PAYMENT
+   - NO_RECORD
+   - UNKNOWN_AMOUNT
+   - SOURCE_NOT_REGISTERED
+5. NO_RECORD/UNKNOWN/SOURCE未登録はpayment=null。0円補完しない。
+6. ZERO_PAYMENTだけはpayment=0として既知値扱い。
+7. 売上状態も KNOWN / UNMATCHED / UNKNOWN_AMOUNT / SOURCE_NOT_REGISTERED / NO_SLIPS に分離。
+8. 配送件数はDELIVERY_LIST掲載原票数を使用し、売上未一致でも0件にしない。
+9. 利益確定は「原票あり + 売上KNOWN + 支払KNOWN/ZERO_PAYMENT」の場合のみ。
+10. 便状態を 完全連動 / 部分連動 / 未連動 に分離。
+11. 診断へ
+    - 完全連動便
+    - 部分連動便
+    - 未連動便
+    - NO_RECORD
+    - ZERO_PAYMENT
+    - UNKNOWN_PAYMENT
+    等を追加。
+12. normalized-source-updatedで便Ledgerキャッシュを破棄。
 
 変更ファイル
-- src/core/data_catalog/accounting_parity.js
+- src/core/data_catalog/canonical_route_ledger.js
 - CHANGELOG.txt
+
+変更しないもの
+- route_analysis.js UI
+- SOURCE parser
+- Canonical Builder / Materializer
+- STATE / Repository / Supabase schema
+- 自社便推定ロジック（追加しない）
 
 検証
 - node --check PASS
