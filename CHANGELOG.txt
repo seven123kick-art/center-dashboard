@@ -1,34 +1,35 @@
-Version6 D4-6 / Startup Readiness Gate
+Version6 D4-7 / Verified Read Model Fast Startup
 Date: 2026-08-17
 
 PURPOSE
-- Prevent cached/partial management figures from appearing before current cloud data is verified.
-- Make visible figures mean startup verification completed successfully.
-- On failure, missing data, or timeout, block numeric display and explain the state.
+- Keep D4-6 safety rule: management figures are never shown before startup verification.
+- Reduce repeated cloud downloads when the locally stored state is already the same version that was verified on the previous successful startup.
 
-DISPLAY RULE
-1. Center selected.
-2. Local settings/cache may load internally, but numeric screens are not rendered.
-3. Startup sync verifies manifest, full_state, required fiscal-year datasets, and manifest-declared plan/capacity/daily data.
-4. Only READY renders the requested screen.
-5. LOAD_FAILED / MISSING / timeout keeps figures hidden and shows a blocking dialog.
-6. Successful startup shows a small "データ確認済" timestamp badge.
+DESIGN
+- Cloud Manifest is still checked on every startup.
+- After a full successful startup, a verified-manifest marker is stored in IndexedDB.
+- On the next startup, the current Cloud Manifest is fingerprinted and compared with that marker.
+- Fast path is allowed only when center matches, Manifest fingerprint matches, and required local data is present/current.
+- If any check fails, the existing D4-6 full synchronization runs.
+- Failure/timeout remains blocking; unverified figures are not displayed.
+
+PERFORMANCE
+- Matching verified state skips full_state and monthly dataset downloads.
+- Normal full sync reuses the already fetched full_state for dailyRecords instead of downloading it twice.
 
 IMPORTANT
-- Removed the former 45-second fallback that displayed local cache.
-- Removed cache-first rendering followed by cloud number replacement.
-- full_state/monthly fetch failures are no longer silently ignored.
-- Missing cloud data without a valid fallback is MISSING, not successful empty startup.
-- Business calculations and schemas are unchanged.
+- This is not unconditional cache-first display.
+- Lightweight Cloud Manifest verification always happens before figures are shown.
+- Another device changing data changes the Manifest fingerprint and forces full refresh.
+- Verified marker is written only after successful READY synchronization.
 
 FILES
-- center.html
-- src/app.js
-- src/core/startup_readiness.js (new)
+- src/core/startup_readiness.js
 - src/core/repository/sync_coordinator.js
-- assets/css/foundation/theme.css
 - CHANGELOG.txt
 
 VALIDATION
 - node --check: all src/**/*.js PASS.
-- center.html HTML parse PASS.
+- No business calculation changes.
+- No Data Catalog / Canonical schema changes.
+- No Supabase schema changes.

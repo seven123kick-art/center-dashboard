@@ -196,13 +196,29 @@ TODO(V6以降)
                     return { ok:false, noData:true, stage:'MANIFEST', readiness:'MISSING', error:legacy?.error || 'クラウドに対象センターの主要データが登録されていません' };
                 }
 
+                // D4-7: 前回READY時に検証済みのローカル状態とCloud Manifestが完全一致する場合、
+                // 大きなfull_state/月別データを再取得せず、その検証済み状態をRead Modelとして利用する。
+                // Manifest自体は毎回Cloudで確認するため、別端末から更新された場合は必ず通常同期へ落ちる。
+                if (window.STARTUP_READINESS?.canUseVerifiedLocal) {
+                    const reusable = await STARTUP_READINESS.canUseVerifiedLocal(manifest);
+                    if (reusable) {
+                        if (typeof applyDeletionTombstonesToState === 'function') applyDeletionTombstonesToState(STATE);
+                        if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
+                        if (window.FIELD_DATA_ACCESS?.invalidate) window.FIELD_DATA_ACCESS.invalidate();
+                        if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('ok');
+                        return { ok:true, changed:false, source:'verified_local_snapshot', readiness:'READY', verifiedAt:new Date().toISOString(), fastPath:true };
+                    }
+                }
+
                 // manifest.deleted は古い削除フラグ汚染の原因になるためマージしない（既存仕様を踏襲）。
 
                 // full_state は routeData / companyMaster / workerMaster 等の軽量台帳の正本でもある。
                 // 起動同期でここを取得しないと、別端末・キャッシュ消失後に便別採算だけ
                 // 「配達持出PDFなし」「所属会社なし」になるため、月別CSV取得より先に復元する。
+                let bootCloudFull = null;
                 try {
                     const cloudFull = await CR.fetchFullState();
+                    bootCloudFull = cloudFull;
                     if (!cloudFull || typeof cloudFull !== 'object') {
                         return { ok:false, stage:'FULL_STATE', readiness:'MISSING', error:'クラウドの主要状態データを確認できませんでした' };
                     }
@@ -282,7 +298,9 @@ TODO(V6以降)
 
                 if (manifest.hasDailyRecords) {
                     try {
-                        const full = await CR.fetchFullState();
+                        // full_stateは起動同期の冒頭ですでに検証・取得済み。
+                        // 同一起動中に同じCloudオブジェクトを二重取得しない。
+                        const full = bootCloudFull;
                         if (!full || !Array.isArray(full.dailyRecords)) return { ok:false, stage:'DAILY_RECORDS', readiness:'MISSING', error:'日次データを確認できませんでした' };
                         STATE.dailyRecords = full.dailyRecords;
                         changed++;
@@ -295,7 +313,13 @@ TODO(V6以降)
                 if (changed) window.STORAGE_REPOSITORY.save();
 
                 if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('ok');
-                return { ok: true, changed: !!changed, source: 'boot_fiscal_year_skdl_only', readiness:'READY', verifiedAt:new Date().toISOString() };
+                const verifiedAt = new Date().toISOString();
+                // 正常同期を最後まで通過した状態だけを、次回起動で再利用可能な検証済みRead Modelとして記録する。
+                // 失敗・途中状態ではmarkerを更新しない。
+                if (window.STARTUP_READINESS?.saveVerifiedMarker) {
+                    await STARTUP_READINESS.saveVerifiedMarker(manifest, verifiedAt);
+                }
+                return { ok: true, changed: !!changed, source: 'boot_fiscal_year_skdl_only', readiness:'READY', verifiedAt, fastPath:false };
             } catch (e) {
                 if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('error');
                 return { ok: false, error: e.message || String(e) };

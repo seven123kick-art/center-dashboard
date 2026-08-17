@@ -81,5 +81,58 @@
       ]);
     } finally { if(timer) clearTimeout(timer); }
   }
-  window.STARTUP_READINESS={ setProgress, showFailure, markVerified, withTimeout };
+  function manifestFingerprint(manifest){
+    if(!manifest || typeof manifest !== 'object') return '';
+    const datasets=(Array.isArray(manifest.datasets)?manifest.datasets:[])
+      .filter(x=>x&&x.ym)
+      .map(x=>({ym:String(x.ym),type:String(x.type||'confirmed'),importedAt:x.importedAt||x.updatedAt||null}))
+      .sort((a,b)=>(a.ym+a.type).localeCompare(b.ym+b.type));
+    const workers=(Array.isArray(manifest.workerCsvData)?manifest.workerCsvData:[])
+      .filter(x=>x&&x.ym).map(x=>({ym:String(x.ym),importedAt:x.importedAt||x.updatedAt||x.savedAt||null}))
+      .sort((a,b)=>a.ym.localeCompare(b.ym));
+    const products=(Array.isArray(manifest.productAddressData)?manifest.productAddressData:[])
+      .filter(x=>x&&x.ym).map(x=>({ym:String(x.ym),importedAt:x.importedAt||x.updatedAt||x.savedAt||null}))
+      .sort((a,b)=>a.ym.localeCompare(b.ym));
+    return JSON.stringify({
+      version:manifest.version||null, savedAt:manifest.savedAt||null,
+      datasets, workers, products,
+      hasPlanData:!!manifest.hasPlanData, planDataUpdatedAt:manifest.planDataUpdatedAt||null,
+      hasCapacity:!!manifest.hasCapacity, hasDailyRecords:!!manifest.hasDailyRecords
+    });
+  }
+  function localMatchesManifest(manifest){
+    if(!manifest || !window.STATE) return false;
+    const ds=Array.isArray(STATE.datasets)?STATE.datasets:[];
+    for(const m of (Array.isArray(manifest.datasets)?manifest.datasets:[])){
+      if(!m?.ym) continue;
+      const type=m.type||'confirmed';
+      const local=ds.find(x=>x&&x.ym===m.ym&&(x.type||'confirmed')===type);
+      if(!local) return false;
+      if(String(local.importedAt||'') < String(m.importedAt||m.updatedAt||'')) return false;
+    }
+    if(manifest.hasPlanData && !(STATE.planData && Object.keys(STATE.planData).length)) return false;
+    if(manifest.hasCapacity && !STATE.capacity) return false;
+    if(manifest.hasDailyRecords && !(Array.isArray(STATE.dailyRecords)&&STATE.dailyRecords.length)) return false;
+    return true;
+  }
+  async function getVerifiedMarker(){
+    if(!window.IDB_CACHE?.get) return null;
+    return IDB_CACHE.get('startup','verified_manifest');
+  }
+  async function saveVerifiedMarker(manifest, verifiedAt){
+    if(!window.IDB_CACHE?.set) return false;
+    return IDB_CACHE.set('startup','verified_manifest',{
+      centerId:window.CENTER?.id||null,
+      fingerprint:manifestFingerprint(manifest),
+      verifiedAt:verifiedAt||new Date().toISOString()
+    });
+  }
+  async function canUseVerifiedLocal(manifest){
+    const marker=await getVerifiedMarker();
+    if(!marker || marker.centerId!==window.CENTER?.id) return false;
+    if(marker.fingerprint!==manifestFingerprint(manifest)) return false;
+    return localMatchesManifest(manifest);
+  }
+  window.STARTUP_READINESS={ setProgress, showFailure, markVerified, withTimeout,
+    manifestFingerprint, localMatchesManifest, getVerifiedMarker, saveVerifiedMarker, canUseVerifiedLocal };
 })();
