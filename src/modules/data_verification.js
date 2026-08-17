@@ -115,11 +115,11 @@
     const fy=fiscalYearOfYm(ym);
     if(!force&&['LOADING','LOADED'].includes(parityStateByFy.get(fy)))return;
     parityStateByFy.set(fy,'LOADING');
-    ACCOUNTING_PARITY.checkFiscalYear(fy,{force}).then(r=>{
-      parityByFy.set(fy,r); parityStateByFy.set(fy,'LOADED'); render();
+    return ACCOUNTING_PARITY.checkFiscalYear(fy,{force}).then(r=>{
+      parityByFy.set(fy,r); parityStateByFy.set(fy,'LOADED'); render(); return r;
     }).catch(e=>{
       parityByFy.set(fy,{status:'ERROR',fiscalYear:fy,error:e?.message||String(e),months:[]});
-      parityStateByFy.set(fy,'ERROR'); render();
+      parityStateByFy.set(fy,'ERROR'); render(); throw e;
     });
   }
   function parityHtml(ym){
@@ -148,14 +148,17 @@
     if(!ok)return;
     try{
       UI?.toast?.('既存確定収支を移行しています…');
+      const verified=[];
       for(const period of targets){
         const r=await ACCOUNTING_LEGACY_MIGRATION.migrateMonth(period);
-        if(!r?.ok&&!r?.skipped)throw new Error(`${period}: ${r?.error||'移行失敗'}`);
+        if(!r?.ok)throw new Error(`${period}: ${r?.error||'移行失敗'}${r?.stage?` [${r.stage}]`:''}`);
+        if(!r?.verified_readback)throw new Error(`${period}: Cloud読戻し確認が完了していません`);
+        verified.push(period);
       }
       parityStateByFy.delete(fy);parityByFy.delete(fy);
-      await ensureMaterialized(ym,true);
-      ensureParity(ym,true);
-      UI?.toast?.('既存確定収支の移行が完了しました');
+      try{await ensureMaterialized(ym,true);}catch(e){console.warn('[D4-29] selected month rematerialize failed',e);}
+      await ensureParity(ym,true);
+      UI?.toast?.(`既存確定収支をCloud読戻し確認済みで移行しました（${verified.map(x=>Number(x.slice(4))+'月').join('・')}）`);
     }catch(e){console.error('[D4-28] accounting migration failed',e);UI?.toast?.(`収支移行に失敗しました：${e?.message||e}`,'error');}
   }
   function setDetail(mode){detailMode=mode;resolutionPreviewState=null;render();}

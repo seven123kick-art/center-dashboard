@@ -1,37 +1,39 @@
-Version6 D4-28 / Legacy Confirmed Accounting Normalization Migration
+Version6 D4-29 / PL_ACTUAL Verified Persistence & Readback
 Date: 2026-08-17
 
-確認結果
-- D3-8以降に新規取込するSKDL0003確定CSVは app.js processCSV() から
-  ACCOUNTING_IMPORT_BRIDGEへ渡され、PL_ACTUAL NormalizedSourceへ保存される。
-- 2026年4～6月はD3-8導入前に登録済みのため、現行Datasetは存在するが
-  PL_ACTUAL NormalizedSource batchが存在せず、Parity診断が「PL未正規化」となっていた。
-- 現行Datasetには科目別rowsが保存されているが、元CSVの原票/HEAD等の明細は復元できない。
+D4-28実機結果
+- 「既存確定収支の移行が完了しました」と表示された後も、
+  再診断で2026年4～6月がPL未正規化のままだった。
+- D4-28 UIは skipped=true を失敗扱いせず、Cloud読戻し確認なしで
+  完了通知できる欠陥があった。
 
-対応
-1. accounting_legacy_migration.js 新設。
-2. 既存のconfirmed Datasetの科目別rowsを、推測せずそのままPL_ACTUALへ移行可能にした。
-3. 原CSV明細を復元したように見せないため、
-   source_granularity=ACCOUNT_TOTAL
-   migration_source=LEGACY_CONFIRMED_DATASET
-   を明示して保存。
-4. 原票番号・HEAD・荷主・社員等、既存Datasetから復元不能な項目はnullのまま。
-5. データ確認 > 収支データ移行診断に
-   「既存確定データを移行」ボタンを追加。
-6. PL未正規化月だけを対象にし、実行前に確認ダイアログを表示。
-7. 既存Datasetは変更・削除しない。
-8. 移行後にParityを再診断し、一致/差異を実測する。
+修正
+1. accounting_legacy_migration.js
+   - ACCOUNTING_IMPORT_BRIDGE経由ではなく正式Repository.NormalizedSource.saveBatchを直接使用。
+   - 保存前にCloud CURRENTをpreferCache=falseで確認。
+   - 保存後、loadCurrent(... preferCache=false)でCloudから必ず読戻し。
+   - batch_id / manifest.current_batch_id / record_countを照合。
+   - CONFIRMED、migration_source=LEGACY_CONFIRMED_DATASET、
+     source_granularity=ACCOUNT_TOTALを読戻し内容でも確認。
+   - 上記を満たさない限りok=trueを返さない。
+2. data_verification.js
+   - skippedや依存不足を「移行完了」にしない。
+   - 3か月すべてCloud読戻し確認済みの場合だけ完了通知。
+   - ensureParity()をPromiseとして返し、再診断完了をawait。
+3. accounting_parity.js
+   - MaterializerでPL batchが見えない場合、NormalizedSource CURRENTをCloudへ直接確認。
+   - CURRENTが存在するのにMaterializerが見えない場合はCANONICAL_FAILEDとして区別。
 
-今後
-- 新規SKDL0003は従来どおり原CSV明細から正規化する。
-- D4-28移行分はACCOUNT_TOTAL粒度であることを保持し続ける。
-- Parity一致確認前にホーム/年度推移をCanonicalへ切り替えない。
+重要
+- ホームKPI/年度推移はまだCanonicalへ切り替えない。
+- 既存Datasetは変更しない。
+- 原CSV明細を推測復元しない。
+- D4-28で保存済みの正常なCURRENTが存在する場合は再保存せず、Cloud読戻し確認後にParityへ進む。
 
 変更ファイル
 - src/core/data_catalog/accounting_legacy_migration.js
+- src/core/data_catalog/accounting_parity.js
 - src/modules/data_verification.js
-- assets/css/foundation/theme.css
-- center.html
 - CHANGELOG.txt
 
 検証

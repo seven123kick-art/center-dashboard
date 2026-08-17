@@ -50,7 +50,17 @@
     try{m=await CANONICAL_MATERIALIZER.materialize({period:ym});}
     catch(e){const out={status:'CANONICAL_FAILED',period:ym,ready:false,error:e?.message||String(e)};cache.set(ym,out);return out;}
     const batch=m?.snapshot?.materialization?.current_batches?.PL_ACTUAL||null;
-    if(!batch){const out={status:'PL_ACTUAL_NOT_NORMALIZED',period:ym,ready:false};cache.set(ym,out);return out;}
+    if(!batch){
+      let direct=null;
+      try{direct=await Repository?.NormalizedSource?.loadCurrent?.('PL_ACTUAL',ym,{preferCache:false});}catch(_e){}
+      const directBatch=direct?.batch?.batch_id||null;
+      const out={
+        status:directBatch?'CANONICAL_FAILED':'PL_ACTUAL_NOT_NORMALIZED',period:ym,ready:false,
+        normalized_current_batch_id:directBatch,
+        error:directBatch?'PL_ACTUAL CURRENTは存在するがCanonical Materializerが認識していません':null
+      };
+      cache.set(ym,out);return out;
+    }
 
     const facts=m?.snapshot?.entities?.ACCOUNTING_FACT||[];
     const cr=canonicalRows(facts);
