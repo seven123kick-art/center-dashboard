@@ -1,29 +1,37 @@
-Version6 D4-27 / Accounting Parity Active View Connection
+Version6 D4-28 / Legacy Confirmed Accounting Normalization Migration
 Date: 2026-08-17
 
-原因
-- D4-26は data_import_management.js 側へ診断UIを追加したが、
-  現在の「データ確認」画面の実描画主体は src/modules/data_verification.js。
-- そのためAccounting Parityロジックは存在していたが、実画面最下部へ表示されていなかった。
+確認結果
+- D3-8以降に新規取込するSKDL0003確定CSVは app.js processCSV() から
+  ACCOUNTING_IMPORT_BRIDGEへ渡され、PL_ACTUAL NormalizedSourceへ保存される。
+- 2026年4～6月はD3-8導入前に登録済みのため、現行Datasetは存在するが
+  PL_ACTUAL NormalizedSource batchが存在せず、Parity診断が「PL未正規化」となっていた。
+- 現行Datasetには科目別rowsが保存されているが、元CSVの原票/HEAD等の明細は復元できない。
 
-修正
-1. 実際のデータ確認画面 data_verification.js へ収支データ移行診断を正式接続。
-2. 「確認詳細」の直下に年度12か月診断を表示。
-3. 一致 / 差異 / 金額不明 / PL未正規化 / 現行Datasetなしを表示。
-4. MISMATCH時は科目・現行値・Canonical値・差額を表示。
-5. 「再診断」ボタンを追加。
-6. 診断は非同期。既存のデータ確認画面を先に表示し、診断完了後に更新。
-7. D4-26のAccountingParity.checkFiscalYear()をそのまま利用。
-   比較条件や数字判定は変更していない。
+対応
+1. accounting_legacy_migration.js 新設。
+2. 既存のconfirmed Datasetの科目別rowsを、推測せずそのままPL_ACTUALへ移行可能にした。
+3. 原CSV明細を復元したように見せないため、
+   source_granularity=ACCOUNT_TOTAL
+   migration_source=LEGACY_CONFIRMED_DATASET
+   を明示して保存。
+4. 原票番号・HEAD・荷主・社員等、既存Datasetから復元不能な項目はnullのまま。
+5. データ確認 > 収支データ移行診断に
+   「既存確定データを移行」ボタンを追加。
+6. PL未正規化月だけを対象にし、実行前に確認ダイアログを表示。
+7. 既存Datasetは変更・削除しない。
+8. 移行後にParityを再診断し、一致/差異を実測する。
 
-重要
-- ホームKPI/年度推移の参照先はまだ変更しない。
-- 診断結果で自動補正・自動切替しない。
-- UNKNOWNを0円扱いしない。
+今後
+- 新規SKDL0003は従来どおり原CSV明細から正規化する。
+- D4-28移行分はACCOUNT_TOTAL粒度であることを保持し続ける。
+- Parity一致確認前にホーム/年度推移をCanonicalへ切り替えない。
 
 変更ファイル
+- src/core/data_catalog/accounting_legacy_migration.js
 - src/modules/data_verification.js
 - assets/css/foundation/theme.css
+- center.html
 - CHANGELOG.txt
 
 検証

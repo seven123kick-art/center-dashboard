@@ -137,7 +137,26 @@
       const detail=diffs||totals||(r.error?esc(r.error):'');
       return `<div class="dv-parity-month ${cls}"><div><strong>${mm}月</strong><span>${esc(parityLabel[r.status]||r.status)}</span></div>${detail?`<small>${detail}</small>`:''}</div>`;
     }).join('');
-    return `<div class="card dv-parity-card"><div class="card-header"><span class="card-title">収支データ移行診断</span><span class="dv-readonly">${esc(fy)}年度</span></div><div class="card-body"><div class="dv-parity-head"><span class="dv-parity-summary ${report?.migrationReady?'is-ready':'is-review'}">${report?.migrationReady?'12か月一致':'確認が必要'}</span><button type="button" class="btn dv-parity-refresh" onclick="DATA_VERIFICATION_UI.refreshParity()">再診断</button></div><div class="dv-parity-counts"><span>一致 ${n(c.READY)}</span><span>差異 ${n(c.MISMATCH)}</span><span>金額不明 ${n(c.UNKNOWN_AMOUNT)}</span><span>未正規化 ${n(c.PL_ACTUAL_NOT_NORMALIZED)}</span><span>現行なし ${n(c.LEGACY_MISSING)}</span></div><div class="dv-parity-months">${cards}</div><div class="dv-footnote">${esc(report?.note||'診断結果による自動修正・自動切替は行いません。')}</div></div></div>`;
+    return `<div class="card dv-parity-card"><div class="card-header"><span class="card-title">収支データ移行診断</span><span class="dv-readonly">${esc(fy)}年度</span></div><div class="card-body"><div class="dv-parity-head"><span class="dv-parity-summary ${report?.migrationReady?'is-ready':'is-review'}">${report?.migrationReady?'12か月一致':'確認が必要'}</span><div class="dv-parity-actions">${(c.PL_ACTUAL_NOT_NORMALIZED||0)>0?`<button type="button" class="btn dv-parity-migrate" onclick="DATA_VERIFICATION_UI.migrateLegacyAccounting()">既存確定データを移行</button>`:''}<button type="button" class="btn dv-parity-refresh" onclick="DATA_VERIFICATION_UI.refreshParity()">再診断</button></div></div><div class="dv-parity-counts"><span>一致 ${n(c.READY)}</span><span>差異 ${n(c.MISMATCH)}</span><span>金額不明 ${n(c.UNKNOWN_AMOUNT)}</span><span>未正規化 ${n(c.PL_ACTUAL_NOT_NORMALIZED)}</span><span>現行なし ${n(c.LEGACY_MISSING)}</span></div><div class="dv-parity-months">${cards}</div><div class="dv-footnote">${esc(report?.note||'診断結果による自動修正・自動切替は行いません。')}</div></div></div>`;
+  }
+  async function migrateLegacyAccounting(){
+    const ym=selectedYm(),fy=fiscalYearOfYm(ym);
+    if(!window.ACCOUNTING_LEGACY_MIGRATION?.migrateFiscalYear){UI?.toast?.('収支移行基盤を読み込めません','error');return;}
+    const targets=(parityByFy.get(fy)?.months||[]).filter(x=>x.status==='PL_ACTUAL_NOT_NORMALIZED').map(x=>x.period);
+    if(!targets.length){UI?.toast?.('移行対象の確定収支はありません','warn');return;}
+    const ok=confirm(`${fy}年度のうち、PL未正規化の既存確定収支（${targets.map(x=>Number(x.slice(4))+'月').join('・')}）をCanonical PL_ACTUALへ移行します。\n\n原CSV明細を復元する処理ではなく、現在保存されている確定科目合計をACCOUNT_TOTAL粒度で移行します。既存の収支Datasetは変更しません。\n\n実行しますか？`);
+    if(!ok)return;
+    try{
+      UI?.toast?.('既存確定収支を移行しています…');
+      for(const period of targets){
+        const r=await ACCOUNTING_LEGACY_MIGRATION.migrateMonth(period);
+        if(!r?.ok&&!r?.skipped)throw new Error(`${period}: ${r?.error||'移行失敗'}`);
+      }
+      parityStateByFy.delete(fy);parityByFy.delete(fy);
+      await ensureMaterialized(ym,true);
+      ensureParity(ym,true);
+      UI?.toast?.('既存確定収支の移行が完了しました');
+    }catch(e){console.error('[D4-28] accounting migration failed',e);UI?.toast?.(`収支移行に失敗しました：${e?.message||e}`,'error');}
   }
   function setDetail(mode){detailMode=mode;resolutionPreviewState=null;render();}
   function render(){const host=document.getElementById('data-verification-root');if(!host)return;if(resolutionLoadState==='IDLE')ensureResolutionLoaded();const ym=selectedYm(),yms=allYms(),sel=document.getElementById('data-verification-ym');if(ym&&resolutionLoadState==='LOADED'&&!materializeStateByYm.has(ym))ensureMaterialized(ym);if(sel){const keep=sel.value;sel.innerHTML=yms.map(y=>`<option value="${y}">${ymLabel(y)}</option>`).join('');sel.value=(keep&&yms.includes(keep))?keep:(ym||'');}if(!ym){host.innerHTML='<div class="dv-empty">確認できるデータがありません。先にデータ取込を行ってください。</div>';return;}const data=buildData(ym);if(!data){host.innerHTML='<div class="dv-empty">データ確認基盤を読み込めませんでした。</div>';return;}const s=data.summary,c=s.entity_counts||{},l=s.link_summary||{},i=s.issue_summary||{},o=s.observation_summary||{},v=s.value_summary||{};
@@ -153,5 +172,5 @@
     materializeStateByYm.delete(ym); materializedByYm.delete(ym);
     if(selectedYm()===ym&&resolutionLoadState==='LOADED') ensureMaterialized(ym,true);
   });
-  window.DATA_VERIFICATION_UI=Object.freeze({render,buildSummary,setDetail,previewResolution,saveResolution,refreshResolution:async()=>{await ensureResolutionLoaded(true);await ensureMaterialized(selectedYm(),true);},refreshCanonical:()=>ensureMaterialized(selectedYm(),true),refreshParity:()=>ensureParity(selectedYm(),true)});
+  window.DATA_VERIFICATION_UI=Object.freeze({render,buildSummary,setDetail,previewResolution,saveResolution,refreshResolution:async()=>{await ensureResolutionLoaded(true);await ensureMaterialized(selectedYm(),true);},refreshCanonical:()=>ensureMaterialized(selectedYm(),true),refreshParity:()=>ensureParity(selectedYm(),true),migrateLegacyAccounting});
 })();
