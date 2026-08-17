@@ -354,9 +354,32 @@ function renderShipper() {
     }).join('');
   }
 
+  function setCanonicalShipperStatus(state){
+    const view=document.getElementById('view-shipper');
+    if(!view)return;
+    let el=document.getElementById('shipper-canonical-status');
+    if(!el){el=document.createElement('div');el.id='shipper-canonical-status';const selector=document.getElementById('common-period-selector-shipper')||view.firstElementChild; if(selector?.parentNode===view)selector.insertAdjacentElement('afterend',el);else view.prepend(el);}
+    if(!state){el.innerHTML='<div class="msg msg-info">確認済みデータを読み込んでいます…</div>';return;}
+    if(state.status==='READY'&&state.shipper){
+      const issues=state.shipper.issues?.length||0;
+      el.innerHTML=issues?`<div class="msg msg-warn">データ経路：Canonical。${issues}原票は荷主コード競合または金額UNKNOWNのため合計から除外しています。</div>`:'<div class="msg msg-info">データ経路：Canonical（確認済みCURRENT SOURCE）</div>';
+      return;
+    }
+    el.innerHTML=`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${_escLocal(state.reason||'正規化SOURCE未登録')}</div>`;
+  }
+
   renderShipper = function(){
     renderCommonPeriodSelector('shipper');
     const ds = selectedDatasetInSelectedFiscalYear();
+    const analysisYM=String(ds?.ym||STATE.selYM||'').replace(/\D/g,'').slice(0,6);
+    const canonicalState=analysisYM&&window.CANONICAL_ANALYSIS_READ_MODELS?.peek?CANONICAL_ANALYSIS_READ_MODELS.peek(analysisYM):null;
+    if(analysisYM&&window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth&&!canonicalState){
+      setCanonicalShipperStatus(null);
+      CANONICAL_ANALYSIS_READ_MODELS.loadMonth(analysisYM).then(()=>renderShipper()).catch(e=>{console.warn('[Shipper] canonical read model failed',e);renderShipper();});
+      return;
+    }
+    if(analysisYM)setCanonicalShipperStatus(canonicalState||{status:'LEGACY_FALLBACK',reason:'Canonical Read Model unavailable'});
+    const canonicalShipper=canonicalState?.status==='READY'?canonicalState.shipper:null;
     const mode = STATE.shipperMode || 'group';
     setShipperTabs(mode);
 
@@ -366,12 +389,12 @@ function renderShipper() {
       if (view) { noticeEl=document.createElement('div'); noticeEl.id='shipper-notice'; view.prepend(noticeEl); }
     }
 
-    const groups = getShipperGroups(ds);
-    const contracts = getShipperContracts(ds);
-    const totalIncome = groups.reduce((s,g)=>s+(Number(g.income)||0),0) || (ds ? ds.totalIncome : 0) || 0;
+    const groups = canonicalShipper ? canonicalShipper.groups : getShipperGroups(ds);
+    const contracts = canonicalShipper ? canonicalShipper.contracts : getShipperContracts(ds);
+    const totalIncome = groups.reduce((sum,g)=>sum+(Number(g.income)||0),0) || (!canonicalShipper&&ds ? ds.totalIncome : 0) || 0;
     const hasData = groups.length || contracts.length;
 
-    if (!ds || !hasData) {
+    if ((!ds && !canonicalShipper) || !hasData) {
       if (noticeEl) noticeEl.innerHTML = '<div class="msg msg-info" style="margin-bottom:14px">選択月の荷主別データがありません。確定CSV／速報CSVを再取込してください。</div>';
       if (typeof CHART_MGR !== 'undefined') CHART_MGR.make('c-shipper-bar', {type:'bar', data:{labels:[], datasets:[{data:[]}]}, options:{responsive:true,maintainAspectRatio:false}});
       renderGroupTable([],0);
@@ -380,7 +403,7 @@ function renderShipper() {
     }
 
     if (noticeEl) {
-      const colText = ds.shipperColumns
+      const colText = !canonicalShipper && ds?.shipperColumns
         ? `取得列：荷主コード=${ds.shipperColumns.shipperCode+1}列目 / 契約名=${ds.shipperColumns.shipperName+1}列目 / 重複キー=${ds.shipperColumns.detailKey+1}列目 / 金額=${ds.shipperColumns.amount+1}列目`
         : '';
       noticeEl.innerHTML = colText ? `<div class="msg msg-info" style="margin-bottom:14px">${_escLocal(ds.shipperSourceRule || '')}　${_escLocal(colText)}</div>` : '';

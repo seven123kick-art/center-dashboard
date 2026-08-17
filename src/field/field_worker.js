@@ -53,8 +53,19 @@
   }
 
   function workerRecord(ym){
+    const canonical=window.CANONICAL_ANALYSIS_READ_MODELS?.peek?.(ym);
+    if(canonical?.status==='READY'&&canonical.worker)return canonical.worker;
     const records = window.FIELD_DATA_ACCESS?.getWorkerRecords ? FIELD_DATA_ACCESS.getWorkerRecords() : safeArray(STATE.workerCsvData);
     return records.find(d => d && d.ym === ym) || null;
+  }
+
+  function renderCanonicalWorkerStatus(state){
+    const view=document.getElementById('view-field-worker');if(!view)return;
+    let el=document.getElementById('worker-canonical-status');
+    if(!el){el=document.createElement('div');el.id='worker-canonical-status';const selector=document.getElementById('field-common-selector-box');if(selector&&selector.parentNode===view)selector.insertAdjacentElement('afterend',el);else view.prepend(el);}
+    if(!state){el.innerHTML='<div class="msg msg-info">確認済みデータを読み込んでいます…</div>';return;}
+    if(state.status==='READY'&&state.worker){el.innerHTML='<div class="msg msg-info">データ経路：Canonical（確認済みWORKER_SALES CURRENT SOURCE）</div>';return;}
+    el.innerHTML=`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${esc(state.reason||'正規化SOURCE未登録')}</div>`;
   }
 
   function rowsFromRecord(rec){
@@ -377,6 +388,13 @@
       if (typeof window.setupFieldCommonSelectors === 'function') window.setupFieldCommonSelectors();
     } catch(e) {}
     const ym = selectedYM();
+    const canonicalState=ym&&window.CANONICAL_ANALYSIS_READ_MODELS?.peek?CANONICAL_ANALYSIS_READ_MODELS.peek(ym):null;
+    if(ym&&window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth&&!canonicalState){
+      renderCanonicalWorkerStatus(null);
+      CANONICAL_ANALYSIS_READ_MODELS.loadMonth(ym).then(()=>render()).catch(e=>{console.warn('[WorkerAnalysis] canonical read model failed',e);render();});
+      return;
+    }
+    if(ym)renderCanonicalWorkerStatus(canonicalState||{status:'LEGACY_FALLBACK',reason:'Canonical Read Model unavailable'});
     const rec = workerRecord(ym);
     const rows = rowsFromRecord(rec);
     ensureDetailHeader();
