@@ -1,34 +1,38 @@
-Version6 D4-29 / PL_ACTUAL Verified Persistence & Readback
+Version6 D4-30 / Accounting CONFIG Binding Fix
 Date: 2026-08-17
 
-D4-28実機結果
-- 「既存確定収支の移行が完了しました」と表示された後も、
-  再診断で2026年4～6月がPL未正規化のままだった。
-- D4-28 UIは skipped=true を失敗扱いせず、Cloud読戻し確認なしで
-  完了通知できる欠陥があった。
+D4-29実機結果
+- 202604で ACCOUNT_ROWS_NOT_FOUND。
+- confirmed Dataset自体は取得できていた。
+
+実コード確認で確定した原因
+- app.js の CONFIG は `const CONFIG = {...}` として定義された top-level lexical binding。
+- `window.CONFIG` には公開されていない。
+- 現行 processDataset() は `CONFIG.INCOME_KEYS / CONFIG.EXPENSE_KEYS` を直接参照して正常動作。
+- D4-25 accounting_parity.js と D4-28 accounting_legacy_migration.js は誤って
+  `window.CONFIG` を参照していた。
+- その結果、移行対象科目キーが0件となり ACCOUNT_ROWS_NOT_FOUND になっていた。
+- 同じ誤りがParityにもあり、移行後の科目比較が0キーになる潜在不具合もあった。
 
 修正
 1. accounting_legacy_migration.js
-   - ACCOUNTING_IMPORT_BRIDGE経由ではなく正式Repository.NormalizedSource.saveBatchを直接使用。
-   - 保存前にCloud CURRENTをpreferCache=falseで確認。
-   - 保存後、loadCurrent(... preferCache=false)でCloudから必ず読戻し。
-   - batch_id / manifest.current_batch_id / record_countを照合。
-   - CONFIRMED、migration_source=LEGACY_CONFIRMED_DATASET、
-     source_granularity=ACCOUNT_TOTALを読戻し内容でも確認。
-   - 上記を満たさない限りok=trueを返さない。
-2. data_verification.js
-   - skippedや依存不足を「移行完了」にしない。
-   - 3か月すべてCloud読戻し確認済みの場合だけ完了通知。
-   - ensureParity()をPromiseとして返し、再診断完了をawait。
-3. accounting_parity.js
-   - MaterializerでPL batchが見えない場合、NormalizedSource CURRENTをCloudへ直接確認。
-   - CURRENTが存在するのにMaterializerが見えない場合はCANONICAL_FAILEDとして区別。
+   - window.CONFIG参照を廃止。
+   - 現行processDataset()と同じglobal lexical CONFIGを使用。
+   - INCOME_KEYS + EXPENSE_KEYSだけを既存Dataset.rowsからPL_ACTUALへ移行。
+   - CONFIG自体が見えない場合はACCOUNT_CONFIG_UNAVAILABLEとして区別。
+2. accounting_parity.js
+   - window.CONFIG参照を廃止。
+   - 現行processDataset()と同じCONFIG科目集合で比較。
+   - 収入合計・費用合計の判定も同じCONFIGを使用。
+3. data_verification.js
+   - ACCOUNT_ROWS_NOT_FOUND時にDataset row数もエラー表示できるよう診断補強。
 
 重要
+- 既存Dataset構造を推測変更していない。
+- processDataset()の収支計算ロジックは変更していない。
+- 既存Datasetは変更・削除しない。
 - ホームKPI/年度推移はまだCanonicalへ切り替えない。
-- 既存Datasetは変更しない。
-- 原CSV明細を推測復元しない。
-- D4-28で保存済みの正常なCURRENTが存在する場合は再保存せず、Cloud読戻し確認後にParityへ進む。
+- D4-29のCloud読戻し厳格検証を維持する。
 
 変更ファイル
 - src/core/data_catalog/accounting_legacy_migration.js
@@ -38,3 +42,4 @@ D4-28実機結果
 
 検証
 - 全 src/**/*.js node --check PASS
+- window.CONFIG誤参照が上記2ファイルから消えていることを確認

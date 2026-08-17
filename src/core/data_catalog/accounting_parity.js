@@ -64,17 +64,24 @@
 
     const facts=m?.snapshot?.entities?.ACCOUNTING_FACT||[];
     const cr=canonicalRows(facts);
-    const keys=[...(window.CONFIG?.INCOME_KEYS||[]),...(window.CONFIG?.EXPENSE_KEYS||[])];
+    // app.jsのCONFIGはwindowプロパティではなくglobal lexical binding。
+    // 現行processDataset()と完全に同じ科目集合で比較する。
+    const cfg=(typeof CONFIG!=='undefined'&&CONFIG)?CONFIG:null;
+    if(!cfg){
+      const out={status:'CANONICAL_FAILED',period:ym,ready:false,error:'ACCOUNT_CONFIG_UNAVAILABLE'};
+      cache.set(ym,out);return out;
+    }
+    const keys=[...(cfg.INCOME_KEYS||[]),...(cfg.EXPENSE_KEYS||[])];
     const unique=[...new Set(keys)];
     const comparisons=unique.map(k=>compareKey(cr.rows,legacy.rows||{},k));
     const unknown=comparisons.filter(x=>x.status==='UNKNOWN');
     const mismatch=comparisons.filter(x=>x.status==='MISMATCH');
 
     const sum=(ks,rows)=>ks.reduce((a,k)=>a+(finite(rows[k])?rows[k]:0),0);
-    const canUnknownIncome=(window.CONFIG?.INCOME_KEYS||[]).some(k=>cr.rows[k]===null);
-    const canUnknownExpense=(window.CONFIG?.EXPENSE_KEYS||[]).some(k=>cr.rows[k]===null);
-    const canonicalIncome=canUnknownIncome?null:sum(window.CONFIG?.INCOME_KEYS||[],cr.rows);
-    const canonicalExpense=canUnknownExpense?null:sum(window.CONFIG?.EXPENSE_KEYS||[],cr.rows);
+    const canUnknownIncome=(cfg.INCOME_KEYS||[]).some(k=>cr.rows[k]===null);
+    const canUnknownExpense=(cfg.EXPENSE_KEYS||[]).some(k=>cr.rows[k]===null);
+    const canonicalIncome=canUnknownIncome?null:sum(cfg.INCOME_KEYS||[],cr.rows);
+    const canonicalExpense=canUnknownExpense?null:sum(cfg.EXPENSE_KEYS||[],cr.rows);
     const canonicalProfit=(canonicalIncome===null||canonicalExpense===null)?null:canonicalIncome-canonicalExpense;
     const totals={
       totalIncome:{canonical:canonicalIncome,legacy:Number(legacy.totalIncome||0)},

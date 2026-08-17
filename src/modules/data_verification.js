@@ -151,7 +151,7 @@
       const verified=[];
       for(const period of targets){
         const r=await ACCOUNTING_LEGACY_MIGRATION.migrateMonth(period);
-        if(!r?.ok)throw new Error(`${period}: ${r?.error||'移行失敗'}${r?.stage?` [${r.stage}]`:''}`);
+        if(!r?.ok)throw new Error(`${period}: ${r?.error||'移行失敗'}${r?.stage?` [${r.stage}]`:''}${Number.isFinite(r?.dataset_row_count)?` (Dataset rows=${r.dataset_row_count})`:''}`);
         if(!r?.verified_readback)throw new Error(`${period}: Cloud読戻し確認が完了していません`);
         verified.push(period);
       }

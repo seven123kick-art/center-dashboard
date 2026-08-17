@@ -30,7 +30,10 @@
 
   function recordsFromDataset(ds){
     if(!ds||!ds.ym||!ds.rows||typeof ds.rows!=='object')return [];
-    const keys=[...(window.CONFIG?.INCOME_KEYS||[]),...(window.CONFIG?.EXPENSE_KEYS||[])];
+    // app.jsのCONFIGはtop-level const（global lexical binding）でありwindow.CONFIGではない。
+    // processDataset()と同じ正式な収入・費用キーを参照する。
+    const cfg=(typeof CONFIG!=='undefined'&&CONFIG)?CONFIG:null;
+    const keys=[...(cfg?.INCOME_KEYS||[]),...(cfg?.EXPENSE_KEYS||[])];
     const unique=[...new Set(keys)];
     const importedAt=ds.importedAt||ds.updatedAt||ds.savedAt||null;
     return unique.filter(k=>Object.prototype.hasOwnProperty.call(ds.rows,k)).map((accountName,i)=>{
@@ -71,7 +74,11 @@
     const ds=activeConfirmed(ym);
     if(!ds)return {ok:false,error:'CONFIRMED_DATASET_NOT_FOUND',period:ym};
     const records=recordsFromDataset(ds);
-    if(!records.length)return {ok:false,error:'ACCOUNT_ROWS_NOT_FOUND',period:ym};
+    if(!records.length){
+      const cfg=(typeof CONFIG!=='undefined'&&CONFIG)?CONFIG:null;
+      return {ok:false,error:cfg?'ACCOUNT_ROWS_NOT_FOUND':'ACCOUNT_CONFIG_UNAVAILABLE',period:ym,
+        dataset_row_count:(ds?.rows&&typeof ds.rows==='object')?Object.keys(ds.rows).length:0};
+    }
 
     const id=batchId(ym);
     const saved=await Repository.NormalizedSource.saveBatch({
