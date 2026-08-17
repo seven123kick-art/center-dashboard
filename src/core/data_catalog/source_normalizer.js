@@ -224,10 +224,34 @@
     return out;
   }
 
+
+  function normalizeDeliveryListRoutes(routes, meta = {}){
+    const out=[];
+    const fileId=sourceFileId(meta);
+    (Array.isArray(routes)?routes:[]).forEach((r,routeIndex)=>{
+      const headNo=clean(r?.headNumber||r?.head_no).replace(/\.0$/,'');
+      const deliveryDate=normalizeDate(r?.date||r?.delivery_date);
+      if(!headNo||!deliveryDate) return;
+      const slips=[...new Set((Array.isArray(r?.slips)?r.slips:[]).map(normalizeSlipNo).filter(Boolean))];
+      const base={
+        document_type:'DELIVERY_LIST', source_file_id:fileId,
+        year_month:yearMonth(meta)||deliveryDate.replace(/\D/g,'').slice(0,6), center_id:centerId(meta),
+        delivery_date:deliveryDate, head_no:headNo,
+        source_worker1_label:clean(r?.worker)||null,
+        source_page_number:Number.isFinite(Number(r?._source_page))?Number(r._source_page):null,
+      };
+      if(!slips.length){
+        out.push({...base,slip_no:null,source_record_id:`DELIVERY_LIST:${fileId}:${routeIndex+1}:HEAD`,source_row_index:routeIndex+1});
+      } else slips.forEach((slipNo,slipIndex)=>out.push({...base,slip_no:slipNo,source_record_id:`DELIVERY_LIST:${fileId}:${routeIndex+1}:${slipIndex+1}`,source_row_index:routeIndex+1}));
+    });
+    return out;
+  }
+
   window.SOURCE_NORMALIZER = Object.freeze({
     normalizeWorkerSalesRows,
     normalizeShipperAreaRows,
     normalizeRoutePaymentRows,
+    normalizeDeliveryListRoutes,
     normalizeSlipNo,
     normalizeDate,
     normalizeMatchLabel,

@@ -180,6 +180,7 @@
         }catch(_){ }
       }
       const r=parsePageText(text,items);
+      r._source_page=p;
       diagnostics.push({page:p,head:r.headNumber,date:r.date,items:items.length,fallbackChars,engine:engineName,source});
       if(!r.headNumber||!r.date) continue;
       const key=`${r.date}|${r.headNumber}`;
@@ -250,11 +251,16 @@
         return;
       }
       const byYm=new Map();
+      const normalizedDeliveryByYm=new Map();
       let parsedRouteCount = 0;
       const allDiagnostics=[];
       for(const f of arr){
         const routes=await parsePdf(f);
         parsedRouteCount += routes.length;
+        if(window.SOURCE_NORMALIZER?.normalizeDeliveryListRoutes){
+          const normalized=SOURCE_NORMALIZER.normalizeDeliveryListRoutes(routes,{file_name:f.name,center_id:window.CENTER?.id||null});
+          for(const rec of normalized){ const nym=String(rec.year_month||''); if(!/^\d{6}$/.test(nym)) continue; if(!normalizedDeliveryByYm.has(nym)) normalizedDeliveryByYm.set(nym,[]); normalizedDeliveryByYm.get(nym).push(rec); }
+        }
         allDiagnostics.push({file:f.name,pages:routes._diagnostics||[]});
         for(const r of routes){
           const ym=ymOfDate(r.date);
@@ -280,12 +286,22 @@
       STATE.routeData.sort((a,b)=>a.ym.localeCompare(b.ym));
       Repository.Storage.save();
       if(window.CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(()=>{});
+      let normalizedDeliverySaved=0, normalizedDeliveryFailed=0;
+      if(window.Repository?.NormalizedSource?.saveBatch){
+        for(const [ym,records] of normalizedDeliveryByYm){
+          try{
+            const suffix=(globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function')?globalThis.crypto.randomUUID().replace(/-/g,''):`${Date.now()}_${Math.random().toString(36).slice(2,10)}`;
+            const nr=await Repository.NormalizedSource.saveBatch({document_type:'DELIVERY_LIST',period:ym,batch_id:`DELIVERY_LIST_${ym}_${suffix}`,source_file_id:null,records,meta:{imported_at:new Date().toISOString()}});
+            if(nr?.ok) normalizedDeliverySaved++; else normalizedDeliveryFailed++;
+          }catch(e){ normalizedDeliveryFailed++; console.warn('[D3-8] DELIVERY_LIST normalized save failed',ym,e); }
+        }
+      } else normalizedDeliveryFailed=normalizedDeliveryByYm.size;
       if (!parsedRouteCount) {
         const d=allDiagnostics.flatMap(x=>x.pages).slice(-6).map(x=>`${x.engine||'?'} P${x.page}:日付=${x.date||'×'} / ヘッド=${x.head||'×'} / Text=${x.items} / Op文字=${x.fallbackChars||0} / ${x.source||''}`).join('、');
         if(msg) msg.innerHTML=`<span style="color:#991b1b;font-weight:700">PDFは読み込みましたが便を確定できませんでした。</span><br><span style="font-size:12px;color:#64748b">診断: ${esc(d||'PDF文字情報なし')}</span>`;
         return;
       }
-      if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルから${parsedRouteCount}便を取り込みました。</span>`;
+      if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルから${parsedRouteCount}便を取り込みました。${normalizedDeliveryFailed?` <span style=\"color:#92400e\">/ 正規化SOURCE保存未確認 ${normalizedDeliveryFailed}ヶ月</span>`:` / 正規化SOURCE保存済 ${normalizedDeliverySaved}ヶ月`}</span>`;
       render();
     }catch(e){
       console.error(e);

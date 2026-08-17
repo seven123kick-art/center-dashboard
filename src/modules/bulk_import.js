@@ -118,6 +118,8 @@ window.BULK_IMPORT = {
     const mm = ym.slice(4,6);
     const monthCol = CONFIG.PLAN_MONTH_COLS[mm] ?? null;
     let imported = 0;
+    const normalizedAccountingRecords=[];
+    const normalizedAccountingFiles=[];
 
     for (const f of g.files) {
       const text = await CSV.read(f);
@@ -132,6 +134,11 @@ window.BULK_IMPORT = {
       ds.unit = '円';
       ds.importedAt = new Date().toISOString();
       ds.replacedAt = new Date().toISOString();
+      // bulkのdailyは現行SKDL0001（日報）。新PL_ACTUALのPRELIMINARY(SKDL0002)とは別物なので保存しない。
+      if(type==='confirmed' && window.ACCOUNTING_IMPORT_BRIDGE?.normalizeCsvText){
+        normalizedAccountingRecords.push(...ACCOUNTING_IMPORT_BRIDGE.normalizeCsvText(text,{period:ym,document_state:'CONFIRMED',file_name:f.name}));
+        normalizedAccountingFiles.push(f.name);
+      }
 
       if (typeof clearDataDeleted === 'function') clearDataDeleted('datasets', dataDeleteKey(ym, type));
       STATE.datasets = (STATE.datasets || []).filter(d => !(d.ym === ym && (d.type || 'confirmed') === type && d.source !== 'history'));
@@ -147,6 +154,10 @@ window.BULK_IMPORT = {
     }
 
     Repository.Storage.save();
+    if(type==='confirmed' && normalizedAccountingRecords.length && window.ACCOUNTING_IMPORT_BRIDGE?.persistRecords){
+      const nr=await ACCOUNTING_IMPORT_BRIDGE.persistRecords(normalizedAccountingRecords,{period:ym,document_state:'CONFIRMED',source_file_names:normalizedAccountingFiles});
+      if(!nr?.ok) throw new Error(`PL_ACTUAL正規化SOURCE保存に失敗しました: ${nr?.error||'UNKNOWN'}`);
+    }
 
     // 一括取込では月ごとの pushMonth を行わない。
     // _busy 競合を避けるため、handleFiles の全ループ完了後に pushAll() を1回だけ実行する。

@@ -47,7 +47,7 @@
     materializeStateByYm.set(ym,'LOADING');
     try{
       const r=await CANONICAL_MATERIALIZER.materialize({period:ym,resolutionDecisions:persistedResolutionDecisions});
-      if(r?.snapshot?.materialization?.has_normalized_detail_source) materializedByYm.set(ym,r);
+      if(r?.snapshot?.materialization && Object.values(r.snapshot.materialization.current_batches||{}).some(Boolean)) materializedByYm.set(ym,r);
       else materializedByYm.delete(ym);
       materializeStateByYm.set(ym,'LOADED');
     }catch(e){
@@ -63,7 +63,13 @@
     const snapshot=m?.snapshot||CANONICAL_BUILDER.buildSnapshot({routeData});
     const legacyMaster={workers:[...(STATE.workerMaster||[])],companies:[...(STATE.companyMaster||[])],center:window.CENTER||null};
     const resolutionContext=m?.resolutionContext||window.RESOLUTION_PREVIEW?.buildContext?.(Object.assign({},legacyMaster,{resolutionDecisions:persistedResolutionDecisions}))||null;
-    return {snapshot,materialization:m?.snapshot?.materialization||null,summary:DATA_VERIFICATION_SUMMARY.build({center_id:window.CENTER?.id||null,year_month:ym,canonical_snapshot:snapshot,source_status:sourceStatus(ym),accounting_facts:[],accounting_reconciliations:[]}),detail:window.DATA_VERIFICATION_DETAIL?.build({center_id:window.CENTER?.id||null,year_month:ym,canonical_snapshot:snapshot,worker_csv_data:STATE.workerCsvData||[],resolution_context:resolutionContext})||null};
+    const normalizedStatus=sourceStatus(ym);
+    if(m?.snapshot?.materialization?.current_batches){
+      const cb=m.snapshot.materialization.current_batches;
+      for(const k of ['PL_ACTUAL','WORKER_SALES','SHIPPER_AREA','DELIVERY_LIST','ROUTE_PAYMENT']) if(cb[k]){ normalizedStatus[k]={...(normalizedStatus[k]||{}),present:true,batch_count:1}; }
+      if(cb.PL_ACTUAL){ const states=[...new Set((snapshot.entities.ACCOUNTING_FACT||[]).map(x=>x.document_state).filter(Boolean))]; normalizedStatus.PL_ACTUAL.document_states=states; }
+    }
+    return {snapshot,materialization:m?.snapshot?.materialization||null,summary:DATA_VERIFICATION_SUMMARY.build({center_id:window.CENTER?.id||null,year_month:ym,canonical_snapshot:snapshot,source_status:normalizedStatus,accounting_facts:snapshot.entities.ACCOUNTING_FACT||[],accounting_reconciliations:snapshot.entities.ACCOUNTING_RECONCILIATION||[]}),detail:window.DATA_VERIFICATION_DETAIL?.build({center_id:window.CENTER?.id||null,year_month:ym,canonical_snapshot:snapshot,worker_csv_data:STATE.workerCsvData||[],resolution_context:resolutionContext})||null};
   }
   function buildSummary(ym){return buildData(ym)?.summary||null;}
   function sourceCards(s){const names={PL_ACTUAL:'月次収支（確定）',WORKER_SALES:'作業者別売上明細',SHIPPER_AREA:'荷主別配送エリア物量',DELIVERY_LIST:'配達持出予定リスト',ROUTE_PAYMENT:'配達ヘッド傭車料確認'};return Object.entries(names).map(([k,label])=>{const x=s.source_status[k]||{};return `<div class="dv-source ${x.present?'is-present':'is-missing'}"><div class="dv-source-mark">${x.present?'✓':'—'}</div><div><div class="dv-source-name">${esc(label)}</div><div class="dv-source-meta">${x.present?`登録あり${x.document_states?.length?' / '+x.document_states.join(', '):''}`:'未登録'}</div></div></div>`}).join('');}

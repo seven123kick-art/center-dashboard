@@ -1,46 +1,54 @@
-Version6 D3-6C/D3-7 Canonical再Materialize・データ確認統合 (2026-08-17)
+Version6 D3-8 / D3-9 foundation integration
+Date: 2026-08-17
 
-■目的
-D3-6Bで正式保存できるようになったCURRENT NORMALIZED SOURCEを読み戻し、保存済みResolution/Aliasを適用してCanonical Snapshotを再構築し、データ確認画面まで一連で反映する。
+PURPOSE
+- Extend NORMALIZED SOURCE from WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT to DELIVERY_LIST and PL_ACTUAL.
+- Re-materialize Canonical routes and accounting facts/reconciliation from CURRENT normalized batches.
+- Preserve confirmed accounting immutability and the distinction between explicit zero and UNKNOWN/null.
 
-■変更ファイル
-- center.html
-  - canonical_materializer.js 読込を1行追加。
-- src/core/data_catalog/canonical_materializer.js（新規）
-  - WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT のCURRENT BatchをRepository.NormalizedSourceから取得。
-  - Repository.ResolutionのDecisionからResolution Contextを再構成。
-  - CANONICAL_BUILDERへNORMALIZED行を渡してSALES_DETAIL / PRODUCT_DETAIL / BUSINESS_SLIP / RECONCILIATION_RESULTを再Materialize。
-  - ROUTE_PAYMENTは旧STATEのyoshaFeeではなくNORMALIZED SOURCEのpayment_amountを優先し、nullと0を維持。
-  - SOURCE/STATE/Masterへの書込みなし。
-- src/core/data_catalog/verification_detail.js
-  - 帰属主体表記の集計元をCanonical SALES_DETAILへ移行。
-  - NORMALIZED SOURCEが未導入の旧データのみ既存workerCsvDataへフォールバック。
-- src/modules/data_verification.js
-  - CURRENT NORMALIZED SOURCEから再構築したSnapshotをデータ確認画面の参照元として利用。
-  - Resolution保存後、Cloud再取得→Alias再構成→Canonical再Materialize→画面再描画まで実行。
-  - 旧取込データでNORMALIZED詳細Batchが存在しない月は従来Snapshotへ安全にフォールバック。
-  - NORMALIZED SOURCE更新イベントを受け、対象月のCanonical cacheを破棄・再構築。
-- src/core/repository/normalized_source_repository.js
-  - CURRENT Batch切替成功後に normalized-source-updated イベントを通知。
-  - 保存仕様・Supabase正本/IndexedDB cache責務は変更なし。
+CHANGES
+1) NormalizedSourceRepository
+- Supported document types now include PL_ACTUAL and DELIVERY_LIST.
+- PL_ACTUAL CONFIRMED is immutable: semantically identical re-import is idempotent; differing confirmed payload is rejected with CONFIRMED_IMMUTABLE_CONFLICT.
+- PRELIMINARY -> CONFIRMED remains possible.
 
-■重要仕様
-1. NORMALIZED SOURCEが存在する月は、詳細Canonicalの正本入力としてCURRENT Batchを使用する。
-2. Resolution DecisionはSOURCEを書き換えず、再Materialize時にResolver Contextとして適用する。
-3. ROUTE_PAYMENTの空欄(null)と明示0円(0)を再構築後も区別する。
-4. 配達持出予定リスト由来のDELIVERY_ROUTE/ATTEMPTは現行routeDataを継続利用（NORMALIZED DELIVERY_LIST永続化は未実装）。
-5. 旧データ互換のため、NORMALIZED WORKER_SALES/SHIPPER_AREA Batchが双方存在しない月は従来表示を維持する。
-6. Canonical Snapshot自体の永続保存は行わない。SOURCE+Resolutionから再生成可能な派生データとして扱う。
+2) DELIVERY_LIST normalized source
+- Added normalizeDeliveryListRoutes().
+- PDF extraction records source page number and normalizes head_no, delivery_date, worker1 label and slip_no.
+- Existing routeData behavior remains unchanged.
+- After successful PDF import, normalized DELIVERY_LIST is saved per YYYYMM.
+- Canonical Materializer prefers CURRENT normalized DELIVERY_LIST and falls back to legacy routeData for old months.
 
-■検証
-- 全 src/**/*.js を node --check：PASS
-- Mock CURRENT BatchからCanonical再Materialize：PASS
-- WORKER_SALES/SHIPPER_AREAからBUSINESS_SLIP・SALES_DETAIL生成：PASS
-- ROUTE_PAYMENT 明示0円→amount=0 / ZERO_PAYMENT：PASS
-- materialization metadataにCURRENT batch ID・record count保持：PASS
-- STATE/SOURCEへの書込みコード追加なし
+3) PL_ACTUAL normalized source
+- Added accounting_import_bridge.js.
+- Existing confirmed CSV import additionally normalizes original CSV rows and saves PL_ACTUAL/CONFIRMED.
+- Existing daily import is deliberately NOT mapped to PRELIMINARY: legacy daily is SKDL0001, while new Data Catalog PRELIMINARY is SKDL0002.
+- Bridge accepts PRELIMINARY for a future dedicated SKDL0002 path.
 
-■次の主要課題
-- DELIVERY_LIST（配達持出予定リスト）自体のNORMALIZED SOURCE正式永続化
-- Accounting Fact（SKDL0002/0003）のCanonical再Materialize統合
-- Canonical/Accounting reconciliationをデータ確認画面へ完全接続
+4) Canonical/accounting re-materialization
+- Materializer loads CURRENT WORKER_SALES, SHIPPER_AREA, ROUTE_PAYMENT, DELIVERY_LIST and PL_ACTUAL.
+- ACCOUNTING_FACT and ACCOUNTING_RECONCILIATION are regenerated from CURRENT PL_ACTUAL.
+- UNKNOWN/null and explicit zero remain distinct.
+- Canonical remains derived data and is not persisted.
+
+5) Data Verification
+- Materialized accounting facts/reconciliations are passed into DATA_VERIFICATION_SUMMARY.
+- CURRENT normalized batch presence is reflected in source status.
+
+UNCHANGED
+- Existing SKDL0001 legacy behavior.
+- Existing STATE/full_state structures.
+- Existing PDF routeData/headPayments behavior.
+- No Supabase schema migration.
+
+KNOWN / INTENTIONAL
+- Dedicated SKDL0002 UI/import route is not added here, to avoid misclassifying SKDL0001 as SKDL0002.
+- Legacy parseHeadPaymentSheet still has historical blank-to-zero behavior; normalized ROUTE_PAYMENT remains the Canonical source when available.
+
+VALIDATION
+- All src/**/*.js node --check PASS.
+- DELIVERY_LIST normalizer PASS.
+- Accounting explicit zero and CONFIRMED immutable PASS.
+- Identical confirmed re-import idempotent PASS.
+- Differing confirmed re-import rejected PASS.
+- Materializer normalized DELIVERY_LIST/ROUTE_PAYMENT/PL_ACTUAL integration PASS.

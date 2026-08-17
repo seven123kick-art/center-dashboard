@@ -21,7 +21,7 @@
   const VERSION=1;
   const PREFIX='normalized_source_v1';
   const CACHE_KIND='normalized_source';
-  const SUPPORTED=new Set(['WORKER_SALES','SHIPPER_AREA','ROUTE_PAYMENT']);
+  const SUPPORTED=new Set(['PL_ACTUAL','WORKER_SALES','SHIPPER_AREA','DELIVERY_LIST','ROUTE_PAYMENT']);
   const clone=v=>JSON.parse(JSON.stringify(v));
   const clean=v=>String(v??'').trim();
 
@@ -101,6 +101,19 @@
 
     const current=await loadManifest(s.document_type,s.period);
     const priorId=current.manifest.current_batch_id;
+    // SKDL0003(CONFIRMED)は会社確定値でimmutable。同月の確定正本が既にある場合、
+    // 内容差異のある新BatchでCURRENTを動かさない。同一内容の再投入だけ冪等成功とする。
+    if(s.document_type==='PL_ACTUAL'&&priorId&&vr.records.some(r=>r?.document_state==='CONFIRMED')){
+      const prior=await loadBatch(s.document_type,s.period,priorId);
+      const priorRows=prior?.ok?(prior.batch?.records||[]):[];
+      const semantic=row=>{ const x=Object.assign({},row); delete x.source_file_id; delete x.source_record_id; delete x.source_row_index; return x; };
+      const sig=rows=>JSON.stringify((rows||[]).map(semantic));
+      const priorConfirmed=priorRows.some(r=>r?.document_state==='CONFIRMED');
+      if(priorConfirmed){
+        if(sig(priorRows)===sig(vr.records)) return {ok:true,idempotent:true,batch_id:priorId,supersedes_batch_id:prior.batch?.supersedes_batch_id||null,record_count:priorRows.length,manifest:clone(current.manifest)};
+        return {ok:false,error:'CONFIRMED_IMMUTABLE_CONFLICT',current_batch_id:priorId};
+      }
+    }
     const supersedes=clean(input.supersedes_batch_id)||priorId||null;
     if(priorId&&supersedes!==priorId) return {ok:false,error:'REVISION_CHAIN_MISMATCH',expected_supersedes_batch_id:priorId};
 

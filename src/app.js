@@ -945,6 +945,8 @@ const IMPORT = {
 
     let imported = 0;
     const strictFailures = [];
+    const normalizedAccountingRecords = [];
+    const normalizedAccountingFiles = [];
     for (const f of files) {
       try {
         const text = await CSV.read(f);
@@ -961,6 +963,11 @@ const IMPORT = {
         ds.fiscalYear = fiscalYearFromYM(ym);
         ds.unit = '円';
         ds.replacedAt = existing ? new Date().toISOString() : null;
+        // 新Data CatalogのPL_ACTUALはSKDL0002/0003のみ。現行UIのdailyはSKDL0001（日報）なので正規化対象にしない。
+        if(type==='confirmed' && window.ACCOUNTING_IMPORT_BRIDGE?.normalizeCsvText){
+          try{ normalizedAccountingRecords.push(...ACCOUNTING_IMPORT_BRIDGE.normalizeCsvText(text,{period:ym,document_state:'CONFIRMED',file_name:f.name})); normalizedAccountingFiles.push(f.name); }
+          catch(e){ console.warn('[D3-8] PL_ACTUAL normalize skipped',f.name,e); }
+        }
 
         // 差替時は同じ年月＋同じ区分だけ削除してから入れる（速報と確定は両方保持）
         STATE.datasets = STATE.datasets.filter(d => !(d.ym === ym && (d.type || 'confirmed') === type && d.source !== 'history'));
@@ -989,6 +996,10 @@ const IMPORT = {
 
     if (imported > 0) {
       Repository.Storage.save();
+      if(importType==='confirmed' && normalizedAccountingRecords.length && window.ACCOUNTING_IMPORT_BRIDGE?.persistRecords){
+        try{ const nr=await ACCOUNTING_IMPORT_BRIDGE.persistRecords(normalizedAccountingRecords,{period:ym,document_state:'CONFIRMED',source_file_names:normalizedAccountingFiles}); if(!nr?.ok) console.warn('[D3-8] PL_ACTUAL normalized save not confirmed',nr); }
+        catch(e){ console.warn('[D3-8] PL_ACTUAL normalized save failed',e); }
+      }
       // 確定CSVが入った月は速報を残さず削除する
       if (importType === 'confirmed') {
         try { await supersedeDailyWithConfirmed(ym, opt.strict ? { deferCloudDelete: true } : {}); Repository.Storage.save(); } catch(e) {}

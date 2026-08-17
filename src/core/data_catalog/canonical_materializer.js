@@ -64,16 +64,32 @@
     return out;
   }
 
+  function routeDataFromDeliveryList(records,period){
+    const byHead=new Map();
+    arr(records).forEach(rec=>{
+      if(!rec||rec.is_deleted) return;
+      const head=clean(rec.head_no); if(!head) return;
+      if(!byHead.has(head)) byHead.set(head,{date:rec.delivery_date||null,headNumber:head,worker:rec.source_worker1_label||'',slips:[]});
+      const r=byHead.get(head);
+      if(!r.worker&&rec.source_worker1_label) r.worker=rec.source_worker1_label;
+      if(rec.slip_no&&!r.slips.includes(clean(rec.slip_no))) r.slips.push(clean(rec.slip_no));
+    });
+    return byHead.size?[{ym:period,routes:[...byHead.values()],source:'normalized_delivery_list'}]:[];
+  }
+
   async function materialize(input={}){
     requireDeps();
     const period=clean(input.period);
     if(!/^\d{6}$/.test(period)) throw new Error('period must be YYYYMM');
-    const [worker,shipper,payment]=await Promise.all([
-      loadCurrent('WORKER_SALES',period), loadCurrent('SHIPPER_AREA',period), loadCurrent('ROUTE_PAYMENT',period)
+    const [worker,shipper,payment,delivery,accounting]=await Promise.all([
+      loadCurrent('WORKER_SALES',period), loadCurrent('SHIPPER_AREA',period), loadCurrent('ROUTE_PAYMENT',period),
+      loadCurrent('DELIVERY_LIST',period), loadCurrent('PL_ACTUAL',period)
     ]);
     const decisions=input.resolutionDecisions!==undefined?arr(input.resolutionDecisions):await loadDecisions();
     const resolutionContext=input.resolutionContext||legacyMaster(decisions);
-    const routeData=arr(input.routeData!==undefined?input.routeData:(window.STATE?.routeData||[])).filter(x=>clean(x?.ym)===period);
+    const legacyRouteData=arr(input.routeData!==undefined?input.routeData:(window.STATE?.routeData||[])).filter(x=>clean(x?.ym)===period);
+    const normalizedRouteData=routeDataFromDeliveryList(delivery.records,period);
+    const routeData=delivery.batch?normalizedRouteData:legacyRouteData;
     const snapshot=CANONICAL_BUILDER.buildSnapshotFromNormalizedSources({
       routeData,
       workerSalesRecords:worker.records,
@@ -82,6 +98,12 @@
     });
     snapshot.entities.ROUTE_PAYMENT=routePaymentsFromNormalized(payment.records,snapshot.entities.DELIVERY_ROUTE);
     snapshot.counts.ROUTE_PAYMENT=snapshot.entities.ROUTE_PAYMENT.length;
+    const accountingFacts=window.ACCOUNTING_RECONCILIATION?.buildAccountingFacts?.(accounting.records)||[];
+    const accountingReconciliation=window.ACCOUNTING_RECONCILIATION?.reconcileBySlip?.(snapshot.entities.SALES_DETAIL,accountingFacts,snapshot.entities.BUSINESS_SLIP)||[];
+    snapshot.entities.ACCOUNTING_FACT=accountingFacts;
+    snapshot.entities.ACCOUNTING_RECONCILIATION=accountingReconciliation;
+    snapshot.counts.ACCOUNTING_FACT=accountingFacts.length;
+    snapshot.counts.ACCOUNTING_RECONCILIATION=accountingReconciliation.length;
     snapshot.materialization={
       period, generated_at:new Date().toISOString(),
       normalized_source:true,
@@ -89,14 +111,18 @@
       current_batches:{
         WORKER_SALES:worker.batch?.batch_id||null,
         SHIPPER_AREA:shipper.batch?.batch_id||null,
-        ROUTE_PAYMENT:payment.batch?.batch_id||null
+        ROUTE_PAYMENT:payment.batch?.batch_id||null,
+        DELIVERY_LIST:delivery.batch?.batch_id||null,
+        PL_ACTUAL:accounting.batch?.batch_id||null
       },
-      source_record_counts:{WORKER_SALES:worker.records.length,SHIPPER_AREA:shipper.records.length,ROUTE_PAYMENT:payment.records.length},
+      source_record_counts:{WORKER_SALES:worker.records.length,SHIPPER_AREA:shipper.records.length,ROUTE_PAYMENT:payment.records.length,DELIVERY_LIST:delivery.records.length,PL_ACTUAL:accounting.records.length},
       has_normalized_detail_source:!!(worker.batch||shipper.batch),
-      has_normalized_route_payment:!!payment.batch
+      has_normalized_route_payment:!!payment.batch,
+      has_normalized_delivery_list:!!delivery.batch,
+      has_normalized_accounting:!!accounting.batch
     };
-    return {ok:true,snapshot,decisions:clone(decisions),resolutionContext,normalized:{WORKER_SALES:worker,SHIPPER_AREA:shipper,ROUTE_PAYMENT:payment}};
+    return {ok:true,snapshot,decisions:clone(decisions),resolutionContext,normalized:{WORKER_SALES:worker,SHIPPER_AREA:shipper,ROUTE_PAYMENT:payment,DELIVERY_LIST:delivery,PL_ACTUAL:accounting}};
   }
 
-  window.CANONICAL_MATERIALIZER=Object.freeze({materialize,_internal:Object.freeze({routePaymentsFromNormalized})});
+  window.CANONICAL_MATERIALIZER=Object.freeze({materialize,_internal:Object.freeze({routePaymentsFromNormalized,routeDataFromDeliveryList})});
 })();
