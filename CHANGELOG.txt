@@ -1,26 +1,35 @@
-Version6 D4-16 / Sync Failure Visibility
+Version6 D4-17 / Data Pipeline Status Foundation
 Date: 2026-08-17
 
-PURPOSE
-- Do not silently treat Cloud sync failures as complete success after local save/delete succeeds.
-- Distinguish local completion from Cloud reflection for the user.
+目的
+- SOURCE → NORMALIZED → CANONICAL → DISPLAY_SNAPSHOT → CLOUD の各段階を、
+  「成功 / 部分成功 / 失敗 / 実行中 / 未確認」として共通形式で追跡する基礎を追加。
+- 推測で成功扱いせず、コード上で観測できた段階だけ記録する。
 
-CHANGES
-- Monthly PL import: warn when background Cloud sync fails; warn when old preliminary cleanup fails after confirmed import.
-- Capacity import: warn when Cloud sync fails after local save.
-- Landing forecast daily actuals: warn when Cloud sync fails after import/delete.
-- Delivery list PDF / route payment import: warn when Cloud sync fails after local save.
-- Field detail full reset: warn when Cloud sync fails after local deletion.
-- {ok:false} sync results are also treated as failures.
+変更
+1. DATA_PIPELINE_STATUS を新設
+   - period + document_type 単位
+   - SOURCE / NORMALIZED / CANONICAL / DISPLAY_SNAPSHOT / CLOUD
+   - UNKNOWN / RUNNING / OK / PARTIAL / FAILED
+   - IndexedDB cacheへ永続化
+2. NormalizedSourceRepository
+   - saveBatch結果を共通Pipeline Statusへ反映
+   - batch保存済み・manifest失敗は PARTIAL + CLOUD FAILED として区別
+3. Canonical Materializer
+   - 再構築開始をRUNNING、正常完了をCANONICAL OKとして記録
+   - 正常生成した表示SnapshotをDISPLAY_SNAPSHOT OKとして記録
+4. SKDL0002取込
+   - ユーザーが選択したSOURCEファイルを観測できた時点のみSOURCE OKを記録
 
-FILES
-- src/app.js
-- src/modules/landing_forecast.js
-- src/field/route_analysis.js
-- src/field/field_core.js
+重要
+- 既存業務データ・計算結果・Canonical schemaは変更しない。
+- SOURCE管理がまだ統一されていない既存取込について、推測でSOURCE OKにはしない。
+- まず共通状態管理層を追加し、今後各取込経路を順次接続する。
+
+変更ファイル
+- center.html
+- src/core/data_catalog/pipeline_status.js (new)
+- src/core/repository/normalized_source_repository.js
+- src/core/data_catalog/canonical_materializer.js
+- src/modules/data_import_management.js
 - CHANGELOG.txt
-
-VALIDATION
-- node --check PASS for all 4 changed JS files.
-- Silent SYNC_COORDINATOR catch(()=>{}) in the targeted app/modules/field scope: 0.
-- No business calculation, Canonical, Data Catalog, Supabase schema, D4-11 startup, or D4-12 UI changes.

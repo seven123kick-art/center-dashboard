@@ -83,6 +83,7 @@
     requireDeps();
     const period=clean(input.period);
     if(!/^\d{6}$/.test(period)) throw new Error('period must be YYYYMM');
+    try{ await window.DATA_PIPELINE_STATUS?.setStage?.(period,'ALL','CANONICAL','RUNNING',{message:'Canonical materialization started'}); }catch(_e){}
     const [worker,shipper,payment,delivery,accounting]=await Promise.all([
       loadCurrent('WORKER_SALES',period), loadCurrent('SHIPPER_AREA',period), loadCurrent('ROUTE_PAYMENT',period),
       loadCurrent('DELIVERY_LIST',period), loadCurrent('PL_ACTUAL',period)
@@ -123,6 +124,10 @@
       has_normalized_delivery_list:!!delivery.batch,
       has_normalized_accounting:!!accounting.batch
     };
+    try{
+      await window.DATA_PIPELINE_STATUS?.setStage?.(period,'ALL','CANONICAL','OK',{detail:{counts:clone(snapshot.counts||{}),current_batches:clone(snapshot.materialization.current_batches||{})}});
+      await window.DATA_PIPELINE_STATUS?.setStage?.(period,'ALL','DISPLAY_SNAPSHOT','OK',{message:'Verified display snapshot built',detail:{generated_at:snapshot.materialization.generated_at}});
+    }catch(e){ console.warn('[CanonicalMaterializer] pipeline status update failed',e); }
     return {ok:true,snapshot,decisions:clone(decisions),resolutionContext,normalized:{WORKER_SALES:worker,SHIPPER_AREA:shipper,ROUTE_PAYMENT:payment,DELIVERY_LIST:delivery,PL_ACTUAL:accounting}};
   }
 

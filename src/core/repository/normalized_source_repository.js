@@ -146,5 +146,16 @@
     return {ok:true,batch_id:batchId,supersedes_batch_id:supersedes,record_count:batch.record_count,cache_ok,manifest:clone(manifest)};
   }
 
-  window.NORMALIZED_SOURCE_REPOSITORY=Object.freeze({VERSION,PREFIX,CACHE_KIND,SUPPORTED:Object.freeze([...SUPPORTED]),validateRecords,loadManifest,loadBatch,loadCurrent,saveBatch});
+  async function saveBatchObserved(input={}){
+    let result;
+    try{ result=await saveBatch(input); }
+    catch(e){
+      try{ await window.DATA_PIPELINE_STATUS?.markNormalizedResult?.(input.period,input.document_type,{ok:false,error:e?.message||String(e)}); }catch(_e){}
+      throw e;
+    }
+    try{ await window.DATA_PIPELINE_STATUS?.markNormalizedResult?.(input.period,input.document_type,result); }catch(e){ console.warn('[NormalizedSourceRepository] pipeline status update failed',e); }
+    return result;
+  }
+
+  window.NORMALIZED_SOURCE_REPOSITORY=Object.freeze({VERSION,PREFIX,CACHE_KIND,SUPPORTED:Object.freeze([...SUPPORTED]),validateRecords,loadManifest,loadBatch,loadCurrent,saveBatch:saveBatchObserved});
 })();

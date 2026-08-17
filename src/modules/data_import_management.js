@@ -16,6 +16,7 @@
     if(!/\.csv$/i.test(file.name)){setMsg('CSVファイルを選択してください。','error');return;}
     if(!window.ACCOUNTING_IMPORT_BRIDGE?.persistCsvText){setMsg('速報取込基盤を読み込めません。','error');return;}
     setMsg('内容を確認して保存しています…');
+    try{ await window.DATA_PIPELINE_STATUS?.setStage?.(period,'PL_ACTUAL','SOURCE','OK',{message:'SKDL0002 file selected',detail:{file_name:file.name}}); }catch(_e){}
     try{
       const text=window.CSV?.read?await CSV.read(file):await file.text();
       const r=await ACCOUNTING_IMPORT_BRIDGE.persistCsvText(text,{period,document_state:'PRELIMINARY',file_name:file.name});
