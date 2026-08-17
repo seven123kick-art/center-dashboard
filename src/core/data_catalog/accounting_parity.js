@@ -143,6 +143,201 @@
     };
   }
 
-  function invalidate(period){ if(period) cache.delete(clean(period)); else cache.clear(); }
-  window.ACCOUNTING_PARITY=Object.freeze({checkMonth,checkFiscalYear,fiscalMonths,invalidate,canonicalRows});
+  function peekMonth(period){
+    return cache.get(clean(period))||null;
+  }
+
+  function invalidate(period){
+    if(period) cache.delete(clean(period)); else cache.clear();
+    try{window.ACCOUNTING_DATASET_READ_MODEL?.invalidate?.(period);}catch(_e){}
+  }
+
+  window.ACCOUNTING_PARITY=Object.freeze({checkMonth,checkFiscalYear,fiscalMonths,peekMonth,invalidate,canonicalRows});
+})();
+
+/* ============================================================================
+   Version6 D4-32: Accounting Canonical Dataset Read Model
+   ----------------------------------------------------------------------------
+   既存画面を壊さず、Parity READYの確定月だけCanonical PL_ACTUALを
+   Dataset互換オブジェクトへ変換して表示系に供給する。
+
+   - READY以外は必ず既存Datasetへfallback。
+   - daily / historyはCanonicalへ昇格させない。
+   - CanonicalとLegacyが完全一致してからしか切り替えない。
+   - 非同期判定中はLegacyを表示し、数字を未確認値へ差し替えない。
+============================================================================ */
+(function(){
+  if(window.ACCOUNTING_DATASET_READ_MODEL) return;
+
+  const canonicalCache=new Map();
+  const stateCache=new Map();
+  const loading=new Map();
+
+  const original=Object.freeze({
+    activeDatasets: typeof window.activeDatasets==='function' ? window.activeDatasets : null,
+    activeDatasetByYM: typeof window.activeDatasetByYM==='function' ? window.activeDatasetByYM : null,
+    activeRealCsvDatasets: typeof window.activeRealCsvDatasets==='function' ? window.activeRealCsvDatasets : null,
+    activeRealCsvDatasetByYM: typeof window.activeRealCsvDatasetByYM==='function' ? window.activeRealCsvDatasetByYM : null
+  });
+
+  const ym=v=>String(v??'').trim();
+  function isConfirmedLegacy(ds){
+    return !!ds && ds.source!=='history' && (ds.type||'confirmed')==='confirmed' && ds.source!=='canonical';
+  }
+
+  function buildCanonicalDataset(legacy, parity){
+    if(!legacy || !parity?.ready || parity.status!=='READY') return null;
+    if(typeof processDataset!=='function') return null;
+
+    const rows={};
+    (parity.comparisons||[]).forEach(c=>{
+      if(c?.key && Number.isFinite(Number(c.canonical))) rows[c.key]=Number(c.canonical);
+    });
+
+    const canonical=processDataset(legacy.ym,'confirmed',rows);
+    return {
+      ...legacy,
+      ...canonical,
+      ym:legacy.ym,
+      type:'confirmed',
+      source:'canonical',
+      unit:'円',
+      fileName:legacy.fileName||'Canonical PL_ACTUAL',
+      importedAt:legacy.importedAt||canonical.importedAt,
+      fiscalYear:legacy.fiscalYear,
+      routePayments:legacy.routePayments,
+      _dataPath:'CANONICAL',
+      _canonicalVerified:true,
+      _canonicalBatchId:parity.current_batch_id||null,
+      _legacySource:legacy.source||'csv',
+      _legacyFileName:legacy.fileName||null
+    };
+  }
+
+  async function warmMonth(period, legacyOverride=null, {force=false}={}){
+    const periodKey=ym(period);
+    if(!/^\d{6}$/.test(periodKey)) return {status:'INVALID_PERIOD',period:periodKey};
+    if(!force && canonicalCache.has(periodKey)) return {status:'CANONICAL',period:periodKey,dataset:canonicalCache.get(periodKey)};
+    if(loading.has(periodKey)) return loading.get(periodKey);
+
+    const legacy=legacyOverride
+      || original.activeRealCsvDatasetByYM?.(periodKey)
+      || original.activeDatasetByYM?.(periodKey)
+      || null;
+
+    if(!isConfirmedLegacy(legacy)){
+      const status=legacy?.source==='history'?'HISTORY_FALLBACK':legacy?.type==='daily'?'PRELIMINARY_FALLBACK':'LEGACY_FALLBACK';
+      stateCache.set(periodKey,{status,period:periodKey,reason:'Canonical切替対象は確定CSVのみ'});
+      canonicalCache.delete(periodKey);
+      return stateCache.get(periodKey);
+    }
+
+    const task=(async()=>{
+      try{
+        const parity=await window.ACCOUNTING_PARITY?.checkMonth?.(periodKey,{force});
+        if(parity?.ready && parity.status==='READY'){
+          const ds=buildCanonicalDataset(legacy,parity);
+          if(ds){
+            canonicalCache.set(periodKey,ds);
+            const out={status:'CANONICAL',period:periodKey,current_batch_id:parity.current_batch_id||null};
+            stateCache.set(periodKey,out);
+            return {...out,dataset:ds};
+          }
+        }
+        canonicalCache.delete(periodKey);
+        const out={
+          status:'LEGACY_FALLBACK',period:periodKey,
+          reason:parity?.status||'PARITY_NOT_READY',
+          parity_status:parity?.status||null
+        };
+        stateCache.set(periodKey,out);
+        return out;
+      }catch(e){
+        canonicalCache.delete(periodKey);
+        const out={status:'LEGACY_FALLBACK',period:periodKey,reason:e?.message||String(e)};
+        stateCache.set(periodKey,out);
+        return out;
+      }finally{
+        loading.delete(periodKey);
+      }
+    })();
+    loading.set(periodKey,task);
+    return task;
+  }
+
+  function resolveSync(ds){
+    if(!ds?.ym) return ds;
+    const periodKey=ym(ds.ym);
+    if(isConfirmedLegacy(ds)){
+      const canonical=canonicalCache.get(periodKey);
+      if(canonical) return canonical;
+      // 非同期判定中はLegacyをそのまま返す。表示中の数字を未検証値へ変えない。
+      warmMonth(periodKey,ds).catch(()=>{});
+    }
+    return ds;
+  }
+
+  function resolveList(list){
+    return (Array.isArray(list)?list:[]).map(resolveSync);
+  }
+
+  function inspect(period){
+    const periodKey=ym(period);
+    const canonical=canonicalCache.get(periodKey);
+    if(canonical) return {
+      status:'CANONICAL',period:periodKey,
+      current_batch_id:canonical._canonicalBatchId||null,
+      source:canonical.source
+    };
+    if(loading.has(periodKey)) return {status:'LOADING',period:periodKey};
+    return stateCache.get(periodKey)||{status:'NOT_WARMED',period:periodKey};
+  }
+
+  function invalidate(period){
+    if(period){
+      const periodKey=ym(period);
+      canonicalCache.delete(periodKey);
+      stateCache.delete(periodKey);
+      loading.delete(periodKey);
+    }else{
+      canonicalCache.clear();
+      stateCache.clear();
+      loading.clear();
+    }
+  }
+
+  // 既存Dataset選択層を安全にoverlayする。
+  // 各画面個別のKPI/グラフ計算は変更せず、既存Dataset互換形で供給する。
+  if(original.activeDatasetByYM){
+    window.activeDatasetByYM=function(period){
+      return resolveSync(original.activeDatasetByYM(period));
+    };
+  }
+  if(original.activeDatasets){
+    window.activeDatasets=function(){
+      return resolveList(original.activeDatasets());
+    };
+  }
+  if(original.activeRealCsvDatasetByYM){
+    window.activeRealCsvDatasetByYM=function(period){
+      return resolveSync(original.activeRealCsvDatasetByYM(period));
+    };
+  }
+  if(original.activeRealCsvDatasets){
+    window.activeRealCsvDatasets=function(){
+      return resolveList(original.activeRealCsvDatasets());
+    };
+  }
+
+  window.addEventListener?.('normalized-source-updated',ev=>{
+    const periodKey=ym(ev?.detail?.period);
+    if(periodKey){
+      invalidate(periodKey);
+      try{window.ACCOUNTING_PARITY?.invalidate?.(periodKey);}catch(_e){}
+    }
+  });
+
+  window.ACCOUNTING_DATASET_READ_MODEL=Object.freeze({
+    warmMonth,resolveSync,inspect,invalidate,buildCanonicalDataset
+  });
 })();

@@ -1,37 +1,43 @@
-Version6 D4-31 / Confirmed vs Preliminary Accounting Split
+Version6 D4-32 / Parity-Gated Canonical Accounting Read Model
 Date: 2026-08-17
+Base GitHub main commit: 028cc2fc50b55b7229f547929c3ae2cca00560a0
 
-D4-30実機結果
-- 202604/202605の確定移行処理後、202606で CONFIRMED_DATASET_NOT_FOUND。
-- 画面上の最終データは2026年6月（日報）。
-- これは日報を確定収支として移行しなかった安全な停止。
+目的
+- 収支表示をCanonical PL_ACTUALへ段階移行する。
+- 既存画面の計算・UIを個別改修せず、Dataset選択層で安全に切り替える。
 
-修正
-1. Accounting Parity
-   - 確定Datasetがなくactive Datasetがdailyの場合は PRELIMINARY_ONLY（画面: 日報のみ）。
-   - PL_ACTUAL_NOT_NORMALIZEDとは分離。
-2. Legacy Accounting Migration
-   - confirmed探索をRepository.Dataset.getAll()から実施。
-   - 日報しかない月は確定移行対象外。
-3. データ確認UI
-   - 「日報のみ」件数・月表示を追加。
-   - 「既存確定データを移行」はconfirmed Datasetが存在するPL未正規化月だけ対象。
-   - 各月を独立処理し、部分成功でも必ずParityを再診断して最新状態を表示。
-4. ホーム/年度推移
-   - 参照先はまだ変更しない。
-   - 日報を確定値へ昇格させない。
+実装
+1. ACCOUNTING_PARITY.peekMonth()を追加。
+2. ACCOUNTING_DATASET_READ_MODELを追加。
+3. 確定CSVかつParity READYの月だけCanonical PL_ACTUALからDataset互換値を生成。
+4. READY以外は必ず既存Datasetへfallback。
+5. daily（日報/速報）は従来Datasetを維持。
+6. history（収支補完）は従来Datasetを維持。
+7. Parity判定中も既存Datasetを表示し、未検証Canonicalを画面へ出さない。
+8. Canonical Datasetは既存processDataset()で指標を再計算するため、
+   totalIncome / totalExpense / profit / pseudoLaborRate / fixedCost / varCost等の
+   既存画面契約を維持。
+9. activeDatasetByYM / activeDatasets / activeRealCsvDatasetByYM /
+   activeRealCsvDatasets の読取層をoverlay。
+   ホーム・月次収支・年度推移等は既存ロジックを変更せず段階的にCanonicalを利用。
+10. normalized-source-updated時はCanonical/Parityキャッシュを破棄。
 
-期待
-- 4月/5月: D4-30でCloud保存済みなら一致または差異へ進む。
-- 6月: confirmedが存在しない限り「日報のみ」。
-- 7月以降: 現行Datasetがなければ従来どおり現行Datasetなし。
+安全条件
+- Parity READYでなければCanonicalを表示しない。
+- UNKNOWN / MISMATCH / CANONICAL_FAILED / PL未正規化はLegacy維持。
+- 日報を確定値へ昇格しない。
+- 既存STATE / Dataset / Supabaseデータを書き換えない。
+- 表示値が一致確認済みの月のみ経路がCanonicalへ変わるため、表示数字は変えない。
+
+現在の実機確認結果を前提
+- 2026年4月: READY
+- 2026年5月: READY
+- 2026年6月: PRELIMINARY_ONLY（日報のみ）
+したがって4・5月のみCanonical候補、6月はLegacy日報維持。
 
 変更ファイル
 - src/core/data_catalog/accounting_parity.js
-- src/core/data_catalog/accounting_legacy_migration.js
-- src/modules/data_verification.js
-- assets/css/foundation/theme.css
 - CHANGELOG.txt
 
 検証
-- 全 src/**/*.js node --check PASS
+- node --check PASS
