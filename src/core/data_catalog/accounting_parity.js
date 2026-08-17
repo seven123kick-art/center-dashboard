@@ -341,3 +341,99 @@
     warmMonth,resolveSync,inspect,invalidate,buildCanonicalDataset
   });
 })();
+
+/* ============================================================================
+   Version6 D4-33: Accounting Actual Read-Path Proof
+   ----------------------------------------------------------------------------
+   D4-32で実装したRead Modelが実際にどの経路を選んでいるかを、
+   データ確認画面の収支移行診断直下へ読取専用で表示する。
+   business logic / Dataset / Canonical / Cloudへの書込は一切行わない。
+============================================================================ */
+(function(){
+  if(window.__ACCOUNTING_READ_PATH_PROOF_D433__) return;
+  window.__ACCOUNTING_READ_PATH_PROOF_D433__=true;
+
+  const LABEL=Object.freeze({
+    CANONICAL:'Canonical利用中',
+    PRELIMINARY_FALLBACK:'日報Dataset利用中',
+    HISTORY_FALLBACK:'収支補完Dataset利用中',
+    LEGACY_FALLBACK:'現行Dataset利用中',
+    LOADING:'確認中',
+    NOT_WARMED:'未確認'
+  });
+
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function selectedFiscalYear(){
+    const ym=document.getElementById('data-verification-ym')?.value||'';
+    if(!/^\d{6}$/.test(ym)) return null;
+    return Number(ym.slice(4))>=4?Number(ym.slice(0,4)):Number(ym.slice(0,4))-1;
+  }
+
+  async function collect(){
+    const fy=selectedFiscalYear();
+    const rm=window.ACCOUNTING_DATASET_READ_MODEL;
+    if(!fy||!rm?.inspect||!rm?.warmMonth||!window.ACCOUNTING_PARITY?.fiscalMonths) return null;
+    const months=ACCOUNTING_PARITY.fiscalMonths(fy);
+    const out=[];
+    for(const period of months){
+      let state=rm.inspect(period);
+      if(['NOT_WARMED','LOADING'].includes(state?.status)){
+        try{await rm.warmMonth(period);}catch(_e){}
+        state=rm.inspect(period);
+      }
+      out.push({period,status:state?.status||'NOT_WARMED',reason:state?.reason||null});
+    }
+    return {fy,months:out};
+  }
+
+  function render(report){
+    const parity=document.querySelector('#data-verification-root .dv-parity-card');
+    if(!parity||!report) return;
+    let host=document.getElementById('dv-accounting-read-path-proof');
+    if(!host){
+      host=document.createElement('div');
+      host.id='dv-accounting-read-path-proof';
+      host.className='card dv-parity-card';
+      parity.insertAdjacentElement('afterend',host);
+    }
+    const visible=report.months.filter(x=>x.status!=='NOT_WARMED'||x.reason);
+    host.innerHTML=`<div class="card-header"><span class="card-title">収支読取経路</span><span class="dv-readonly">${esc(report.fy)}年度 / 読取専用</span></div>
+      <div class="card-body">
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px">
+          ${visible.map(x=>{
+            const mm=Number(x.period.slice(4));
+            const good=x.status==='CANONICAL';
+            const prelim=x.status==='PRELIMINARY_FALLBACK';
+            const bg=good?'#f0faf5':prelim?'#f3f8fb':'#fafbfa';
+            const bd=good?'rgba(61,187,131,.16)':prelim?'rgba(67,191,239,.18)':'rgba(31,58,48,.07)';
+            return `<div style="min-height:50px;padding:9px 10px;border:1px solid ${bd};border-radius:12px;background:${bg}">
+              <div style="display:flex;justify-content:space-between;gap:6px;align-items:center"><strong style="font-size:12px">${mm}月</strong><span style="font-size:10px;font-weight:800;color:var(--text2)">${esc(LABEL[x.status]||x.status)}</span></div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="dv-footnote" style="margin-top:10px">D4-32の実表示経路を確認しています。Canonicalへの書込・自動補正は行いません。</div>
+      </div>`;
+  }
+
+  let running=false;
+  async function refresh(){
+    if(running) return;
+    if(!document.querySelector('#data-verification-root .dv-parity-card')) return;
+    running=true;
+    try{render(await collect());}finally{running=false;}
+  }
+
+  const observer=new MutationObserver(()=>{setTimeout(refresh,0);});
+  function start(){
+    const root=document.getElementById('data-verification-root');
+    if(!root) return;
+    observer.observe(root,{childList:true,subtree:true});
+    refresh();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start,{once:true});
+  else start();
+
+  window.ACCOUNTING_READ_PATH_PROOF=Object.freeze({collect,refresh});
+})();
+
