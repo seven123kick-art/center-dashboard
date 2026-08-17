@@ -1070,6 +1070,9 @@
         </div>
       </div>
 
+      <details class="dih-legacy-details" style="margin-bottom:14px">
+        <summary>詳細取込・互換操作（通常は上の資料一覧から取込）</summary>
+        <div class="dih-legacy-body">
       <div class="card" style="margin-bottom:14px;border:2px solid #60a5fa;background:#eff6ff">
         <div class="card-header" style="border-bottom:1px solid #bfdbfe">
           <span class="card-title">データ取込</span>
@@ -1121,13 +1124,6 @@
         </div>
       </div>
 
-      <div class="card dim-card" style="margin-bottom:14px">
-        <div class="card-header"><span class="card-title">新データ基盤 取込状況</span><button type="button" class="btn" onclick="DATA_IMPORT_MANAGEMENT.refresh()">更新</button></div>
-        <div class="card-body">
-          <div class="dim-toolbar"><label class="dim-field"><span>確認年月</span><input type="month" id="normalized-status-month" onchange="DATA_IMPORT_MANAGEMENT.refresh()"></label></div>
-          <div id="normalized-source-status"><div class="dim-empty">年月を選択するとCURRENT Batchと改訂履歴を確認できます。</div></div>
-        </div>
-      </div>
 
       <details class="card" style="margin-bottom:14px">
         <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
@@ -1235,9 +1231,11 @@
       </div>
 
       <div class="card" style="margin-bottom:14px">
-        <div class="card-header"><span class="card-title">取込状況一覧（済/未・件数・最終取込日時）</span></div>
+        <div class="card-header"><span class="card-title">旧STATE取込状況（互換確認）</span></div>
         <div id="data-list"><div style="padding:12px 16px;font-size:12px;color:var(--text3)">まだデータがありません</div></div>
       </div>
+        </div>
+      </details>
         </div>
 
         <div class="view" id="view-import">
@@ -1249,7 +1247,7 @@
       </div>
       <div class="card" id="import-center-card" style="margin-bottom:14px;border:2px solid #60a5fa;background:#eff6ff">
         <div class="card-header" style="border-bottom:1px solid #bfdbfe">
-          <span class="card-title" id="import-target-title">その他取込</span>
+          <span class="card-title" id="import-target-title">補助取込・設定</span>
           <span id="import-target-badge" class="badge badge-info">PDF・直接入力</span>
         </div>
         <div class="card-body" style="font-size:12px;line-height:1.8;color:var(--text2)">
@@ -1259,8 +1257,8 @@
       </div>
       <div class="card" style="margin-bottom:14px;background:#f8fafc">
         <div class="card-body" style="font-size:12px;color:var(--text2);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-          <span>SKDL・作業者別・荷主別などのCSVは「CSV取込」から登録してください。</span>
-          <button class="btn btn-primary" onclick="NAV.go('csv-import')" style="font-size:12px;white-space:nowrap">📦 CSV取込を開く</button>
+          <span>主要資料は「データ取込」から登録してください。</span>
+          <button class="btn btn-primary" onclick="NAV.go('csv-import')" style="font-size:12px;white-space:nowrap">データ取込を開く</button>
         </div>
       </div>
 
@@ -1443,8 +1441,8 @@
         <div class="card-header"><span class="card-title">運用ガイド</span></div>
         <div class="card-body">
           <div class="rule-list">
-            <p>収支CSV・作業者別CSV・商品住所CSVの取込は「CSV取込」タブに移動しました</p>
-            <p>このタブは、配達持出リストPDF・直接入力・過去実績補完・クラウド同期設定・ストレージ管理をまとめた「その他取込」画面です</p>
+            <p>主要SOURCEの取込は「データ取込」タブに集約しました</p>
+            <p>このタブは、直接入力・過去実績補完・クラウド同期設定・ストレージ管理をまとめた「補助取込・設定」画面です</p>
             <p>複数月まとめて選択すると推移グラフが自動生成されます</p>
             <p>同一月のファイルを再度読み込むと上書き更新されます</p>
             <p>クラウド同期設定済みの場合、データはSupabaseにも自動保存されます</p>

@@ -325,7 +325,7 @@ const CONFIG = {
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
     'field-worker':'作業者分析', 'route-analysis':'配送分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
-    capacity:'キャパ分析', 'data-verification':'データ確認', import:'その他取込', 'csv-import':'CSV取込', 'worker-master':'マスタ管理',
+    capacity:'キャパ分析', 'data-verification':'データ確認', import:'補助取込・設定', 'csv-import':'データ取込', 'worker-master':'マスタ管理',
     kamoku:'収支科目 詳細分析', report:'会議報告書', 'budget-actual':'予実差異分析',
   },
 };
@@ -2753,7 +2753,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 2. センター情報を画面に反映
     document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
-    document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent='その他取込');
+    document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent='補助取込・設定');
 
     // 3. ドロップゾーン設定
     setupDropZone('upload-zone', 'file-input', f=>IMPORT.handleFiles(f));

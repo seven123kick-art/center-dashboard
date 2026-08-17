@@ -1,55 +1,57 @@
-Version6 D3-16 / D3-17
+Version6 D3-18 / D3-19 — Data Import closure and legacy UI consolidation
 Date: 2026-08-17
 
 PURPOSE
-- Consolidate the seven principal Data Catalog sources into one operational import hub.
-- Make target period, registration state, CURRENT/revision status and file selection available from one screen.
-- Reuse the already-tested import/save paths instead of creating duplicate parsers.
+- Close D3 by making the Data Catalog import hub the practical primary import surface.
+- Reduce duplicate/competing import-status UI without deleting compatibility import logic.
+- Keep legacy detailed controls available, but collapsed and clearly secondary.
+- Correct remaining old UI wording (CSV取込 / その他取込) to the current product terminology.
 
-IMPLEMENTATION
-1. Unified Data Import Hub
-- New src/modules/data_import_hub.js.
-- One target-month selector controls the operational import context.
-- Seven source cards:
-  PLAN_BUDGET / SKFL0001
-  PL_ACTUAL PRELIMINARY / SKDL0002
-  PL_ACTUAL CONFIRMED / SKDL0003
-  WORKER_SALES
-  SHIPPER_AREA
-  DELIVERY_LIST
-  ROUTE_PAYMENT
-- Each card shows source role, current registration state and revision count where applicable.
-- File selection is launched from the card while the existing import handler remains the single processing/save path.
+CHANGES
+1. Unified import hub behavior
+- SKFL0001 card now opens the PDF chooser and immediately runs PLAN_PDF_IMPORT.importSelected() after selection.
+- SKDL0002 card now opens the chooser and immediately runs DATA_IMPORT_MANAGEMENT.importPreliminary() after selection.
+- SKDL0003 card explicitly prepares the existing import route as CONFIRMED before the legacy modal/processing flow continues.
+- Existing official parsers and save paths are reused; no duplicate parsing/business logic was added.
 
-2. Period synchronization
-- Hub month synchronizes SKDL0002, WORKER_SALES and SHIPPER_AREA legacy selectors.
-- Fiscal year for SKFL0001 is synchronized from the selected month.
-- DELIVERY_LIST continues to derive delivery dates from its source PDF; no false month is injected.
+2. Revision visibility
+- Import cards can expose retained Normalized Source revision history when multiple revisions exist.
+- History remains read-only and is loaded from NormalizedSourceRepository manifests.
 
-3. Source-of-truth status
-- Normalized source status is read from Repository.NormalizedSource manifests/CURRENT batches.
-- PL_ACTUAL distinguishes PRELIMINARY and CONFIRMED.
-- If CONFIRMED is CURRENT, the preliminary card is shown as superseded rather than missing.
-- Budget status uses STATE.planData fiscal-year coverage and preserves FIRST_HALF_ONLY / NOT_PLANNED_YET semantics.
+3. Duplicate UI cleanup
+- Removed the second standalone “新データ基盤 取込状況” panel from the CSV-import view because the unified hub already shows CURRENT / Revision state.
+- Existing detailed import controls are preserved under a collapsed “詳細取込・互換操作” section.
+- Legacy STATE list remains available there as “旧STATE取込状況（互換確認）”.
+- No legacy parser/save path was deleted in this package.
 
-4. Legacy/detail controls
-- Existing tested upload controls remain below the hub for compatibility and detailed operations.
-- The new hub does not duplicate parser, STATE, Storage, Cloud or Supabase write logic.
-- No business logic was moved into the UI.
+4. Product terminology cleanup
+- Top-bar title: csv-import -> データ取込.
+- Top-bar title: import -> 補助取込・設定.
+- Remaining guidance text that referred to “CSV取込” / “その他取込” was aligned to the current terminology where applicable.
 
-5. UI scope
-- Added only the import-hub structural CSS needed for this function.
-- Full product-wide color/sidebar/login/design-system unification is intentionally deferred to D4, after D3 data/import foundations are closed.
+5. SKDL0002 file lifecycle
+- The dedicated SKDL0002 file input is cleared after a successful import so selecting the same file again can trigger a future revision import.
+
+UNCHANGED
+- Existing STATE/full_state structures.
+- Existing SKDL0001 daily processing.
+- Existing SKDL0003 parser and legacy storage behavior.
+- Existing WORKER_SALES / SHIPPER_AREA / DELIVERY_LIST / ROUTE_PAYMENT parsers.
+- Supabase schema.
+- Canonical/Accounting business rules.
+- D3-1 through D3-17 data contracts and repositories.
 
 VALIDATION
 - node --check PASS for every src/**/*.js file.
-- New hub has no direct STATE/full_state/Supabase write path.
-- Existing input IDs and handlers remain present.
-- No Supabase schema migration.
+- Unified hub still targets the official existing input/import routes.
+- Detailed compatibility controls remain present in DOM for legacy code paths.
+- No new Storage/Cloud writes were introduced by the hub itself.
 
 FILES
 - center.html
-- assets/css/app.css
-- assets/css/features/data-import-hub.css (new)
-- src/modules/data_import_hub.js (new)
+- src/app.js
+- src/ui/ui_helpers.js
+- src/modules/data_import_hub.js
+- src/modules/data_import_management.js
+- assets/css/features/data-import-hub.css
 - CHANGELOG.txt

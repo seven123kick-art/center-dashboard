@@ -21,6 +21,7 @@
       const r=await ACCOUNTING_IMPORT_BRIDGE.persistCsvText(text,{period,document_state:'PRELIMINARY',file_name:file.name});
       if(!r?.ok)throw new Error(r?.error||'保存に失敗しました');
       setMsg(`SKDL0002速報を登録しました（${period.slice(0,4)}年${Number(period.slice(4))}月 / ${r.record_count||0}行）`,'ok');
+      if(document.getElementById('preliminary-pl-file'))document.getElementById('preliminary-pl-file').value='';
       const status=document.getElementById('normalized-status-month');if(status)status.value=month;
       await refresh();
       try{await window.CANONICAL_MATERIALIZER?.materialize?.(period,{force:true});}catch(_e){}

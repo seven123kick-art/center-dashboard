@@ -53,7 +53,7 @@ window.UI = {
     }
     // センター名を全要素に反映
     document.querySelectorAll('[data-center-name]').forEach(el=>el.textContent=CENTER.name);
-    document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent='その他取込');
+    document.querySelectorAll('[data-center-import-name]').forEach(el=>el.textContent='補助取込・設定');
   },
 
   updateSaveStatus() {
