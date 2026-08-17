@@ -1,20 +1,32 @@
-Version6 D4-12 / Shared Pastel Data Palette
+Version6 D4-13 / Startup Finalization + Canonical Read Cache
 Date: 2026-08-17
 
 PURPOSE
-- Align revenue composition, expense breakdown, and shipper sales colors with the approved bright modern pastel + refined UI.
-- Keep chart/data colors identical across Kitasaitama and Toda so numeric meaning/readability remains shared.
+- Finalize the D4-11 startup path after browser-restart measurement reached READY in 1.51s.
+- Keep startup profiling available for maintenance without showing the temporary diagnostic popup to normal users.
+- Reduce repeated Canonical materialization downloads without weakening CURRENT-source verification.
 
-CHANGE
-- Replaced the legacy high-saturation CONFIG.COLORS palette (dark navy/red/green/orange/blue/purple) with a softer shared pastel data palette.
-- The new palette is inspired by the ReGLOSS / hololive GAMERS color family, but adjusted for business-dashboard readability rather than using full-strength official colors.
-- This affects existing components that already consume CONFIG.COLORS, including revenue composition, expense category bars, shipper rankings, and related analysis charts.
-- Semantic KPI colors (income / expense / profit / labor) and center-specific accent colors are unchanged.
+CHANGES
+1. Startup Profiler
+   - Normal startup no longer shows the temporary diagnostic popup.
+   - Profiler remains available for maintenance.
+   - Enable with localStorage key v6_startup_profiler=1 or URL query startupProfile=1.
+   - STARTUP_PROFILER.setEnabled(true/false) is also available from developer tools.
 
-FILES
-- src/app.js
-- CHANGELOG.txt
+2. Canonical Materializer read path
+   - CURRENT manifest is still read from Cloud for each normalized source.
+   - Once the manifest identifies the exact current_batch_id, the immutable batch body is reused from IndexedDB when present.
+   - Cache miss automatically falls back to Cloud and refreshes the IndexedDB cache.
+   - Therefore stale batch data is not selected merely because it exists locally.
 
-VALIDATION
-- node --check src/app.js PASS.
-- No calculation, data, startup, Canonical, Data Catalog, or Supabase changes.
+3. Data Import Management
+   - Fixed the post-import Canonical materialize call to use the current object-form API: materialize({period}).
+   - The previous positional call was caught and ignored, so post-import materialization could silently fail.
+
+SAFETY
+- D4-6 Readiness Gate unchanged.
+- D4-10/D4-11 verified revision startup unchanged.
+- No business calculation changes.
+- No Data Catalog / Canonical contract changes.
+- No Supabase schema changes.
+- No UI design-system expansion in this patch.

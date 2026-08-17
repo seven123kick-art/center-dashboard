@@ -24,7 +24,7 @@
       if(document.getElementById('preliminary-pl-file'))document.getElementById('preliminary-pl-file').value='';
       const status=document.getElementById('normalized-status-month');if(status)status.value=month;
       await refresh();
-      try{await window.CANONICAL_MATERIALIZER?.materialize?.(period,{force:true});}catch(_e){}
+      try{await window.CANONICAL_MATERIALIZER?.materialize?.({period});}catch(_e){}
     }catch(e){setMsg(e?.message||String(e),'error');}
   }
   async function refresh(){

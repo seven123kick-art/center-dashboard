@@ -31,7 +31,9 @@
     return arr(r.decisions);
   }
   async function loadCurrent(type,period){
-    const r=await Repository.NormalizedSource.loadCurrent(type,period);
+    // CURRENT manifest is always verified against Cloud; the immutable batch body may
+    // be reused from IndexedDB when the exact current_batch_id is already cached.
+    const r=await Repository.NormalizedSource.loadCurrent(type,period,{preferCache:true});
     if(!r?.ok) throw new Error(r?.error||`${type} load failed`);
     return r;
   }
