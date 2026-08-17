@@ -8,7 +8,7 @@
    - 本モジュール自身はSTATE / IndexedDB / Storage / Cloud / Supabaseへ書かない。
    - 現行RepositoryにはResolution専用の安全な永続API/DB schemaが存在しないため、
      推測で既存FullStateへ混入させない。
-   - D3-5Bで永続先schema/APIを正式に決めた後、このLedgerをRepositoryへ接続する。
+   - D3-5B以降はResolutionRepository経由で正本/履歴として利用する。
 ============================================================ */
 'use strict';
 (function(){
@@ -64,7 +64,17 @@
     const out=new Map(arr(existingAliases).map(x=>[aliasKey(x),clone(x)]));
     for(const d of activeDecisions(decisions)){
       if(!d.remember_as_alias) continue;
-      const a={entity_type:d.entity_type,alias_label:d.source_value,master_id:d.selected_master_id,source_document_type:d.source_document_type,status:'ACTIVE',resolution_decision_id:d.resolution_decision_id};
+      const a={
+        entity_type:d.entity_type,
+        subject_type:d.entity_type,
+        alias_label:d.source_value,
+        master_id:d.selected_master_id,
+        subject_id:d.entity_type==='PROCESS'?null:d.selected_master_id,
+        process_code:d.entity_type==='PROCESS'?d.selected_master_id:null,
+        source_document_type:d.source_document_type,
+        status:'ACTIVE',
+        resolution_decision_id:d.resolution_decision_id
+      };
       out.set(aliasKey(a),a);
     }
     return [...out.values()];

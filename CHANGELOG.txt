@@ -1,3 +1,52 @@
+Version6 D3-5C Resolution Save Integration
+Date: 2026-08-17
+
+Purpose
+- Connect D3-4 resolution preview to D3-5B ResolutionRepository.
+- Persist only human-confirmed attribution resolution decisions.
+- Re-fetch from Cloud after save, rebuild active aliases, and re-evaluate Resolver results.
+- Keep SOURCE and Master data immutable.
+
+Changed files
+1. src/modules/data_verification.js
+   - Loads persisted Resolution Decisions through Repository.Resolution.
+   - Adds explicit confirmation + save action from the existing preview.
+   - Save sequence: create decision -> Cloud save -> Cloud re-fetch -> verify decision -> rebuild UI/Resolver context.
+   - Avoids duplicate active decisions when the exact same mapping is already active.
+   - When a mapping is changed, the new decision supersedes the prior active decision instead of overwriting/deleting it.
+   - Does not mutate STATE, workerMaster, companyMaster, SOURCE, or legacy FullState.
+
+2. src/core/data_catalog/resolution_ledger.js
+   - Materialized aliases now conform to ATTRIBUTION_SUBJECT_ALIAS / SUBJECT_RESOLVER shape:
+     subject_type + subject_id / process_code.
+   - Existing ledger history semantics remain ACTIVE/REVOKED/supersedes.
+
+3. src/core/data_catalog/resolution_preview.js
+   - Accepts persisted resolutionDecisions.
+   - Rebuilds effective subject aliases from active decisions before SUBJECT_RESOLVER index creation.
+
+4. src/core/repository/resolution_repository.js
+   - Documentation updated to reflect D3-5C UI integration. Runtime persistence behavior unchanged.
+
+5. assets/css/features/data-verification.css
+   - Minimal styles for save action and save/reload status message.
+
+Important limitation
+- The current legacy STATE does not retain the row-level normalized WORKER_SALES / SHIPPER_AREA records needed to rebuild the full detailed Canonical Snapshot from persisted decisions after a page reload.
+- D3-5C therefore performs persisted Alias reconstruction + Resolver re-evaluation in the verification flow.
+- It does NOT pretend that detailed Canonical SALES_DETAIL has been rebuilt when the required normalized SOURCE rows are unavailable.
+- Full Canonical re-materialization belongs to the later normalized SOURCE persistence/migration step.
+
+Verification
+- node --check: all src/*.js PASS.
+- Resolution Ledger alias materialization -> SUBJECT_RESOLVER persisted alias lookup PASS.
+- ResolutionRepository mock Cloud save -> Cloud reload -> decision verification PASS.
+- Explicit 0/UNKNOWN, accounting, parser, STATE, Storage FullState logic not changed in this phase.
+
+
+============================================================
+Previous changelog follows
+============================================================
 Version6 D3-5B Resolution正式永続化基盤
 作成日: 2026-08-17
 

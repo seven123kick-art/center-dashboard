@@ -27,10 +27,14 @@
 
   function buildContext(input={}){
     const masterData=input.masterData||legacyMasterData(input);
+    const decisions=arr(input.resolutionDecisions);
+    const persistedAliases=window.RESOLUTION_LEDGER?.materializeAliases?.(decisions,masterData.subjectAliases||[])||arr(masterData.subjectAliases);
+    const subjectData=Object.assign({},masterData,{subjectAliases:persistedAliases});
     return {
       masterData,
-      subjectData:masterData,
-      subjectIndexes:window.SUBJECT_RESOLVER?.buildIndexes?.(masterData)||null,
+      subjectData,
+      resolutionDecisions:decisions,
+      subjectIndexes:window.SUBJECT_RESOLVER?.buildIndexes?.(subjectData)||null,
       masterIndexes:window.MASTER_RESOLVER?.buildIndexes?.(masterData)||null
     };
   }

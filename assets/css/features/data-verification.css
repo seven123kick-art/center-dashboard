@@ -37,3 +37,8 @@
 #view-data-verification .dv-preview-box{margin:12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-soft);font-size:11px;line-height:1.7}
 #view-data-verification .dv-preview-box b{display:block;margin-bottom:4px}
 #view-data-verification .dv-preview-box small{display:block;margin-top:5px;color:var(--text3)}
+#view-data-verification .dv-preview-actions{display:flex;justify-content:flex-end;margin-top:8px}
+#view-data-verification .dv-resolution-message{margin:10px 12px 0;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:11px}
+#view-data-verification .dv-resolution-message.is-success{font-weight:600}
+#view-data-verification .dv-resolution-message.is-error{font-weight:700}
+#view-data-verification .dv-resolution-message.is-working{color:var(--text2)}
