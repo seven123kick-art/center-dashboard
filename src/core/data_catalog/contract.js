@@ -43,6 +43,8 @@
       center_id: field('string', false, 'D1時点ではUNSPECIFIED。センター判定ロジックが既存コード上に確認できていないため'),
       year_month: field('string', false),
       import_batch_id: field('string', false, 'IMPORT_BATCHへの参照（任意）'),
+      file_hash: field('string', false, '同一ファイル検出用。採番/ハッシュ方式は保存層実装時に確定する'),
+      supersedes_source_file_id: field('string', false, '訂正版の場合に直前SOURCE_FILEを参照。原SOURCEは削除しない'),
     },
   };
 
@@ -64,8 +66,16 @@
       import_batch_id: field('string', true),
       started_at: field('string', true),
       finished_at: field('string', false),
-      status: field('string', true, 'D1時点では値の集合を固定しない（UNSPECIFIED許容）'),
+      status: field('string', true, '取込処理状態。保存層実装時に値集合を確定する'),
+      revision_status: field('string', false, 'CURRENT/SUPERSEDED等。改訂系譜と処理成否statusを混同しない'),
+      supersedes_import_batch_id: field('string', false, 'このBatchが置き換える直前Batch。旧Batchは削除しない'),
+      revision_number: field('number', false, '同一帳票系列内の改訂番号。保存層実装時に採番方式を確定する'),
+      document_type: field('string', false),
+      center_id: field('string', false),
+      target_period: field('string', false, '対象年月/日等。帳票Catalogのtarget_scopeに従う'),
       file_ids: field('array', false, 'SOURCE_FILEのID配列'),
+      added_count: field('number', false), changed_count: field('number', false),
+      removed_count: field('number', false), conflict_count: field('number', false),
     },
   };
 
@@ -300,6 +310,31 @@
      「自社便である」と推測してはならない（既存原則を維持）。
      既存の1ヘッド=1レコードという構造は業務仕様と一致しているため、
      フィールド構造自体は変更していない。 */
+  /* ---------- ROUTE_PAYMENT_SOURCE_RECORD ----------
+     配達ヘッド傭車料確認Excelの行単位SOURCE正規化契約。
+     既存parseHeadPaymentSheetの `|| 0` を経由せず、原セルの空欄はnull、
+     明示0は0として保持する新データ基盤用の契約。既存parser/UIには未接続。 */
+  const ROUTE_PAYMENT_SOURCE_RECORD = {
+    entity: 'ROUTE_PAYMENT_SOURCE_RECORD',
+    layer: 'NORMALIZED',
+    fields: {
+      source_record_id: field('string', true),
+      source_file_id: field('string', false),
+      source_row_index: field('number', false),
+      year_month: field('string', false),
+      center_id: field('string', false),
+      delivery_date: field('string', true),
+      head_no: field('string', true, '会社共通の強い業務キー'),
+      source_vehicle_company_code: field('string', false),
+      source_worker1_code: field('string', false),
+      payment_amount: field('number', false, '空欄/解釈不能はnull、明示0は0'),
+      toll_amount: field('number', false, '空欄/解釈不能はnull、明示0は0'),
+      calc_type: field('string', false),
+      is_deleted: field('boolean', false, '削除フラグ。SOURCE事実として保持し、Normalizerでは行を消さない'),
+      payment_confirmed: field('boolean', false),
+    },
+  };
+
   const ROUTE_PAYMENT_ENTITY = {
     entity: 'ROUTE_PAYMENT',
     layer: 'NORMALIZED',
@@ -493,7 +528,7 @@
       accounting_fact_id: field('string', true),
       document_type: field('string', true, 'PL_ACTUAL'),
       document_state: field('string', true, 'PRELIMINARY/CONFIRMED'),
-      value_status: field('string', true, 'PRELIMINARY/CONFIRMED。数字の存在と確定度を分離する'),
+      value_status: field('string', true, '値の確定度軸。PRELIMINARY/CONFIRMEDに加え、将来ESTIMATED等を扱える。DATA_QUALITYとは別軸'),
       immutable: field('boolean', true, 'SKDL0003確定はtrue'),
       center_code: field('string', false), year_month: field('string', false), accounting_date: field('string', false),
       account_code: field('string', true), account_name: field('string', false),
@@ -513,6 +548,7 @@
     IMPORT_BATCH,
     WORKER_SALES_SOURCE_RECORD,
     SHIPPER_AREA_SOURCE_RECORD,
+    ROUTE_PAYMENT_SOURCE_RECORD,
     DELIVERY_ROUTE,
     BUSINESS_SLIP,
     DELIVERY_ATTEMPT,

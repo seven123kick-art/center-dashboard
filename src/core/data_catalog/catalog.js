@@ -13,6 +13,10 @@
      （content_check: 'DEFERRED_TO_EXISTING_PARSER' 等）。
    - 未確定・未確認の項目は、推測で埋めず null / [] / 'UNSPECIFIED'
      のいずれかで明示する。
+   - 本CatalogはSOURCE帳票の入口仕様を定義する。DELIVERY_ROUTEや
+     BUSINESS_SLIP等の業務Entityの一意性はDATA_CONTRACTを正本とし、
+     Catalog側へ重複定義しない。source_link_fieldsはSOURCE間の照合に
+     利用可能な項目を示すだけで、一意性を保証する主キーではない。
 
    本ファイルは何もSTATE/Storage/Cloud/DOMへ書き込まない。
    window.DATA_CATALOG という読み取り専用の定義オブジェクトを
@@ -68,8 +72,8 @@
     filename_policy: 'UNSPECIFIED',
     target_scope: 'CENTER_MONTH',
     business_role: '月次の営業収益・費用・利益（科目別実績）を提供する',
-    primary_keys: ['center_id', 'year_month', 'status'],
-    link_keys: [],
+    source_link_fields: ['center_id', 'year_month', 'document_state', 'account_code'],
+    business_entity_key_contract: 'DATA_CONTRACT.ACCOUNTING_FACT',
     canonical_fields: [], // D1時点では未確定（推測で定義しない）
     validation: {
       content_check: 'DEFERRED_TO_EXISTING_PARSER',
@@ -122,8 +126,8 @@
     filename_policy: 'RANDOM', // ランダム採番のためファイル名だけでは帳票確定不可（ご指示通り）
     target_scope: 'CENTER_MONTH',
     business_role: '作業者ごとの配送件数・金額・作業内容を提供する',
-    primary_keys: ['center_id', 'year_month', 'source_worker_label'],
-    link_keys: [], // route_id等との将来的な連携キーはD1時点では未確定
+    source_link_fields: ['slip_no'],
+    business_entity_key_contract: 'DATA_CONTRACT.WORKER_SALES_SOURCE_RECORD',
     canonical_fields: [],
     validation: {
       content_check: 'DEFERRED_TO_EXISTING_VALIDATOR',
@@ -151,8 +155,8 @@
     filename_policy: 'RANDOM',
     target_scope: 'CENTER_MONTH',
     business_role: '荷主・エリア（郵便番号/住所）・商品別の配送実績（物量・金額）を提供する',
-    primary_keys: ['center_id', 'year_month', 'slip_no'],
-    link_keys: [],
+    source_link_fields: ['slip_no'],
+    business_entity_key_contract: 'DATA_CONTRACT.BUSINESS_SLIP',
     canonical_fields: [],
     validation: {
       content_check: 'DEFERRED_TO_EXISTING_VALIDATOR',
@@ -186,8 +190,8 @@
     filename_policy: 'UNSPECIFIED',
     target_scope: 'CENTER_DAY',
     business_role: '配達便（ヘッド番号・配達日・作業者・原票番号）の一覧を提供する',
-    primary_keys: ['center_id', 'delivery_date', 'head_no'],
-    link_keys: ['slip_no'],
+    source_link_fields: ['head_no', 'slip_no'],
+    business_entity_key_contract: 'DATA_CONTRACT.DELIVERY_ROUTE / DATA_CONTRACT.DELIVERY_ATTEMPT',
     canonical_fields: [],
     validation: {
       content_check: 'DEFERRED_TO_EXISTING_PARSER',
@@ -217,8 +221,8 @@
     filename_policy: 'UNSPECIFIED',
     target_scope: 'CENTER_DAY',
     business_role: '配達便（ヘッド番号・配達日）ごとの傭車支払額を提供する',
-    primary_keys: ['center_id', 'delivery_date', 'head_no'],
-    link_keys: ['head_no', 'delivery_date'],
+    source_link_fields: ['head_no'],
+    business_entity_key_contract: 'DATA_CONTRACT.ROUTE_PAYMENT',
     canonical_fields: [],
     validation: {
       content_check: 'DEFERRED_TO_EXISTING_PARSER',

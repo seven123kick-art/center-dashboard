@@ -1,49 +1,78 @@
-Version6 D2-6 Attribution Subject Resolution
+経営管理システム Version6 - D2 データ基盤整合改修
 作成日: 2026-08-17
+基準: center-dashboard-main(20260816-235512).zip
 
-■目的
-WORKER_SALES（作業者別売上明細表）の「作業者」欄を人物専用と誤認しない基礎構造へ改訂。
-2026年6月実データと業務確認により、この欄は売上・支払の帰属主体であり、人物・会社・拠点/処理単位・業務処理コード・不明を含むことが確定した。
+【目的】
+D1〜D2-6横断レビューで確認された基礎設計の不整合を、既存UI/STATE/Storage/Cloudへ接続せず読取専用データ基盤側で整理する。
+後付け例外パッチではなく、SOURCE帳票定義・業務Contract・0/UNKNOWN原則の責務を整理した。
 
-■変更ファイル
-- center.html
-  - subject_resolver.js 読込を1行追加。
-- src/core/data_catalog/contract.js
-  - SALES_DETAILをworker_id中心からattribution subject中心へ再定義。
-  - source_subject_label / source_subject_company_nameを保持。
-  - ROUTE_WORKER（実運行人物）との責務分離を維持。
-- src/core/data_catalog/canonical_builder.js
-  - WORKER_SALES由来SALES_DETAILへ新subjectフィールドを出力。
-  - 人物/会社等の自動判定は行わずnullのまま（Resolver接続前の安全状態）。
-- src/core/data_catalog/master.js
-  - ATTRIBUTION_SUBJECT_ALIAS / PROCESS_MASTER契約を追加。
-- src/core/data_catalog/subject_resolver.js（新規）
-  - PERSON / ORGANIZATION / OPERATION_UNIT / PROCESS / UNKNOWNを定義。
-  - 個別表記をコードへベタ書きせず、マスタ/Aliasを引数で受ける純粋Resolver。
-  - PERSONのみ既存MASTER_RESOLVERへ接続可能。
+【変更ファイル】
+1. src/core/data_catalog/accounting_reconciliation.js
+2. src/core/data_catalog/catalog.js
+3. src/core/data_catalog/contract.js
+4. src/core/data_catalog/source_normalizer.js
+5. src/core/data_catalog/canonical_builder.js
+6. CHANGELOG.txt（本ファイル）
 
-■確定業務仕様
-- 個人名: PERSON → WORKER_MASTER候補。
-- 会社名（例: 個人を把握せず会社へ支払を立てるケース）: ORGANIZATION → COMPANY_MASTER。
-- センター等へ売上を帰属: OPERATION_UNIT → CENTER等。
-- 返品/未完了処理等: PROCESS。
-- 空欄/未判定: UNKNOWN。
-- 「習志野リサイクル」のような一括同名コードも人物として扱わない。
-- 会社/拠点/処理主体であることは情報欠落ではなく、業務上意図された正常データになり得る。
+【主な変更】
+1. accounting_reconciliation.js
+- null/UNKNOWNを0として合算していたsum()を廃止。
+- 明示0は有効値として0、金額不明を1件でも含む集計は合計値nullとする。
+- reconcileBySlipだけでなくsummarizeByAccountも同じ原則へ統一。
+- operational_has_unknown / accounting_has_unknownを結果へ保持。
+- 金額不明を含む場合はEXACT/VARIANCEを確定せずUNRESOLVEDとする。
 
-■安全性
-- STATE / IndexedDB / localStorage / Supabase / Cloud書込変更なし。
-- 既存parser変更なし。
-- 既存業務画面からsubject_resolverは未接続。
-- 2026年6月の個別表記をResolverへハードコードしていない。
-- UNKNOWNを架空のWORKER_MASTERへ登録しない。
+2. catalog.js
+- DATA_CATALOGの責務を「SOURCE帳票の入口仕様」へ明確化。
+- 業務Entityの一意性はDATA_CONTRACTを正本とし、Catalog側のprimary_keys/link_keys重複定義を廃止。
+- source_link_fields + business_entity_key_contractへ置換。
+- PL_ACTUALの旧status表記をdocument_stateへ統一。
+- WORKER_SALESのsource_worker_labelを主キー扱いする旧定義を廃止。
+- DELIVERY_LIST/ROUTE_PAYMENTの旧center+date+head複合主キー定義を廃止し、head_noの業務一意性はContract側へ一元化。
 
-■テスト
-- PERSON候補: PASS（氏名のみではPROVISIONALを維持）
-- ORGANIZATION: PASS
-- OPERATION_UNIT: PASS
-- PROCESS: PASS
-- AliasによるOPERATION_UNIT解決: PASS
-- UNKNOWN/空欄: PASS
-- MASTER_CONTRACT新Entity: PASS
-- src配下全JS node --check: PASS
+3. contract.js
+- SOURCE_FILEへfile_hash / supersedes_source_file_idを追加。
+- IMPORT_BATCHへrevision_status / supersedes_import_batch_id / revision_number / document_type / center_id / target_period / 差分件数を追加。
+- 旧SOURCEを削除せず改訂系譜を表現できるContractへ拡張。
+- ROUTE_PAYMENT_SOURCE_RECORDを追加。
+- ACCOUNTING_FACT.value_statusをData Qualityとは別の「値の確定度軸」と明記。将来ESTIMATED等を扱える余地を確保。
+
+4. source_normalizer.js
+- normalizeRoutePaymentRows()を新規追加。
+- 配達ヘッド傭車料確認Excelの原行から、空欄金額=null / 明示0=0を保持。
+- 既存parseHeadPaymentSheetの `|| 0` を経由しない新データ基盤用読取経路。
+- 削除フラグ行もSOURCE事実として保持し、Normalizer段階では削除しない。
+- 既存parser/UI/STATEには未接続。
+
+5. canonical_builder.js
+- MASTER_RESOLVER / SUBJECT_RESOLVERが現時点で意図的に未接続であることを明記。
+- 実データでResolution精度確認後に正式接続する段階移行方針を明文化。
+- ロジック変更なし。
+
+【変更していないもの】
+- src/field/route_analysis.js の既存parseHeadPaymentSheet
+- STATE
+- IndexedDB
+- localStorage
+- Supabase / Cloud
+- center.html / UI
+- 既存取込導線
+- MASTER_RESOLVER / SUBJECT_RESOLVERの自動接続
+
+【重要な既知事項】
+既存parseHeadPaymentSheetには `Number(...) || 0` が残っているため、既存STATE経路では空欄と0円を区別できない。
+今回は既存機能へのパッチ修正を行わず、新SOURCE Normalizerで原Excelから正しく区別できる基礎を追加した。
+既存画面をCanonicalへ切替えるまでは、この既存制約は残る。
+
+【テスト】
+- operational amount=null / accounting amount=0 => operational_value=null, accounting_value=0, difference=null, UNRESOLVED: PASS
+- operational amount=0 / accounting amount=0 => EXACT, difference=0: PASS
+- 科目集計に100 + nullが混在 => amount=null（100として誤確定しない）: PASS
+- ROUTE_PAYMENT空欄傭車料 => payment_amount=null: PASS
+- ROUTE_PAYMENT明示0 => payment_amount=0: PASS
+- 空欄通行料 => null / 明示0 => 0: PASS
+- src配下全JavaScript node --check: PASS
+- 基準ZIPとの差分は上記5 JSファイルのみ: PASS
+
+【判定】
+PASS

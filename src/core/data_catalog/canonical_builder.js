@@ -42,6 +42,9 @@
      parseProductAddressRows / parsePdf / parseHeadPaymentSheet）
      は一切呼び出さない・変更しない。既にSTATEへ格納済みの結果を
      読むだけである。
+   - D2-5/D2-6で定義したMASTER_RESOLVER / SUBJECT_RESOLVERとの
+     自動結線はまだ行わない。実データでResolution精度を検証した後に
+     正式接続するため、現段階の未接続は意図した段階移行状態である。
    - 生成するIDは、D2時点ではメモリ上Snapshot専用の
      deterministic keyであり、永続IDではない。
      BUSINESS_SLIPの一時IDは「年月+slip_no」ではなく「slip_no」

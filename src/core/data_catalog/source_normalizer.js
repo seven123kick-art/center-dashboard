@@ -176,9 +176,58 @@
     return out;
   }
 
+
+  /* 配達ヘッド傭車料確認Excelの新データ基盤用Normalizer。
+     既存parseHeadPaymentSheetとは独立した読取専用経路で、空欄金額を
+     0へ変換しない。削除フラグ行もSOURCE事実として保持する。 */
+  function normalizeRoutePaymentRows(rows, meta = {}){
+    if (!Array.isArray(rows) || !rows.length) return [];
+    const header = rows[0] || [];
+    const idx = {
+      head: findIndex(header, ['ヘッド番号'], -1),
+      date: findIndex(header, ['配達日'], -1),
+      company: findIndex(header, ['車両所属コード'], -1),
+      worker1: findIndex(header, ['作業者１','作業者1'], -1),
+      fee: findIndex(header, ['傭車料'], -1),
+      calc: findIndex(header, ['傭車計算区分'], -1),
+      toll: findIndex(header, ['通行料'], -1),
+      deleted: findIndex(header, ['削除フラグ'], -1),
+      confirmed: findIndex(header, ['支払確定済フラグ'], -1),
+    };
+    if (idx.head < 0 || idx.date < 0 || idx.fee < 0) {
+      throw new Error('必要列（ヘッド番号・配達日・傭車料）を確認できません');
+    }
+    const out=[];
+    rows.slice(1).forEach((r,rowIndex)=>{
+      if(!Array.isArray(r) || !r.some(c=>clean(c))) return;
+      const headNo=clean(r[idx.head]).replace(/\D/g,'');
+      const deliveryDate=normalizeDate(r[idx.date]);
+      if(!headNo || !deliveryDate) return;
+      const deletedRaw=idx.deleted>=0?clean(r[idx.deleted]):'';
+      const confirmedRaw=idx.confirmed>=0?clean(r[idx.confirmed]):'';
+      out.push({
+        document_type:'ROUTE_PAYMENT',
+        source_file_id:sourceFileId(meta),
+        source_record_id:sourceRecordId('ROUTE_PAYMENT',meta,rowIndex),
+        source_row_index:rowIndex+2,
+        year_month:yearMonth(meta), center_id:centerId(meta),
+        delivery_date:deliveryDate, head_no:headNo,
+        source_vehicle_company_code:idx.company>=0?(clean(r[idx.company])||null):null,
+        source_worker1_code:idx.worker1>=0?(clean(r[idx.worker1])||null):null,
+        payment_amount:numericOrNull(r[idx.fee]),
+        toll_amount:idx.toll>=0?numericOrNull(r[idx.toll]):null,
+        calc_type:idx.calc>=0?(clean(r[idx.calc])||null):null,
+        is_deleted:deletedRaw===''?null:deletedRaw==='1',
+        payment_confirmed:confirmedRaw===''?null:confirmedRaw==='1',
+      });
+    });
+    return out;
+  }
+
   window.SOURCE_NORMALIZER = Object.freeze({
     normalizeWorkerSalesRows,
     normalizeShipperAreaRows,
+    normalizeRoutePaymentRows,
     normalizeSlipNo,
     normalizeDate,
     normalizeMatchLabel,
