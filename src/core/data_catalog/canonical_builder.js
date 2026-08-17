@@ -42,9 +42,12 @@
      parseProductAddressRows / parsePdf / parseHeadPaymentSheet）
      は一切呼び出さない・変更しない。既にSTATEへ格納済みの結果を
      読むだけである。
-   - D2-5/D2-6で定義したMASTER_RESOLVER / SUBJECT_RESOLVERとの
-     自動結線はまだ行わない。実データでResolution精度を検証した後に
-     正式接続するため、現段階の未接続は意図した段階移行状態である。
+   - D2-7ではMASTER_RESOLVER / SUBJECT_RESOLVERを任意のresolutionContext
+     が与えられた場合にのみ利用する。Context未指定時は従来どおり
+     未解決(null)のまま生成するため、既存画面・STATEへの副作用はない。
+   - SOURCEの「作業者」欄は人物専用ではない。PERSON / ORGANIZATION /
+     OPERATION_UNIT / PROCESS / UNKNOWNの解決結果をSALES_DETAILへ反映し、
+     人物以外を架空のWORKER_MASTERへ登録しない。
    - 生成するIDは、D2時点ではメモリ上Snapshot専用の
      deterministic keyであり、永続IDではない。
      BUSINESS_SLIPの一時IDは「年月+slip_no」ではなく「slip_no」
@@ -393,7 +396,48 @@
     return map.get(no);
   }
 
-  function buildDetailedEntitiesFromNormalizedSources(workerSalesRecords, shipperAreaRecords, existingBusinessSlips) {
+  function prepareResolutionContext(input) {
+    const ctx = input || null;
+    if (!ctx || !window.SUBJECT_RESOLVER) return null;
+    const subjectIndexes = ctx.subjectIndexes || window.SUBJECT_RESOLVER.buildIndexes(ctx.subjectData || ctx.masterData || {});
+    const masterIndexes = ctx.masterIndexes || (window.MASTER_RESOLVER ? window.MASTER_RESOLVER.buildIndexes(ctx.masterData || ctx.subjectData || {}) : null);
+    return { subjectIndexes, masterIndexes };
+  }
+
+  function applySubjectResolution(detail, sourceRecord, resolutionContext) {
+    if (!detail || !sourceRecord || !resolutionContext || !window.SUBJECT_RESOLVER) return detail;
+    const resolved = window.SUBJECT_RESOLVER.resolve({
+      source_subject_label: sourceRecord.source_worker_name || null,
+      source_subject_company_name: sourceRecord.source_worker_company_name || null,
+      effective_date: sourceRecord.delivery_date || null,
+      center_id: sourceRecord.center_id || null,
+    }, resolutionContext.subjectIndexes, resolutionContext.masterIndexes);
+
+    detail.attribution_subject_type = resolved.subject_type || null;
+    detail.attribution_subject_id = resolved.resolved_id || null;
+    detail.subject_match_method = resolved.match_method || null;
+    detail.subject_match_confidence = resolved.match_confidence == null ? null : resolved.match_confidence;
+    detail.subject_resolution_status = resolved.status || null;
+
+    if (resolved.subject_type === 'PERSON') {
+      detail.worker_id = resolved.resolved_id || null;
+      const assignment = resolved.worker_resolution && resolved.worker_resolution.assignment;
+      if (assignment) {
+        detail.worker_company_id = assignment.company_id || null;
+        if (assignment.center_id) detail.attribution_center_id = assignment.center_id;
+      }
+    } else if (resolved.subject_type === 'ORGANIZATION') {
+      detail.worker_company_id = resolved.resolved_id || null;
+    } else if (resolved.subject_type === 'OPERATION_UNIT') {
+      detail.attribution_center_id = resolved.resolved_id || null;
+    } else if (resolved.subject_type === 'PROCESS') {
+      detail.process_code = resolved.resolved_id || null;
+    }
+    return detail;
+  }
+
+  function buildDetailedEntitiesFromNormalizedSources(workerSalesRecords, shipperAreaRecords, existingBusinessSlips, resolutionContextInput) {
+    const resolutionContext = prepareResolutionContext(resolutionContextInput);
     const workers = safeArray(workerSalesRecords);
     const shippers = safeArray(shipperAreaRecords);
     const businessSlipsByNo = new Map();
@@ -452,7 +496,11 @@
         source_document_type: 'WORKER_SALES',
         source_file_id: r.source_file_id || null,
         source_record_id: r.source_record_id || null,
+        subject_match_method: null,
+        subject_match_confidence: null,
+        subject_resolution_status: null,
       };
+      applySubjectResolution(detail, r, resolutionContext);
       salesDetails.push(detail);
       pushMapArray(workerSalesByExact, salesExactKey(r), detail);
       pushMapArray(workerSalesBySupport, salesSupportKey(r), detail);
@@ -638,7 +686,8 @@
     const detailed = buildDetailedEntitiesFromNormalizedSources(
       opt.workerSalesRecords,
       opt.shipperAreaRecords,
-      routePart.businessSlips
+      routePart.businessSlips,
+      opt.resolutionContext || null
     );
 
     return {
@@ -684,6 +733,7 @@
       routeData: opt.routeData || null,
       workerSalesRecords,
       shipperAreaRecords,
+      resolutionContext: opt.resolutionContext || null,
     });
   }
 
@@ -732,6 +782,8 @@
       tempKey,
       salesExactKey,
       salesSupportKey,
+      prepareResolutionContext,
+      applySubjectResolution,
     },
   };
 

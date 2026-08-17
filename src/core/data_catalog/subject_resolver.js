@@ -21,7 +21,15 @@
   function norm(v){ return clean(v).normalize('NFKC').replace(/[\s　]/g,'').toLowerCase(); }
   function mapOf(list, labelKey, idKey){
     const m=new Map();
-    (list||[]).forEach(x=>{ const k=norm(x&&x[labelKey]); if(!k)return; const a=m.get(k)||[]; a.push(idKey?x[idKey]:x); m.set(k,a); });
+    (list||[]).forEach(x=>{
+      const k=norm(x&&x[labelKey]); if(!k)return;
+      const value=idKey?x[idKey]:x; if(value===null||value===undefined||value==='')return;
+      const a=m.get(k)||[];
+      // 同じマスタIDが正式名称とAliasの双方から入っても、
+      // 同一候補を2件としてCONFLICT扱いしない。
+      if(!idKey || !a.includes(value)) a.push(value);
+      m.set(k,a);
+    });
     return m;
   }
   function buildIndexes(data={}){
