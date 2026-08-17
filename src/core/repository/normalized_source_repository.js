@@ -147,6 +147,14 @@
   }
 
   async function saveBatchObserved(input={}){
+    try{
+      await window.DATA_PIPELINE_STATUS?.setStage?.(input.period,input.document_type,'SOURCE','OK',{
+        message:'Source accepted for normalized save',
+        detail:{source_file_name:input.source_file_name||null,source_file_hash:input.source_file_hash||null}
+      });
+      await window.DATA_PIPELINE_STATUS?.setStage?.(input.period,input.document_type,'NORMALIZED','RUNNING',{message:'Normalized source save started'});
+      await window.DATA_PIPELINE_STATUS?.setStage?.(input.period,input.document_type,'CLOUD','RUNNING',{message:'Cloud save started'});
+    }catch(_e){}
     let result;
     try{ result=await saveBatch(input); }
     catch(e){

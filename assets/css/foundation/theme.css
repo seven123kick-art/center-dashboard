@@ -28,3 +28,19 @@ select,input,textarea{border-radius:10px!important;border:1px solid var(--border
 .startup-readiness-note{font-size:12px!important;font-weight:700;color:#9a5262!important}
 .startup-readiness-actions{display:flex;justify-content:center;gap:10px;margin-top:22px;flex-wrap:wrap}
 .data-readiness-badge{display:inline-flex;align-items:center;min-height:28px;padding:0 10px;border:1px solid rgba(61,187,131,.18);border-radius:999px;background:rgba(61,187,131,.08);font-size:11px;font-weight:700;color:#39785e;white-space:nowrap}
+
+/* D4-18 Data Pipeline Status */
+.dim-pipeline-status{margin-top:18px;padding:16px;border:1px solid rgba(61,187,131,.12);border-radius:18px;background:rgba(255,255,255,.58)}
+.dim-pipeline-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px}
+.dim-pipeline-head>b{font-size:14px;color:var(--text)}
+.dim-pipeline-head>span{font-size:11px;color:var(--muted)}
+.dim-pipeline-status-body{display:grid;gap:9px}
+.dim-pipe-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:11px 12px;border:1px solid rgba(31,58,48,.07);border-radius:14px;background:rgba(255,255,255,.74)}
+.dim-pipe-name{display:flex;align-items:center;gap:8px;min-width:190px;font-size:12px}
+.dim-pipe-chips{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}
+.dim-pipe-chip,.dim-pipe-overall{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:700;line-height:1.2;background:#f3f5f4;color:#66706c}
+.dim-pipe-chip.is-ok,.dim-pipe-overall.is-ok{background:#e7f6ef;color:#287a5c}
+.dim-pipe-chip.is-partial,.dim-pipe-overall.is-partial{background:#fff4d8;color:#8a6617}
+.dim-pipe-chip.is-failed,.dim-pipe-overall.is-failed{background:#fdebec;color:#a34850}
+.dim-pipe-chip.is-running,.dim-pipe-overall.is-running{background:#eeeafd;color:#6752a5}
+@media(max-width:900px){.dim-pipeline-head,.dim-pipe-row{display:block}.dim-pipeline-head>span{display:block;margin-top:4px}.dim-pipe-chips{justify-content:flex-start;margin-top:8px}}

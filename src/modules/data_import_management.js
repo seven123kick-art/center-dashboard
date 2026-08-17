@@ -35,6 +35,25 @@
       }
     }catch(e){setMsg(e?.message||String(e),'error');}
   }
+  const PIPELINE_STATUS_LABELS=Object.freeze({OK:'正常',PARTIAL:'部分完了',FAILED:'失敗',RUNNING:'処理中',UNKNOWN:'未確認'});
+  const PIPELINE_STAGE_LABELS=Object.freeze({SOURCE:'SOURCE',NORMALIZED:'NORMALIZED',CANONICAL:'CANONICAL',DISPLAY_SNAPSHOT:'SNAPSHOT',CLOUD:'CLOUD'});
+  async function pipelineHtml(period){
+    if(!window.DATA_PIPELINE_STATUS?.load) return '';
+    const all=await DATA_PIPELINE_STATUS.load(period,'ALL');
+    const rows=[];
+    for(const type of TYPES){
+      const own=await DATA_PIPELINE_STATUS.load(period,type), stages={...(own?.stages||{})};
+      ['CANONICAL','DISPLAY_SNAPSHOT'].forEach(k=>{
+        if(all?.stages?.[k]?.status&&all.stages[k].status!=='UNKNOWN') stages[k]=all.stages[k];
+      });
+      const order=['SOURCE','NORMALIZED','CANONICAL','DISPLAY_SNAPSHOT','CLOUD'];
+      const values=order.map(k=>stages[k]?.status||'UNKNOWN');
+      const overall=values.includes('FAILED')?'FAILED':values.includes('PARTIAL')?'PARTIAL':values.includes('RUNNING')?'RUNNING':values.includes('OK')?'OK':'UNKNOWN';
+      const chips=order.map(k=>{const st=stages[k]?.status||'UNKNOWN';return `<span class="dim-pipe-chip is-${st.toLowerCase()}">${PIPELINE_STAGE_LABELS[k]}:${PIPELINE_STATUS_LABELS[st]||st}</span>`;}).join('');
+      rows.push(`<div class="dim-pipe-row"><div class="dim-pipe-name"><strong>${esc(LABEL[type]||type)}</strong><span class="dim-pipe-overall is-${overall.toLowerCase()}">${PIPELINE_STATUS_LABELS[overall]||overall}</span></div><div class="dim-pipe-chips">${chips}</div></div>`);
+    }
+    return `<section class="dim-pipeline-status"><div class="dim-pipeline-head"><b>データ処理状況</b><span>SOURCE → NORMALIZED → CANONICAL → SNAPSHOT → CLOUD</span></div><div class="dim-pipeline-status-body">${rows.join('')}</div></section>`;
+  }
   async function refresh(){
     const root=document.getElementById('normalized-source-status');if(!root)return;
     const input=document.getElementById('normalized-status-month');
@@ -55,7 +74,8 @@
     const fy=Number(period.slice(4))>=4?period.slice(0,4):String(Number(period.slice(0,4))-1),plan=window.STATE?.planData?.[fy]||null;
     const coverage=plan?.coverage||plan?.sourceMeta?.coverage||'UNKNOWN'; const coverageLabel=coverage==='FIRST_HALF_ONLY'?'上期策定済・下期未策定':coverage==='FULL_FISCAL_YEAR'?'12か月策定済':'登録済';
     const budgetRow=`<tr><td><b>予算計画</b><div class="dim-history">SKFL0001 / PLAN_BUDGET</div></td><td>${plan?`<span class="dim-state is-current">${esc(coverageLabel)}</span>`:'<span class="dim-state is-missing">未登録</span>'}</td><td>${plan?esc(`${fy}年度`):'—'}</td><td>${plan?esc(plan.itemCount??Object.keys(plan.rows||{}).length):'—'}</td><td><div class="dim-history">${plan?`${esc(plan.sourceMeta?.source_type||'LEGACY_PASTE')} · ${esc(plan.importedAt||'')}`:'—'}</div></td></tr>`;
-    root.innerHTML=`<table class="dim-source-table"><thead><tr><th>資料</th><th>状態</th><th>CURRENT</th><th>行数</th><th>改訂履歴</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(LABEL[x.type]||x.type)}</b><div class="dim-history">${esc(x.type)}</div></td><td>${x.error?`<span class="dim-state is-missing">ERROR</span>`:x.current?`<span class="dim-state is-current">${esc(x.state==='—'?'CURRENT':x.state)}</span>`:'<span class="dim-state is-missing">未登録</span>'}</td><td>${x.current?esc(x.current):'—'}</td><td>${x.count==null?'—':esc(x.count)}</td><td><div class="dim-history">${x.error?esc(x.error):(x.history||[]).slice().reverse().map(h=>`${esc(h.revision_status||'—')} · ${esc(h.record_count??'—')}行 · ${esc(h.saved_at||'')}`).join('<br>')||'—'}</div></td></tr>`).join('')}${budgetRow}</tbody></table>`;
+    const pipeline=await pipelineHtml(period);
+    root.innerHTML=`<table class="dim-source-table"><thead><tr><th>資料</th><th>状態</th><th>CURRENT</th><th>行数</th><th>改訂履歴</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(LABEL[x.type]||x.type)}</b><div class="dim-history">${esc(x.type)}</div></td><td>${x.error?`<span class="dim-state is-missing">ERROR</span>`:x.current?`<span class="dim-state is-current">${esc(x.state==='—'?'CURRENT':x.state)}</span>`:'<span class="dim-state is-missing">未登録</span>'}</td><td>${x.current?esc(x.current):'—'}</td><td>${x.count==null?'—':esc(x.count)}</td><td><div class="dim-history">${x.error?esc(x.error):(x.history||[]).slice().reverse().map(h=>`${esc(h.revision_status||'—')} · ${esc(h.record_count??'—')}行 · ${esc(h.saved_at||'')}`).join('<br>')||'—'}</div></td></tr>`).join('')}${budgetRow}</tbody></table>${pipeline}`;
   }
   document.addEventListener('DOMContentLoaded',()=>{const p=defaultPeriod();['preliminary-pl-month','normalized-status-month'].forEach(id=>{const el=document.getElementById(id);if(el&&!el.value&&p)el.value=monthFromPeriod(p);});refresh().catch(()=>{});});
   window.DATA_IMPORT_MANAGEMENT=Object.freeze({importPreliminary,refresh});
