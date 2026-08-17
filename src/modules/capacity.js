@@ -1432,7 +1432,7 @@ window.CAPACITY_UI = {
       STATE.capacity.calendar = STATE.capacity.calendar || {};
       STATE.capacity.calendar[date] = STATE.capacity.calendar[date] || {};
       STATE.capacity.calendar[date][field] = inp.type === 'number' ? this.n(inp.value) : inp.value;
-      STORE.save();
+      Repository.Storage.save();
       this.render();
     }));
   },
@@ -1459,7 +1459,7 @@ window.CAPACITY_UI = {
       STATE.capacity.calendar = STATE.capacity.calendar || {};
       STATE.capacity.calendar[date] = STATE.capacity.calendar[date] || {};
       STATE.capacity.calendar[date][field] = inp.type === 'number' ? this.n(inp.value) : inp.value;
-      STORE.save();
+      Repository.Storage.save();
       this.render();
     }));
     document.querySelectorAll('[data-capx-group-field]').forEach(inp=>inp.addEventListener('change',()=>{
@@ -1469,7 +1469,7 @@ window.CAPACITY_UI = {
       if (!g) return;
       const field = inp.dataset.capxGroupField;
       g[field] = inp.type === 'checkbox' ? inp.checked : inp.value;
-      STORE.save();
+      Repository.Storage.save();
       this.render();
     }));
     const regionFilter = document.getElementById('capx-region-filter');
@@ -1505,7 +1505,7 @@ window.CAPACITY_UI = {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
-      STORE.save();
+      Repository.Storage.save();
       CLOUD.pushCapacity().catch(()=>{});
       UI.toast('キャパ区分を追加しました');
       this.render();
@@ -1515,7 +1515,7 @@ window.CAPACITY_UI = {
       const id = btn.dataset.capxCapgroupDelete;
       if (!confirm('このキャパ区分を削除しますか？')) return;
       STATE.capacity.capacityGroups = (STATE.capacity.capacityGroups || []).filter(g=>g.id !== id);
-      STORE.save();
+      Repository.Storage.save();
       CLOUD.pushCapacity().catch(()=>{});
       this.render();
     }));
@@ -1527,7 +1527,7 @@ window.CAPACITY_UI = {
       if (!cg) return;
       cg[inp.dataset.capxCapgroupField] = inp.value;
       cg.updatedAt = new Date().toISOString();
-      STORE.save();
+      Repository.Storage.save();
       CLOUD.pushCapacity().catch(()=>{});
       this.render();
     }));
@@ -1543,7 +1543,7 @@ window.CAPACITY_UI = {
       cg.capacity[key] = cg.capacity[key] || { weekday:0, weekend:0 };
       cg.capacity[key][field] = this.n(inp.value);
       cg.updatedAt = new Date().toISOString();
-      STORE.save();
+      Repository.Storage.save();
       CLOUD.pushCapacity().catch(()=>{});
       this.render();
     }));
@@ -1565,7 +1565,7 @@ window.CAPACITY_UI = {
       row[field] = this.n(inp.value);
       STATE.capacity.areas[old] = row;
     }
-    STORE.save();
+    Repository.Storage.save();
     this.render();
   },
 
@@ -1599,7 +1599,7 @@ window.CAPACITY_UI = {
     STATE.capacity.areas = {};
     STATE.capacity.sourceFile = '';
     STATE.capacity.rowCount = 0;
-    STORE.save();
+    Repository.Storage.save();
     this.render();
   },
 

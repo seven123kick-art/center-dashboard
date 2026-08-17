@@ -1,32 +1,22 @@
-Version6 D4-13 / Startup Finalization + Canonical Read Cache
+Version6 D4-14 / Storage Write Boundary Migration
 Date: 2026-08-17
 
 PURPOSE
-- Finalize the D4-11 startup path after browser-restart measurement reached READY in 1.51s.
-- Keep startup profiling available for maintenance without showing the temporary diagnostic popup to normal users.
-- Reduce repeated Canonical materialization downloads without weakening CURRENT-source verification.
+- Continue Repository boundary migration without changing business behavior.
+- Remove remaining direct STORE.save() calls from feature modules that already have Repository.Storage available.
 
 CHANGES
-1. Startup Profiler
-   - Normal startup no longer shows the temporary diagnostic popup.
-   - Profiler remains available for maintenance.
-   - Enable with localStorage key v6_startup_profiler=1 or URL query startupProfile=1.
-   - STARTUP_PROFILER.setEnabled(true/false) is also available from developer tools.
+- src/modules/capacity.js
+  - 9 direct STORE.save() calls -> Repository.Storage.save().
+- src/modules/storage_audit.js
+  - 2 direct STORE.save() calls -> Repository.Storage.save().
 
-2. Canonical Materializer read path
-   - CURRENT manifest is still read from Cloud for each normalized source.
-   - Once the manifest identifies the exact current_batch_id, the immutable batch body is reused from IndexedDB when present.
-   - Cache miss automatically falls back to Cloud and refreshes the IndexedDB cache.
-   - Therefore stale batch data is not selected merely because it exists locally.
+DESIGN
+- Repository.Storage.save() is a thin delegation to the existing STORE.save(), so persistence behavior and AUTO_SYNC interception remain unchanged.
+- This moves feature modules away from the legacy global storage implementation and keeps Storage access behind the Repository boundary.
+- core/cloud.js and field_core.js compatibility/internal calls were intentionally NOT changed in this phase because they are part of the legacy adapter/compatibility layer.
 
-3. Data Import Management
-   - Fixed the post-import Canonical materialize call to use the current object-form API: materialize({period}).
-   - The previous positional call was caught and ignored, so post-import materialization could silently fail.
-
-SAFETY
-- D4-6 Readiness Gate unchanged.
-- D4-10/D4-11 verified revision startup unchanged.
-- No business calculation changes.
-- No Data Catalog / Canonical contract changes.
-- No Supabase schema changes.
-- No UI design-system expansion in this patch.
+VALIDATION
+- node --check PASS for both changed JS files.
+- No business calculations changed.
+- No STATE schema, Canonical, Data Catalog, Supabase schema, startup/readiness, or D4 UI changes.

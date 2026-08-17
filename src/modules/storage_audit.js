@@ -327,7 +327,7 @@ window.DATA_STORAGE_AUDIT = {
     if (el) el.innerHTML = `${esc(fy)}年度の現場データをDBから再読込中...`;
     const r = await SYNC_COORDINATOR.syncFieldFiscalYear(fy);
     if (r && r.ok) {
-      STORE.save();
+      Repository.Storage.save();
       if (window.FIELD_DATA_ACCESS?.invalidate) FIELD_DATA_ACCESS.invalidate();
       UI.toast(`${fy}年度の現場データを再読込しました`);
       renderImport();
@@ -343,7 +343,7 @@ window.DATA_STORAGE_TABLE = {
   changeFY(fy){ STATE.fiscalYear = String(fy); renderImport(); },
 
   async _syncAfterDelete(label){
-    STORE.save();
+    Repository.Storage.save();
     try {
       if (CLOUD?.pushAll) await SYNC_COORDINATOR.syncPush({ onlyChanged:false, updateBadge:true });
     } catch(e) {
