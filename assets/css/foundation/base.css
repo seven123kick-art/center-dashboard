@@ -1,52 +1,20 @@
-/* Version6 UI Foundation: reset and design tokens */
+/* Version6 Design System — shared tokens and reset */
 *{box-sizing:border-box;margin:0;padding:0}
- :root{
-  --sidebar-w:248px;
-  --header-h:64px;
-  --sidebar-bg:#0f172a;
-  --sidebar-bg-2:#202b3d;
-  --sidebar-hover:#17233a;
-  --sidebar-active:#1e3a5f;
-  --sidebar-text:#b8c3d1;
-  --sidebar-text-active:#fff;
-  --bg:#f5f7fa;
-  --surface:#fff;
-  --surface-soft:#f9fafb;
-  --light:#f3f5f8;
-  --border:#e4e8ee;
-  --border2:#d5dbe4;
-  --navy:#315f8c;
-  --blue:#315f8c;
-  --green:#16966a;
-  --red:#df5a52;
-  --amber:#d9852f;
-  --text:#172033;
-  --text2:#647086;
-  --text3:#98a2b3;
-  --radius:14px;
-  --radius-lg:18px;
-  --shadow:0 8px 28px rgba(31,42,61,.055),0 1px 3px rgba(31,42,61,.035);
-  --accent:#315f8c;
-  --accent-2:#4b78a2;
-  --accent-soft:#edf4fa;
-  --focus:rgba(49,95,140,.14);
-  --good:#16966a;
-  --bad:#d94f4f;
-  --warn:#d9852f;
+:root{
+  --sidebar-w:248px;--header-h:66px;
+  --brand:#315f8c;--brand-strong:#244b70;--brand-2:#4b78a2;--brand-soft:#edf4fa;--brand-subtle:#f6f9fc;
+  --accent:var(--brand);--accent-2:var(--brand-2);--accent-soft:var(--brand-soft);--focus:rgba(49,95,140,.14);
+  --sidebar-bg:#16283b;--sidebar-bg-2:#1d344b;--sidebar-hover:#243e57;--sidebar-active:#315f8c;
+  --sidebar-text:#c2ceda;--sidebar-text-active:#fff;
+  --bg:#f4f7fa;--surface:#fff;--surface-soft:#f8fafc;--surface-muted:#f1f5f8;--light:#f3f6f9;
+  --border:#e1e7ed;--border2:#d2dbe4;
+  --navy:var(--brand);--blue:var(--brand);--green:#16966a;--red:#d95650;--amber:#d9852f;
+  --text:#182434;--text2:#5f6f82;--text3:#8b98a8;
+  --radius-sm:9px;--radius:12px;--radius-lg:16px;--radius-xl:22px;
+  --shadow-sm:0 1px 3px rgba(28,43,58,.05);--shadow:0 8px 24px rgba(28,43,58,.055),0 1px 3px rgba(28,43,58,.035);--shadow-lg:0 20px 48px rgba(28,43,58,.11);
+  --good:#16966a;--bad:#d94f4f;--warn:#d9852f;
 }
-html[data-center="toda"]{
-  --accent:#c96f35;
-  --accent-2:#e49358;
-  --accent-soft:#fff3e9;
-  --focus:rgba(201,111,53,.14);
-}
-body{
-  font-family:"Yu Gothic UI","Yu Gothic","Meiryo",system-ui,sans-serif;
-  font-size:13px;
-  letter-spacing:.005em;
-  background:radial-gradient(circle at 82% 0%,rgba(220,213,250,.28),transparent 30%),var(--bg);
-  color:var(--text);
-  display:flex;
-  height:100vh;
-  overflow:hidden;
-}
+html[data-center="toda"]{--accent:#c96f35;--accent-2:#e49358;--accent-soft:#fff3e9;--focus:rgba(201,111,53,.14)}
+html,body{min-height:100%}
+body{font-family:"Yu Gothic UI","Yu Gothic","Meiryo",system-ui,sans-serif;font-size:13px;letter-spacing:.005em;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden}
+button,input,select,textarea{font:inherit}

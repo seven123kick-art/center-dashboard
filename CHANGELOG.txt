@@ -1,57 +1,58 @@
-Version6 D3-18 / D3-19 — Data Import closure and legacy UI consolidation
+Version6 D4-1 / D4-2 — Design System foundation and shell unification
 Date: 2026-08-17
 
 PURPOSE
-- Close D3 by making the Data Catalog import hub the practical primary import surface.
-- Reduce duplicate/competing import-status UI without deleting compatibility import logic.
-- Keep legacy detailed controls available, but collapsed and clearly secondary.
-- Correct remaining old UI wording (CSV取込 / その他取込) to the current product terminology.
+- Start D4 by fixing the root cause of the visual mismatch between the center-selection screen and the logged-in application shell.
+- Rebuild shared design tokens and shell styles instead of layering another visual patch on top.
+- Preserve all business/data logic.
+
+AUDIT FINDINGS
+- index.html used landing.css with an independent green/orange palette and independent radii/shadows.
+- center.html used foundation/base.css + shell.css + theme.css with a separate navy palette.
+- shell colors were also duplicated as hard-coded values in features/version2.css.
+- center.html still contained many inline styles; D4-1 removes only shell-level inline styling. Feature-specific inline styles remain for later screen-by-screen cleanup.
+- app.css already had a sensible foundation/features loading architecture, so D4 keeps that architecture and rewrites the shared foundation instead of adding a new override stylesheet.
 
 CHANGES
-1. Unified import hub behavior
-- SKFL0001 card now opens the PDF chooser and immediately runs PLAN_PDF_IMPORT.importSelected() after selection.
-- SKDL0002 card now opens the chooser and immediately runs DATA_IMPORT_MANAGEMENT.importPreliminary() after selection.
-- SKDL0003 card explicitly prepares the existing import route as CONFIRMED before the legacy modal/processing flow continues.
-- Existing official parsers and save paths are reused; no duplicate parsing/business logic was added.
+1. foundation/base.css
+- Rebuilt as the single shared Version6 token source.
+- Added shared brand/surface/border/text/radius/shadow tokens.
+- Center-specific accent remains supported: North Saitama uses blue, Toda uses orange.
+- The center accent is no longer allowed to redefine the entire product visual language.
 
-2. Revision visibility
-- Import cards can expose retained Normalized Source revision history when multiple revisions exist.
-- History remains read-only and is loaded from NormalizedSourceRepository manifests.
+2. foundation/shell.css
+- Rebuilt sidebar/topbar/content shell from shared tokens.
+- Reduced unrelated purple/navy remnants.
+- Unified spacing, radii, typography and active/hover behavior.
+- Added reusable shell classes for brand, cloud status, session message and topbar hint.
 
-3. Duplicate UI cleanup
-- Removed the second standalone “新データ基盤 取込状況” panel from the CSV-import view because the unified hub already shows CURRENT / Revision state.
-- Existing detailed import controls are preserved under a collapsed “詳細取込・互換操作” section.
-- Legacy STATE list remains available there as “旧STATE取込状況（互換確認）”.
-- No legacy parser/save path was deleted in this package.
+3. foundation/theme.css
+- Rebuilt shared cards/KPI/buttons/forms/tables/messages/upload areas around the same token set.
+- Removed the previous purple-tinted control styling that conflicted with the shell.
 
-4. Product terminology cleanup
-- Top-bar title: csv-import -> データ取込.
-- Top-bar title: import -> 補助取込・設定.
-- Remaining guidance text that referred to “CSV取込” / “その他取込” was aligned to the current terminology where applicable.
+4. landing.css
+- Rebuilt center selection on the SAME foundation tokens as center.html.
+- Center cards still retain their center identity through accent color and character art, but typography, surfaces, borders, controls and spacing now match the application.
+- North Saitama changes from the isolated green landing palette to the same blue product accent used after entry.
+- Toda retains orange as its center accent, matching html[data-center="toda"] in the application.
 
-5. SKDL0002 file lifecycle
-- The dedicated SKDL0002 file input is cleared after a successful import so selecting the same file again can trigger a future revision import.
+5. center.html
+- Removed shell-level inline style definitions for logo mark, cloud status, session message and topbar layout.
+- These are now owned by foundation/shell.css.
+- Business views and behavior are unchanged.
 
-UNCHANGED
-- Existing STATE/full_state structures.
-- Existing SKDL0001 daily processing.
-- Existing SKDL0003 parser and legacy storage behavior.
-- Existing WORKER_SALES / SHIPPER_AREA / DELIVERY_LIST / ROUTE_PAYMENT parsers.
-- Supabase schema.
-- Canonical/Accounting business rules.
-- D3-1 through D3-17 data contracts and repositories.
+6. features/version2.css
+- Navigation group/subitem colors now reference shared shell tokens rather than a second hard-coded sidebar palette.
+
+NOT CHANGED
+- No JS business logic.
+- No Data Catalog / Canonical / Repository / Supabase changes.
+- No feature screen redesign yet.
+- No center character images changed.
+- Existing feature-specific inline styles are intentionally left for the next D4 passes rather than hidden by a global override patch.
 
 VALIDATION
-- node --check PASS for every src/**/*.js file.
-- Unified hub still targets the official existing input/import routes.
-- Detailed compatibility controls remain present in DOM for legacy code paths.
-- No new Storage/Cloud writes were introduced by the hub itself.
-
-FILES
-- center.html
-- src/app.js
-- src/ui/ui_helpers.js
-- src/modules/data_import_hub.js
-- src/modules/data_import_management.js
-- assets/css/features/data-import-hub.css
-- CHANGELOG.txt
+- All src/**/*.js node --check PASS.
+- center.html/index.html parsed successfully.
+- CSS brace balance PASS.
+- Existing center query behavior preserved (kitasaitama/toda).

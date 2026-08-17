@@ -130,3 +130,12 @@ body.pl-fullscreen-open{overflow:hidden}
   .analysis-hub-tabs{margin-bottom:12px}
   .analysis-hub-tabs button{padding:7px 11px}
 }
+
+/* D4: remove old hard-coded shell palette from navigation extension */
+#sidebar .nav-group-toggle{color:var(--sidebar-text)}
+#sidebar .nav-group-toggle:hover,#sidebar .nav-group.open>.nav-group-toggle{background:var(--sidebar-hover);color:#fff}
+#sidebar .nav-group-chevron{color:#8299ad}
+#sidebar .nav-subitem{color:#a9bbcb}
+#sidebar .nav-subitem:hover{background:var(--sidebar-hover);color:#fff}
+#sidebar .nav-subitem.active{background:var(--sidebar-active);color:#fff}
+#sidebar .nav-group.has-active>.nav-group-toggle::before{background:var(--accent)}

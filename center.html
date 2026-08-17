@@ -122,8 +122,8 @@
 <!-- ════════ SIDEBAR ════════ -->
 <div id="sidebar">
   <div class="sidebar-logo">
-    <div style="display:flex;align-items:center;gap:11px">
-      <div style="width:38px;height:38px;background:linear-gradient(145deg,var(--accent),var(--accent-2));border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 8px 18px rgba(0,0,0,.18)">
+    <div class="sidebar-brand-row">
+      <div class="sidebar-brand-mark">
         <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round"><rect x="2.5" y="3.5" width="15" height="13" rx="3"/><path d="M6 13v-3m4 3V7m4 6V9"/></svg>
       </div>
       <div>
@@ -178,12 +178,12 @@
   </div>
 
   <div class="sidebar-bottom">
-    <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px;color:#9e96b5;font-size:10px;font-weight:800">
-      <span id="cloud-dot" style="width:7px;height:7px;border-radius:50%;background:#65d3a5;flex-shrink:0"></span>
+    <div class="sidebar-cloud-status">
+      <span id="cloud-dot" class="sidebar-cloud-dot"></span>
       <span id="cloud-label">同期状態を確認中</span>
     </div>
     <div id="autosave-badge" style="display:none"><span id="autosave-dot"></span><span id="autosave-label">ローカル保存</span></div>
-    <div id="session-msg" style="font-size:9px;color:#756e89;min-height:14px;line-height:1.4;margin-bottom:7px"></div>
+    <div id="session-msg" class="sidebar-session-msg"></div>
     <input type="file" id="session-load-input" accept=".json" style="display:none">
     <div class="sidebar-version">Version 6 · S-LINE GIFU</div>
   </div>
@@ -193,14 +193,14 @@
 <div id="main">
   <!-- トップバー -->
   <div id="topbar">
-    <div class="topbar-left" style="flex-shrink:0">
+    <div class="topbar-left">
       <div>
         <div class="page-title" id="page-title">ダッシュボード</div>
         <div class="page-sub" id="page-sub">読み込みデータなし</div>
       </div>
     </div>
-    <div class="topbar-right" id="topbar-right" style="flex-wrap:wrap;justify-content:flex-end">
-      <span style="font-size:11px;color:var(--text3)">データ取込からCSVを読み込んでください</span>
+    <div class="topbar-right" id="topbar-right">
+      <span class="topbar-hint">データ取込からCSVを読み込んでください</span>
     </div>
   </div>
 
