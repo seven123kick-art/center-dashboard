@@ -173,9 +173,9 @@ window.renderDashboard = function renderDashboard() {
     data: {
       labels,
       datasets:[
-        {label:'収入',data:inc,backgroundColor:'rgba(26,77,124,.7)',order:2},
-        {label:'費用',data:exp,backgroundColor:'rgba(224,91,77,.7)',order:2},
-        {label:'利益',data:prof,type:'line',borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,.1)',
+        {label:'収入',data:inc,backgroundColor:'rgba(120,167,131,.72)',order:2},
+        {label:'費用',data:exp,backgroundColor:'rgba(217,166,179,.72)',order:2},
+        {label:'利益',data:prof,type:'line',borderColor:'#b08fc4',backgroundColor:'rgba(184,172,216,.12)',
           pointRadius:3,tension:.3,fill:false,order:1,yAxisID:'y2'},
       ]
     },

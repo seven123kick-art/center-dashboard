@@ -67,8 +67,8 @@ const CONFIG = {
   SUPABASE_BUCKET: (window.SUPABASE_CONFIG||{}).bucket || 'center-data',
 
   CENTERS: [
-    { id: 'kitasaitama', name: '北埼玉センター', color: '#1a4d7c' },
-    { id: 'toda',        name: '戸田センター',   color: '#1a7a52' },
+    { id: 'kitasaitama', name: '北埼玉センター', color: '#78a783' },
+    { id: 'toda',        name: '戸田センター',   color: '#d39b55' },
   ],
   COMPANY: 'エスラインギフ　家電物流事業部',
   FISCAL_START: 4,
@@ -318,7 +318,7 @@ const CONFIG = {
     variableRateMax:  80,
   },
 
-  COLORS: ['#1a4d7c','#e05b4d','#1a7a52','#b45309','#2563eb','#7c3aed','#0891b2','#be185d','#65a30d','#d97706'],
+  COLORS: ['#78a783','#d9a6b3','#b8acd8','#e7c979','#9fcbd0','#d8a47f','#9fc49b','#c6a7c8','#aebf78','#e6ae8d'],
   VIEW_TITLES: {
     dashboard:'ホーム', pl:'月次収支表', 'profit-structure':'経営分析', 'landing-forecast':'着地予測', trend:'売上推移',
     shipper:'荷主分析', indicators:'経営指標', annual:'年次サマリー',

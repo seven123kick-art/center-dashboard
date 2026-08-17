@@ -1,20 +1,27 @@
-/* Version6 Design System — shared tokens and reset */
+/* Version6 D4 — bright modern design system tokens */
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:248px;--header-h:66px;
-  --brand:#315f8c;--brand-strong:#244b70;--brand-2:#4b78a2;--brand-soft:#edf4fa;--brand-subtle:#f6f9fc;
-  --accent:var(--brand);--accent-2:var(--brand-2);--accent-soft:var(--brand-soft);--focus:rgba(49,95,140,.14);
-  --sidebar-bg:#16283b;--sidebar-bg-2:#1d344b;--sidebar-hover:#243e57;--sidebar-active:#315f8c;
-  --sidebar-text:#c2ceda;--sidebar-text-active:#fff;
-  --bg:#f4f7fa;--surface:#fff;--surface-soft:#f8fafc;--surface-muted:#f1f5f8;--light:#f3f6f9;
-  --border:#e1e7ed;--border2:#d2dbe4;
-  --navy:var(--brand);--blue:var(--brand);--green:#16966a;--red:#d95650;--amber:#d9852f;
-  --text:#182434;--text2:#5f6f82;--text3:#8b98a8;
-  --radius-sm:9px;--radius:12px;--radius-lg:16px;--radius-xl:22px;
-  --shadow-sm:0 1px 3px rgba(28,43,58,.05);--shadow:0 8px 24px rgba(28,43,58,.055),0 1px 3px rgba(28,43,58,.035);--shadow-lg:0 20px 48px rgba(28,43,58,.11);
-  --good:#16966a;--bad:#d94f4f;--warn:#d9852f;
+  --sidebar-w:252px;--header-h:70px;
+  --brand:#6f9b78;--brand-strong:#557a61;--brand-2:#a8cdb0;--brand-soft:#eef7ef;--brand-subtle:#fbfdf9;
+  --accent:#78a783;--accent-2:#b6d9bd;--accent-soft:#eef8f0;--accent-pale:#f7fbf5;--focus:rgba(120,167,131,.18);
+  --accent-warm:#d8a47f;--accent-rose:#d9a6b3;--accent-lilac:#b8acd8;--accent-sky:#9fcbd0;--accent-sun:#e7c979;
+  --sidebar-bg:#fbfcf8;--sidebar-bg-2:#f6f8f1;--sidebar-hover:#f0f5ed;--sidebar-active:#e8f3e8;
+  --sidebar-text:#667064;--sidebar-text-active:#385342;
+  --bg:#f7f6f1;--surface:#fffefb;--surface-soft:#faf9f5;--surface-muted:#f3f2ed;--light:#f7f6f1;
+  --border:#e8e5dc;--border2:#dcd8cc;
+  --navy:#557a61;--blue:#78a783;--green:#4f956f;--red:#c96f72;--amber:#c99455;
+  --text:#343a35;--text2:#69716b;--text3:#969b95;
+  --radius-sm:11px;--radius:14px;--radius-lg:18px;--radius-xl:26px;
+  --shadow-sm:0 2px 8px rgba(74,70,58,.045);--shadow:0 10px 28px rgba(74,70,58,.065),0 2px 6px rgba(74,70,58,.035);--shadow-lg:0 22px 54px rgba(74,70,58,.12);
+  --good:#4f956f;--bad:#c96f72;--warn:#c99455;
+  --theme-a:#78a783;--theme-b:#d9a6b3;--theme-c:#b8acd8;--theme-d:#e7c979;--theme-e:#9fcbd0;
 }
-html[data-center="toda"]{--accent:#c96f35;--accent-2:#e49358;--accent-soft:#fff3e9;--focus:rgba(201,111,53,.14)}
+html[data-center="toda"]{
+  --brand:#c79256;--brand-strong:#9e6f3f;--brand-2:#e7bf82;--brand-soft:#fff5df;--brand-subtle:#fffaf0;
+  --accent:#d39b55;--accent-2:#efc987;--accent-soft:#fff3d9;--accent-pale:#fffaf0;--focus:rgba(211,155,85,.18);
+  --sidebar-hover:#fff4dc;--sidebar-active:#ffedc7;--sidebar-text-active:#765027;
+  --theme-a:#d39b55;--theme-b:#e8a8a0;--theme-c:#9fc49b;--theme-d:#e7c979;--theme-e:#b9a7d4;
+}
 html,body{min-height:100%}
 body{font-family:"Yu Gothic UI","Yu Gothic","Meiryo",system-ui,sans-serif;font-size:13px;letter-spacing:.005em;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden}
 button,input,select,textarea{font:inherit}
