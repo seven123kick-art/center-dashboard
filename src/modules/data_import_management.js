@@ -60,10 +60,30 @@
     finally{if(btn)btn.disabled=false;}
   }
 
+  function formatPipelineTime(value){
+    if(!value)return '—';
+    try{return new Intl.DateTimeFormat('ja-JP',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(value));}
+    catch(_e){return String(value);}
+  }
+  function issueInfo(type,stages){
+    const order=['SOURCE','NORMALIZED','CANONICAL','DISPLAY_SNAPSHOT','CLOUD'];
+    const problem=order.find(k=>['FAILED','PARTIAL'].includes(stages[k]?.status))
+      ||order.find(k=>(stages[k]?.status||'UNKNOWN')==='UNKNOWN');
+    if(!problem)return null;
+    const state=stages[problem]?.status||'UNKNOWN';
+    const message=stages[problem]?.message||'処理状態を確認できません。';
+    let action='状態を再確認';
+    if(problem==='SOURCE'&&state==='UNKNOWN') action='SOURCE履歴を再確認。確認できない場合は元資料の再取込';
+    else if(problem==='SOURCE') action='元資料を確認し、必要なら再取込';
+    else if(problem==='NORMALIZED'||problem==='CLOUD') action='状態を再確認・再構築';
+    else if(problem==='CANONICAL'||problem==='DISPLAY_SNAPSHOT') action='再構築';
+    const lastOk=order.map(k=>stages[k]?.last_ok_at).filter(Boolean).sort().at(-1)||null;
+    return {type,problem,state,message,action,lastOk};
+  }
   async function pipelineHtml(period){
     if(!window.DATA_PIPELINE_STATUS?.load) return '';
     const all=await DATA_PIPELINE_STATUS.load(period,'ALL');
-    const rows=[];
+    const rows=[],issues=[];
     for(const type of TYPES){
       const own=await DATA_PIPELINE_STATUS.load(period,type), stages={...(own?.stages||{})};
       ['CANONICAL','DISPLAY_SNAPSHOT'].forEach(k=>{
@@ -71,11 +91,17 @@
       });
       const order=['SOURCE','NORMALIZED','CANONICAL','DISPLAY_SNAPSHOT','CLOUD'];
       const values=order.map(k=>stages[k]?.status||'UNKNOWN');
-      const overall=values.includes('FAILED')?'FAILED':values.includes('PARTIAL')?'PARTIAL':values.includes('RUNNING')?'RUNNING':values.includes('OK')?'OK':'UNKNOWN';
+      const overall=values.includes('FAILED')?'FAILED':values.includes('PARTIAL')?'PARTIAL':values.includes('RUNNING')?'RUNNING':values.includes('UNKNOWN')?'UNKNOWN':'OK';
       const chips=order.map(k=>{const st=stages[k]?.status||'UNKNOWN';return `<span class="dim-pipe-chip is-${st.toLowerCase()}">${PIPELINE_STAGE_LABELS[k]}:${PIPELINE_STATUS_LABELS[st]||st}</span>`;}).join('');
       rows.push(`<div class="dim-pipe-row"><div class="dim-pipe-name"><strong>${esc(LABEL[type]||type)}</strong><span class="dim-pipe-overall is-${overall.toLowerCase()}">${PIPELINE_STATUS_LABELS[overall]||overall}</span></div><div class="dim-pipe-chips">${chips}</div></div>`);
+      const issue=issueInfo(type,stages); if(issue)issues.push(issue);
     }
-    return `<section class="dim-pipeline-status"><div class="dim-pipeline-head"><div><b>データ処理状況</b><span>SOURCE → NORMALIZED → CANONICAL → SNAPSHOT → CLOUD</span></div><button id="pipeline-verify-rebuild-btn" class="btn-secondary dim-pipeline-action" type="button">状態を再確認・再構築</button></div><div id="pipeline-action-msg" class="dim-pipeline-action-msg"></div><div class="dim-pipeline-status-body">${rows.join('')}</div></section>`;
+    const rank={FAILED:0,PARTIAL:1,UNKNOWN:2,RUNNING:3};
+    issues.sort((a,b)=>(rank[a.state]??9)-(rank[b.state]??9));
+    const issueHtml=issues.length
+      ?`<section class="dim-pipeline-issues"><div class="dim-issue-title"><b>要対応</b><span>${issues.length}件</span></div>${issues.map(x=>`<div class="dim-issue-row is-${x.state.toLowerCase()}"><div class="dim-issue-main"><strong>${esc(LABEL[x.type]||x.type)}</strong><span>${esc(PIPELINE_STAGE_LABELS[x.problem]||x.problem)} · ${esc(PIPELINE_STATUS_LABELS[x.state]||x.state)}</span></div><div class="dim-issue-reason">${esc(x.message)}</div><div class="dim-issue-meta"><span>最終正常 ${esc(formatPipelineTime(x.lastOk))}</span><strong>${esc(x.action)}</strong></div></div>`).join('')}</section>`
+      :`<section class="dim-pipeline-all-ok"><strong>要対応なし</strong><span>確認できた処理はすべて正常です。</span></section>`;
+    return `<section class="dim-pipeline-status"><div class="dim-pipeline-head"><div><b>データ処理状況</b><span>SOURCE → NORMALIZED → CANONICAL → SNAPSHOT → CLOUD</span></div><button id="pipeline-verify-rebuild-btn" class="btn-secondary dim-pipeline-action" type="button">状態を再確認・再構築</button></div><div id="pipeline-action-msg" class="dim-pipeline-action-msg"></div>${issueHtml}<details class="dim-pipeline-detail"><summary>全データの処理状況を表示</summary><div class="dim-pipeline-status-body">${rows.join('')}</div></details></section>`;
   }
   async function refresh(){
     const root=document.getElementById('normalized-source-status');if(!root)return;

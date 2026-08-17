@@ -31,7 +31,15 @@
   async function setStage(period,documentType,stage,status,meta={}){
     const st=clean(stage).toUpperCase(); if(!STAGES.includes(st)) throw new Error(`Unsupported pipeline stage: ${st}`);
     const rec=await load(period,documentType), now=new Date().toISOString();
-    rec.stages[st]={status:validStatus(status),updated_at:now,message:meta.message||null,detail:meta.detail??null};
+    const previous=rec.stages[st]||{};
+    const nextStatus=validStatus(status);
+    rec.stages[st]={
+      status:nextStatus,
+      updated_at:now,
+      last_ok_at:nextStatus===STATUS.OK?now:(previous.last_ok_at||null),
+      message:meta.message||null,
+      detail:meta.detail??null
+    };
     rec.updated_at=now; const k=key(period,documentType); memory.set(k,rec);
     try{await window.Repository?.Storage?.setCached?.(CACHE_KIND,k,rec);}catch(e){console.warn('[DATA_PIPELINE_STATUS] cache save failed',e);}
     try{window.dispatchEvent(new CustomEvent('data-pipeline-status-updated',{detail:{period:rec.period,document_type:rec.document_type,stage:st,status:rec.stages[st].status}}));}catch(_e){}
