@@ -1,34 +1,33 @@
-Version6 D4-18 / Pipeline Status Connections & Data Check UI
+Version6 D4-19 / Pipeline Verification & Recovery
 Date: 2026-08-17
 
-対象:
-- 収支実績
-- 作業者別売上明細
-- 荷主別配送エリア物量
-- 配達持出予定リスト
-- 配達ヘッド傭車料確認
+目的
+- D4-17以前の既存データが「未確認」のまま残る問題を、推測せずCloudのCURRENT実体で検証してbackfillする。
+- 部分完了/失敗後に、安全に再確認・Canonical再構築できる操作を追加する。
 
-変更:
-1. NormalizedSourceRepositoryの正式saveBatch窓口で、主要5種すべての
-   SOURCE / NORMALIZED / CLOUD 状態を共通Pipeline Statusへ接続。
-2. データ確認画面へ「データ処理状況」を追加。
-   SOURCE → NORMALIZED → CANONICAL → SNAPSHOT → CLOUD を
-   正常 / 部分完了 / 失敗 / 処理中 / 未確認 で表示。
-3. Canonical/SnapshotはD4-17のperiod全体のmaterialize結果を利用。
-4. 既存データでPipeline履歴がまだ存在しないものは「未確認」。
-   過去データを推測で正常扱いしない。
-5. D4-12の明るいパステルUIに合わせ、状態色は控えめに統一。
+変更
+1. pipeline_recovery.js 新設
+   - CURRENT Manifest + CURRENT BatchをCloudから再取得。
+   - batch_id一致、record_count一致を検証。
+   - source_record_idが全件存在する場合のみSOURCEをOKへbackfill。
+   - NORMALIZED/CLOUDはCloud実体確認後のみOK。
+2. Canonical Materializer
+   - 失敗時にCANONICAL / DISPLAY_SNAPSHOTをFAILEDとして明示。RUNNINGのまま残さない。
+3. データ確認UI
+   - 「状態を再確認・再構築」ボタン追加。
+   - 主要5資料をCloud再検証後、Canonical/Snapshotを再Materialize。
+   - 未登録資料は異常扱いせず件数を通知。
+   - Cloud取得/整合エラーは明示。
 
-重要:
-- Pipeline監査記録の失敗は業務取込自体を止めない。
-- 既存計算、Canonical schema、Data Catalog、Supabase schema、
-  D4-11高速起動の動作は変更しない。
+安全性
+- 未登録資料を推測でOKにしない。
+- Pipeline Statusは監査/確認層であり、SOURCE原値や業務計算は変更しない。
+- Supabase schema / Data Catalog / D4-11高速起動は変更なし。
 
-変更ファイル:
-- src/core/repository/normalized_source_repository.js
+変更ファイル
+- center.html
+- src/core/data_catalog/pipeline_recovery.js (new)
+- src/core/data_catalog/canonical_materializer.js
 - src/modules/data_import_management.js
 - assets/css/foundation/theme.css
 - CHANGELOG.txt
-
-検証:
-- 全 src/**/*.js node --check PASS

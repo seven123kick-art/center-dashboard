@@ -37,6 +37,29 @@
   }
   const PIPELINE_STATUS_LABELS=Object.freeze({OK:'正常',PARTIAL:'部分完了',FAILED:'失敗',RUNNING:'処理中',UNKNOWN:'未確認'});
   const PIPELINE_STAGE_LABELS=Object.freeze({SOURCE:'SOURCE',NORMALIZED:'NORMALIZED',CANONICAL:'CANONICAL',DISPLAY_SNAPSHOT:'SNAPSHOT',CLOUD:'CLOUD'});
+  function setPipelineActionMessage(text,type=''){
+    const el=document.getElementById('pipeline-action-msg');
+    if(el){el.textContent=text||'';el.className=`dim-pipeline-action-msg ${type?`is-${type}`:''}`;}
+  }
+  async function verifyAndRebuildCurrent(){
+    const input=document.getElementById('normalized-status-month');
+    const period=periodFromMonth(input?.value||'');
+    if(!/^\d{6}$/.test(period)){setPipelineActionMessage('確認年月を選択してください。','error');return;}
+    if(!window.DATA_PIPELINE_RECOVERY?.verifyAndRebuild){setPipelineActionMessage('データ再確認基盤を読み込めません。','error');return;}
+    setPipelineActionMessage('CloudのCURRENTデータを確認し、表示用データを再構築しています…');
+    const btn=document.getElementById('pipeline-verify-rebuild-btn'); if(btn)btn.disabled=true;
+    try{
+      const r=await DATA_PIPELINE_RECOVERY.verifyAndRebuild(period);
+      const failed=(r.sources||[]).filter(x=>!x.ok);
+      const missing=(r.sources||[]).filter(x=>x.ok&&!x.registered);
+      if(failed.length){setPipelineActionMessage(`再確認は完了しましたが、${failed.length}資料で取得/整合エラーがあります。詳細状態を確認してください。`,'error');}
+      else if(r.materialized?.ok===false){setPipelineActionMessage(`SOURCE確認は完了しましたが、Canonical再構築に失敗しました。（${r.materialized.error||'詳細不明'}）`,'error');}
+      else{setPipelineActionMessage(`再確認・再構築が完了しました。未登録資料 ${missing.length}件。`,'ok');}
+      await refresh();
+    }catch(e){setPipelineActionMessage(e?.message||String(e),'error');}
+    finally{if(btn)btn.disabled=false;}
+  }
+
   async function pipelineHtml(period){
     if(!window.DATA_PIPELINE_STATUS?.load) return '';
     const all=await DATA_PIPELINE_STATUS.load(period,'ALL');
@@ -52,7 +75,7 @@
       const chips=order.map(k=>{const st=stages[k]?.status||'UNKNOWN';return `<span class="dim-pipe-chip is-${st.toLowerCase()}">${PIPELINE_STAGE_LABELS[k]}:${PIPELINE_STATUS_LABELS[st]||st}</span>`;}).join('');
       rows.push(`<div class="dim-pipe-row"><div class="dim-pipe-name"><strong>${esc(LABEL[type]||type)}</strong><span class="dim-pipe-overall is-${overall.toLowerCase()}">${PIPELINE_STATUS_LABELS[overall]||overall}</span></div><div class="dim-pipe-chips">${chips}</div></div>`);
     }
-    return `<section class="dim-pipeline-status"><div class="dim-pipeline-head"><b>データ処理状況</b><span>SOURCE → NORMALIZED → CANONICAL → SNAPSHOT → CLOUD</span></div><div class="dim-pipeline-status-body">${rows.join('')}</div></section>`;
+    return `<section class="dim-pipeline-status"><div class="dim-pipeline-head"><div><b>データ処理状況</b><span>SOURCE → NORMALIZED → CANONICAL → SNAPSHOT → CLOUD</span></div><button id="pipeline-verify-rebuild-btn" class="btn-secondary dim-pipeline-action" type="button">状態を再確認・再構築</button></div><div id="pipeline-action-msg" class="dim-pipeline-action-msg"></div><div class="dim-pipeline-status-body">${rows.join('')}</div></section>`;
   }
   async function refresh(){
     const root=document.getElementById('normalized-source-status');if(!root)return;
@@ -77,6 +100,6 @@
     const pipeline=await pipelineHtml(period);
     root.innerHTML=`<table class="dim-source-table"><thead><tr><th>資料</th><th>状態</th><th>CURRENT</th><th>行数</th><th>改訂履歴</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(LABEL[x.type]||x.type)}</b><div class="dim-history">${esc(x.type)}</div></td><td>${x.error?`<span class="dim-state is-missing">ERROR</span>`:x.current?`<span class="dim-state is-current">${esc(x.state==='—'?'CURRENT':x.state)}</span>`:'<span class="dim-state is-missing">未登録</span>'}</td><td>${x.current?esc(x.current):'—'}</td><td>${x.count==null?'—':esc(x.count)}</td><td><div class="dim-history">${x.error?esc(x.error):(x.history||[]).slice().reverse().map(h=>`${esc(h.revision_status||'—')} · ${esc(h.record_count??'—')}行 · ${esc(h.saved_at||'')}`).join('<br>')||'—'}</div></td></tr>`).join('')}${budgetRow}</tbody></table>${pipeline}`;
   }
-  document.addEventListener('DOMContentLoaded',()=>{const p=defaultPeriod();['preliminary-pl-month','normalized-status-month'].forEach(id=>{const el=document.getElementById(id);if(el&&!el.value&&p)el.value=monthFromPeriod(p);});refresh().catch(()=>{});});
-  window.DATA_IMPORT_MANAGEMENT=Object.freeze({importPreliminary,refresh});
+  document.addEventListener('DOMContentLoaded',()=>{const p=defaultPeriod();['preliminary-pl-month','normalized-status-month'].forEach(id=>{const el=document.getElementById(id);if(el&&!el.value&&p)el.value=monthFromPeriod(p);});document.addEventListener('click',e=>{if(e.target?.id==='pipeline-verify-rebuild-btn')verifyAndRebuildCurrent();});refresh().catch(()=>{});});
+  window.DATA_IMPORT_MANAGEMENT=Object.freeze({importPreliminary,refresh,verifyAndRebuildCurrent});
 })();

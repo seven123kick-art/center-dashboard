@@ -79,7 +79,7 @@
     return byHead.size?[{ym:period,routes:[...byHead.values()],source:'normalized_delivery_list'}]:[];
   }
 
-  async function materialize(input={}){
+  async function materializeCore(input={}){
     requireDeps();
     const period=clean(input.period);
     if(!/^\d{6}$/.test(period)) throw new Error('period must be YYYYMM');
@@ -129,6 +129,18 @@
       await window.DATA_PIPELINE_STATUS?.setStage?.(period,'ALL','DISPLAY_SNAPSHOT','OK',{message:'Verified display snapshot built',detail:{generated_at:snapshot.materialization.generated_at}});
     }catch(e){ console.warn('[CanonicalMaterializer] pipeline status update failed',e); }
     return {ok:true,snapshot,decisions:clone(decisions),resolutionContext,normalized:{WORKER_SALES:worker,SHIPPER_AREA:shipper,ROUTE_PAYMENT:payment,DELIVERY_LIST:delivery,PL_ACTUAL:accounting}};
+  }
+
+  async function materialize(input={}){
+    const period=clean(input.period);
+    try{ return await materializeCore(input); }
+    catch(e){
+      if(/^\d{6}$/.test(period)){
+        try{ await window.DATA_PIPELINE_STATUS?.setStage?.(period,'ALL','CANONICAL','FAILED',{message:e?.message||String(e)}); }catch(_e){}
+        try{ await window.DATA_PIPELINE_STATUS?.setStage?.(period,'ALL','DISPLAY_SNAPSHOT','FAILED',{message:'Canonical materialization failed'}); }catch(_e){}
+      }
+      throw e;
+    }
   }
 
   window.CANONICAL_MATERIALIZER=Object.freeze({materialize,_internal:Object.freeze({routePaymentsFromNormalized,routeDataFromDeliveryList})});
