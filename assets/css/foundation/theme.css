@@ -75,3 +75,17 @@ select,input,textarea{border-radius:10px!important;border:1px solid var(--border
 .dim-parity-month.is-ready{background:#f0faf5;border-color:rgba(61,187,131,.16)}.dim-parity-month.is-mismatch{background:#fff8f9;border-color:rgba(217,122,136,.18)}.dim-parity-month.is-unknown{background:#fffaf0;border-color:rgba(225,189,88,.2)}
 .dim-parity-note{margin:10px 0 0;font-size:10px;color:var(--muted);line-height:1.5}.dim-parity-error{margin-top:10px;color:#a34850;font-size:11px}
 @media(max-width:900px){.dim-parity-months{grid-template-columns:repeat(2,minmax(0,1fr))}.dim-parity-head{align-items:flex-start}}
+
+/* D4-27 Accounting parity in active Data Verification view */
+.dv-parity-card{margin-top:18px}
+.dv-parity-loading,.dv-parity-error{padding:10px 0;font-size:12px;color:var(--text2)}
+.dv-parity-error{color:#a34850}
+.dv-parity-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.dv-parity-summary{display:inline-flex;padding:5px 9px;border-radius:999px;font-size:10px;font-weight:800}
+.dv-parity-summary.is-ready{background:#e7f6ef;color:#287a5c}.dv-parity-summary.is-review{background:#fff4d8;color:#8a6617}
+.dv-parity-refresh{min-height:30px!important;padding:5px 10px!important;font-size:10px!important}
+.dv-parity-counts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.dv-parity-counts span{padding:4px 8px;border-radius:999px;background:#f4f5f4;color:var(--text2);font-size:10px;font-weight:700}
+.dv-parity-months{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+.dv-parity-month{min-height:58px;padding:9px 10px;border:1px solid rgba(31,58,48,.07);border-radius:12px;background:#fafbfa}.dv-parity-month>div{display:flex;align-items:center;justify-content:space-between;gap:6px}.dv-parity-month strong{font-size:12px}.dv-parity-month span{font-size:10px;font-weight:800;color:var(--text2)}.dv-parity-month small{display:block;margin-top:5px;font-size:9px;line-height:1.45;color:var(--text2)}
+.dv-parity-month.is-ready{background:#f0faf5;border-color:rgba(61,187,131,.16)}.dv-parity-month.is-mismatch{background:#fff8f9;border-color:rgba(217,122,136,.18)}.dv-parity-month.is-unknown{background:#fffaf0;border-color:rgba(225,189,88,.2)}
+@media(max-width:900px){.dv-parity-months{grid-template-columns:repeat(2,minmax(0,1fr))}}

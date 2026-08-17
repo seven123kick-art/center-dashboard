@@ -1,34 +1,30 @@
-Version6 D4-26 / Fiscal Accounting Parity Diagnostic
+Version6 D4-27 / Accounting Parity Active View Connection
 Date: 2026-08-17
 
-目的
-- ホーム/年度推移をCanonicalへ切り替える前に、年度12か月を実データで比較できるようにする。
-- READY月と移行禁止月を明確に分離し、不一致を自動補正しない。
+原因
+- D4-26は data_import_management.js 側へ診断UIを追加したが、
+  現在の「データ確認」画面の実描画主体は src/modules/data_verification.js。
+- そのためAccounting Parityロジックは存在していたが、実画面最下部へ表示されていなかった。
 
-変更
-1. AccountingParity.checkFiscalYear()を追加
-   - 4月～翌3月の12か月を並列診断。
-   - READY / MISMATCH / UNKNOWN_AMOUNT / PL_ACTUAL_NOT_NORMALIZED /
-     LEGACY_MISSING / CANONICAL_FAILED等を月別集計。
-2. データ確認画面へ「収支データ移行診断」を追加
-   - 年度12か月を一覧表示。
-   - 一致、差異、金額不明、未正規化、現行Datasetなしを件数表示。
-   - MISMATCHは勘定科目、現行値、Canonical値、差額を最大3件表示。
-3. 年度全月一致時のみ「12か月一致」。
-   それ以外は「確認が必要」とし、表示参照先はまだ切り替えない。
+修正
+1. 実際のデータ確認画面 data_verification.js へ収支データ移行診断を正式接続。
+2. 「確認詳細」の直下に年度12か月診断を表示。
+3. 一致 / 差異 / 金額不明 / PL未正規化 / 現行Datasetなしを表示。
+4. MISMATCH時は科目・現行値・Canonical値・差額を表示。
+5. 「再診断」ボタンを追加。
+6. 診断は非同期。既存のデータ確認画面を先に表示し、診断完了後に更新。
+7. D4-26のAccountingParity.checkFiscalYear()をそのまま利用。
+   比較条件や数字判定は変更していない。
 
 重要
-- ホームKPI/年度推移の参照先は変更していない。
-- READY月だけが今後のCanonical移行候補。
-- UNKNOWNを0円に変換しない。
-- 差異を自動修正しない。
+- ホームKPI/年度推移の参照先はまだ変更しない。
+- 診断結果で自動補正・自動切替しない。
+- UNKNOWNを0円扱いしない。
 
 変更ファイル
-- src/core/data_catalog/accounting_parity.js
-- src/modules/data_import_management.js
+- src/modules/data_verification.js
 - assets/css/foundation/theme.css
 - CHANGELOG.txt
 
 検証
 - 全 src/**/*.js node --check PASS
-- Canonical schema / Data Catalog / Supabase schema / D4-11高速起動変更なし

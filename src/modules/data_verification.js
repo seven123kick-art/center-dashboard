@@ -105,6 +105,40 @@
       render();
     }catch(e){resolutionMessage={type:'error',text:e?.message||String(e)};render();}
   }
+  const parityByFy=new Map();
+  const parityStateByFy=new Map();
+  const parityLabel=Object.freeze({READY:'一致',MISMATCH:'差異あり',UNKNOWN_AMOUNT:'金額不明',PL_ACTUAL_NOT_NORMALIZED:'PL未正規化',LEGACY_MISSING:'現行Datasetなし',CANONICAL_FAILED:'Canonical失敗',CANONICAL_UNAVAILABLE:'Canonical未利用'});
+  const parityYen=v=>Number.isFinite(Number(v))?`${Math.round(Number(v)).toLocaleString('ja-JP')}円`:'—';
+  function fiscalYearOfYm(ym){return Number(String(ym).slice(4))>=4?String(ym).slice(0,4):String(Number(String(ym).slice(0,4))-1);}
+  function ensureParity(ym,force=false){
+    if(!ym||!window.ACCOUNTING_PARITY?.checkFiscalYear)return;
+    const fy=fiscalYearOfYm(ym);
+    if(!force&&['LOADING','LOADED'].includes(parityStateByFy.get(fy)))return;
+    parityStateByFy.set(fy,'LOADING');
+    ACCOUNTING_PARITY.checkFiscalYear(fy,{force}).then(r=>{
+      parityByFy.set(fy,r); parityStateByFy.set(fy,'LOADED'); render();
+    }).catch(e=>{
+      parityByFy.set(fy,{status:'ERROR',fiscalYear:fy,error:e?.message||String(e),months:[]});
+      parityStateByFy.set(fy,'ERROR'); render();
+    });
+  }
+  function parityHtml(ym){
+    if(!window.ACCOUNTING_PARITY?.checkFiscalYear)return '';
+    const fy=fiscalYearOfYm(ym),state=parityStateByFy.get(fy),report=parityByFy.get(fy);
+    if(!state){ensureParity(ym);return `<div class="card dv-parity-card"><div class="card-header"><span class="card-title">収支データ移行診断</span><span class="dv-readonly">${esc(fy)}年度</span></div><div class="card-body"><div class="dv-parity-loading">Canonical PL_ACTUALと現行Datasetを比較しています…</div></div></div>`;}
+    if(state==='LOADING')return `<div class="card dv-parity-card"><div class="card-header"><span class="card-title">収支データ移行診断</span><span class="dv-readonly">${esc(fy)}年度</span></div><div class="card-body"><div class="dv-parity-loading">Canonical PL_ACTUALと現行Datasetを比較しています…</div></div></div>`;
+    if(state==='ERROR'||report?.status==='ERROR')return `<div class="card dv-parity-card"><div class="card-header"><span class="card-title">収支データ移行診断</span><span class="dv-readonly">${esc(fy)}年度</span></div><div class="card-body"><div class="dv-parity-error">${esc(report?.error||'診断に失敗しました')}</div></div></div>`;
+    const c=report?.counts||{};
+    const cards=(report?.months||[]).map(r=>{
+      const mm=Number(String(r.period||'').slice(4));
+      const cls=r.status==='READY'?'is-ready':r.status==='MISMATCH'?'is-mismatch':r.status==='UNKNOWN_AMOUNT'?'is-unknown':'is-pending';
+      const diffs=(r.mismatches||[]).slice(0,3).map(x=>`${esc(x.key)} ${parityYen(x.legacy)} → ${parityYen(x.canonical)}（差 ${parityYen(x.difference)}）`).join('<br>');
+      const totals=(r.total_mismatches||[]).slice(0,2).map(x=>`${esc(x.key)} ${parityYen(x.legacy)} → ${parityYen(x.canonical)}`).join('<br>');
+      const detail=diffs||totals||(r.error?esc(r.error):'');
+      return `<div class="dv-parity-month ${cls}"><div><strong>${mm}月</strong><span>${esc(parityLabel[r.status]||r.status)}</span></div>${detail?`<small>${detail}</small>`:''}</div>`;
+    }).join('');
+    return `<div class="card dv-parity-card"><div class="card-header"><span class="card-title">収支データ移行診断</span><span class="dv-readonly">${esc(fy)}年度</span></div><div class="card-body"><div class="dv-parity-head"><span class="dv-parity-summary ${report?.migrationReady?'is-ready':'is-review'}">${report?.migrationReady?'12か月一致':'確認が必要'}</span><button type="button" class="btn dv-parity-refresh" onclick="DATA_VERIFICATION_UI.refreshParity()">再診断</button></div><div class="dv-parity-counts"><span>一致 ${n(c.READY)}</span><span>差異 ${n(c.MISMATCH)}</span><span>金額不明 ${n(c.UNKNOWN_AMOUNT)}</span><span>未正規化 ${n(c.PL_ACTUAL_NOT_NORMALIZED)}</span><span>現行なし ${n(c.LEGACY_MISSING)}</span></div><div class="dv-parity-months">${cards}</div><div class="dv-footnote">${esc(report?.note||'診断結果による自動修正・自動切替は行いません。')}</div></div></div>`;
+  }
   function setDetail(mode){detailMode=mode;resolutionPreviewState=null;render();}
   function render(){const host=document.getElementById('data-verification-root');if(!host)return;if(resolutionLoadState==='IDLE')ensureResolutionLoaded();const ym=selectedYm(),yms=allYms(),sel=document.getElementById('data-verification-ym');if(ym&&resolutionLoadState==='LOADED'&&!materializeStateByYm.has(ym))ensureMaterialized(ym);if(sel){const keep=sel.value;sel.innerHTML=yms.map(y=>`<option value="${y}">${ymLabel(y)}</option>`).join('');sel.value=(keep&&yms.includes(keep))?keep:(ym||'');}if(!ym){host.innerHTML='<div class="dv-empty">確認できるデータがありません。先にデータ取込を行ってください。</div>';return;}const data=buildData(ym);if(!data){host.innerHTML='<div class="dv-empty">データ確認基盤を読み込めませんでした。</div>';return;}const s=data.summary,c=s.entity_counts||{},l=s.link_summary||{},i=s.issue_summary||{},o=s.observation_summary||{},v=s.value_summary||{};
     host.innerHTML=`<div class="dv-overview"><div><div class="dv-eyebrow">総合状態</div><div class="dv-status dv-${esc(s.overall_status)}">${esc(statusLabel[s.overall_status]||s.overall_status)}</div></div><div class="dv-overview-note">${esc(ymLabel(ym))} / ${esc(window.CENTER?.name||'')}</div></div>
@@ -112,11 +146,12 @@
     <div class="dv-section-title">連動状況</div><div class="dv-kpis"><div class="dv-kpi"><span>配送HEAD</span><strong>${n(c.DELIVERY_ROUTE)}</strong></div><div class="dv-kpi"><span>原票</span><strong>${n(c.BUSINESS_SLIP)}</strong></div><div class="dv-kpi"><span>持出履歴</span><strong>${n(c.DELIVERY_ATTEMPT)}</strong></div><div class="dv-kpi"><span>HEADなし原票</span><strong>${n(l.slips_without_delivery_attempt)}</strong><small>正常ケースを含む</small></div></div>
     <div class="dv-two-col"><div class="card"><div class="card-header"><span class="card-title">要確認</span></div><div class="card-body dv-lines"><div><span>Subject不一致</span><b>${n(i.subject_conflict)}</b></div><div><span>Subject未照合</span><b>${n(i.subject_unmatched)}</b></div><div><span>未評価</span><b>${n(i.subject_not_evaluated)}</b></div><div><span>金額UNKNOWN</span><b>${n(i.unknown_value_count)}</b></div></div></div><div class="card"><div class="card-header"><span class="card-title">差異・観測</span></div><div class="card-body dv-lines"><div><span>SOURCE差異</span><b>${n(o.source_variance)}</b></div><div><span>片側SOURCE</span><b>${n(o.single_source)}</b></div><div><span>会計差異</span><b>${n(o.accounting_variance)}</b></div><div><span>会計のみ</span><b>${n(o.accounting_only)}</b></div><p>差異や片側SOURCEは正常な業務ケースを含むため、自動的にエラー扱いしません。</p></div></div></div>
     <div class="card"><div class="card-header"><span class="card-title">金額データ品質</span></div><div class="card-body"><div class="dv-value-grid"><div><span>売上・既知</span><b>${n(v.sales_amount?.known_value)}</b></div><div><span>売上・明示0円</span><b>${n(v.sales_amount?.known_zero)}</b></div><div><span>売上・UNKNOWN</span><b>${n(v.sales_amount?.unknown)}</b></div><div><span>傭車料・既知</span><b>${n(v.route_payment_amount?.known_value)}</b></div><div><span>傭車料・明示0円</span><b>${n(v.route_payment_amount?.known_zero)}</b></div><div><span>傭車料・UNKNOWN</span><b>${n(v.route_payment_amount?.unknown)}</b></div></div></div></div>
-    <div class="card dv-detail-card"><div class="card-header"><span class="card-title">確認詳細</span><span class="dv-readonly">Resolution保存対応</span></div><div class="card-body"><div class="dv-tabs">${[['WORKER_LABELS','帰属主体表記'],['HEADLESS','HEADなし原票'],['VALUE','金額UNKNOWN'],['RECON','SOURCE差異']].map(([k,t])=>`<button type="button" class="dv-tab ${detailMode===k?'active':''}" onclick="DATA_VERIFICATION_UI.setDetail('${k}')">${t}</button>`).join('')}</div><div class="dv-detail-scroll">${detailTable(data.detail)}</div><div class="dv-footnote">D3-5Cでは人が確定したResolutionのみを履歴保存します。SOURCE・Master本体は変更せず、Aliasは有効Decisionから再構成します。</div></div></div>`;}
+    <div class="card dv-detail-card"><div class="card-header"><span class="card-title">確認詳細</span><span class="dv-readonly">Resolution保存対応</span></div><div class="card-body"><div class="dv-tabs">${[['WORKER_LABELS','帰属主体表記'],['HEADLESS','HEADなし原票'],['VALUE','金額UNKNOWN'],['RECON','SOURCE差異']].map(([k,t])=>`<button type="button" class="dv-tab ${detailMode===k?'active':''}" onclick="DATA_VERIFICATION_UI.setDetail('${k}')">${t}</button>`).join('')}</div><div class="dv-detail-scroll">${detailTable(data.detail)}</div><div class="dv-footnote">D3-5Cでは人が確定したResolutionのみを履歴保存します。SOURCE・Master本体は変更せず、Aliasは有効Decisionから再構成します。</div></div></div>
+    ${parityHtml(ym)}`;}
   window.addEventListener?.('normalized-source-updated',ev=>{
     const ym=ev?.detail?.period; if(!ym)return;
     materializeStateByYm.delete(ym); materializedByYm.delete(ym);
     if(selectedYm()===ym&&resolutionLoadState==='LOADED') ensureMaterialized(ym,true);
   });
-  window.DATA_VERIFICATION_UI=Object.freeze({render,buildSummary,setDetail,previewResolution,saveResolution,refreshResolution:async()=>{await ensureResolutionLoaded(true);await ensureMaterialized(selectedYm(),true);},refreshCanonical:()=>ensureMaterialized(selectedYm(),true)});
+  window.DATA_VERIFICATION_UI=Object.freeze({render,buildSummary,setDetail,previewResolution,saveResolution,refreshResolution:async()=>{await ensureResolutionLoaded(true);await ensureMaterialized(selectedYm(),true);},refreshCanonical:()=>ensureMaterialized(selectedYm(),true),refreshParity:()=>ensureParity(selectedYm(),true)});
 })();
