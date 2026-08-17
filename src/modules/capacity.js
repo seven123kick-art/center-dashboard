@@ -275,7 +275,7 @@ window.CAPACITY_UI = {
   confirmedShipperInfoBySlip(slip, ym) {
     const key = String(slip || '').trim();
     if (!key) return null;
-    const list = (STATE.datasets || []).filter(d=>!ym || d.ym === ym);
+    const list = (window.Repository?.Dataset?.getActive?.() || []).filter(d=>!ym || d.ym === ym);
     for (const ds of list) {
       const map = ds && ds.confirmedSlipSales;
       if (!map || typeof map !== 'object') continue;

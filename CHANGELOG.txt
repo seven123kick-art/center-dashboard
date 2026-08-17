@@ -1,38 +1,47 @@
-Version6 D4-24 / Product & Area Analysis Verified Read Path
+Version6 D4-25 / State Ownership Audit & Accounting Parity Guard
 Date: 2026-08-17
 
 目的
-- D4-22便別採算、D4-23荷主/作業者分析に続き、商品カテゴリ分析・エリア分析を
-  Verified CURRENT SHIPPER_AREA経路へ移行する。
-- 画面ごとに旧STATEのCSV集計結果へ固定しない。
+- キャパ管理／年度集計・推移／ホームKPIの旧STATE依存を横断確認し、
+  「STATEに残すべきもの」と「Canonicalへ移すべきもの」を整理する。
+- ホーム・年度推移を根拠なくCanonicalへ切り替えず、実データ同値確認の
+  ガードを先に追加する。
 
-変更
-1. CanonicalAnalysisReadModelsを拡張
-   - materialize時に取得済みのVerified CURRENT SHIPPER_AREA normalized recordsから
-     商品/住所分析用Read Modelを生成。
-   - 原票単位へまとめ、郵便番号・商品名・作業明細・金額を保持。
-2. 商品カテゴリ分析
-   - 対象月にCanonical Read Modelがある場合はそれだけを使用。
-   - Legacy STATEとCanonicalを同月内で混在集計しない。
-   - 未移行月は既存FIELD_DATA_ACCESS/STATEへfallback。
-3. エリア分析
-   - 同じVerified SHIPPER_AREA Read Modelを優先。
-   - 郵便番号→市区町村の既存判定ロジックは変更しない。
-4. 金額UNKNOWN
-   - normalized SOURCEのnull金額を0円SOURCE事実へ変換しない。
-   - Read ModelにamountKnown/unknownAmountRowsを保持。
-   - 既存画面の確定集計ロジック自体は変更しないため、今後UNKNOWN表示強化可能。
+棚卸し結果
+1. ホームKPI・月次推移・予実
+   - 現在は activeDataset*() 経由で Repository.Dataset.getActive() を使用。
+   - confirmed > daily > history の既存優先順位が組み込まれており、
+     旧STATE.datasets直読みではない。
+   - すぐ置換せず、PL_ACTUAL Canonicalと既存Datasetの同値検証後に移行する。
+
+2. キャパ設定
+   - calendar / shipperGroups / capacityGroups 等は利用者が設定する計画・設定値。
+   - SOURCE由来Canonicalへ移す対象ではなくSTATE/Repository.Storage保持が妥当。
+   - 商品・住所の実績部分は将来Verified SHIPPER_AREA Read Modelへ移行候補だが、
+     現キャパロジックが必要とする荷主/住所/日付属性を完全再現できるまでは変更しない。
+
+3. キャパ内の確定荷主照合
+   - STATE.datasets直接参照が1箇所残っていたため Repository.Dataset.getActive()へ移行。
+
+新規 Accounting Parity Guard
+- Verified PL_ACTUAL Canonicalと現在のRepository.Datasetを月単位で比較。
+- CONFIG.INCOME_KEYS / EXPENSE_KEYSの各科目、および営業収益・費用・利益を比較。
+- UNKNOWN金額は0へ変換しない。
+- MISMATCHを自動補正しない。
+- READYになった月だけ、将来ホーム/年度推移をCanonicalへ切替可能と判断できる。
 
 重要
-- Canonical Entity schemaには郵便番号を新設せず、materializerが返すVerified normalized sourceをRead Model境界で利用。
-- SOURCE/Canonical schema/Data Catalog/Supabase schema変更なし。
-- D4-11高速起動変更なし。
+- 今回ホーム／年度推移の表示経路自体は変更しない。
+- 「Canonical化すること」を目的に既存の正常な会計表示を壊さない。
+- 計画・設定・手入力データはSTATEに残す。
 
 変更ファイル
-- src/core/data_catalog/canonical_analysis_read_models.js
-- src/field/field_product.js
-- src/field/field_area.js
+- center.html
+- src/core/data_catalog/accounting_parity.js (new)
+- src/modules/capacity.js
 - CHANGELOG.txt
 
 検証
 - 全 src/**/*.js node --check PASS
+- Canonical schema / Data Catalog / Supabase schema変更なし
+- D4-11高速起動 / D4-12 UI変更なし
