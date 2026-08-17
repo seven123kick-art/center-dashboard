@@ -167,6 +167,11 @@
   </div>
 
   <div class="sidebar-section">システム</div>
+  <div class="nav-item nav-primary" data-view="data-verification" onclick="NAV.go(this)">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2.5h10v11H3z"/><path d="m5 6 1.2 1.2L8.5 5M9.5 6H11M5 10l1.2 1.2L8.5 9M9.5 10H11"/></svg>
+    <span class="nav-label">データ確認</span>
+  </div>
+
   <div class="nav-item nav-primary" data-view="csv-import" data-nav-hub="data" onclick="NAV.go(this)">
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1.5"/><path d="M5 4V2h6v2M5 8h6M5 11h4"/></svg>
     <span class="nav-label">データ管理</span>
@@ -1012,6 +1017,15 @@
     </div>
 
 
+    <!-- ▼ データ確認 -->
+    <div class="view" id="view-data-verification">
+      <div class="dv-toolbar">
+        <div class="dv-toolbar-copy">取込済み資料・連動状況・要確認データを、共通データ確認サマリーから確認します。</div>
+        <select id="data-verification-ym" class="form-control" onchange="DATA_VERIFICATION_UI.render()"></select>
+      </div>
+      <div id="data-verification-root"></div>
+    </div>
+
     <!-- ▼ データ取込 -->
     <!-- ▼ 科目分析 -->
     <div class="view" id="view-kamoku">
@@ -1475,6 +1489,7 @@
 <script src="src/modules/profit_structure.js" defer></script>
 <script src="src/modules/trend.js" defer></script>
 <script src="src/modules/landing_forecast.js" defer></script>
+<script src="src/modules/data_verification.js" defer></script>
 <script src="src/modules/navigation.js" defer></script>
 
 <script src="src/field/field_core.js" defer></script>

@@ -179,6 +179,7 @@ window.NAV = {
       case 'worker-master':
         if (window.WORKER_MASTER_UI?.render) WORKER_MASTER_UI.render();
         break;
+      case 'data-verification': if (window.DATA_VERIFICATION_UI?.render) DATA_VERIFICATION_UI.render(); break;
       case 'csv-import':
         renderFieldViewAfterCloud(view, () => {
           renderImport();

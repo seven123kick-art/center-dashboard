@@ -325,7 +325,7 @@ const CONFIG = {
     alerts:'アラート', memo:'メモ・コメント', report:'会議報告書',
     library:'過去資料', field:'作業者・エリア分析',
     'field-worker':'作業者分析', 'route-analysis':'配送分析', 'field-content':'作業内容分析', 'field-product':'商品カテゴリ分析', 'field-area':'エリア分析',
-    capacity:'キャパ分析', import:'その他取込', 'csv-import':'CSV取込', 'worker-master':'マスタ管理',
+    capacity:'キャパ分析', 'data-verification':'データ確認', import:'その他取込', 'csv-import':'CSV取込', 'worker-master':'マスタ管理',
     kamoku:'収支科目 詳細分析', report:'会議報告書', 'budget-actual':'予実差異分析',
   },
 };

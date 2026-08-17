@@ -1,96 +1,47 @@
-================================================================
-2026-08-17 D3-1 データ確認サマリー基盤
-================================================================
+Version6 D3-2 データ確認画面
+作成日: 2026-08-17
 
 目的
-- 「データ確認」画面が各SOURCE/STATEを直接数える場当たり実装にならないよう、
-  センター×対象期間の確認情報を読取専用の共通サマリーとして生成する基盤を追加。
-- UIはまだ実装・接続しない。
-
-変更
-1. src/core/data_catalog/verification_summary.js 新規
-   - SOURCE帳票の有無・速報/確定状態
-   - Canonical Entity件数
-   - BUSINESS_SLIP / DELIVERY_ATTEMPT / SOURCE_LINK / RECONCILIATION集計
-   - Subject Resolutionの実行状況・主体種別・解決状態
-   - 0円 / UNKNOWN / 有効値の件数を分離
-   - Operational↔Accounting照合状態
-   - issueとvariance observationを別軸で集計
-   - SOURCEが存在しないだけでMISSING_SOURCE/ERRORと自動判定しない
-   - HEADなし原票を自動異常扱いしない
-   - pure/read-only。STATE/Storage/Cloud/DOM変更なし
-
-2. src/core/data_catalog/contract.js
-   - DATA_VERIFICATION_SUMMARY Contractを追加。
-   - observation_summaryをData Quality issueと分離。
-
-3. center.html
-   - verification_summary.js のscript読込1行のみ追加。
-   - 画面表示・DOM・既存UIロジック変更なし。
-
-重要な設計判断
-- SOURCE_VARIANCE / ACCOUNTING_VARIANCE / SINGLE_SOURCEは、正常な業務差異を含み得るため
-  自動的にData Quality issueへ昇格しない。observation_summaryとして保持する。
-- Resolver未実行はUNKNOWNとは別にNOT_EVALUATEDとして集計する。
-- PRELIMINARY/CONFIRMED等の値確定度とData Qualityを混同しない。
-
-検証
-- src配下全JavaScript node --check PASS
-- 0円とUNKNOWNの分離 PASS
-- HEADなしBUSINESS_SLIPをissue化しないこと PASS
-- Resolver未実行をUNKNOWNではなくNOT_EVALUATEDへ分離 PASS
-- PRELIMINARYをvalue_statusとして別軸管理 PASS
-- 2026年6月実CSVで以下を再現確認：
-  WORKER_SALES 8,554行 / SHIPPER_AREA 9,730行 / SKDL0003 8,691行
-  BUSINESS_SLIP 2,556件
-  WORKER_SALES⇔SHIPPER_AREA EXACT 2,256原票 / SOURCE_VARIANCE 20原票 / SINGLE_SOURCE 280原票
-  SALES_DETAIL既知金額合計 20,419,997円
-  SKDL0003 document_state CONFIRMED
-- STATE / IndexedDB / localStorage / Supabase / Cloud 書込なし
-
-次工程
-- D3-2でこのサマリーを参照する「データ確認」UIを設計・実装する。
-Version6 D2-7 Subject Resolution Integration
-Date: 2026-08-17
-
-目的
-- D2-6で実装済みのSUBJECT_RESOLVER / MASTER_RESOLVERを、読取専用Canonical Builderへ任意接続する。
-- WORKER_SALESの「作業者」欄を人物専用として扱わず、PERSON / ORGANIZATION / OPERATION_UNIT / PROCESS / UNKNOWNとして解決可能にする。
-- resolutionContext未指定時は従来どおり未解決(null)のまま生成し、既存画面・STATE・Storage・Cloudへの影響を生じさせない。
+- D3-1 DATA_VERIFICATION_SUMMARYを画面側の唯一の集計入口として利用する「データ確認」画面を追加。
+- SOURCEの有無、Canonical件数、要確認、差異観測、0/UNKNOWNを管理者が同一画面で確認できるようにする。
 
 変更ファイル
-1. center.html
-   - master_resolver.js / subject_resolver.jsをcanonical_builder.jsより前にロードする2行を追加。
-2. src/core/data_catalog/canonical_builder.js
-   - optional resolutionContextを追加。
-   - SUBJECT_RESOLVERの結果をSALES_DETAILへ反映。
-   - PERSON: worker_id / 当時所属会社・センターを解決可能。
-   - ORGANIZATION: worker_company_idへ帰属先会社を保持。
-   - OPERATION_UNIT: attribution_center_idへ保持。
-   - PROCESS: process_codeへ保持。
-   - Context未指定時は既存挙動を維持。
-3. src/core/data_catalog/contract.js
-   - SALES_DETAILにsubject_match_method / subject_match_confidence / subject_resolution_statusを追加。
-4. src/core/data_catalog/subject_resolver.js
-   - 正式名称とAliasが同一master IDへ解決する場合、同一候補を重複カウントしてCONFLICTにしないようindex生成を修正。
+- center.html
+  - サイドバー「システム」に「データ確認」を追加。
+  - view-data-verificationを追加。
+  - data_verification.jsのscript読込を追加。
+- src/modules/data_verification.js（新規）
+  - センター×年月の読取専用UIアダプタ。
+  - DATA_VERIFICATION_SUMMARY.build()の結果だけをDOM描画に使用。
+  - 現行STATEからSOURCE availabilityと対象月routeDataを読み取り、Canonical Builder/D3-1 Summaryへ渡す。
+  - SKDL0001（日報）はPL_ACTUAL PRELIMINARYとして扱わない。現行STATE上confirmedのみCONFIRMED表示。
+  - SOURCE欠落を自動ERRORにしない。
+- src/modules/navigation.js
+  - data-verification描画caseを追加。
+- src/app.js
+  - VIEW_TITLESへ「データ確認」を追加。
+- assets/css/features/data-verification.css（新規）
+  - データ確認画面専用CSS。#view-data-verification配下へスコープ。
+- assets/css/app.css
+  - data-verification.cssのimportを追加。
 
-2026年6月実データ検証
-- WORKER_SALESの作業者欄25表記を全件確認。
-- PERSON: 15表記 / 7,747行 / 1,902原票 / 16,532,417円
-- ORGANIZATION: 3表記 / 627行 / 297原票 / 2,347,580円
-- OPERATION_UNIT: 2表記 / 33行 / 33原票 / 737,100円
-- PROCESS: 4表記 / 136行 / 80原票 / 266,800円
-- UNKNOWN(空欄): 1表記 / 11行 / 3原票 / 536,100円
-- 確認済みマスタ/Aliasを与えたResolverテストでは、空欄を除く24表記を期待したSUBJECT_TYPEへ解決。
-- 空欄はUNKNOWN / UNMATCHEDのまま。
+表示内容
+- 必要資料5系統の登録有無
+- DELIVERY_ROUTE / BUSINESS_SLIP / DELIVERY_ATTEMPT / HEADなし原票
+- Subject CONFLICT / UNMATCHED / NOT_EVALUATED
+- 金額UNKNOWN
+- SOURCE_VARIANCE / SINGLE_SOURCE / Accounting差異観測
+- 売上・傭車料の既知値 / 明示0 / UNKNOWN
 
-安全確認
-- resolutionContextなしではSALES_DETAILの帰属解決フィールドは従来どおりnull。
-- 入力オブジェクト不変を確認。
-- STATE / IndexedDB / localStorage / Supabase / Cloudへの書込追加なし。
+重要な制約
+- 現在永続STATEに保持される既存解析済みworkerCsvData/productAddressDataを、新Canonical行レベルSOURCEへ逆変換する処理は追加していない。
+- そのため未接続の詳細SOURCEは「0件だった」と断定せず、D3-1のNOT_EVALUATED思想を維持する。
+- Accounting明細FACTも既存集計済みSTATEから推測復元しない。
+- STATE / IndexedDB / Storage / Cloud / Supabaseへの書込処理なし。
 - 既存parser変更なし。
-- src配下全JavaScript node --check PASS。
+- 既存分析画面のロジック変更なし。
 
-注意
-- 本変更はResolverを読取Canonicalへ接続する基盤のみ。実マスタ/Aliasの永続登録や自動生成は行わない。
-- 6月の個別表記をResolver本体へベタ書きしていない。
+検証
+- node --check: data_verification.js / navigation.js / app.js PASS
+- data-verification view/nav/script/style参照の存在確認 PASS
+- 新CSSは画面ID配下へスコープ（共通UIへの上書きなし）
