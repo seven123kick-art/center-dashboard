@@ -935,7 +935,7 @@ const IMPORT = {
     const existing = STATE.datasets.find(d => d.ym === ym && (d.type || 'confirmed') === importType && d.source !== 'history');
 
     if (existing && !opt.replace) {
-      const label = `${ymLabel(ym)}（${importType==='confirmed'?'確定':'速報'} / ${existing.fileName || 'ファイル名なし'}）`;
+      const label = `${ymLabel(ym)}（${importType==='confirmed'?'確定':'日報'} / ${existing.fileName || 'ファイル名なし'}）`;
       const ok = confirm(`${label} は既に登録されています。\n\n新しいCSVで入れ替えますか？`);
       if (!ok) {
         UI.toast('取込を中止しました', 'warn');
@@ -1113,7 +1113,7 @@ const IMPORT = {
   async deleteDataset(ym, type) {
     type = type || 'confirmed';
     const ds = STATE.datasets.find(d=>d.ym===ym && (d.type || 'confirmed') === type && d.source !== 'history');
-    const typeLabel = type === 'daily' ? '速報' : '確定';
+    const typeLabel = type === 'daily' ? '日報' : '確定';
     const detail = ds ? `
 区分：${typeLabel}
 ${ds.fileName || 'ファイル名なし'}
@@ -1144,7 +1144,7 @@ ${ds.fileName || 'ファイル名なし'}
     const ds = STATE.datasets.find(d=>d.ym===ym && (d.type || 'confirmed') === type && d.source !== 'history');
     if (!ds) { UI.toast('入替対象CSVが見つかりません','warn'); return; }
 
-    const typeLabel = type === 'daily' ? '速報' : '確定';
+    const typeLabel = type === 'daily' ? '日報' : '確定';
     const ok = confirm(
       `${ymLabel(ym)}の${typeLabel}データを新しいCSVで入れ替えます。\n\n` +
       `現在：${ds.fileName || 'ファイル名なし'}\n` +
@@ -1311,7 +1311,7 @@ function datasetSourceKind(ds) {
 function datasetKindLabel(ds) {
   const kind = datasetSourceKind(ds);
   if (kind === 'history') return '補完';
-  if (kind === 'daily') return '速報';
+  if (kind === 'daily') return '日報';
   if (kind === 'confirmed') return '確定';
   return '不明';
 }
@@ -1962,7 +1962,7 @@ function renderImport() {
     const statusHtml = Object.keys(statusMap).sort().reverse().map(fy => `
       <div style="padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;font-size:12px">
         <strong>${fy}年度の登録状況</strong>
-        <span style="margin-left:10px;color:var(--text2)">確定 ${statusMap[fy].confirmed.size}ヶ月 / 速報 ${statusMap[fy].daily.size}ヶ月</span>
+        <span style="margin-left:10px;color:var(--text2)">確定 ${statusMap[fy].confirmed.size}ヶ月 / 日報 ${statusMap[fy].daily.size}ヶ月</span>
       </div>
     `).join('');
 

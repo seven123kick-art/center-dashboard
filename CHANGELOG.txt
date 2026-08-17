@@ -1,54 +1,41 @@
-Version6 D3-8 / D3-9 foundation integration
+Version6 D3-10 / D3-11
 Date: 2026-08-17
 
 PURPOSE
-- Extend NORMALIZED SOURCE from WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT to DELIVERY_LIST and PL_ACTUAL.
-- Re-materialize Canonical routes and accounting facts/reconciliation from CURRENT normalized batches.
-- Preserve confirmed accounting immutability and the distinction between explicit zero and UNKNOWN/null.
+- Add a dedicated SKDL0002 PRELIMINARY import path without misusing legacy SKDL0001 daily data.
+- Make NORMALIZED SOURCE current/revision status visible from the import screen.
+- Prevent accounting state from moving backward from CONFIRMED to PRELIMINARY.
+- Correct legacy UI wording that called SKDL0001 daily data "速報".
 
 CHANGES
-1) NormalizedSourceRepository
-- Supported document types now include PL_ACTUAL and DELIVERY_LIST.
-- PL_ACTUAL CONFIRMED is immutable: semantically identical re-import is idempotent; differing confirmed payload is rejected with CONFIRMED_IMMUTABLE_CONFLICT.
-- PRELIMINARY -> CONFIRMED remains possible.
+1. Dedicated SKDL0002 import
+- Separate month + CSV input for SKDL0002.
+- Saves through ACCOUNTING_IMPORT_BRIDGE as PL_ACTUAL / PRELIMINARY.
+- Does not write SKDL0002 into legacy STATE.datasets as daily.
 
-2) DELIVERY_LIST normalized source
-- Added normalizeDeliveryListRoutes().
-- PDF extraction records source page number and normalizes head_no, delivery_date, worker1 label and slip_no.
-- Existing routeData behavior remains unchanged.
-- After successful PDF import, normalized DELIVERY_LIST is saved per YYYYMM.
-- Canonical Materializer prefers CURRENT normalized DELIVERY_LIST and falls back to legacy routeData for old months.
+2. Confirmed accounting downgrade protection
+- CURRENT CONFIRMED rejects later PRELIMINARY with CONFIRMED_CANNOT_DOWNGRADE_TO_PRELIMINARY.
+- Existing CONFIRMED immutability remains in force.
+- PRELIMINARY can still be revised until CONFIRMED is registered.
 
-3) PL_ACTUAL normalized source
-- Added accounting_import_bridge.js.
-- Existing confirmed CSV import additionally normalizes original CSV rows and saves PL_ACTUAL/CONFIRMED.
-- Existing daily import is deliberately NOT mapped to PRELIMINARY: legacy daily is SKDL0001, while new Data Catalog PRELIMINARY is SKDL0002.
-- Bridge accepts PRELIMINARY for a future dedicated SKDL0002 path.
+3. Import status / revision visibility
+- Read-only status panel for PL_ACTUAL, WORKER_SALES, SHIPPER_AREA, DELIVERY_LIST, ROUTE_PAYMENT.
+- Shows CURRENT batch, accounting state, row count and retained revision history.
 
-4) Canonical/accounting re-materialization
-- Materializer loads CURRENT WORKER_SALES, SHIPPER_AREA, ROUTE_PAYMENT, DELIVERY_LIST and PL_ACTUAL.
-- ACCOUNTING_FACT and ACCOUNTING_RECONCILIATION are regenerated from CURRENT PL_ACTUAL.
-- UNKNOWN/null and explicit zero remain distinct.
-- Canonical remains derived data and is not persisted.
-
-5) Data Verification
-- Materialized accounting facts/reconciliations are passed into DATA_VERIFICATION_SUMMARY.
-- CURRENT normalized batch presence is reflected in source status.
-
-UNCHANGED
-- Existing SKDL0001 legacy behavior.
-- Existing STATE/full_state structures.
-- Existing PDF routeData/headPayments behavior.
-- No Supabase schema migration.
-
-KNOWN / INTENTIONAL
-- Dedicated SKDL0002 UI/import route is not added here, to avoid misclassifying SKDL0001 as SKDL0002.
-- Legacy parseHeadPaymentSheet still has historical blank-to-zero behavior; normalized ROUTE_PAYMENT remains the Canonical source when available.
+4. SKDL0001 wording correction
+- Existing SKDL0001 behavior is unchanged.
+- UI now calls SKDL0001 日報, not 速報.
+- SKDL0002=PRELIMINARY, SKDL0003=CONFIRMED remain the new Data Catalog definitions.
 
 VALIDATION
-- All src/**/*.js node --check PASS.
-- DELIVERY_LIST normalizer PASS.
-- Accounting explicit zero and CONFIRMED immutable PASS.
-- Identical confirmed re-import idempotent PASS.
-- Differing confirmed re-import rejected PASS.
-- Materializer normalized DELIVERY_LIST/ROUTE_PAYMENT/PL_ACTUAL integration PASS.
+- node --check PASS for all src/**/*.js.
+- No direct STATE/full_state mutation added for SKDL0002.
+
+FILES
+- center.html
+- src/app.js
+- src/modules/data_import_management.js (new)
+- src/core/repository/normalized_source_repository.js
+- assets/css/app.css
+- assets/css/features/data-import-management.css (new)
+- CHANGELOG.txt

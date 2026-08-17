@@ -103,6 +103,15 @@
     const priorId=current.manifest.current_batch_id;
     // SKDL0003(CONFIRMED)は会社確定値でimmutable。同月の確定正本が既にある場合、
     // 内容差異のある新BatchでCURRENTを動かさない。同一内容の再投入だけ冪等成功とする。
+    if(s.document_type==='PL_ACTUAL'&&priorId){
+      const prior=await loadBatch(s.document_type,s.period,priorId);
+      const priorRows=prior?.ok?(prior.batch?.records||[]):[];
+      const priorConfirmed=priorRows.some(r=>r?.document_state==='CONFIRMED');
+      const incomingPreliminary=vr.records.some(r=>r?.document_state==='PRELIMINARY');
+      if(priorConfirmed&&incomingPreliminary){
+        return {ok:false,error:'CONFIRMED_CANNOT_DOWNGRADE_TO_PRELIMINARY',current_batch_id:priorId};
+      }
+    }
     if(s.document_type==='PL_ACTUAL'&&priorId&&vr.records.some(r=>r?.document_state==='CONFIRMED')){
       const prior=await loadBatch(s.document_type,s.period,priorId);
       const priorRows=prior?.ok?(prior.batch?.records||[]):[];

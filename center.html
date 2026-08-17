@@ -1071,7 +1071,7 @@
             <table class="tbl" style="font-size:12px">
               <thead><tr><th>CSV種別</th><th>ファイルの中身</th><th>主にどこで使うか</th></tr></thead>
               <tbody>
-                <tr><td><strong>① 収支CSV（SKDL）</strong></td><td>科目別の収支金額（SKDL0001=日報／SKDL0003=確定）</td><td>ダッシュボード・月次収支表・売上推移・経営指標</td></tr>
+                <tr><td><strong>① 収支CSV（SKDL）</strong></td><td>科目別の収支金額（SKDL0001=日報（旧運用）／SKDL0002=速報／SKDL0003=確定）</td><td>ダッシュボード・月次収支表・売上推移・経営指標</td></tr>
                 <tr><td><strong>② 作業者別CSV</strong></td><td>作業者ごとの配送件数・金額</td><td>作業者分析画面</td></tr>
                 <tr><td><strong>③ 商品・住所CSV</strong></td><td>原票番号ごとの商品カテゴリ・作業内容・エリア</td><td>作業内容分析・商品カテゴリ分析・エリア分析</td></tr>
               </tbody>
@@ -1088,13 +1088,34 @@
             <div style="font-size:32px;color:#94a3b8;margin-bottom:10px">⬆</div>
             <div style="font-size:15px;font-weight:700;margin-bottom:6px">クリックまたはCSVファイルをドロップ</div>
             <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px">収支実績データ（SKDL形式）を選択</div>
-            <div style="font-size:12px;color:var(--text2);margin-bottom:8px">SKDL0001（日報）または SKDL0003（確定） — 複数月まとめてOK</div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:8px">この既存取込欄は SKDL0001（日報）または SKDL0003（確定）用です。SKDL0002（速報）は下の専用欄から登録します。</div>
             <div style="display:flex;gap:12px;justify-content:center;margin-bottom:6px">
-              <span style="font-size:11px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;padding:2px 8px;border-radius:4px">SKDL0001 = 日報（速報値）</span>
+              <span style="font-size:11px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;padding:2px 8px;border-radius:4px">SKDL0001 = 日報（新基盤では速報扱いしない）</span>
               <span style="font-size:11px;background:#d1fae5;border:1px solid #6ee7b7;color:#064e3b;padding:2px 8px;border-radius:4px">SKDL0003 = 確定値</span>
             </div>
           </div>
           <div id="upload-msg"></div>
+        </div>
+      </div>
+
+      <div class="card dim-card" style="margin-bottom:14px">
+        <div class="card-header"><span class="card-title">SKDL0002（速報）取込</span><span class="badge badge-info">新データ基盤</span></div>
+        <div class="card-body">
+          <div class="dim-grid">
+            <label class="dim-field"><span>対象年月</span><input type="month" id="preliminary-pl-month"></label>
+            <label class="dim-field dim-file"><span>SKDL0002 CSV</span><input type="file" id="preliminary-pl-file" accept=".csv"></label>
+            <button type="button" class="btn" id="preliminary-pl-import-btn" onclick="DATA_IMPORT_MANAGEMENT.importPreliminary()">速報を登録</button>
+          </div>
+          <div class="dim-note">SKDL0002は速報（PRELIMINARY）として保存します。SKDL0001（日報）とは別データです。SKDL0003（確定）が存在する月へ速報を後戻り登録することはできません。</div>
+          <div id="preliminary-pl-msg" class="dim-message"></div>
+        </div>
+      </div>
+
+      <div class="card dim-card" style="margin-bottom:14px">
+        <div class="card-header"><span class="card-title">新データ基盤 取込状況</span><button type="button" class="btn" onclick="DATA_IMPORT_MANAGEMENT.refresh()">更新</button></div>
+        <div class="card-body">
+          <div class="dim-toolbar"><label class="dim-field"><span>確認年月</span><input type="month" id="normalized-status-month" onchange="DATA_IMPORT_MANAGEMENT.refresh()"></label></div>
+          <div id="normalized-source-status"><div class="dim-empty">年月を選択するとCURRENT Batchと改訂履歴を確認できます。</div></div>
         </div>
       </div>
 
@@ -1497,6 +1518,7 @@
 <script src="src/modules/trend.js" defer></script>
 <script src="src/modules/landing_forecast.js" defer></script>
 <script src="src/modules/data_verification.js" defer></script>
+<script src="src/modules/data_import_management.js" defer></script>
 <script src="src/modules/navigation.js" defer></script>
 
 <script src="src/field/field_core.js" defer></script>
