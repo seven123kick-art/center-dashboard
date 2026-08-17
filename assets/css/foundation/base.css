@@ -1,27 +1,33 @@
-/* Version6 D4 — bright modern design system tokens */
+/* Version6 D4 Design System — bright modern pastel theme */
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:252px;--header-h:70px;
-  --brand:#6f9b78;--brand-strong:#557a61;--brand-2:#a8cdb0;--brand-soft:#eef7ef;--brand-subtle:#fbfdf9;
-  --accent:#78a783;--accent-2:#b6d9bd;--accent-soft:#eef8f0;--accent-pale:#f7fbf5;--focus:rgba(120,167,131,.18);
-  --accent-warm:#d8a47f;--accent-rose:#d9a6b3;--accent-lilac:#b8acd8;--accent-sky:#9fcbd0;--accent-sun:#e7c979;
-  --sidebar-bg:#fbfcf8;--sidebar-bg-2:#f6f8f1;--sidebar-hover:#f0f5ed;--sidebar-active:#e8f3e8;
-  --sidebar-text:#667064;--sidebar-text-active:#385342;
-  --bg:#f7f6f1;--surface:#fffefb;--surface-soft:#faf9f5;--surface-muted:#f3f2ed;--light:#f7f6f1;
-  --border:#e8e5dc;--border2:#dcd8cc;
-  --navy:#557a61;--blue:#78a783;--green:#4f956f;--red:#c96f72;--amber:#c99455;
-  --text:#343a35;--text2:#69716b;--text3:#969b95;
-  --radius-sm:11px;--radius:14px;--radius-lg:18px;--radius-xl:26px;
-  --shadow-sm:0 2px 8px rgba(74,70,58,.045);--shadow:0 10px 28px rgba(74,70,58,.065),0 2px 6px rgba(74,70,58,.035);--shadow-lg:0 22px 54px rgba(74,70,58,.12);
-  --good:#4f956f;--bad:#c96f72;--warn:#c99455;
-  --theme-a:#78a783;--theme-b:#d9a6b3;--theme-c:#b8acd8;--theme-d:#e7c979;--theme-e:#9fcbd0;
+  --sidebar-w:248px;--header-h:66px;
+  /* Product palette: ReGLOSS / Kitasaitama */
+  --raden:#3DBB83;--kanade:#F9E03C;--ririka:#E63291;--hajime:#A77BE8;
+  /* Gamers / Toda */
+  --korone:#FEE039;--fubuki:#43BFEF;--mio:#C71E3E;--okayu:#B190FC;
+  --accent:var(--raden);--accent-2:var(--hajime);--accent-3:var(--ririka);--accent-4:var(--kanade);
+  --accent-soft:#edf9f3;--accent-soft-2:#f5f0fd;--accent-soft-3:#fdf0f7;--accent-soft-4:#fff9dc;
+  --focus:rgba(61,187,131,.18);
+  --brand:var(--accent);--brand-strong:#23875c;--brand-2:var(--accent-2);--brand-soft:var(--accent-soft);--brand-subtle:#fbfaf7;
+  --sidebar-bg:#fbfcf8;--sidebar-bg-2:#f7faf4;--sidebar-hover:#f0f7f2;--sidebar-active:#e5f4e9;
+  --sidebar-text:#58665e;--sidebar-text-active:#274f3b;
+  --bg:#f7f6f2;--surface:#fffefa;--surface-soft:#fafaf7;--surface-muted:#f3f4ef;--light:#f5f6f1;
+  --border:#e3e2da;--border2:#d4d5cc;
+  --navy:var(--accent);--blue:var(--fubuki);--green:#268b62;--red:#c85063;--amber:#b58a24;
+  --text:#303832;--text2:#58615b;--text3:#777f79;
+  --radius-sm:10px;--radius:13px;--radius-lg:17px;--radius-xl:23px;
+  --shadow-sm:0 1px 3px rgba(55,63,56,.055);--shadow:0 8px 24px rgba(67,71,63,.065),0 1px 3px rgba(67,71,63,.04);--shadow-lg:0 20px 48px rgba(67,71,63,.12);
+  --good:#278b62;--bad:#c85063;--warn:#b58a24;
+  --chart-1:var(--raden);--chart-2:var(--ririka);--chart-3:var(--hajime);--chart-4:var(--kanade);
 }
 html[data-center="toda"]{
-  --brand:#c79256;--brand-strong:#9e6f3f;--brand-2:#e7bf82;--brand-soft:#fff5df;--brand-subtle:#fffaf0;
-  --accent:#d39b55;--accent-2:#efc987;--accent-soft:#fff3d9;--accent-pale:#fffaf0;--focus:rgba(211,155,85,.18);
-  --sidebar-hover:#fff4dc;--sidebar-active:#ffedc7;--sidebar-text-active:#765027;
-  --theme-a:#d39b55;--theme-b:#e8a8a0;--theme-c:#9fc49b;--theme-d:#e7c979;--theme-e:#b9a7d4;
+  --accent:var(--korone);--accent-2:var(--okayu);--accent-3:var(--fubuki);--accent-4:var(--mio);
+  --accent-soft:#fff9dc;--accent-soft-2:#f5f0ff;--accent-soft-3:#edf9fe;--accent-soft-4:#fff0f2;
+  --focus:rgba(254,224,57,.22);--brand-strong:#8a7412;
+  --sidebar-hover:#fff9e4;--sidebar-active:#fff3bd;--sidebar-text-active:#62551c;
+  --chart-1:#e5bd18;--chart-2:var(--okayu);--chart-3:var(--fubuki);--chart-4:var(--mio);
 }
 html,body{min-height:100%}
-body{font-family:"Yu Gothic UI","Yu Gothic","Meiryo",system-ui,sans-serif;font-size:13px;letter-spacing:.005em;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden}
+body{font-family:"Yu Gothic UI","Yu Gothic","Meiryo",system-ui,sans-serif;font-size:13px;letter-spacing:.005em;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 button,input,select,textarea{font:inherit}

@@ -1,40 +1,73 @@
-Version6 D4-3 Preview Theme Rebuild
+Version6 D4-4 Pastel Theme Refinement
+Date: 2026-08-17
+
+- Rebuilt D4 theme tokens around the supplied official member colors.
+- Kitasaitama: Raden #3DBB83 primary; Kanade #F9E03C, Ririka #E63291, Hajime #A77BE8 as supporting accents.
+- Toda: Korone #FEE039 primary; Fubuki #43BFEF, Mio #C71E3E, Okayu #B190FC as supporting accents.
+- Removed the remaining blue/navy product-shell emphasis from the D4 preview.
+- Increased text contrast one step without returning to hard black enterprise UI styling.
+- Refined sidebar active/hover states, topbar, KPI surfaces, buttons, form focus and dashboard section accents.
+- Dashboard main chart now reads center theme colors from CSS tokens instead of hard-coded navy/red/green.
+- Center selection cards now share the same product design system while expressing each center through its own palette.
+- Business logic, data structures, repositories and Supabase behavior unchanged.
+
+Validation: all src/**/*.js node --check PASS; modified CSS brace checks PASS.
+
+Version6 D4-1 / D4-2 — Design System foundation and shell unification
 Date: 2026-08-17
 
 PURPOSE
-- Replace the blue/dark enterprise visual direction from D4-1/D4-2.
-- Produce the first visual sample before applying the design to all screens.
-- Target: center selection, shared shell/sidebar/topbar, and home dashboard.
+- Start D4 by fixing the root cause of the visual mismatch between the center-selection screen and the logged-in application shell.
+- Rebuild shared design tokens and shell styles instead of layering another visual patch on top.
+- Preserve all business/data logic.
 
-DESIGN DIRECTION
-- Bright modern UI.
-- Pastel accents with restrained polish.
-- Friendly enough to make daily use pleasant, while remaining appropriate for management meetings.
-- No Taisho-romantic / Japanese-modern theme in this system.
-- No direct reproduction of Hololive logos/character artwork as UI decoration.
-- Center personality is expressed abstractly through color rhythm and atmosphere.
-
-CENTER THEMES
-- Kitasaitama: soft green as the main accent, with lilac/rose/sun/sky supporting pastels. Inspired by the user's Raden + ReGLOSS preference.
-- Toda: warm cream/yellow/orange main accent with green/rose/lilac supporting pastels. Inspired by the user's Korone + hololive GAMERS preference.
-- Layout/components remain the same product; only theme tokens differ.
+AUDIT FINDINGS
+- index.html used landing.css with an independent green/orange palette and independent radii/shadows.
+- center.html used foundation/base.css + shell.css + theme.css with a separate navy palette.
+- shell colors were also duplicated as hard-coded values in features/version2.css.
+- center.html still contained many inline styles; D4-1 removes only shell-level inline styling. Feature-specific inline styles remain for later screen-by-screen cleanup.
+- app.css already had a sensible foundation/features loading architecture, so D4 keeps that architecture and rewrites the shared foundation instead of adding a new override stylesheet.
 
 CHANGES
-- foundation/base.css: replaced dark-blue tokens with warm neutral surfaces and pastel center tokens.
-- foundation/shell.css: changed sidebar from dark navy wall to a light, low-pressure shell; active state is a soft center-colored highlight.
-- foundation/theme.css: cards/KPIs/buttons/forms/tables/messages rebuilt around warm neutral surfaces and pastel accents.
-- landing.css: center selection rebuilt as the first visual sample with distinct but related Kitasaitama/Toda personalities.
-- dashboard.css: home cards receive a lighter, more playful-but-professional presentation.
-- dashboard.js: home chart palette changed from navy/red/green to green/rose/lilac.
-- src/app.js: shared chart palette and center colors changed to the new pastel system.
-- center.html: home chart legend swatches aligned with the new palette.
+1. foundation/base.css
+- Rebuilt as the single shared Version6 token source.
+- Added shared brand/surface/border/text/radius/shadow tokens.
+- Center-specific accent remains supported: North Saitama uses blue, Toda uses orange.
+- The center accent is no longer allowed to redefine the entire product visual language.
 
-SCOPE
-- This is intentionally a visual sample, not full-screen rollout.
-- Business logic, data model, Data Catalog, Repository, Canonical, Supabase and import logic are unchanged.
-- Other feature screens may still contain legacy blue hard-coded colors. They are intentionally left for the next rollout after visual approval.
+2. foundation/shell.css
+- Rebuilt sidebar/topbar/content shell from shared tokens.
+- Reduced unrelated purple/navy remnants.
+- Unified spacing, radii, typography and active/hover behavior.
+- Added reusable shell classes for brand, cloud status, session message and topbar hint.
+
+3. foundation/theme.css
+- Rebuilt shared cards/KPI/buttons/forms/tables/messages/upload areas around the same token set.
+- Removed the previous purple-tinted control styling that conflicted with the shell.
+
+4. landing.css
+- Rebuilt center selection on the SAME foundation tokens as center.html.
+- Center cards still retain their center identity through accent color and character art, but typography, surfaces, borders, controls and spacing now match the application.
+- North Saitama changes from the isolated green landing palette to the same blue product accent used after entry.
+- Toda retains orange as its center accent, matching html[data-center="toda"] in the application.
+
+5. center.html
+- Removed shell-level inline style definitions for logo mark, cloud status, session message and topbar layout.
+- These are now owned by foundation/shell.css.
+- Business views and behavior are unchanged.
+
+6. features/version2.css
+- Navigation group/subitem colors now reference shared shell tokens rather than a second hard-coded sidebar palette.
+
+NOT CHANGED
+- No JS business logic.
+- No Data Catalog / Canonical / Repository / Supabase changes.
+- No feature screen redesign yet.
+- No center character images changed.
+- Existing feature-specific inline styles are intentionally left for the next D4 passes rather than hidden by a global override patch.
 
 VALIDATION
-- All src/**/*.js syntax checks PASS.
-- HTML parse checks PASS for index.html and center.html.
-- CSS brace balance PASS for changed stylesheets.
+- All src/**/*.js node --check PASS.
+- center.html/index.html parsed successfully.
+- CSS brace balance PASS.
+- Existing center query behavior preserved (kitasaitama/toda).

@@ -46,6 +46,12 @@
   }
 
   function escLocal(v){ return typeof esc === 'function' ? esc(v) : String(v ?? ''); }
+  function cssThemeColor(name, fallback, alpha){
+    const raw=getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+    if(alpha == null || !/^#[0-9a-f]{6}$/i.test(raw)) return raw;
+    const n=parseInt(raw.slice(1),16);
+    return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${alpha})`;
+  }
 
 function renderDashboardSelector() {
   const area = document.getElementById('kpi-area');
@@ -173,9 +179,9 @@ window.renderDashboard = function renderDashboard() {
     data: {
       labels,
       datasets:[
-        {label:'収入',data:inc,backgroundColor:'rgba(120,167,131,.72)',order:2},
-        {label:'費用',data:exp,backgroundColor:'rgba(217,166,179,.72)',order:2},
-        {label:'利益',data:prof,type:'line',borderColor:'#b08fc4',backgroundColor:'rgba(184,172,216,.12)',
+        {label:'収入',data:inc,backgroundColor:cssThemeColor('--chart-1','#3DBB83',.62),order:2},
+        {label:'費用',data:exp,backgroundColor:cssThemeColor('--chart-2','#E63291',.38),order:2},
+        {label:'利益',data:prof,type:'line',borderColor:cssThemeColor('--chart-3','#A77BE8'),backgroundColor:cssThemeColor('--chart-3','#A77BE8',.10),
           pointRadius:3,tension:.3,fill:false,order:1,yAxisID:'y2'},
       ]
     },

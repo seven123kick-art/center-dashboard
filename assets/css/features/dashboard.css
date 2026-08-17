@@ -1,7 +1,6 @@
-/* D4 home preview — light, cheerful, still business-readable */
-#view-dashboard{position:relative}#view-dashboard:before{content:"";position:absolute;right:1%;top:-12px;width:190px;height:80px;border-radius:999px;background:linear-gradient(90deg,color-mix(in srgb,var(--theme-b) 8%,transparent),color-mix(in srgb,var(--theme-e) 10%,transparent));filter:blur(18px);pointer-events:none}
-#dashboard-period-selector{margin-bottom:14px}
+/* D4 home dashboard — readable, playful but restrained */
 #kpi-area .home-labor-rate-breakdown{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:8px}
-#kpi-area .home-labor-rate-item{min-width:0;padding-left:12px;border-left:1px solid var(--border)}#kpi-area .home-labor-rate-item:first-child{padding-left:0;border-left:0}#kpi-area .home-labor-rate-label{margin-bottom:2px;font-size:11px;line-height:1.35;color:var(--text3)}#kpi-area .home-labor-rate-item .kpi-value{font-size:23px;line-height:1.15}#kpi-area .home-labor-rate-target{margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
-#view-dashboard .grid-6-4,#view-dashboard .grid2{gap:15px}#view-dashboard .card{transition:transform .16s,box-shadow .16s}#view-dashboard .card:hover{transform:translateY(-1px);box-shadow:0 13px 32px rgba(74,70,58,.075)}
-#view-dashboard .legend-dot{border-radius:999px}
+#kpi-area .home-labor-rate-item{min-width:0;padding-left:12px;border-left:1px solid var(--border)}#kpi-area .home-labor-rate-item:first-child{padding-left:0;border-left:0}
+#kpi-area .home-labor-rate-label{margin-bottom:2px;font-size:11px;line-height:1.35;color:var(--text2);font-weight:750}#kpi-area .home-labor-rate-item .kpi-value{font-size:23px;line-height:1.15}#kpi-area .home-labor-rate-target{margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+#view-dashboard .card{border-color:#e3e2da}#view-dashboard .card-header{position:relative}#view-dashboard .card-header:before{content:"";position:absolute;left:17px;bottom:-1px;width:34px;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+#view-dashboard .mbar-track{background:#e9eae4!important;border-radius:999px!important}#view-dashboard .mbar-fill{border-radius:999px!important}
