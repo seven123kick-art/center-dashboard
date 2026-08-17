@@ -1,62 +1,58 @@
-Version6 D3-12 / D3-13
+Version6 D3-14 / D3-15
 Date: 2026-08-17
 
 PURPOSE
-- Add direct SKFL0001 budget-plan PDF import.
-- Keep legacy copy/paste as a fallback, while making PDF the recommended budget source.
-- Include budget-plan status in the Data Import status view.
-- Register PLAN_BUDGET in the central Data Catalog.
+- Correct SKFL0001 budget semantics: future half-year not yet budgeted is not a zero budget.
+- Prevent budget/actual screens from displaying NOT_PLANNED_YET months as 0.
+- Reframe the import UI around Data Catalog document roles instead of file extensions.
 
-IMPLEMENTATION
-1. PLAN_BUDGET / SKFL0001
-- Added PLAN_BUDGET to DATA_CATALOG.
-- Scope: CENTER_FISCAL_YEAR.
-- Source: SKFL0001 monthly P/L plan PDF.
-- Fiscal year and center metadata are read from PDF content.
-- Monthly amounts remain in thousand-yen units, matching existing planData.
+BUSINESS RULE CORRECTION
+For the supplied 2026 SKFL0001, April-September are the currently prepared budget months. October-March are not yet budgeted. The zeros printed in the future half-year of SKFL0001 must therefore not be treated as explicit zero-yen budgets.
 
-2. Direct PDF parser
-- New src/modules/plan_pdf_import.js.
-- Reads the two SKFL0001 pages with PDF.js.
-- Page 1 maps April-September; page 2 maps October-March.
-- Extracts account labels and monthly values using PDF coordinates rather than flattened parsed-text order.
-- Validates major accounts before allowing import.
-- Does not silently turn a missing account into zero.
+PLAN MODEL
+- PLANNED: a budget exists; amount may legitimately be 0.
+- NOT_PLANNED_YET: budget has not been prepared yet; no amount is materialized.
+- UNKNOWN: source cannot establish the budget state.
+- The supplied first-half-only SKFL0001 is stored with coverage=FIRST_HALF_ONLY.
+- October-March keys are removed from plan rows for this case; they are not stored as zero.
+- monthStatus is retained in planData and source metadata.
 
-3. Existing PLAN save path refactored
-- Added PLAN.importParsed() as the single save path for parsed budget data.
-- Both PDF import and legacy paste import use the same full-replace / Storage / Cloud sync behavior.
-- Source metadata is retained in planData.
+DETECTION
+- For SKFL0001, if all required major accounts on the second-half page are zero while the first half contains non-zero budget values, the second half is classified NOT_PLANNED_YET.
+- Missing required accounts still stop import; they are never filled with zero.
 
-4. Import UI
-- SKFL0001 PDF is now the recommended budget import method.
-- Legacy copy/paste remains available under a collapsible fallback section.
-- Data Import status includes the fiscal-year budget registration and source type.
+DISPLAY / CALCULATION
+- getPlanRowsForFiscalYear exposes month status to plan readers without changing the persisted row schema.
+- getPlanValueK returns null for NOT_PLANNED_YET / UNKNOWN months.
+- pl.js and budget_actual.js stop derived expense/profit calculations for a month that is not budgeted, preventing null inputs from collapsing to a displayed 0.
 
-ATTACHED PDF VALIDATION
-- Fiscal year: 2026
-- Center shown: 110203 北埼玉C
-- Unit: 千円
-- Page 1: April-September plan
-- Page 2: October-March plan (all monthly plan values shown as 0 in this supplied file)
-Verified examples:
-- 営業収益計: 25,661 / 22,153 / 22,608 / 25,112 / 25,559 / 24,507
-- 人件費計: 4,949 / 4,627 / 4,763 / 4,969 / 4,883 / 4,894
-- 傭車費計: 16,965 / 14,117 / 14,425 / 16,617 / 16,952 / 15,975
-- 水道光熱費: 340 / 340 / 340 / 410 / 410 / 410
-- 営業利益: 622 / 262 / 211 / 298 / 483 / 413
+DATA CATALOG
+- PLAN_BUDGET canonical fields now include plan_status.
+- Completion rule now covers only months whose budget is actually planned.
+- NOT_PLANNED_YET is explicitly distinct from zero.
+
+IMPORT UI
+- Primary data-management tab is renamed "データ取込".
+- Secondary legacy/miscellaneous area is renamed "補助取込・設定".
+- Added a Data Catalog based entry panel for the seven principal sources:
+  SKFL0001 budget, SKDL0002 preliminary, SKDL0003 confirmed,
+  worker sales, shipper area, delivery list, route payment.
+- Existing import handlers are reused; no duplicate parser or save path was created.
+- Budget status shows "上期策定済・下期未策定" for the supplied first-half-only plan.
 
 VALIDATION
-- All src/**/*.js: node --check PASS.
-- Supplied PDF rendered and layout-inspected.
-- Coordinate extraction prototype verified the supplied PDF's key monthly figures.
-- Existing paste parser retained.
-- No Supabase schema migration.
+- node --check PASS for all src/**/*.js.
+- No Supabase schema change.
+- Existing actual/import parsers are unchanged except the SKFL0001 plan parser.
+- Explicit planned amount 0 remains 0; only NOT_PLANNED_YET months have no materialized amount.
 
 FILES
 - center.html
+- assets/css/features/data-import-management.css
 - src/app.js
-- src/modules/plan_pdf_import.js (new)
+- src/modules/plan_pdf_import.js
 - src/modules/data_import_management.js
+- src/modules/pl.js
+- src/modules/budget_actual.js
 - src/core/data_catalog/catalog.js
 - CHANGELOG.txt

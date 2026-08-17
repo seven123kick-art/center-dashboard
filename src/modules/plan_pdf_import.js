@@ -38,20 +38,29 @@
   async function parseFile(file){
     const lib=await pdfjs(),data=new Uint8Array(await file.arrayBuffer()),doc=await lib.getDocument({data}).promise;
     if(doc.numPages<2)throw new Error('SKFL0001は上期・下期の2ページを想定しています。2ページ未満のため取込できません。');
-    let fy=null,centerCode=null,centerName=null; const plan={};
+    let fy=null,centerCode=null,centerName=null; const plan={}; const pagePlans=[];
     for(let p=1;p<=Math.min(doc.numPages,2);p++){
       const page=await doc.getPage(p),content=await page.getTextContent({disableNormalization:false}),lines=groupLines(content.items);
       const all=content.items.map(x=>String(x.str||'')).join(' ');
       const fyMatch=all.match(/(20\d{2})\s*年度/); if(fyMatch)fy=fy||fyMatch[1];
       const centerMatch=all.match(/支店[：:]?\s*(\d{6})\s*([^\s]+)/); if(centerMatch){centerCode=centerCode||centerMatch[1];centerName=centerName||centerMatch[2];}
-      const parsed=parsePage(lines,p-1);
+      const parsed=parsePage(lines,p-1); pagePlans[p-1]=parsed;
       for(const [label,vals] of Object.entries(parsed)){plan[label]=Object.assign({},plan[label]||{},vals);}
     }
     if(!fy)throw new Error('PDFから年度を確認できませんでした。');
     const required=['営業収益計','人件費計','傭車費計','営業利益'];
     const missing=required.filter(k=>!plan[k]);
     if(missing.length)throw new Error(`SKFL0001の主要科目を確認できません: ${missing.join('、')}`);
-    return {fiscalYear:fy,centerCode,centerName,rows:plan,itemCount:Object.keys(plan).length};
+    // SKFL0001は未策定の将来月も帳票上0表示になる。0円予算と未策定を混同しない。
+    // 下期主要科目がすべて0で、上期に実額がある場合は下期未策定として月値をCanonical plan rowsから除外する。
+    const lowerMonths=MONTHS_BY_PAGE[1], upperMonths=MONTHS_BY_PAGE[0];
+    const lowerRequired=required.flatMap(k=>lowerMonths.map(m=>plan[k]?.[m])).filter(v=>v!==undefined&&v!==null);
+    const upperRequired=required.flatMap(k=>upperMonths.map(m=>plan[k]?.[m])).filter(v=>v!==undefined&&v!==null);
+    const lowerNotPlanned=lowerRequired.length===required.length*lowerMonths.length && lowerRequired.every(v=>v===0) && upperRequired.some(v=>v!==0);
+    const monthStatus={}; upperMonths.forEach(m=>monthStatus[m]='PLANNED');
+    lowerMonths.forEach(m=>monthStatus[m]=lowerNotPlanned?'NOT_PLANNED_YET':'PLANNED');
+    if(lowerNotPlanned){ for(const vals of Object.values(plan)) lowerMonths.forEach(m=>{ if(vals&&Object.prototype.hasOwnProperty.call(vals,m)) delete vals[m]; }); }
+    return {fiscalYear:fy,centerCode,centerName,rows:plan,itemCount:Object.keys(plan).length,monthStatus,coverage:lowerNotPlanned?'FIRST_HALF_ONLY':'FULL_FISCAL_YEAR'};
   }
   function setMsg(text,type=''){const el=document.getElementById('plan-pdf-import-msg');if(el){el.textContent=text||'';el.className=type==='error'?'text-danger':'';}}
   async function importSelected(){
@@ -62,8 +71,8 @@
       const r=await parseFile(file),selected=String(document.getElementById('plan-year-sel')?.value||'');
       if(selected&&selected!==String(r.fiscalYear)){throw new Error(`選択年度は${selected}年度ですが、PDFは${r.fiscalYear}年度です。年度を確認してください。`);}
       if(!window.PLAN?.importParsed)throw new Error('計画保存基盤を読み込めません。');
-      const ok=await PLAN.importParsed(r.rows,r.fiscalYear,{source_type:'SKFL0001_PDF',file_name:file.name,center_code:r.centerCode,center_name:r.centerName,item_count:r.itemCount});
-      if(ok!==false){setMsg(`${r.fiscalYear}年度 SKFL0001を取込みました（${r.itemCount}科目）`);const input=document.getElementById('plan-pdf-file-input');if(input)input.value='';}
+      const ok=await PLAN.importParsed(r.rows,r.fiscalYear,{source_type:'SKFL0001_PDF',file_name:file.name,center_code:r.centerCode,center_name:r.centerName,item_count:r.itemCount,month_status:r.monthStatus,coverage:r.coverage});
+      if(ok!==false){setMsg(`${r.fiscalYear}年度 SKFL0001を取込みました（${r.itemCount}科目 / ${r.coverage==='FIRST_HALF_ONLY'?'上期予算・下期未策定':'12か月予算'}）`);const input=document.getElementById('plan-pdf-file-input');if(input)input.value='';}
     }catch(e){setMsg(e?.message||String(e),'error');}
   }
   document.addEventListener('DOMContentLoaded',()=>{const input=document.getElementById('plan-pdf-file-input');if(input)input.addEventListener('change',()=>{const n=document.getElementById('plan-pdf-file-name');if(n)n.textContent=input.files?.[0]?.name||'未選択';});});

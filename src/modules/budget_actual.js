@@ -133,7 +133,7 @@
      既存'粗利益'ラベルへ、それぞれそのままマッピングするだけで、
      算出方法自体は一切変更していない） ---------- */
   function planGroupValue(planRows, label, keys, mm) {
-    if (!planRows) return null;
+    if (!planRows || (typeof isPlanMonthAvailable==='function' && !isPlanMonthAvailable(planRows, mm))) return null;
 
     if (label === '営業費用') {
       const direct = readPlanValueByLabel(planRows, '売上原価', mm);

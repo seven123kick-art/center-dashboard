@@ -137,7 +137,7 @@ function renderPL() {
   }
 
   function planValue(label, keys) {
-    if (!plan) return null;
+    if (!plan || (typeof isPlanMonthAvailable==='function' && !isPlanMonthAvailable(plan, mm))) return null;
 
     if (label === '売上原価') {
       const direct = readPlanValueByLabel(plan, '売上原価', mm);

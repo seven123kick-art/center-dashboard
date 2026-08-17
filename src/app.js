@@ -1660,7 +1660,17 @@ function getPlanPackForFiscalYear(fy) {
 }
 function getPlanRowsForFiscalYear(fy) {
   const pack = getPlanPackForFiscalYear(fy);
-  return pack ? pack.rows : null;
+  if (!pack) return null;
+  const rows = pack.rows;
+  if (rows && typeof rows === 'object') {
+    try { Object.defineProperty(rows, '__monthStatus', { value:Object.assign({}, pack.monthStatus||pack.sourceMeta?.month_status||{}), configurable:true, enumerable:false }); } catch(_e) {}
+  }
+  return rows;
+}
+function isPlanMonthAvailable(planRows, mm) {
+  if (!planRows || !mm) return false;
+  const status=planRows.__monthStatus?.[String(mm).padStart(2,'0')];
+  return status !== 'NOT_PLANNED_YET' && status !== 'UNKNOWN';
 }
 
 
@@ -1831,6 +1841,7 @@ function sumPlanValues(planRows, labels, mm) {
 }
 
 function getPlanValueK(planRows, label, mm, fallbackLabels) {
+  if (!isPlanMonthAvailable(planRows, mm)) return null;
   // v10方針：親項目は、可能な限り画面側の子科目合計を優先する。
   // 理由：元データには「営業収益」「営業収益計」「人件費」「人件費計」など親行が複数あり、
   //      さらに同名行もあるため、親を直接拾うとズレることがある。
@@ -2556,7 +2567,7 @@ const PLAN = {
       delete STATE.planData[fy];
     }
     clearDataDeleted('planFiscalYears', fy);
-    STATE.planData[fy] = { rows: plan, fiscalYear: fy, importedAt: new Date().toISOString(), itemCount: Object.keys(plan).length, unit:'千円', mode:'full_replace', sourceMeta: Object.assign({}, sourceMeta||{}) };
+    STATE.planData[fy] = { rows: plan, fiscalYear: fy, importedAt: new Date().toISOString(), itemCount: Object.keys(plan).length, unit:'千円', mode:'full_replace', monthStatus: Object.assign({}, sourceMeta?.month_status||{}), coverage: sourceMeta?.coverage||'UNKNOWN', sourceMeta: Object.assign({}, sourceMeta||{}) };
     Repository.Storage.save();
     const count = Object.keys(plan).length;
     renderImport(); NAV.refresh();
