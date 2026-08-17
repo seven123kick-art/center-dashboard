@@ -120,6 +120,7 @@
 
     let cache_ok=null; const st=storage();
     if(st?.setCached){ try{ cache_ok=await st.setCached(CACHE_KIND,cacheId(s.document_type,s.period,`batch::${token(batchId)}`),batch); }catch(e){ cache_ok=false; } }
+    try{ window.dispatchEvent(new CustomEvent('normalized-source-updated',{detail:{document_type:s.document_type,period:s.period,batch_id:batchId}})); }catch(_e){}
     return {ok:true,batch_id:batchId,supersedes_batch_id:supersedes,record_count:batch.record_count,cache_ok,manifest:clone(manifest)};
   }
 

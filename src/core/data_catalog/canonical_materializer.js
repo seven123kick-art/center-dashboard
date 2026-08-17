@@ -1,0 +1,102 @@
+/* ============================================================================
+   Version6 D3-6C/D3-7: Canonical Materializer
+   CURRENT NORMALIZED SOURCE + ACTIVE ResolutionからCanonical Snapshotを再構築する。
+   SOURCE/STATE/Masterは変更しない。永続化済みNORMALIZED SOURCEを正本として優先し、
+   未保存SOURCEは空配列として扱う（旧STATEから明細を推測復元しない）。
+============================================================================ */
+'use strict';
+(function(){
+  if(window.__CANONICAL_MATERIALIZER_LOADED_20260817__) return;
+  window.__CANONICAL_MATERIALIZER_LOADED_20260817__=true;
+  const clone=v=>JSON.parse(JSON.stringify(v));
+  const arr=v=>Array.isArray(v)?v:[];
+  const clean=v=>String(v??'').trim();
+
+  function requireDeps(){
+    if(!window.Repository?.NormalizedSource) throw new Error('Repository.NormalizedSource is required');
+    if(!window.CANONICAL_BUILDER) throw new Error('CANONICAL_BUILDER is required');
+  }
+  function legacyMaster(decisions){
+    return window.RESOLUTION_PREVIEW?.buildContext?.({
+      workers:[...(window.STATE?.workerMaster||[])],
+      companies:[...(window.STATE?.companyMaster||[])],
+      center:window.CENTER||null,
+      resolutionDecisions:arr(decisions)
+    })||null;
+  }
+  async function loadDecisions(){
+    if(!window.Repository?.Resolution) return [];
+    const r=await Repository.Resolution.load();
+    if(!r?.ok) throw new Error(r?.error||'Resolution load failed');
+    return arr(r.decisions);
+  }
+  async function loadCurrent(type,period){
+    const r=await Repository.NormalizedSource.loadCurrent(type,period);
+    if(!r?.ok) throw new Error(r?.error||`${type} load failed`);
+    return r;
+  }
+  function routePaymentsFromNormalized(records, routes){
+    const byHead=new Map();
+    arr(records).forEach(r=>{if(r&&!r.is_deleted&&clean(r.head_no)) byHead.set(clean(r.head_no),r);});
+    const out=[];
+    const seen=new Set();
+    arr(routes).forEach(r=>{
+      const head=clean(r?.head_no); if(!head||seen.has(head)) return; seen.add(head);
+      const src=byHead.get(head)||null;
+      out.push({
+        route_payment_id:`RP_${head}`,
+        route_payment_id_is_temporary:true,
+        route_id:r.route_id,
+        delivery_date:r.delivery_date||src?.delivery_date||null,
+        head_no:head,
+        amount:src?src.payment_amount:null,
+        toll_amount:src?src.toll_amount:null,
+        absence_status:src?(src.payment_amount===0?'ZERO_PAYMENT':null):'NO_RECORD',
+        source_vehicle_company_code:src?.source_vehicle_company_code||null,
+        source_worker_code:src?.source_worker1_code||null,
+        payment_confirmed:src?.payment_confirmed??null,
+        quality_status:src?'OK':'MISSING_SOURCE',
+        source_document_type:'ROUTE_PAYMENT',
+        source_file_id:src?.source_file_id||null,
+        source_record_id:src?.source_record_id||null,
+      });
+    });
+    return out;
+  }
+
+  async function materialize(input={}){
+    requireDeps();
+    const period=clean(input.period);
+    if(!/^\d{6}$/.test(period)) throw new Error('period must be YYYYMM');
+    const [worker,shipper,payment]=await Promise.all([
+      loadCurrent('WORKER_SALES',period), loadCurrent('SHIPPER_AREA',period), loadCurrent('ROUTE_PAYMENT',period)
+    ]);
+    const decisions=input.resolutionDecisions!==undefined?arr(input.resolutionDecisions):await loadDecisions();
+    const resolutionContext=input.resolutionContext||legacyMaster(decisions);
+    const routeData=arr(input.routeData!==undefined?input.routeData:(window.STATE?.routeData||[])).filter(x=>clean(x?.ym)===period);
+    const snapshot=CANONICAL_BUILDER.buildSnapshotFromNormalizedSources({
+      routeData,
+      workerSalesRecords:worker.records,
+      shipperAreaRecords:shipper.records,
+      resolutionContext
+    });
+    snapshot.entities.ROUTE_PAYMENT=routePaymentsFromNormalized(payment.records,snapshot.entities.DELIVERY_ROUTE);
+    snapshot.counts.ROUTE_PAYMENT=snapshot.entities.ROUTE_PAYMENT.length;
+    snapshot.materialization={
+      period, generated_at:new Date().toISOString(),
+      normalized_source:true,
+      resolution_decision_count:decisions.length,
+      current_batches:{
+        WORKER_SALES:worker.batch?.batch_id||null,
+        SHIPPER_AREA:shipper.batch?.batch_id||null,
+        ROUTE_PAYMENT:payment.batch?.batch_id||null
+      },
+      source_record_counts:{WORKER_SALES:worker.records.length,SHIPPER_AREA:shipper.records.length,ROUTE_PAYMENT:payment.records.length},
+      has_normalized_detail_source:!!(worker.batch||shipper.batch),
+      has_normalized_route_payment:!!payment.batch
+    };
+    return {ok:true,snapshot,decisions:clone(decisions),resolutionContext,normalized:{WORKER_SALES:worker,SHIPPER_AREA:shipper,ROUTE_PAYMENT:payment}};
+  }
+
+  window.CANONICAL_MATERIALIZER=Object.freeze({materialize,_internal:Object.freeze({routePaymentsFromNormalized})});
+})();

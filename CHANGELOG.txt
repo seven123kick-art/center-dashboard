@@ -1,39 +1,46 @@
-Version6 D3-6B - Existing import -> NORMALIZED SOURCE integration
-Date: 2026-08-17
+Version6 D3-6C/D3-7 Canonical再Materialize・データ確認統合 (2026-08-17)
 
-Purpose
-- Connect the existing import entry points to the D3-6A NormalizedSourceRepository without replacing or bypassing legacy behavior.
-- Preserve SOURCE -> NORMALIZED facts so Canonical can later be rematerialized after Resolution changes.
+■目的
+D3-6Bで正式保存できるようになったCURRENT NORMALIZED SOURCEを読み戻し、保存済みResolution/Aliasを適用してCanonical Snapshotを再構築し、データ確認画面まで一連で反映する。
 
-Changed files
-1. src/field/field_core.js
-   - WORKER_SALES import: normalize the validated original CSV rows and save a new immutable NORMALIZED SOURCE batch for the selected YYYYMM.
-   - SHIPPER_AREA import: same pattern.
-   - Legacy STATE update, Repository.Storage.save(), existing Cloud synchronization, UI refresh and existing parsers remain in place.
-   - NORMALIZED save failure does not roll back a successful legacy import; the user is warned separately.
-   - Each re-import creates a new batch; D3-6A manifest logic marks the previous CURRENT batch SUPERSEDED.
+■変更ファイル
+- center.html
+  - canonical_materializer.js 読込を1行追加。
+- src/core/data_catalog/canonical_materializer.js（新規）
+  - WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT のCURRENT BatchをRepository.NormalizedSourceから取得。
+  - Repository.ResolutionのDecisionからResolution Contextを再構成。
+  - CANONICAL_BUILDERへNORMALIZED行を渡してSALES_DETAIL / PRODUCT_DETAIL / BUSINESS_SLIP / RECONCILIATION_RESULTを再Materialize。
+  - ROUTE_PAYMENTは旧STATEのyoshaFeeではなくNORMALIZED SOURCEのpayment_amountを優先し、nullと0を維持。
+  - SOURCE/STATE/Masterへの書込みなし。
+- src/core/data_catalog/verification_detail.js
+  - 帰属主体表記の集計元をCanonical SALES_DETAILへ移行。
+  - NORMALIZED SOURCEが未導入の旧データのみ既存workerCsvDataへフォールバック。
+- src/modules/data_verification.js
+  - CURRENT NORMALIZED SOURCEから再構築したSnapshotをデータ確認画面の参照元として利用。
+  - Resolution保存後、Cloud再取得→Alias再構成→Canonical再Materialize→画面再描画まで実行。
+  - 旧取込データでNORMALIZED詳細Batchが存在しない月は従来Snapshotへ安全にフォールバック。
+  - NORMALIZED SOURCE更新イベントを受け、対象月のCanonical cacheを破棄・再構築。
+- src/core/repository/normalized_source_repository.js
+  - CURRENT Batch切替成功後に normalized-source-updated イベントを通知。
+  - 保存仕様・Supabase正本/IndexedDB cache責務は変更なし。
 
-2. src/field/route_analysis.js
-   - ROUTE_PAYMENT Excel import now also passes the original worksheet rows to SOURCE_NORMALIZER.normalizeRoutePaymentRows().
-   - Uses file name + sheet name in source_record_id material to avoid row-ID collision across sheets.
-   - Groups normalized records by delivery month and saves one immutable batch per YYYYMM.
-   - Existing parseHeadPaymentSheet and existing STATE.routeData behavior are unchanged. Therefore legacy yoshaFee still follows the old parser, while NORMALIZED SOURCE preserves blank amount as null and explicit zero as 0.
+■重要仕様
+1. NORMALIZED SOURCEが存在する月は、詳細Canonicalの正本入力としてCURRENT Batchを使用する。
+2. Resolution DecisionはSOURCEを書き換えず、再Materialize時にResolver Contextとして適用する。
+3. ROUTE_PAYMENTの空欄(null)と明示0円(0)を再構築後も区別する。
+4. 配達持出予定リスト由来のDELIVERY_ROUTE/ATTEMPTは現行routeDataを継続利用（NORMALIZED DELIVERY_LIST永続化は未実装）。
+5. 旧データ互換のため、NORMALIZED WORKER_SALES/SHIPPER_AREA Batchが双方存在しない月は従来表示を維持する。
+6. Canonical Snapshot自体の永続保存は行わない。SOURCE+Resolutionから再生成可能な派生データとして扱う。
 
-Safety / behavior
-- No change to existing business calculation rules.
-- No change to STATE schema, full_state, IndexedDB schema, Supabase table schema, existing Cloud sync API, or UI navigation.
-- New NORMALIZED persistence is additive and uses Repository.NormalizedSource only.
-- Existing import success is not falsely rolled back if the new parallel persistence fails.
-- SOURCE_NORMALIZER missing is treated as an import error before legacy mutation, preventing a half-normalized new import path.
+■検証
+- 全 src/**/*.js を node --check：PASS
+- Mock CURRENT BatchからCanonical再Materialize：PASS
+- WORKER_SALES/SHIPPER_AREAからBUSINESS_SLIP・SALES_DETAIL生成：PASS
+- ROUTE_PAYMENT 明示0円→amount=0 / ZERO_PAYMENT：PASS
+- materialization metadataにCURRENT batch ID・record count保持：PASS
+- STATE/SOURCEへの書込みコード追加なし
 
-Verification
-- node --check: all src/**/*.js PASS.
-- 2026-06 real CSV normalization recheck:
-  WORKER_SALES 8,554 rows; SHIPPER_AREA 9,730 rows.
-- Explicit zero remains numeric 0 (WORKER_SALES 60 rows; SHIPPER_AREA 1,796 rows in the checked June files).
-- No code converts null/blank NORMALIZED amounts to zero.
-
-Not included yet
-- Automatic Canonical rematerialization from persisted NORMALIZED SOURCE.
-- Automatic reload of persisted NORMALIZED SOURCE during application boot.
-- PL_ACTUAL and DELIVERY_LIST normalized persistence (their SOURCE paths require separate contracts/normalizers).
+■次の主要課題
+- DELIVERY_LIST（配達持出予定リスト）自体のNORMALIZED SOURCE正式永続化
+- Accounting Fact（SKDL0002/0003）のCanonical再Materialize統合
+- Canonical/Accounting reconciliationをデータ確認画面へ完全接続

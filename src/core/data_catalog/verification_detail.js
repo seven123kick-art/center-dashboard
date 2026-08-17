@@ -38,6 +38,19 @@
     const e=snapshot?.entities||{}, attempts=new Set(arr(e.DELIVERY_ATTEMPT).map(x=>x?.slip_id).filter(Boolean));
     return arr(e.BUSINESS_SLIP).filter(x=>x?.slip_id&&!attempts.has(x.slip_id)).map(x=>({category:'HEADLESS',status:'OBSERVATION',slip_no:x.slip_no||null,slip_id:x.slip_id}));
   }
+
+  function canonicalWorkerLabels(snapshot){
+    const map=new Map();
+    arr(snapshot?.entities?.SALES_DETAIL).filter(x=>x?.source_document_type==='WORKER_SALES').forEach(x=>{
+      const label=clean(x.source_subject_label); if(!label)return;
+      const old=map.get(label)||{source_label:label,slip_ids:new Set(),amount:0,known_amount_rows:0};
+      if(x.slip_id) old.slip_ids.add(x.slip_id);
+      if(finite(x.amount)){old.amount+=x.amount;old.known_amount_rows++;}
+      map.set(label,old);
+    });
+    return [...map.values()].map(x=>({source_label:x.source_label,slip_count:x.slip_ids.size,amount:x.amount,known_amount_rows:x.known_amount_rows})).sort((a,b)=>b.slip_count-a.slip_count||a.source_label.localeCompare(b.source_label,'ja'));
+  }
+
   function legacyWorkerLabels(workerCsvData,ym){
     const map=new Map();
     arr(workerCsvData).filter(x=>x?.ym===ym).forEach(month=>Object.values(month.workers||{}).forEach(w=>{
@@ -51,13 +64,14 @@
   }
   function build(input={}){
     const snapshot=input.canonical_snapshot||input.snapshot||{};
-    const labels=legacyWorkerLabels(input.worker_csv_data,input.year_month);
+    const canonicalLabels=canonicalWorkerLabels(snapshot);
+    const labels=canonicalLabels.length?canonicalLabels:legacyWorkerLabels(input.worker_csv_data,input.year_month);
     const resolutionPreview=window.RESOLUTION_PREVIEW?.build?.({labels,context:input.resolution_context})||null;
     return Object.freeze({
       center_id:input.center_id||null,year_month:input.year_month||null,generated_at:new Date().toISOString(),
       subject_attention:subjectDetails(snapshot), value_attention:valueDetails(snapshot),
       reconciliation_observations:reconciliationDetails(snapshot), headless_observations:headlessDetails(snapshot),
-      legacy_worker_labels:labels, resolution_preview:resolutionPreview,
+      worker_labels:labels, worker_labels_source:canonicalLabels.length?'CANONICAL_NORMALIZED':'LEGACY_FALLBACK', resolution_preview:resolutionPreview,
       read_only:true
     });
   }
