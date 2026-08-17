@@ -1,45 +1,37 @@
-Version6 D4-30 / Accounting CONFIG Binding Fix
+Version6 D4-31 / Confirmed vs Preliminary Accounting Split
 Date: 2026-08-17
 
-D4-29実機結果
-- 202604で ACCOUNT_ROWS_NOT_FOUND。
-- confirmed Dataset自体は取得できていた。
-
-実コード確認で確定した原因
-- app.js の CONFIG は `const CONFIG = {...}` として定義された top-level lexical binding。
-- `window.CONFIG` には公開されていない。
-- 現行 processDataset() は `CONFIG.INCOME_KEYS / CONFIG.EXPENSE_KEYS` を直接参照して正常動作。
-- D4-25 accounting_parity.js と D4-28 accounting_legacy_migration.js は誤って
-  `window.CONFIG` を参照していた。
-- その結果、移行対象科目キーが0件となり ACCOUNT_ROWS_NOT_FOUND になっていた。
-- 同じ誤りがParityにもあり、移行後の科目比較が0キーになる潜在不具合もあった。
+D4-30実機結果
+- 202604/202605の確定移行処理後、202606で CONFIRMED_DATASET_NOT_FOUND。
+- 画面上の最終データは2026年6月（日報）。
+- これは日報を確定収支として移行しなかった安全な停止。
 
 修正
-1. accounting_legacy_migration.js
-   - window.CONFIG参照を廃止。
-   - 現行processDataset()と同じglobal lexical CONFIGを使用。
-   - INCOME_KEYS + EXPENSE_KEYSだけを既存Dataset.rowsからPL_ACTUALへ移行。
-   - CONFIG自体が見えない場合はACCOUNT_CONFIG_UNAVAILABLEとして区別。
-2. accounting_parity.js
-   - window.CONFIG参照を廃止。
-   - 現行processDataset()と同じCONFIG科目集合で比較。
-   - 収入合計・費用合計の判定も同じCONFIGを使用。
-3. data_verification.js
-   - ACCOUNT_ROWS_NOT_FOUND時にDataset row数もエラー表示できるよう診断補強。
+1. Accounting Parity
+   - 確定Datasetがなくactive Datasetがdailyの場合は PRELIMINARY_ONLY（画面: 日報のみ）。
+   - PL_ACTUAL_NOT_NORMALIZEDとは分離。
+2. Legacy Accounting Migration
+   - confirmed探索をRepository.Dataset.getAll()から実施。
+   - 日報しかない月は確定移行対象外。
+3. データ確認UI
+   - 「日報のみ」件数・月表示を追加。
+   - 「既存確定データを移行」はconfirmed Datasetが存在するPL未正規化月だけ対象。
+   - 各月を独立処理し、部分成功でも必ずParityを再診断して最新状態を表示。
+4. ホーム/年度推移
+   - 参照先はまだ変更しない。
+   - 日報を確定値へ昇格させない。
 
-重要
-- 既存Dataset構造を推測変更していない。
-- processDataset()の収支計算ロジックは変更していない。
-- 既存Datasetは変更・削除しない。
-- ホームKPI/年度推移はまだCanonicalへ切り替えない。
-- D4-29のCloud読戻し厳格検証を維持する。
+期待
+- 4月/5月: D4-30でCloud保存済みなら一致または差異へ進む。
+- 6月: confirmedが存在しない限り「日報のみ」。
+- 7月以降: 現行Datasetがなければ従来どおり現行Datasetなし。
 
 変更ファイル
-- src/core/data_catalog/accounting_legacy_migration.js
 - src/core/data_catalog/accounting_parity.js
+- src/core/data_catalog/accounting_legacy_migration.js
 - src/modules/data_verification.js
+- assets/css/foundation/theme.css
 - CHANGELOG.txt
 
 検証
 - 全 src/**/*.js node --check PASS
-- window.CONFIG誤参照が上記2ファイルから消えていることを確認

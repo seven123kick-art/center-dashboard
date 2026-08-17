@@ -24,7 +24,7 @@
 
   function activeConfirmed(period){
     const ym=clean(period);
-    const list=window.Repository?.Dataset?.getActive?.()||[];
+    const list=window.Repository?.Dataset?.getAll?.()||[];
     return list.find(d=>d?.ym===ym&&d?.source!=='history'&&(d?.type||'confirmed')==='confirmed')||null;
   }
 

@@ -92,4 +92,4 @@ select,input,textarea{border-radius:10px!important;border:1px solid var(--border
 .dv-parity-actions{display:flex;align-items:center;gap:7px}
 .dv-parity-migrate{min-height:30px!important;padding:5px 10px!important;font-size:10px!important;background:#eef9f4!important;border-color:rgba(61,187,131,.22)!important;color:#287a5c!important}
 @media(max-width:700px){.dv-parity-head{align-items:flex-start;flex-direction:column}.dv-parity-actions{width:100%;justify-content:flex-end}}
-
+.dv-parity-month.is-preliminary{background:#f3f8fb;border-color:rgba(67,191,239,.18)}

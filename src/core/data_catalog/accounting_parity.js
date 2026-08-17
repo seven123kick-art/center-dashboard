@@ -29,6 +29,13 @@
     const list=window.Repository?.Dataset?.getActive?.()||[];
     return list.find(d=>d?.ym===ym&&d?.source!=='history')||null;
   }
+  function legacyDatasetsForMonth(ym){
+    const all=window.Repository?.Dataset?.getAll?.()||[];
+    return all.filter(d=>d?.ym===ym&&d?.source!=='history');
+  }
+  function confirmedLegacy(ym){
+    return legacyDatasetsForMonth(ym).find(d=>(d?.type||'confirmed')==='confirmed')||null;
+  }
 
   function compareKey(rows,legacyRows,key){
     const cv=Object.prototype.hasOwnProperty.call(rows,key)?rows[key]:0;
@@ -44,7 +51,9 @@
     if(!force&&cache.has(ym)) return cache.get(ym);
     const legacy=activeLegacy(ym);
     if(!legacy){ const out={status:'LEGACY_MISSING',period:ym,ready:false}; cache.set(ym,out); return out; }
-    if(!window.CANONICAL_MATERIALIZER?.materialize){ const out={status:'CANONICAL_UNAVAILABLE',period:ym,ready:false}; cache.set(ym,out); return out; }
+    const confirmed=confirmedLegacy(ym);
+    const legacyType=(legacy?.type||'confirmed');
+    if(!window.CANONICAL_MATERIALIZER?.materialize){ const out={status:'CANONICAL_UNAVAILABLE',period:ym,ready:false,legacy_type:legacyType}; cache.set(ym,out); return out; }
 
     let m;
     try{m=await CANONICAL_MATERIALIZER.materialize({period:ym});}
@@ -54,10 +63,17 @@
       let direct=null;
       try{direct=await Repository?.NormalizedSource?.loadCurrent?.('PL_ACTUAL',ym,{preferCache:false});}catch(_e){}
       const directBatch=direct?.batch?.batch_id||null;
+      let status='PL_ACTUAL_NOT_NORMALIZED', error=null;
+      if(directBatch){
+        status='CANONICAL_FAILED';
+        error='PL_ACTUAL CURRENTは存在するがCanonical Materializerが認識していません';
+      }else if(!confirmed && legacyType==='daily'){
+        status='PRELIMINARY_ONLY';
+        error='日報Datasetのみ。確定Datasetがないため確定PL_ACTUAL移行対象外';
+      }
       const out={
-        status:directBatch?'CANONICAL_FAILED':'PL_ACTUAL_NOT_NORMALIZED',period:ym,ready:false,
-        normalized_current_batch_id:directBatch,
-        error:directBatch?'PL_ACTUAL CURRENTは存在するがCanonical Materializerが認識していません':null
+        status,period:ym,ready:false,legacy_type:legacyType,has_confirmed_legacy:!!confirmed,
+        normalized_current_batch_id:directBatch,error
       };
       cache.set(ym,out);return out;
     }
@@ -113,7 +129,7 @@
     const months=fiscalMonths(fy);
     if(!months.length)return {status:'INVALID_FISCAL_YEAR',fiscalYear:fy,months:[]};
     const results=await Promise.all(months.map(ym=>checkMonth(ym,{force})));
-    const counts={READY:0,MISMATCH:0,UNKNOWN_AMOUNT:0,PL_ACTUAL_NOT_NORMALIZED:0,LEGACY_MISSING:0,CANONICAL_FAILED:0,CANONICAL_UNAVAILABLE:0,OTHER:0};
+    const counts={READY:0,MISMATCH:0,UNKNOWN_AMOUNT:0,PL_ACTUAL_NOT_NORMALIZED:0,PRELIMINARY_ONLY:0,LEGACY_MISSING:0,CANONICAL_FAILED:0,CANONICAL_UNAVAILABLE:0,OTHER:0};
     results.forEach(r=>{const k=Object.prototype.hasOwnProperty.call(counts,r.status)?r.status:'OTHER';counts[k]++;});
     const readyMonths=results.filter(r=>r.ready).map(r=>r.period);
     const blockedMonths=results.filter(r=>!r.ready).map(r=>({period:r.period,status:r.status,error:r.error||null}));
