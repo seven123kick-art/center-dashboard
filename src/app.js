@@ -2694,6 +2694,8 @@ const TSV_IMPORT = {
 /* ════════ §30 BOOT ═════════════════════════════════════════════ */
 function setupFieldImportYMControls(){}
 document.addEventListener('DOMContentLoaded', async () => {
+  window.STARTUP_PROFILER?.start?.();
+  window.STARTUP_PROFILER?.mark?.('DOMContentLoaded');
   let _bootRendered = false;
 
   function _hideOverlay() {
@@ -2716,12 +2718,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     STARTUP_READINESS?.setProgress(1, '起動準備中です', '画面機能とローカル設定を準備しています。');
 
     // 0. 画面別モジュール読込
-    await loadScreenModules();
+    await window.STARTUP_PROFILER?.measure?.('画面モジュール読込', () => loadScreenModules()) ?? await loadScreenModules();
 
     // 1. ローカル設定・キャッシュは復元するが、起動Gate通過前には画面へ描画しない。
+    window.STARTUP_PROFILER?.begin?.('ローカルStorage復元');
     Repository.Storage.load();
+    window.STARTUP_PROFILER?.end?.('ローカルStorage復元');
     if (window.APP_BOOT_STATE) APP_BOOT_STATE.cloudSyncPending = true;
-    if (window.IDB_CACHE?.hydrateState) await IDB_CACHE.hydrateState();
+    if (window.IDB_CACHE?.hydrateState) await window.STARTUP_PROFILER?.measure?.('IndexedDB復元', () => IDB_CACHE.hydrateState()) ?? await IDB_CACHE.hydrateState();
     if (window.APP_BOOT_STATE) {
       APP_BOOT_STATE.renderedFromCache = false;
       APP_BOOT_STATE.displayVerified = false;
@@ -2760,7 +2764,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 2. 主要Cloudデータを確認。ここが完了するまで数値画面は一切表示しない。
     STARTUP_READINESS?.setProgress(2, '最新データを確認しています', 'クラウドのCURRENTデータと主要状態を確認しています。');
-    let pullResult = await STARTUP_READINESS.withTimeout(
+    window.STARTUP_PROFILER?.wrapCloudRepository?.();
+    let pullResult = await window.STARTUP_PROFILER?.measure?.('Startup同期合計', () => STARTUP_READINESS.withTimeout(
+      () => AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView)),
+      45000
+    )) ?? await STARTUP_READINESS.withTimeout(
       () => AUTO_SYNC.withoutSyncAsync(async () => SYNC_COORDINATOR.syncBoot(_lastView)),
       45000
     );
@@ -2783,7 +2791,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Gate通過後に初めて画面を描画する。以後この表示は起動時Snapshotとして扱う。
     STARTUP_READINESS.markVerified(pullResult.verifiedAt || new Date().toISOString());
     STARTUP_READINESS?.setProgress(4, '準備ができました', '確認済みデータで画面を表示します。');
+    window.STARTUP_PROFILER?.begin?.('初回画面描画');
     _bootRender(_lastView);
+    window.STARTUP_PROFILER?.end?.('初回画面描画');
+    window.STARTUP_PROFILER?.finish?.({ pullResult, view:_lastView });
 
   } catch(e) {
     console.error('[BOOT] 起動処理エラー:', e);
