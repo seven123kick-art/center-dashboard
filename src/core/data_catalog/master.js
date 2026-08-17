@@ -288,6 +288,11 @@
       remember_as_alias: field('boolean', false, 'trueの場合もD2-5ではAlias候補を返すだけで永続化しない'),
       decided_at: field('string', false),
       decided_by: field('string', false),
+      decision_status: field('string', false, 'ACTIVE/REVOKED。取消時も元決定は削除しない'),
+      revoked_at: field('string', false),
+      revoked_by: field('string', false),
+      revoke_reason: field('string', false),
+      supersedes_resolution_decision_id: field('string', false, '再決定時に旧Decisionを参照'),
     },
   };
 

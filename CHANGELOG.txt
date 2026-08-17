@@ -1,3 +1,20 @@
+D3-5A Resolution永続化契約・取消基盤
+作成日: 2026-08-17
+
+目的
+- D3-4の保存前プレビューの次段階として、Resolution Decisionを上書き/削除せず履歴管理する契約を確定する。
+- 誤紐付けを取消可能にし、AliasをDecisionから再構成できるpure Ledgerを追加する。
+- 現行Repository/SupabaseにResolution専用schema/APIが確認できないため、推測で既存FullStateへ保存しない。
+
+変更
+- master.js: MASTER_RESOLUTION_DECISIONへACTIVE/REVOKED、取消監査、再決定参照を追加。
+- resolution_ledger.js（新規）: validate / activeDecisions / materializeAliases / revoke。
+- center.html: resolution_ledger.js読込1行追加。
+
+重要
+- STATE/IndexedDB/localStorage/Cloud/Supabaseへの書込はまだ0件。
+- D3-5BではSupabase正本・IndexedDBキャッシュの正式schema/APIを決めてからRepository接続する。
+- 既存RepositoryへResolutionデータを便宜的に混入させない。
 D3-4 Resolver候補表示・保存前プレビュー
 作成日: 2026-08-17
 
