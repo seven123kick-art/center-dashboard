@@ -1,3 +1,61 @@
+Version6 D4-40: 荷主分析 Canonical一本化・旧描画整理
+（2026-08-18）
+
+【GitHub正本・基準SHA】
+seven123kick-art/center-dashboard
+ce0c7fd6f76ac393a0e2f1dfbe768707fcd89d1e
+
+【変更ファイル】
+- src/modules/shipper.js
+- src/modules/dashboard.js
+- src/modules/trend.js
+
+【目的】
+荷主分析のSOURCE選択を月単位で一元化し、Canonical描画後にLegacy Datasetで再描画していた旧処理を撤去した。
+Canonical READY月ではCanonicalのみ、未移行月だけLegacy fallbackを使用する。同一月で両SOURCEを混在させず、Canonical 0件もLegacyで補完しない。
+
+【主な変更】
+1. window.SHIPPER_DATA_ACCESSを追加し、resolveMonth(ym)でCanonical / Legacy fallback / NOT_LOADEDを一意に判定。
+2. D4-39暫定global window.__D4_39_resolveShipperGroupsForYMを撤去。
+3. 専用荷主分析をCanonical正本へ統一。Canonical描画後にgroupsOf(ds)/contractsOf(ds)で再描画する旧renderShipperラッパーを削除。
+4. 旧ラッパーにあった「営業収益との差分チェック」はCanonical正本側へ移し、機能を維持。
+5. ホーム上位8社、前月・前年比較、専用比較、異常検知、荷主推移をSHIPPER_DATA_ACCESSへ統一。
+6. dashboard.jsの旧Legacy荷主バー描画を削除。shipper.jsのCanonical対応Hookのみが描画する構造へ整理。
+7. trend.jsの旧Legacy主要荷主推移描画を削除。shipper.jsの月単位Canonical対応Hookへ統一。
+8. 2026-04-29の旧荷主CSV集計・CSV.parseSKDL直接モンキーパッチ・processDataset直接モンキーパッチを削除。後段の現行V3 Hook実装が完全代替しているため二重処理を解消。
+
+【残したLegacy】
+- ds.shippers / ds.shipperGroups / ds.shipperContracts
+- 現行V3のLegacy荷主集計Hook
+理由：SHIPPER_AREA CURRENTが存在しない旧月のfallbackとしてSHIPPER_DATA_ACCESSから現在も参照するため。
+これらはCanonical移行済み月での混在には使用しない。
+
+【Canonical / Legacy判定】
+- peek(ym)がnull/undefined: NOT_LOADED。loadMonth対象。
+- READY + shipperあり: Canonical groups/contractsのみ。
+- READY + shipperなし: Legacy fallback。再loadしない。
+- LEGACY_FALLBACK / Canonical基盤利用不能: Legacy fallback。
+- READY + groups=[]: Canonical 0件。Legacy補完なし。
+
+【テスト】
+- node --check src/modules/shipper.js : PASS
+- node --check src/modules/dashboard.js : PASS
+- node --check src/modules/trend.js : PASS
+- Node VMで修正版shipper.js本体をロードし、以下を確認: PASS
+  1) peekなし -> NOT_LOADED
+  2) READY + shipper.groups=[] -> Canonical 0件維持
+  3) READY + shipper=null -> Legacy fallback、再load対象外
+  4) READY + shipperあり -> Canonical採用
+- D4-39暫定global残存: 0件
+- Canonical後段Legacy renderShipperラッパー残存: 0件
+- 旧dashboard荷主バーLegacy描画: 撤去確認
+- 旧trend主要荷主Legacy描画: 撤去確認
+- 旧2026-04-29荷主集計モンキーパッチ: 撤去確認
+
+【今後のLegacy撤去候補】
+旧月fallbackが不要になり、全対象月にSHIPPER_AREA CURRENTが揃った段階で、ds.shippers / shipperGroups / shipperContractsおよび現行Legacy集計Hookの撤去可否を再監査する。
+
+============================================================
 Version6 D4-39: ホーム画面荷主分析 Canonical Read Model優先移行
 （2026-08-18、投入前レビュー指摘の修正反映）
 

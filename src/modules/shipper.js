@@ -11,41 +11,8 @@
   if (window.__SHIPPER_MODULE_LOADED_20260501__) return;
   window.__SHIPPER_MODULE_LOADED_20260501__ = true;
 
-/* ════════ §15 RENDER — Shipper ════════════════════════════════ */
-function renderShipper() {
-  renderCommonPeriodSelector('shipper');
-
-  const ds = selectedDatasetInSelectedFiscalYear();
-  const chartEl = document.getElementById('c-shipper-bar');
-  const hasShippers = ds && ds.shippers && Object.keys(ds.shippers).length > 0;
-
-  const noticeId = 'shipper-notice';
-  let noticeEl = document.getElementById(noticeId);
-  if (!noticeEl) {
-    const view = document.getElementById('view-shipper');
-    if (view) { noticeEl=document.createElement('div'); noticeEl.id=noticeId; view.prepend(noticeEl); }
-  }
-  if (!hasShippers && noticeEl) {
-    noticeEl.innerHTML = '<div class="msg msg-info" style="margin-bottom:14px">選択月の荷主別データがありません。荷主コード付きCSVを取り込むと荷主分析が表示されます。</div>';
-    return;
-  }
-  if (noticeEl) noticeEl.innerHTML = '';
-  if (!ds) return;
-
-  const items = Object.entries(ds.shippers||{}).sort((a,b)=>b[1].income-a[1].income);
-  CHART_MGR.make('c-shipper-bar', {
-    type:'bar',
-    data:{labels:items.map(x=>x[0]), datasets:[{
-      label:'売上（千円）',
-      data:items.map(x=>x[1].income/1000),
-      backgroundColor: items.map((_,i)=>CONFIG.COLORS[i%CONFIG.COLORS.length]),
-    }]},
-    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
-      scales:{x:{title:{display:true,text:'千円'}}}}
-  });
-}
-
+/* renderShipperは下段のCanonical描画層で実体を設定する。 */
+let renderShipper;
 
 /* ════════════════════════════════════════════════════════════════
    2026-04-29 追補：荷主別／契約別 集計再設計（安全版）
@@ -60,227 +27,10 @@ function renderShipper() {
   if (window.__SHIPPER_CONTRACT_PATCH_SAFE_20260429__) return;
   window.__SHIPPER_CONTRACT_PATCH_SAFE_20260429__ = true;
 
-  function _cleanText(v){
-    return String(v ?? '')
-      .replace(/[\u0000-\u001f]/g,'')
-      .replace(/\uFEFF/g,'')
-      .replace(/\s+/g,' ')
-      .trim();
-  }
-  function _normHeader(v){
-    return _cleanText(v)
-      .replace(/[\s　]/g,'')
-      .replace(/[()（）［］\[\]「」]/g,'')
-      .toLowerCase();
-  }
-  function _toNumber(v){
-    const s = String(v ?? '')
-      .replace(/,/g,'')
-      .replace(/[円¥￥\s　]/g,'')
-      .replace(/[^0-9.\-]/g,'');
-    if (!s || s === '-' || s === '.') return 0;
-    const num = Number(s);
-    return Number.isFinite(num) ? num : 0;
-  }
-  function _code(v){ return _cleanText(v).replace(/\.0$/,''); }
-  function _code3(v){ const c = _code(v); return c ? c.slice(0,3) : ''; }
-  function _stripParen(name){ return _cleanText(name).replace(/（.*?）/g,'').replace(/\(.*?\)/g,'').trim(); }
   function _escLocal(v){ return typeof esc === 'function' ? esc(v) : String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function _fmtLocal(v){ return typeof fmt === 'function' ? fmt(v) : Math.round(Number(v)||0).toLocaleString('ja-JP'); }
   function _fmtKLocal(v){ return typeof fmtK === 'function' ? fmtK(v) : Math.round((Number(v)||0)/1000).toLocaleString('ja-JP'); }
   function _yenPer(count, income){ return count > 0 ? Math.round((Number(income)||0) / count) : 0; }
-
-  function _findColumn(headers, candidates, fallbackIndex){
-    const normalized = (headers || []).map(_normHeader);
-    const normalizedCandidates = candidates.map(_normHeader);
-
-    for (const c of normalizedCandidates) {
-      const idx = normalized.indexOf(c);
-      if (idx >= 0) return idx;
-    }
-    for (const c of normalizedCandidates) {
-      const idx = normalized.findIndex(h => h && (h.includes(c) || c.includes(h)));
-      if (idx >= 0) return idx;
-    }
-    return fallbackIndex;
-  }
-
-  function _detectColumns(rows){
-    const header = Array.isArray(rows) && rows.length ? rows[0] : [];
-    return {
-      shipperCode: _findColumn(header, ['荷主コード','荷主ＣＤ','荷主CD','荷主ｺｰﾄﾞ'], 24), // Y列
-      shipperName: _findColumn(header, ['荷主名','契約名','荷主名称','契約名称'], 26),      // AA列
-      detailKey:   _findColumn(header, ['明細キー','明細番号','伝票番号','原票番号','エスライン原票番号'], 27), // AB列
-      amount:      _findColumn(header, ['金額','売上金額','請求金額','合計金額'], 20),       // U列
-    };
-  }
-
-  function _simplifyNameByKnownWords(name){
-    const n = _cleanText(name);
-    if (/でんきち|デンキチ/.test(n)) return 'でんきち';
-    if (/コジマ/.test(n)) return 'コジマ';
-    if (/ビックカメラ|ビック/.test(n)) return 'ビックカメラ';
-    if (/ジェイトップ/.test(n)) return 'ジェイトップ';
-    if (/プラスカーゴ/.test(n)) return 'プラスカーゴサービス';
-    if (/フジ医療器/.test(n)) return 'フジ医療器';
-    if (/スリーエス/.test(n)) return 'スリーエスサンキ家具';
-    return _stripParen(n) || n || '未設定';
-  }
-
-  function _simpleGroupName(names){
-    const list = Array.from(names || []).map(_cleanText).filter(Boolean);
-    const counts = new Map();
-    list.forEach(n => {
-      const simple = _simplifyNameByKnownWords(n);
-      counts.set(simple, (counts.get(simple) || 0) + 1);
-    });
-    if (!counts.size) return '未設定';
-    return Array.from(counts.entries()).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],'ja'))[0][0];
-  }
-
-  function _contractName(name){ return _cleanText(name) || '未設定'; }
-
-  function buildShipperAggregationFromCsvRows(csvRows){
-    const rows = Array.isArray(csvRows) ? csvRows : [];
-    if (!rows.length) return { groups:[], contracts:[], dashboardShippers:{}, columns:null };
-
-    const columns = _detectColumns(rows);
-    const body = rows.length > 1 ? rows.slice(1) : rows;
-    const groups = new Map();
-    const contracts = new Map();
-    const usedByContract = new Set();
-    const usedByGroup = new Set();
-
-    body.forEach((row, idx)=>{
-      if (!Array.isArray(row)) return;
-
-      const fullCode = _code(row[columns.shipperCode]);
-      const c3 = _code3(fullCode);
-      const rawName = _contractName(row[columns.shipperName]);
-      const detailKeyRaw = _cleanText(row[columns.detailKey]);
-      const detailKey = detailKeyRaw || `__row_${idx}`;
-      const amount = _toNumber(row[columns.amount]);
-
-      if (!fullCode || !c3) return;
-
-      const contractKey = fullCode;
-      const contractDedupKey = `${contractKey}::${detailKey}`;
-      const groupDedupKey = `${c3}::${detailKey}`;
-
-      if (!contracts.has(contractKey)) {
-        contracts.set(contractKey, {
-          code: fullCode,
-          groupCode: c3,
-          name: rawName,
-          names: new Set(),
-          detailKeys: new Set(),
-          count: 0,
-          income: 0
-        });
-      }
-      const contract = contracts.get(contractKey);
-      if (rawName) contract.names.add(rawName);
-      if (!contract.name || contract.name === '未設定') contract.name = rawName || contract.name;
-
-      if (!groups.has(c3)) {
-        groups.set(c3, {
-          code3: c3,
-          name: '',
-          names: new Set(),
-          detailKeys: new Set(),
-          count: 0,
-          income: 0,
-          contracts: new Map()
-        });
-      }
-      const group = groups.get(c3);
-      if (rawName) group.names.add(rawName);
-      group.contracts.set(contractKey, contract);
-
-      if (!usedByContract.has(contractDedupKey)) {
-        usedByContract.add(contractDedupKey);
-        contract.detailKeys.add(detailKey);
-        contract.count += 1;
-        contract.income += amount;
-      }
-      if (!usedByGroup.has(groupDedupKey)) {
-        usedByGroup.add(groupDedupKey);
-        group.detailKeys.add(detailKey);
-        group.count += 1;
-        group.income += amount;
-      }
-    });
-
-    const groupList = Array.from(groups.values()).map(g=>{
-      const contracts = Array.from(g.contracts.values()).map(c=>({
-        code: c.code,
-        groupCode: c.groupCode,
-        name: _contractName(c.name || Array.from(c.names)[0]),
-        count: c.count,
-        income: c.income,
-        unit: _yenPer(c.count, c.income)
-      })).sort((a,b)=>b.income-a.income || b.count-a.count || a.code.localeCompare(b.code,'ja'));
-
-      return {
-        code3: g.code3,
-        name: _simpleGroupName(g.names),
-        count: g.count,
-        income: g.income,
-        unit: _yenPer(g.count, g.income),
-        contracts
-      };
-    }).sort((a,b)=>b.income-a.income || b.count-a.count || a.name.localeCompare(b.name,'ja'));
-
-    const contractList = Array.from(contracts.values()).map(c=>({
-      code: c.code,
-      groupCode: c.groupCode,
-      groupName: _simpleGroupName(groups.get(c.groupCode)?.names || []),
-      name: _contractName(c.name || Array.from(c.names)[0]),
-      count: c.count,
-      income: c.income,
-      unit: _yenPer(c.count, c.income)
-    })).sort((a,b)=>b.income-a.income || b.count-a.count || a.code.localeCompare(b.code,'ja'));
-
-    const dashboardShippers = {};
-    groupList.forEach(g=>{
-      dashboardShippers[g.name] = { income:g.income, count:g.count, code3:g.code3 };
-    });
-
-    return { groups:groupList, contracts:contractList, dashboardShippers, columns };
-  }
-
-  const originalParseSKDL = CSV.parseSKDL.bind(CSV);
-  CSV.parseSKDL = function(text, monthCol){
-    const result = originalParseSKDL(text, monthCol);
-    if (!result) return result;
-    try {
-      const rows = this.toRows(text);
-      const agg = buildShipperAggregationFromCsvRows(rows);
-      result._shipperGroups = agg.groups;
-      result._shipperContracts = agg.contracts;
-      result._dashboardShippers = agg.dashboardShippers;
-      result._shipperColumns = agg.columns;
-      result._shipperSourceRule = 'Y列荷主コード／AA列契約名／AB列重複除外／U列金額（ヘッダ名優先・列位置補完）';
-    } catch(e) {
-      result._shipperGroups = [];
-      result._shipperContracts = [];
-      result._dashboardShippers = {};
-      result._shipperError = e.message;
-    }
-    return result;
-  };
-
-  const originalProcessDataset = processDataset;
-  processDataset = function(ym, type, rows){
-    const ds = originalProcessDataset(ym, type, rows);
-    if (rows && rows._dashboardShippers) ds.shippers = rows._dashboardShippers;
-    if (rows && rows._shipperGroups) ds.shipperGroups = rows._shipperGroups;
-    if (rows && rows._shipperContracts) ds.shipperContracts = rows._shipperContracts;
-    if (rows && rows._shipperColumns) ds.shipperColumns = rows._shipperColumns;
-    if (rows && rows._shipperSourceRule) ds.shipperSourceRule = rows._shipperSourceRule;
-    if (rows && rows._shipperError) ds.shipperError = rows._shipperError;
-    return ds;
-  };
 
   const SHIPPER_DRILL = window.SHIPPER_DRILL || { openGroups:{} };
   window.SHIPPER_DRILL = SHIPPER_DRILL;
@@ -318,7 +68,7 @@ function renderShipper() {
     });
   }
 
-  function renderGroupTable(groups, totalIncome){
+  function renderGroupTable(groups, totalIncome, revenueTotal){
     const tbody = document.getElementById('shipper-group-tbody');
     if (!tbody) return;
     if (!groups.length) {
@@ -326,6 +76,12 @@ function renderShipper() {
       return;
     }
     const rows = [];
+    if (Number.isFinite(Number(revenueTotal))) {
+      const shipperTotal = groups.reduce((sum,g)=>sum+(Number(g.income)||0),0);
+      const gap = Number(revenueTotal) - shipperTotal;
+      const gapOk = Math.abs(Math.round(gap/1000)) <= 1;
+      rows.push(`<tr style="background:${gapOk ? '#ecfdf5' : '#fef2f2'}"><td><strong>営業収益との差分チェック</strong></td><td class="r">営業収益 ${_fmtKLocal(revenueTotal)}千</td><td class="r">荷主合計 ${_fmtKLocal(shipperTotal)}千</td><td class="r" style="font-weight:900;color:${gapOk ? '#059669' : '#dc2626'}">差分 ${_fmtKLocal(gap)}千</td><td class="r">${gapOk ? 'OK' : '要確認'}</td><td></td></tr>`);
+    }
     groups.forEach(g=>{
       const open = !!SHIPPER_DRILL.openGroups[g.code3];
       const rate = totalIncome > 0 ? g.income / totalIncome * 100 : 0;
@@ -372,14 +128,22 @@ function renderShipper() {
     renderCommonPeriodSelector('shipper');
     const ds = selectedDatasetInSelectedFiscalYear();
     const analysisYM=String(ds?.ym||STATE.selYM||'').replace(/\D/g,'').slice(0,6);
-    const canonicalState=analysisYM&&window.CANONICAL_ANALYSIS_READ_MODELS?.peek?CANONICAL_ANALYSIS_READ_MODELS.peek(analysisYM):null;
-    if(analysisYM&&window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth&&!canonicalState){
+    const resolved = window.SHIPPER_DATA_ACCESS?.resolveMonth
+      ? SHIPPER_DATA_ACCESS.resolveMonth(analysisYM)
+      : null;
+    if (analysisYM && resolved?.state === 'NOT_LOADED' && window.SHIPPER_DATA_ACCESS?.loadMonth) {
       setCanonicalShipperStatus(null);
-      CANONICAL_ANALYSIS_READ_MODELS.loadMonth(analysisYM).then(()=>renderShipper()).catch(e=>{console.warn('[Shipper] canonical read model failed',e);renderShipper();});
+      const requestedYM = analysisYM;
+      SHIPPER_DATA_ACCESS.loadMonth(requestedYM).then(()=>{
+        const currentDS = selectedDatasetInSelectedFiscalYear();
+        const currentYM = String(currentDS?.ym||STATE.selYM||'').replace(/\D/g,'').slice(0,6);
+        if (currentYM === requestedYM) renderShipper();
+      }).catch(e=>{ console.warn('[Shipper] canonical read model failed',e); });
       return;
     }
-    if(analysisYM)setCanonicalShipperStatus(canonicalState||{status:'LEGACY_FALLBACK',reason:'Canonical Read Model unavailable'});
-    const canonicalShipper=canonicalState?.status==='READY'?canonicalState.shipper:null;
+    const canonicalState = resolved?.canonicalState || null;
+    if (analysisYM) setCanonicalShipperStatus(resolved?.isCanonical ? canonicalState : {status:'LEGACY_FALLBACK',reason:resolved?.reason||'正規化SOURCE未登録'});
+    const canonicalShipper = resolved?.isCanonical ? canonicalState?.shipper : null;
     const mode = STATE.shipperMode || 'group';
     setShipperTabs(mode);
 
@@ -389,8 +153,8 @@ function renderShipper() {
       if (view) { noticeEl=document.createElement('div'); noticeEl.id='shipper-notice'; view.prepend(noticeEl); }
     }
 
-    const groups = canonicalShipper ? canonicalShipper.groups : getShipperGroups(ds);
-    const contracts = canonicalShipper ? canonicalShipper.contracts : getShipperContracts(ds);
+    const groups = resolved ? resolved.groups : (canonicalShipper ? canonicalShipper.groups : getShipperGroups(ds));
+    const contracts = resolved ? resolved.contracts : (canonicalShipper ? canonicalShipper.contracts : getShipperContracts(ds));
     const totalIncome = groups.reduce((sum,g)=>sum+(Number(g.income)||0),0) || (!canonicalShipper&&ds ? ds.totalIncome : 0) || 0;
     const hasData = groups.length || contracts.length;
 
@@ -440,25 +204,10 @@ function renderShipper() {
     } else {
       if (groupCard) groupCard.style.display = '';
       if (detailCard) detailCard.style.display = 'none';
-      renderGroupTable(groups,totalIncome);
+      renderGroupTable(groups,totalIncome,ds ? Number(ds.totalIncome) : null);
     }
   };
 
-  const originalRenderDashboard = renderDashboard;
-  renderDashboard = function(){
-    originalRenderDashboard();
-    const ds = selectedDashboardDS();
-    const shipArea = document.getElementById('shipper-bars-area');
-    if (!shipArea || !ds) return;
-    const groups = getShipperGroups(ds);
-    if (!groups.length) {
-      shipArea.innerHTML = '<div class="empty">荷主データは確定CSV／速報CSVから取得します。対象月を再取込してください。</div>';
-      return;
-    }
-    const items = groups.slice(0,8);
-    const maxV = Math.max(...items.map(x=>x.income),1);
-    shipArea.innerHTML = items.map((g,i)=>`<div class="mbar-row"><div class="mbar-label" title="${_escLocal(g.name)}">${_escLocal(g.name)}</div><div class="mbar-track"><div class="mbar-fill" style="width:${(g.income/maxV*100).toFixed(1)}%;background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div></div><div class="mbar-val">${_fmtKLocal(g.income)}千</div></div>`).join('');
-  };
 })();
 
 
@@ -839,48 +588,76 @@ function renderShipper() {
     return [];
   }
 
-  /* ════════ D4-39: ホーム画面荷主表示のCanonical Read Model優先化 ════════
-     対象月ymについてCANONICAL_ANALYSIS_READ_MODELS.peek(ym)を確認し、
-     READY かつ shipper が存在すれば、その月はCanonicalのshipper.groups
-     だけを使う（Legacyのgroups/shippersを一切混ぜない）。
-     Canonical未ロード（peekがnullで、loadMonthが利用可能）の場合は
-     呼出元へその旨を返し、呼出元が非同期ロード・再描画を行う。
-     status==='LEGACY_FALLBACK'またはCanonical基盤自体が利用不能な場合は
-     呼出元が既存のgroupsOf(ds)/groupsFromDS(ds)（Legacy実装、既存の
-     専用荷主分析でも使われている集計ロジック）へfallbackする。
-     このヘルパー自体は新しい荷主集計アルゴリズムを持たない
-     （既にcanonical_analysis_read_models.jsが計算済みのgroups配列を
-     そのまま参照するだけ）。 */
-  function resolveShipperGroupsForYM(ym){
-    if (!ym) return { state:'NO_YM', isCanonical:false, groups:null };
-    if (!window.CANONICAL_ANALYSIS_READ_MODELS?.peek) return { state:'UNAVAILABLE', isCanonical:false, groups:null };
-    const canonicalState = CANONICAL_ANALYSIS_READ_MODELS.peek(ym);
-    // D4-39修正：NOT_LOADEDは「peek(ym)が null（真のキャッシュミス）」の
-    // 場合だけにする。CANONICAL_ANALYSIS_READ_MODELS.loadMonth()は、
-    // WORKER_SALES CURRENTだけ存在しSHIPPER_AREA CURRENTが存在しない月
-    // でも status:'READY', worker:非null, shipper:null を返す既存仕様が
-    // ある。これをNOT_LOADEDのまま扱うと、loadMonth()→キャッシュ済み
-    // READY→再度NOT_LOADED判定という無限の再ロード・再描画ループに
-    // なり得るため、peek(ym)が非nullで返ってきた時点（READYでも
-    // LEGACY_FALLBACKでも）で必ずどちらかへ確定させる。
-    if (canonicalState === null || canonicalState === undefined) {
-      // 呼出元がloadMonth()を実行して再判定する必要がある、真の未ロード状態。
-      return { state:'NOT_LOADED', isCanonical:false, groups:null };
-    }
-    if (canonicalState.status === 'READY' && canonicalState.shipper) {
-      return { state:'READY', isCanonical:true, groups: canonicalState.shipper.groups || [] };
-    }
-    // status==='READY'だがshipperがnull（その月にSHIPPER_AREA CURRENTが
-    // 存在しない）、またはstatus==='LEGACY_FALLBACK'のいずれも、
-    // 既にpeekから確定した結果が得られているためLegacy fallbackとする
-    // （再ロードは行わない）。
-    return { state:'LEGACY_FALLBACK', isCanonical:false, groups:null };
+  /* ════════ D4-40: 荷主SOURCEアクセス統合 ════════
+     月ごとにCanonical / Legacy fallbackを一意に選ぶ。
+     同一月で両SOURCEを混在させず、Canonical READY + 0件もそのまま0件とする。
+     NOT_LOADEDはpeek(ym)がnull/undefinedの真の未ロード時だけ返す。 */
+  const SHIPPER_DATA_ACCESS = window.SHIPPER_DATA_ACCESS || {};
+
+  function datasetForYM(ym){
+    return ym && typeof activeDatasetByYM === 'function' ? activeDatasetByYM(ym) : null;
   }
-  // D4-39: shipper.js内には複数の独立したIIFEが存在し、後方の
-  // 「前月・前年比較」IIFE（別スコープ）からもこの関数を再利用する
-  // 必要があるため、内部共有専用の参照として公開する（新しい
-  // 荷主解決ロジックを別途複製しないための最小限の共有手段）。
-  window.__D4_39_resolveShipperGroupsForYM = resolveShipperGroupsForYM;
+
+  SHIPPER_DATA_ACCESS.resolveMonth = function(ym){
+    const normalizedYM = String(ym || '').replace(/\D/g,'').slice(0,6);
+    const ds = datasetForYM(normalizedYM);
+
+    if (!normalizedYM) {
+      return { ym:'', state:'NO_YM', source:'NONE', isCanonical:false, ds, groups:[], contracts:[], canonicalState:null };
+    }
+
+    if (!window.CANONICAL_ANALYSIS_READ_MODELS?.peek) {
+      return {
+        ym:normalizedYM,
+        state:'LEGACY_FALLBACK',
+        source:'LEGACY',
+        isCanonical:false,
+        ds,
+        groups:groupsOf(ds),
+        contracts:contractsOf(ds),
+        canonicalState:null,
+        reason:'Canonical Read Model unavailable'
+      };
+    }
+
+    const canonicalState = CANONICAL_ANALYSIS_READ_MODELS.peek(normalizedYM);
+    if (canonicalState === null || canonicalState === undefined) {
+      return { ym:normalizedYM, state:'NOT_LOADED', source:'PENDING', isCanonical:false, ds, groups:[], contracts:[], canonicalState:null };
+    }
+
+    if (canonicalState.status === 'READY' && canonicalState.shipper) {
+      return {
+        ym:normalizedYM,
+        state:'READY',
+        source:'CANONICAL',
+        isCanonical:true,
+        ds,
+        groups:Array.isArray(canonicalState.shipper.groups) ? canonicalState.shipper.groups : [],
+        contracts:Array.isArray(canonicalState.shipper.contracts) ? canonicalState.shipper.contracts : [],
+        canonicalState,
+        issues:Array.isArray(canonicalState.shipper.issues) ? canonicalState.shipper.issues : []
+      };
+    }
+
+    return {
+      ym:normalizedYM,
+      state:'LEGACY_FALLBACK',
+      source:'LEGACY',
+      isCanonical:false,
+      ds,
+      groups:groupsOf(ds),
+      contracts:contractsOf(ds),
+      canonicalState,
+      reason:canonicalState.reason || (canonicalState.status === 'READY' ? 'SHIPPER_AREA CURRENT SOURCE未登録' : 'Canonical Read Model未利用')
+    };
+  };
+
+  SHIPPER_DATA_ACCESS.loadMonth = function(ym){
+    if (!window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth) return Promise.resolve(null);
+    return CANONICAL_ANALYSIS_READ_MODELS.loadMonth(String(ym || '').replace(/\D/g,'').slice(0,6));
+  };
+
+  window.SHIPPER_DATA_ACCESS = SHIPPER_DATA_ACCESS;
 
   function contractsOf(ds){
     return ds && Array.isArray(ds.shipperContracts) ? ds.shipperContracts : [];
@@ -888,9 +665,12 @@ function renderShipper() {
 
   function ticketCountOf(ds){
     if (!ds) return 0;
+    const resolved = window.SHIPPER_DATA_ACCESS?.resolveMonth ? SHIPPER_DATA_ACCESS.resolveMonth(ds.ym) : null;
+    if (resolved && resolved.state !== 'NOT_LOADED') {
+      return (resolved.groups || []).reduce((sum,g)=>sum+(Number(g.count)||0),0);
+    }
     if (typeof ds.shipperTicketCount === 'number') return ds.shipperTicketCount;
-    const gs = groupsOf(ds);
-    return gs.reduce((sum,g)=>sum+(Number(g.count)||0),0);
+    return groupsOf(ds).reduce((sum,g)=>sum+(Number(g.count)||0),0);
   }
 
   /* ════════ Version4 Phase5-5 Layer1：renderDashboardのHook移行（荷主バー表示）════════
@@ -908,7 +688,7 @@ function renderShipper() {
     if (!shipArea || !ds) return;
 
     const analysisYM = String(ds.ym||'').replace(/\D/g,'').slice(0,6);
-    const resolved = resolveShipperGroupsForYM(analysisYM);
+    const resolved = SHIPPER_DATA_ACCESS.resolveMonth(analysisYM);
 
     if (resolved.state === 'NOT_LOADED' && window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth) {
       shipArea.innerHTML = '<div class="msg msg-info">確認済みデータを読み込んでいます…</div>';
@@ -929,7 +709,7 @@ function renderShipper() {
     const usingCanonical = resolved.isCanonical;
     // D4-39: Canonical READY月はshipper.groupsのみを使用し、Legacyのgroupsを混ぜない。
     // 0件でもgroupsOf(ds)へ補完せず空表示にする。
-    const allGroups = usingCanonical ? (resolved.groups || []) : groupsOf(ds);
+    const allGroups = resolved.groups || [];
     const items = allGroups
       .filter(g => Number(g.income) !== 0 || Number(g.count) !== 0)
       .slice(0,8);
@@ -978,7 +758,8 @@ function renderShipper() {
     });
   };
 
-  window.RENDER.onAfterTrend(function(){
+  let __shipperTrendToken = 0;
+  function renderShipperTrendHook(){
     const list = datasetsForSelectedFiscalYear();
     if (!list || !list.length) return;
     const labels = list.map(d=>ymLabel(d.ym));
@@ -1004,31 +785,47 @@ function renderShipper() {
     }
 
     if (document.getElementById('c-trend-shipper') && typeof CHART_MGR !== 'undefined') {
-      const latest = selectedDatasetInSelectedFiscalYear() || list[list.length-1];
-      const top = groupsOf(latest).slice(0,5);
+      const resolvedByYM = new Map(list.map(d=>[String(d.ym), SHIPPER_DATA_ACCESS.resolveMonth(d.ym)]));
+      const needsLoad = [...resolvedByYM.values()].filter(r=>r.state==='NOT_LOADED').map(r=>r.ym);
+      if (needsLoad.length) {
+        const token = ++__shipperTrendToken;
+        const requestedYMs = list.map(d=>String(d.ym)).join(',');
+        Promise.all(needsLoad.map(ym=>SHIPPER_DATA_ACCESS.loadMonth(ym))).then(()=>{
+          if (token !== __shipperTrendToken) return;
+          const current = datasetsForSelectedFiscalYear().map(d=>String(d.ym)).join(',');
+          if (current === requestedYMs) renderShipperTrendHook();
+        }).catch(e=>console.warn('[Shipper] canonical read model failed(trend)', e));
+      } else {
+        const latest = selectedDatasetInSelectedFiscalYear() || list[list.length-1];
+        const latestResolved = resolvedByYM.get(String(latest.ym)) || SHIPPER_DATA_ACCESS.resolveMonth(latest.ym);
+        const top = (latestResolved.groups || []).slice(0,5);
+        const keyOf = g => String(g?.code4 || g?.code3 || g?.name || '');
 
-      CHART_MGR.make('c-trend-shipper', {
-        type:'line',
-        data:{
-          labels,
-          datasets:top.map((g,i)=>({
-            label:g.name,
-            data:list.map(d=>{
-              const found = groupsOf(d).find(x=>x.code4 === g.code4 || x.name === g.name);
-              return found ? (Number(found.income)||0)/1000 : 0;
-            }),
-            borderColor:CONFIG.COLORS[i%CONFIG.COLORS.length],
-            backgroundColor:CONFIG.COLORS[i%CONFIG.COLORS.length],
-            tension:.25
-          }))
-        },
-        options:{
-          responsive:true,
-          maintainAspectRatio:false,
-          plugins:{legend:{position:'bottom'}},
-          scales:{y:{title:{display:true,text:'千円'}}}
-        }
-      });
+        CHART_MGR.make('c-trend-shipper', {
+          type:'line',
+          data:{
+            labels,
+            datasets:top.map((g,i)=>({
+              label:g.name,
+              data:list.map(d=>{
+                const resolved = resolvedByYM.get(String(d.ym));
+                const key = keyOf(g);
+                const found = (resolved?.groups || []).find(x=>keyOf(x) === key || x.name === g.name);
+                return found ? (Number(found.income)||0)/1000 : 0;
+              }),
+              borderColor:CONFIG.COLORS[i%CONFIG.COLORS.length],
+              backgroundColor:CONFIG.COLORS[i%CONFIG.COLORS.length],
+              tension:.25
+            }))
+          },
+          options:{
+            responsive:true,
+            maintainAspectRatio:false,
+            plugins:{legend:{position:'bottom'}},
+            scales:{y:{title:{display:true,text:'千円'}}}
+          }
+        });
+      }
     }
 
     const tbl = document.getElementById('trend-table-body') || document.getElementById('trend-summary-body');
@@ -1047,168 +844,9 @@ function renderShipper() {
         </tr>`;
       }).join('');
     }
-  });
+  }
+  window.RENDER.onAfterTrend(renderShipperTrendHook);
 
-  const prevRenderShipper = renderShipper;
-  renderShipper = function(){
-    prevRenderShipper();
-
-    const ds = selectedDatasetInSelectedFiscalYear() || selectedDashboardDS();
-    const mode = STATE.shipperMode || 'group';
-    const groups = groupsOf(ds);
-    const contracts = contractsOf(ds);
-    const totalIncome = groups.reduce((sum,g)=>sum+(Number(g.income)||0),0) || (ds ? Number(ds.totalIncome)||0 : 0);
-
-    const noticeId = 'shipper-rule-notice';
-    let noticeEl = document.getElementById(noticeId);
-    if (!noticeEl) {
-      const view = document.getElementById('view-shipper');
-      if (view) {
-        noticeEl = document.createElement('div');
-        noticeEl.id = noticeId;
-        view.prepend(noticeEl);
-      }
-    }
-
-    if (noticeEl) {
-      const rule = ds && ds.shipperSourceRule ? esc2(ds.shipperSourceRule) : '';
-      const summary = ds ? ` / 対象収入行 ${fmt2(ds.shipperTargetRows || 0)}行 / 荷主売上 ${fmtK2(ds.shipperIncomeTotal || 0)}千円` : '';
-      noticeEl.innerHTML = rule
-        ? `<div class="msg msg-info" style="margin-bottom:14px">${rule}${summary}</div>`
-        : '';
-    }
-
-    const chartItems = (mode === 'detail' ? contracts : groups).slice(0,10);
-    if (typeof CHART_MGR !== 'undefined') {
-      CHART_MGR.make('c-shipper-bar', {
-        type:'bar',
-        data:{
-          labels:chartItems.map(x=>x.name),
-          datasets:[{
-            label:'売上（千円）',
-            data:chartItems.map(x=>(Number(x.income)||0)/1000),
-            backgroundColor:chartItems.map((_,i)=>CONFIG.COLORS[i%CONFIG.COLORS.length])
-          }]
-        },
-        options:{
-          indexAxis:'y',
-          responsive:true,
-          maintainAspectRatio:false,
-          plugins:{legend:{display:false}},
-          scales:{x:{title:{display:true,text:'千円'}}}
-        }
-      });
-    }
-
-    const groupCard = document.getElementById('shipper-group-card');
-    const detailCard = document.getElementById('shipper-detail-card');
-
-    if (mode === 'detail') {
-      if (groupCard) groupCard.style.display = 'none';
-      if (detailCard) detailCard.style.display = '';
-
-      const tbody = document.getElementById('shipper-detail-tbody');
-      if (tbody) {
-        tbody.innerHTML = contracts.length ? contracts.map(c=>{
-          const rate = totalIncome > 0 ? c.income/totalIncome*100 : 0;
-          return `<tr>
-            <td style="font-family:monospace">${String(c.code || '').startsWith('9999_') ? '—' : esc2(c.code)}</td>
-            <td><strong>${esc2(c.name)}</strong></td>
-            <td class="r">${String(c.code || '').startsWith('9999_') ? '—' : fmt2(c.count)}</td>
-            <td class="r">${fmtK2(c.income)}</td>
-            <td class="r">${rate.toFixed(1)}%</td>
-            <td class="r">${String(c.code || '').startsWith('9999_') ? '—' : fmt2(c.unit)}</td>
-          </tr>`;
-        }).join('') : '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">契約別データがありません</td></tr>';
-      }
-    } else {
-      if (groupCard) groupCard.style.display = '';
-      if (detailCard) detailCard.style.display = 'none';
-
-      const tbody = document.getElementById('shipper-group-tbody');
-      if (tbody) {
-        const shipperTotal = groups.reduce((sum,g)=>sum+(Number(g.income)||0),0);
-        const revenueTotal = ds ? (Number(ds.totalIncome)||0) : 0;
-        const gap = revenueTotal - shipperTotal;
-        const gapOk = Math.abs(Math.round(gap/1000)) <= 1;
-
-        const verifyRow = `<tr style="background:${gapOk ? '#ecfdf5' : '#fef2f2'}">
-          <td><strong>営業収益との差分チェック</strong></td>
-          <td class="r">営業収益 ${fmtK2(revenueTotal)}千</td>
-          <td class="r">荷主合計 ${fmtK2(shipperTotal)}千</td>
-          <td class="r" style="font-weight:900;color:${gapOk ? '#059669' : '#dc2626'}">差分 ${fmtK2(gap)}千</td>
-          <td class="r">${gapOk ? 'OK' : '要確認'}</td>
-          <td></td>
-        </tr>`;
-
-        tbody.innerHTML = groups.length ? verifyRow + groups.map((g,gi)=>{
-          const rate = totalIncome > 0 ? g.income/totalIncome*100 : 0;
-          const detailId = `shipper-group-detail-${gi}`;
-          const hasContracts = Array.isArray(g.contracts) && g.contracts.length;
-          let html = `<tr>
-            <td><strong>${esc2(g.name)}</strong></td>
-            <td class="r"><strong>${g.code4 === '9999' ? '—' : fmt2(g.count)}</strong></td>
-            <td class="r"><strong>${fmtK2(g.income)}</strong></td>
-            <td class="r">${rate.toFixed(1)}%</td>
-            <td class="r">${g.code4 === '9999' ? '—' : fmt2(g.unit)}</td>
-            <td class="r">${hasContracts ? `<button type="button" class="btn-mini" data-shipper-toggle="${detailId}">＋</button>` : ''}</td>
-          </tr>`;
-
-          if (g.code4 === '9999' && Array.isArray(g.breakdown) && g.breakdown.length) {
-            html += g.breakdown.map(b=>{
-              const br = g.income > 0 ? (Number(b.income)||0) / g.income * 100 : 0;
-              return `<tr style="background:#f8fafc">
-                <td style="padding-left:28px;color:var(--text2)">└ ${esc2(b.name)}</td>
-                <td class="r">—</td>
-                <td class="r">${fmtK2(b.income)}</td>
-                <td class="r">${br.toFixed(1)}%</td>
-                <td class="r">—</td>
-                <td></td>
-              </tr>`;
-            }).join('');
-          }
-
-          if (hasContracts) {
-            const contractRows = g.contracts.map(c=>{
-              const cr = g.income > 0 ? (Number(c.income)||0) / g.income * 100 : 0;
-              const codeText = String(c.code || '').startsWith('9999_') ? '—' : esc2(c.code);
-              return `<tr>
-                <td style="font-family:monospace;color:var(--text2)">${codeText}</td>
-                <td>${esc2(c.name)}</td>
-                <td class="r">${String(c.code || '').startsWith('9999_') ? '—' : fmt2(c.count)}</td>
-                <td class="r">${fmtK2(c.income)}</td>
-                <td class="r">${cr.toFixed(1)}%</td>
-                <td class="r">${String(c.code || '').startsWith('9999_') ? '—' : fmt2(c.unit)}</td>
-              </tr>`;
-            }).join('');
-            html += `<tr id="${detailId}" style="display:none;background:#ffffff">
-              <td colspan="6" style="padding:0">
-                <div style="padding:12px 16px;background:#f8fafc;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-                  <div style="font-weight:900;margin-bottom:8px;color:var(--text)">${esc2(g.name)} 契約別内訳</div>
-                  <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden">
-                    <thead><tr style="background:#f1f5f9"><th style="text-align:left;padding:8px">荷主コード</th><th style="text-align:left;padding:8px">契約名</th><th style="text-align:right;padding:8px">件数</th><th style="text-align:right;padding:8px">売上（千円）</th><th style="text-align:right;padding:8px">構成比</th><th style="text-align:right;padding:8px">単価（円）</th></tr></thead>
-                    <tbody>${contractRows}</tbody>
-                  </table>
-                </div>
-              </td>
-            </tr>`;
-          }
-          return html;
-        }).join('') : '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">荷主別データがありません</td></tr>';
-
-        tbody.querySelectorAll('[data-shipper-toggle]').forEach(btn=>{
-          btn.addEventListener('click', ()=>{
-            const id = btn.getAttribute('data-shipper-toggle');
-            const row = document.getElementById(id);
-            if (!row) return;
-            const open = row.style.display !== 'none';
-            row.style.display = open ? 'none' : '';
-            btn.textContent = open ? '＋' : '－';
-          });
-        });
-      }
-    }
-  };
 })();
 
 /* ════════════════════════════════════════════════════════════════
@@ -1229,17 +867,16 @@ function renderShipper() {
   function fmtKLocal(v){ return typeof fmtK === 'function' ? fmtK(v) : Math.round((Number(v)||0)/1000).toLocaleString('ja-JP'); }
   function escLocal(v){ const s=String(v??''); return typeof esc==='function'?esc(s):s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function ymPrev(ym){ if(!ym||ym.length<6)return null; let y=parseInt(ym.slice(0,4),10); let m=parseInt(ym.slice(4,6),10)-1; if(!y||!Number.isFinite(m))return null; if(m<=0){y-=1;m=12;} return String(y)+String(m).padStart(2,'0'); }
-  function groupsOfLocal(ds){
-    if(ds&&Array.isArray(ds.shipperGroups))return ds.shipperGroups;
-    if(ds&&ds.shippers){return Object.entries(ds.shippers).map(([name,d])=>({name,code4:d.code4||d.code3||name,count:Number(d.count)||0,income:Number(d.income)||0,isOther:!!d.isOther}));}
-    return [];
-  }
   function groupKey(g){ return String(g.code4||g.code3||g.name||''); }
   function rateObj(cur,prev){ if(!prev)return null; const rate=(Number(cur)||0-Number(prev||0))/Math.abs(Number(prev)||1)*100; if(!Number.isFinite(rate))return null; return {rate,text:(rate>0?'+':'')+Math.round(rate)+'%'}; }
-  function prevDatasetFor(ds){ if(!ds||!ds.ym||typeof activeDatasetByYM!=='function')return null; const p=ymPrev(ds.ym); return p?activeDatasetByYM(p):null; }
-  function detectShipperAnomalies(ds){
-    const groups=groupsOfLocal(ds).filter(g=>!g.isOther&&String(g.code4||'')!=='9999');
-    const prevMap=new Map(groupsOfLocal(prevDatasetFor(ds)).map(g=>[groupKey(g),g]));
+  function detectShipperAnomalies(ym){
+    const current=window.SHIPPER_DATA_ACCESS?.resolveMonth?SHIPPER_DATA_ACCESS.resolveMonth(ym):null;
+    const prevYMValue=ymPrev(ym);
+    const previous=prevYMValue&&window.SHIPPER_DATA_ACCESS?.resolveMonth?SHIPPER_DATA_ACCESS.resolveMonth(prevYMValue):null;
+    const needsLoad=[current?.state==='NOT_LOADED'?ym:null,previous?.state==='NOT_LOADED'?prevYMValue:null].filter(Boolean);
+    if(needsLoad.length)return {list:[],needsLoad};
+    const groups=(current?.groups||[]).filter(g=>!g.isOther&&String(g.code4||g.code3||'')!=='9999');
+    const prevMap=new Map((previous?.groups||[]).filter(g=>!g.isOther&&String(g.code4||g.code3||'')!=='9999').map(g=>[groupKey(g),g]));
     const list=[];
     groups.forEach(g=>{
       const name=g.name||'未設定', key=groupKey(g), count=Number(g.count)||0, income=Number(g.income)||0, unit=count>0?Math.round(income/count):0;
@@ -1255,7 +892,7 @@ function renderShipper() {
         if(sr&&Math.abs(sr.rate)>=SALES_RATE_LIMIT)list.push({level:'mid',type:'売上変動',name,detail:`前月比 ${sr.text}（${fmtKLocal(pg.income)}千 → ${fmtKLocal(income)}千）`,amount:income,count,key});
       }
     });
-    return list.sort((a,b)=>(a.level==='high'?0:1)-(b.level==='high'?0:1)||Math.abs(Number(b.amount)||0)-Math.abs(Number(a.amount)||0));
+    return {list:list.sort((a,b)=>(a.level==='high'?0:1)-(b.level==='high'?0:1)||Math.abs(Number(b.amount)||0)-Math.abs(Number(a.amount)||0)),needsLoad:[]};
   }
   function ensureAnomalyStyles(){
     if(document.getElementById('anomaly-style-v1'))return;
@@ -1268,23 +905,33 @@ function renderShipper() {
     if(!list.length)return `<div class="anomaly-card"><div class="anomaly-head"><span>⚠ 異常検知</span><span class="anomaly-sub">${escLocal(month)} / 単価・件数・売上</span></div><div class="anomaly-body"><div class="anomaly-empty">異常なし</div></div></div>`;
     return `<div class="anomaly-card"><div class="anomaly-head"><span>⚠ 異常検知</span><span class="anomaly-sub">${escLocal(month)} / ${list.length}件</span></div><div class="anomaly-body"><div class="anomaly-list">${list.map(x=>`<div class="anomaly-item"><div><span class="anomaly-badge ${x.level==='high'?'':'mid'}">${escLocal(x.type)}</span></div><div class="anomaly-name">${escLocal(x.name)}</div><div class="anomaly-detail">${escLocal(x.detail)}</div><div class="anomaly-num">${fmtKLocal(x.amount)}千</div></div>`).join('')}</div></div></div>`;
   }
+  let __shipperAnomalyToken=0;
   function renderAnomalyPanel(){
     ensureAnomalyStyles();
     const ds=typeof selectedDatasetInSelectedFiscalYear==='function'?selectedDatasetInSelectedFiscalYear():(typeof selectedDashboardDS==='function'?selectedDashboardDS():null);
     const view=document.getElementById('view-shipper'); if(!view||!ds)return;
     let panel=document.getElementById('shipper-anomaly-panel');
     if(!panel){ panel=document.createElement('div'); panel.id='shipper-anomaly-panel'; const anchor=document.getElementById('shipper-group-card')||document.getElementById('shipper-detail-card'); if(anchor&&anchor.parentNode)anchor.parentNode.insertBefore(panel,anchor.nextSibling); else view.appendChild(panel); }
-    panel.innerHTML=anomalyHtml(detectShipperAnomalies(ds),ds);
+    const result=detectShipperAnomalies(String(ds.ym||''));
+    if(result.needsLoad.length&&window.SHIPPER_DATA_ACCESS?.loadMonth){
+      panel.innerHTML='<div class="anomaly-card"><div class="anomaly-body">確認済みデータを読み込んでいます…</div></div>';
+      const token=++__shipperAnomalyToken, requestedYM=String(ds.ym||'');
+      Promise.all(result.needsLoad.map(ym=>SHIPPER_DATA_ACCESS.loadMonth(ym))).then(()=>{
+        if(token!==__shipperAnomalyToken)return;
+        const current=typeof selectedDatasetInSelectedFiscalYear==='function'?selectedDatasetInSelectedFiscalYear():null;
+        if(String(current?.ym||'')===requestedYM)renderAnomalyPanel();
+      }).catch(e=>console.warn('[Shipper] canonical read model failed(anomaly)',e));
+      return;
+    }
+    panel.innerHTML=anomalyHtml(result.list,ds);
   }
   function renderDashboardAnomalyMini(){
     // 異常検知は荷主分析画面のみ表示。ダッシュボード側の簡易表示は出さない。
     const mini=document.getElementById('dashboard-anomaly-mini');
     if(mini) mini.remove();
   }
-  const prevRenderShipperForAnomaly=renderShipper;
-  renderShipper=function(){ prevRenderShipperForAnomaly(); renderAnomalyPanel(); };
-  const prevRenderDashboardForAnomaly=renderDashboard;
-  renderDashboard=function(){ prevRenderDashboardForAnomaly(); renderDashboardAnomalyMini(); };
+  window.RENDER.onAfterShipper(renderAnomalyPanel);
+  window.RENDER.onAfterDashboard(renderDashboardAnomalyMini);
 })();
 
 /* ════════════════════════════════════════════════════════════════
@@ -1383,12 +1030,8 @@ function renderShipper() {
     return `${value} / ${pctText}`;
   }
 
-  /* D4-39: 計算ロジック本体（sort/slice/countEffect/unitEffect分解）を
-     共通関数へ抽出した。buildComparisonRows(ds)（既存、専用荷主分析
-     画面のrenderComparePanelが使用）はこの関数を呼ぶだけの薄い
-     ラッパーへ変更しており、戻り値・動作は従来と完全に同一である。
-     新しい集計アルゴリズムは追加していない（同じsort/slice/
-     countEffect/unitEffectの計算式をそのまま再利用するだけ）。 */
+  /* 件数×単価の比較計算本体。SOURCE選択はSHIPPER_DATA_ACCESS側で行い、
+     ここでは既存のsort/slice/countEffect/unitEffect計算だけを担当する。 */
   function computeComparisonRowsFromGroups(curGroups, prevGroups, lyGroups){
     const prevMap = new Map((prevGroups||[]).map(g => [g.key, g]));
     const lyMap = new Map((lyGroups||[]).map(g => [g.key, g]));
@@ -1422,15 +1065,8 @@ function renderShipper() {
       });
   }
 
-  function buildComparisonRows(ds){
-    if (!ds || !ds.ym) return [];
-    const curGroups = groupsFromDS(ds);
-    const prevDS = dsByYM(prevYM(ds.ym));
-    const lyDS = dsByYM(lastYearYM(ds.ym));
-    return computeComparisonRowsFromGroups(curGroups, groupsFromDS(prevDS), groupsFromDS(lyDS));
-  }
 
-  /* ════════ D4-39: ホーム「前月・前年比較ミニ」専用のCanonical優先版 ════════
+  /* ════════ D4-40: 専用画面・ホーム共通のCanonical優先比較 ════════
      当月・前月・前年同月をそれぞれ独立してSOURCE選択する。
      計算ロジック自体（sort/slice/countEffect/unitEffect）は
      computeComparisonRowsFromGroups()を再利用し、新しい集計
@@ -1449,20 +1085,17 @@ function renderShipper() {
     };
   }
   function resolveComparisonGroupsForYM(ym){
-    const resolved = window.__D4_39_resolveShipperGroupsForYM ? window.__D4_39_resolveShipperGroupsForYM(ym) : { state:'UNAVAILABLE', isCanonical:false, groups:null };
-    if (resolved.state === 'READY') {
-      return { needsLoad:false, groups: (resolved.groups||[]).map(canonicalGroupToComparisonShape) };
-    }
+    const resolved = window.SHIPPER_DATA_ACCESS?.resolveMonth
+      ? SHIPPER_DATA_ACCESS.resolveMonth(ym)
+      : { state:'LEGACY_FALLBACK', groups:groupsFromDS(dsByYM(ym)) };
     if (resolved.state === 'NOT_LOADED') {
-      return { needsLoad:true, groups: [] };
+      return { needsLoad:true, groups:[] };
     }
-    // LEGACY_FALLBACK / UNAVAILABLE / NO_YM：既存Legacy取得へfallback。
-    const ds = dsByYM(ym);
-    return { needsLoad:false, groups: groupsFromDS(ds) };
+    return { needsLoad:false, groups:(resolved.groups||[]).map(canonicalGroupToComparisonShape) };
   }
-  function buildComparisonRowsForHome(ds){
-    if (!ds || !ds.ym) return { rows:[], needsLoad:[] };
-    const curYM = String(ds.ym);
+  function buildComparisonRowsForYM(ym){
+    if (!ym) return { rows:[], needsLoad:[] };
+    const curYM = String(ym);
     const prevYMv = prevYM(curYM);
     const lyYMv = lastYearYM(curYM);
 
@@ -1536,7 +1169,17 @@ function renderShipper() {
       else view.appendChild(panel);
     }
 
-    const rows = buildComparisonRows(ds);
+    const result = buildComparisonRowsForYM(ds.ym);
+    if (result.needsLoad.length && window.SHIPPER_DATA_ACCESS?.loadMonth) {
+      panel.innerHTML = `<div class="shipper-compare-card"><div class="shipper-compare-head"><span>前月・前年比較／件数×単価分解</span><span class="shipper-compare-sub">${escCmp(ymLabelCmp(ds.ym))}</span></div><div class="shipper-compare-body">確認済みデータを読み込んでいます…</div></div>`;
+      const requestedYM = String(ds.ym||'');
+      Promise.all(result.needsLoad.map(ym=>SHIPPER_DATA_ACCESS.loadMonth(ym))).then(()=>{
+        const currentDS = typeof selectedDatasetInSelectedFiscalYear === 'function' ? selectedDatasetInSelectedFiscalYear() : null;
+        if (String(currentDS?.ym||'') === requestedYM) renderComparePanel();
+      }).catch(e=>console.warn('[Shipper] canonical read model failed(compare)', e));
+      return;
+    }
+    const rows = result.rows;
     if (!rows.length) {
       panel.innerHTML = `<div class="shipper-compare-card"><div class="shipper-compare-head"><span>前月・前年比較／件数×単価分解</span><span class="shipper-compare-sub">${escCmp(ymLabelCmp(ds.ym))}</span></div><div class="shipper-compare-body">比較対象データがありません。</div></div>`;
       return;
@@ -1601,12 +1244,12 @@ function renderShipper() {
     // D4-39: 当月・前月・前年同月をそれぞれ独立してCanonical優先で
     // SOURCE選択する。いずれかが未ロードならloadMonth()を並列実行し、
     // 完了後に再描画する（対象月が変わっていれば古い結果は捨てる）。
-    const result = buildComparisonRowsForHome(ds);
-    if (result.needsLoad.length && window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth) {
+    const result = buildComparisonRowsForYM(ds.ym);
+    if (result.needsLoad.length && window.SHIPPER_DATA_ACCESS?.loadMonth) {
       mini.innerHTML = '<div class="dashboard-unit-title">上位3社の件数・平均単価</div><div class="dashboard-unit-list">確認済みデータを読み込んでいます…</div>';
       const token = ++__homeShipperCompareToken;
       const requestedYM = String(ds.ym||'');
-      Promise.all(result.needsLoad.map(ym=>CANONICAL_ANALYSIS_READ_MODELS.loadMonth(ym))).then(()=>{
+      Promise.all(result.needsLoad.map(ym=>SHIPPER_DATA_ACCESS.loadMonth(ym))).then(()=>{
         if (token !== __homeShipperCompareToken) return;
         const currentDS = typeof selectedDashboardDS === 'function' ? selectedDashboardDS() : null;
         if (String(currentDS?.ym||'') !== requestedYM) return; // 対象月変更時は古い結果を捨てる

@@ -262,21 +262,6 @@ window.renderDashboard = function renderDashboard() {
     }
   }
 
-  // 荷主バー（shippers存在時のみ）
-  const shipArea = document.getElementById('shipper-bars-area');
-  if (shipArea) {
-    if (ds.shippers && Object.keys(ds.shippers).length) {
-      const items = Object.entries(ds.shippers).sort((a,b)=>b[1].income-a[1].income).slice(0,8);
-      const maxV = Math.max(...items.map(x=>x[1].income),1);
-      shipArea.innerHTML = items.map(([name,d],i)=>`
-        <div class="mbar-row">
-          <div class="mbar-label" title="${esc(name)}">${esc(name)}</div>
-          <div class="mbar-track"><div class="mbar-fill" style="width:${(d.income/maxV*100).toFixed(1)}%;background:${CONFIG.COLORS[i%CONFIG.COLORS.length]}"></div></div>
-          <div class="mbar-val">${fmtK(d.income)}千</div>
-        </div>`).join('');
-    } else {
-      shipArea.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text3)">荷主データは別途CSV取込が必要です</div>';
-    }
-  }
+  // 荷主バーはshipper.jsのCanonical対応Hookが一元描画する。
 };
 })();

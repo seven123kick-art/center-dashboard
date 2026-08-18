@@ -54,30 +54,13 @@
     if (msg) msg.remove();
   }
 
-  function groupsOfTrend(ds){
-    if (ds && Array.isArray(ds.shipperGroups)) return ds.shipperGroups;
-    if (ds && ds.shippers && typeof ds.shippers === 'object') {
-      return Object.entries(ds.shippers).map(([name,d])=>({
-        name,
-        income:Number(d && d.income)||0,
-        count:Number(d && d.count)||0,
-        code4:(d && (d.code4 || d.code3)) || name,
-        code3:(d && (d.code4 || d.code3)) || name,
-        isOther:false,
-        contracts:[]
-      }));
-    }
-    return [];
-  }
-
   function ticketCountOfTrend(ds){
     if (!ds) return 0;
-    if (typeof ds.shipperTicketCount === 'number') return ds.shipperTicketCount;
-    return groupsOfTrend(ds).reduce((sum,g)=>sum+(Number(g.count)||0),0);
-  }
-
-  function groupKey(g){
-    return String(g && (g.code4 || g.code3 || g.name) || '');
+    const resolved = window.SHIPPER_DATA_ACCESS?.resolveMonth ? SHIPPER_DATA_ACCESS.resolveMonth(ds.ym) : null;
+    if (resolved && resolved.state !== 'NOT_LOADED') {
+      return (resolved.groups || []).reduce((sum,g)=>sum+(Number(g.count)||0),0);
+    }
+    return typeof ds.shipperTicketCount === 'number' ? ds.shipperTicketCount : 0;
   }
 
   function renderTrend() {
@@ -143,42 +126,7 @@
       });
     }
 
-    if (document.getElementById('c-trend-shipper')) {
-      const latest = selectedDatasetInSelectedFiscalYear() || list[list.length-1];
-      const top = groupsOfTrend(latest)
-        .filter(g => !g.isOther && String(g.code4 || g.code3 || '') !== '9999')
-        .filter(g => Number(g.income || 0) !== 0)
-        .slice(0,5);
-
-      if (!top.length) {
-        emptyBox('c-trend-shipper', '主要荷主データがありません');
-      } else {
-        showCanvas('c-trend-shipper');
-        CHART_MGR.make('c-trend-shipper', {
-          type:'line',
-          data:{
-            labels,
-            datasets:top.map((g,i)=>({
-              label:g.name,
-              data:list.map(d=>{
-                const found = groupsOfTrend(d).find(x=>groupKey(x) === groupKey(g) || x.name === g.name);
-                return found ? (Number(found.income)||0)/1000 : 0;
-              }),
-              borderColor:CONFIG.COLORS[i%CONFIG.COLORS.length],
-              backgroundColor:CONFIG.COLORS[i%CONFIG.COLORS.length],
-              tension:.25,
-              pointRadius:3
-            }))
-          },
-          options:{
-            responsive:true,
-            maintainAspectRatio:false,
-            plugins:{legend:{position:'bottom'}},
-            scales:{y:{title:{display:true,text:'千円'}}}
-          }
-        });
-      }
-    }
+    // 主要荷主推移はshipper.jsの月単位Canonical/Legacy Resolverで一元描画する。
 
     const tbody = document.getElementById('trend-tbody') || document.getElementById('trend-table-body') || document.getElementById('trend-summary-body');
     if (tbody) {
