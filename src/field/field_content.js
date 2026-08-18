@@ -27,6 +27,15 @@
     return (window.STATE && STATE.selYM && yms.includes(STATE.selYM)) ? STATE.selYM : (yms.at(-1) || '');
   }
   function productRecord(ym){
+    // D4-37: 対象月についてCanonical Read Modelを先に確認する。
+    // READYでfieldProductAreaが存在すれば、その月はCanonicalだけを
+    // 使用し（Legacyへは進まずここで返す）、0件でもLegacyで補完しない。
+    // field_product.js / field_area.jsと同一のパターンを踏襲する。
+    const canonicalState = ym && window.CANONICAL_ANALYSIS_READ_MODELS?.peek?.(ym);
+    if (canonicalState?.status === 'READY' && canonicalState.fieldProductArea) {
+      return { ...canonicalState.fieldProductArea, __source: 'CANONICAL.SHIPPER_AREA' };
+    }
+    // Canonical SOURCEが存在しない月のみ、従来通りLegacyへfallbackする。
     const records = window.FIELD_DATA_ACCESS?.getProductRecords ? FIELD_DATA_ACCESS.getProductRecords() : safeArray(STATE?.productAddressData);
     return records.find(d => d && d.ym === ym) || null;
   }
@@ -178,6 +187,14 @@
     const pane = document.getElementById('fpane-content');
     if (!pane) return;
     const ym = selectedYM();
+    // D4-37: 対象月のCanonical Read Modelがまだキャッシュされていない
+    // 場合、非同期でロードし完了後に再描画する
+    // （field_product.js/field_area.jsと同じプリロードパターン）。
+    // これがないと初回アクセス時は常にpeek()がnullを返し、実際には
+    // Canonicalが利用可能でもLegacyへfallbackし続けてしまう。
+    if (ym && window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth && !CANONICAL_ANALYSIS_READ_MODELS.peek(ym)) {
+      CANONICAL_ANALYSIS_READ_MODELS.loadMonth(ym).then(()=>renderSoon()).catch(e=>console.warn('[field_content] canonical read model failed', e));
+    }
     const rec = productRecord(ym);
     if (!rec || !safeArray(rec.tickets).length) {
       pane.innerHTML = `<div class="fc-note">商品・住所CSVを読み込むと、作業内容分析を表示します。</div><div class="fc-card"><div class="fc-body" style="padding:44px;text-align:center;color:var(--text3);font-weight:800">選択月の作業内容データがありません。</div></div>`;

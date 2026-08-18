@@ -1,3 +1,125 @@
+Version6 D4-37: 作業内容分析 Canonical Read Model移行
+（2026-08-18）
+
+【GitHub正本・基準SHAの確認】
+GitHub正本 seven123kick-art/center-dashboard の最新mainを取得し、
+HEADのSHAが指定された確認時基準SHA
+fbbc3620c93dfb9712b2163c85ead952b2f6532f と完全に一致することを
+確認した上で作業した。
+
+【目的】
+Legacy FIELD_DATA_ACCESS.getProductRecords()を直接使用していた
+作業内容分析（src/field/field_content.js）を、既存の
+CANONICAL_ANALYSIS_READ_MODELS へ接続した。商品カテゴリ分析
+（field_product.js）・エリア分析（field_area.js）が既に採用して
+いるのと同一のパターンをそのまま踏襲した。
+
+【変更ファイル】
+- src/field/field_content.js のみ
+
+============================================================
+変更内容
+============================================================
+
+■ productRecord(ym) の書き換え
+対象月ymについて、まずCANONICAL_ANALYSIS_READ_MODELS.peek(ym)を
+確認する。status==='READY'かつfieldProductAreaが存在する場合は、
+そのオブジェクト（__source:'CANONICAL.SHIPPER_AREA'を付与）を
+そのまま返し、Legacy側の処理へは一切進まない（同一月でCanonicalと
+Legacyを混ぜない、0件でもLegacyで補完しない）。
+Canonical SOURCEが存在しない月のみ、従来通り
+FIELD_DATA_ACCESS.getProductRecords()（またはSTATE.
+productAddressData）からのLegacy取得を行う。この既存ロジック
+自体は1行も変更していない。
+
+■ render()内へのCanonical Read Modelプリロード処理の追加
+field_product.js/field_area.jsと同一のパターンで、対象月の
+Read Modelがまだキャッシュされていない場合（peek()がnullを返す
+場合）、CANONICAL_ANALYSIS_READ_MODELS.loadMonth(ym)を非同期で
+呼び出し、完了後にrenderSoon()で再描画する処理を追加した。
+これがないと、初回アクセス時は常にpeek()がnullを返し、実際には
+Canonicalが利用可能な月であってもLegacyへfallackし続けてしまう
+（field_product.js側で既に確立されているパターンであり、新規の
+挙動を発明していない）。
+
+【表示（Canonical/Legacy判別）について】
+ご指示は「商品カテゴリ分析・エリア分析と同様、可能なら画面上の
+補足に表示できるようにする」というものだったが、実際に
+field_product.js・field_area.jsのソースコードを確認した結果、
+両画面とも__sourceフィールドをデータ内部のメタ情報として
+付与しているのみで、画面上に「Canonical（確認済みSHIPPER_AREA
+CURRENT SOURCE）」等のテキストを明示的に描画している箇所は
+存在しないことを確認した（grepで該当テキスト0件）。
+そのため、field_content.jsも同じ水準（__sourceメタ情報の付与に
+とどめ、新規のUI要素・テキスト表示は追加しない）に揃えた。
+これは「新しいCSSパッチは追加しない」というご指示の制約とも
+合致する判断である。
+
+============================================================
+Canonical/Legacy切替条件
+============================================================
+1. 対象月ymについてCANONICAL_ANALYSIS_READ_MODELS.peek(ym)を確認
+2. status==='READY' かつ fieldProductAreaが存在 → その月は
+   Canonicalのみを使用（tickets 0件でもLegacyを足さない）
+3. 上記以外（Canonical未READY・fieldProductArea不在）→ 従来の
+   FIELD_DATA_ACCESS.getProductRecords()へfallback
+4. 月を切り替えるたびにproductRecord(ym)が呼び直され、その月の
+   peek(ym)結果に応じて1〜3が再判定される
+5. render()冒頭のプリロード処理により、Canonicalがまだ
+   キャッシュされていない月は非同期ロード後に自動再描画され、
+   2回目以降のrender()呼び出しでは正しくCanonicalへ切り替わる
+
+============================================================
+テスト結果
+============================================================
+node --check src/field/field_content.js : PASS
+
+Node.js環境でproductRecord()と同一のロジックを実行し、以下を
+確認した：
+1. Canonical READY＋データありのケース：__source=
+   'CANONICAL.SHIPPER_AREA'、tickets 1件（Canonicalのデータが
+   採用される）
+2. Canonical READY＋0件のケース：__source=
+   'CANONICAL.SHIPPER_AREA'のまま、tickets 0件
+   （Legacy側に同じ月のデータが1件存在していても混ぜない
+   ことを確認）
+3. Canonicalなしのケース：__source未設定（Legacy経由）、
+   tickets 1件（Legacyへ正しくfallbackする）
+4. 月切替時の再判定：202606（Canonical READY）→
+   'CANONICAL.SHIPPER_AREA'、202607（Canonical未READY）→
+   Legacyという形で、月ごとに独立して正しく切り替わることを
+   確認した
+5. 既存の作業分類結果が変化しないこと：classifyWork/isCrane/
+   isRecycle/isWaste/isKansen/buildRows/bars等の分類・集計関数を
+   一切変更していないことをdiffで確認した。またCanonical Read
+   Modelのticket構造（amount/product/productName/workDetails/
+   works）が、buildRows()が既存で期待するフィールド構造と完全に
+   互換であることを確認した。
+
+============================================================
+既存機能への影響
+============================================================
+なし。
+・productRecord()の戻り値の型（{ym, tickets, ...}という構造を
+  持つオブジェクトまたはnull）は変更していないため、呼出元の
+  render()/buildRows()は一切変更不要だった。
+・分類ロジック（大分類→中分類→小分類、クレーン、リサイクル、
+  廃材、幹線除外等）は1行も変更していない。
+・KPI・HTMLバー・詳細表示のHTML生成ロジックは一切変更していない。
+・STATE、Repository、Supabase、SOURCE parser
+  （source_normalizer.js等）、Canonical Builder
+  （canonical_builder.js/canonical_analysis_read_models.js等）は
+  今回一切変更していない（呼び出すだけで、モジュール自体は
+  変更していない）。
+・CSSは今回一切変更していない（新規CSSパッチなし）。
+・field_content.js以外のファイルは今回一切変更していない。
+
+============================================================
+最終判定
+============================================================
+PASS
+
+============================================================
 Version6 D4-35: 便別採算 UI・出力の未確定値安全表示
 （2026-08-17）
 
