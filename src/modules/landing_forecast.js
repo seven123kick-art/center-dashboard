@@ -229,12 +229,23 @@
       if (!arr.length) { if(msg) msg.textContent='CSVを選択してください'; return; }
       let imported = 0;
       const logs = [];
+      const normalizedByYM = new Map();
+      const normalizedFilesByYM = new Map();
       for (const f of arr) {
         try {
           const text = await CSV.read(f);
           const records = parseDailyText(text, f.name);
           if (!records.length) throw new Error('日別集計できる行がありません');
           upsertDaily(records);
+          if (window.DAILY_ACCOUNTING_IMPORT_BRIDGE?.normalizeCsvText) {
+            const normalized = DAILY_ACCOUNTING_IMPORT_BRIDGE.normalizeCsvText(text,{file_name:f.name});
+            normalized.forEach(r=>{
+              if(!normalizedByYM.has(r.year_month)) normalizedByYM.set(r.year_month,[]);
+              normalizedByYM.get(r.year_month).push(r);
+              if(!normalizedFilesByYM.has(r.year_month)) normalizedFilesByYM.set(r.year_month,new Set());
+              normalizedFilesByYM.get(r.year_month).add(f.name);
+            });
+          }
           imported += records.length;
           const ymSet = Array.from(new Set(records.map(r=>r.ym))).join(', ');
           logs.push(`OK ${f.name}：${records.length}日分（${ymSet}）`);
@@ -243,6 +254,16 @@
         }
       }
       Repository.Storage.save();
+      if (normalizedByYM.size && window.DAILY_ACCOUNTING_IMPORT_BRIDGE?.persistRecords) {
+        for (const [period, rows] of normalizedByYM.entries()) {
+          try {
+            const saved = await DAILY_ACCOUNTING_IMPORT_BRIDGE.persistRecords(rows,{period,source_file_names:[...(normalizedFilesByYM.get(period)||[])]});
+            if(!saved?.ok) logs.push(`WARN ${ymLabelLocal(period)}：Version6日別SOURCE保存 ${saved?.error||'失敗'}`);
+          } catch(e) {
+            logs.push(`WARN ${ymLabelLocal(period)}：Version6日別SOURCE保存 ${e.message||e}`);
+          }
+        }
+      }
       if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:true }).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(e=>{ console.warn('[D4-16] landing forecast cloud sync failed',e); UI.toast('日別実績はローカル保存済みですが、クラウド同期に失敗しました','warn'); });
       this.renderImportPanel();
       this.render();

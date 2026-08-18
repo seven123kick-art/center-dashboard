@@ -1,3 +1,11 @@
+M2-2 (2026-08-19) SKDL0001 着地予測用SOURCE正式化
+- SKDL0001を PL_DAILY_ACTUAL としてData Catalogへ追加。月次PLの正本には使用せず、着地予測・月末突合専用と明示。
+- Daily Accounting Normalizer / Import Bridgeを追加し、計上日・科目・金額をNormalized Sourceへimmutable batch保存。
+- NormalizedSourceRepositoryの対応SOURCEへPL_DAILY_ACTUALを追加。
+- SKDL0001取込時に既存STATE.dailyRecords保存を維持しつつ、Version6 Normalized Sourceへdual-writeする移行段階とした。
+- UNKNOWN金額はNormalized Source上でnull + amount_known=falseとして保持し、0へ変換しない。
+- M2-2では着地予測の読取元・予測係数・月次PLロジックは変更しない。
+
 M1-2 (2026-08-18) 月次管理状態UI
 - データ確認画面の先頭に MONTHLY_MANAGEMENT_STATUS の月次サマリーを追加。
 - 月次収支 / 作業者分析 / 荷主・商品・エリア分析 / 配送実績 / 便別採算を業務用語で表示。

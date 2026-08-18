@@ -21,7 +21,7 @@
   const VERSION=1;
   const PREFIX='normalized_source_v1';
   const CACHE_KIND='normalized_source';
-  const SUPPORTED=new Set(['PL_ACTUAL','WORKER_SALES','SHIPPER_AREA','DELIVERY_LIST','ROUTE_PAYMENT']);
+  const SUPPORTED=new Set(['PL_ACTUAL','PL_DAILY_ACTUAL','WORKER_SALES','SHIPPER_AREA','DELIVERY_LIST','ROUTE_PAYMENT']);
   const clone=v=>JSON.parse(JSON.stringify(v));
   const clean=v=>String(v??'').trim();
 

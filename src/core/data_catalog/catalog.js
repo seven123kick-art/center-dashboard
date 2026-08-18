@@ -116,6 +116,37 @@
   };
 
   /* ------------------------------------------------------------
+     PL_DAILY_ACTUAL（SKDL0001 日報 / 着地予測専用）
+     ------------------------------------------------------------
+     【業務仕様確定（M2-2 / 2026-08-19）】
+     SKDL0001は月次PLの正本ではない。月途中の進捗・着地予測と、
+     月末のSKDL0003確定値とのRECONCILIATIONにだけ使用する。
+     PL_ACTUALへ混ぜず、独立SOURCEとして保持する。
+  ------------------------------------------------------------ */
+  const PL_DAILY_ACTUAL = {
+    document_type: 'PL_DAILY_ACTUAL',
+    display_name: '日別収支実績（SKDL0001 / 着地予測用）',
+    source_system: 'SKKS',
+    allowed_extensions: ['.csv'],
+    filename_policy: 'UNSPECIFIED',
+    target_scope: 'CENTER_MONTH',
+    business_role: '月途中の日別進捗・着地予測、および月末確定PLとの突合に使用する。月次PLの正式値には使用しない',
+    source_link_fields: ['accounting_date', 'account_name'],
+    business_entity_key_contract: null,
+    canonical_fields: [],
+    validation: { content_check: 'REQUIRES_ACCOUNTING_DATE_ACCOUNT_NAME_AMOUNT',
+      existing_reference: { file: 'src/modules/landing_forecast.js', function: 'LANDING_FORECAST_UI.importFiles(files)',
+        note: '既存SKDL0001取込と並行してNormalized Sourceへ保存する。M2-2では着地予測の読取元はまだSTATE.dailyRecordsを維持する。' } },
+    year_month_detection: 'ACCOUNTING_DATE',
+    center_detection: 'CURRENT_CENTER_CONTEXT',
+    completion_rule: 'FORECAST_INPUT_ONLY',
+    revision_policy: 'REVISABLE',
+    absence_rule: 'NO_FORECAST_WHEN_MISSING',
+    monthly_pl_authority: false,
+    forecast_source: true
+  };
+
+  /* ------------------------------------------------------------
      WORKER_SALES（作業者別売上明細表）
   ------------------------------------------------------------ */
   const WORKER_SALES = {
@@ -281,6 +312,7 @@
   const DATA_CATALOG_ENTRIES = {
     PLAN_BUDGET,
     PL_ACTUAL,
+    PL_DAILY_ACTUAL,
     WORKER_SALES,
     SHIPPER_AREA,
     DELIVERY_LIST,
