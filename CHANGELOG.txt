@@ -1,3 +1,266 @@
+Version6 D4-39: ホーム画面荷主分析 Canonical Read Model優先移行
+（2026-08-18、投入前レビュー指摘の修正反映）
+
+【投入前レビューで発見された問題と修正】
+基準SHA 1610cde19d552d01d78bf795752569db78aa1a26 に対する
+D4-39実装（初版）のZIPをレビューした結果、
+resolveShipperGroupsForYM(ym)のNOT_LOADED判定に問題が指摘された。
+
+既存のCANONICAL_ANALYSIS_READ_MODELS.loadMonth()は、
+WORKER_SALES CURRENTだけ存在しSHIPPER_AREA CURRENTが存在しない
+月でも、status:'READY', worker:非null, shipper:null を返す既存
+仕様がある。初版の判定ロジックはこのケース（READYだがshipperが
+null）を「READY+shipperあり」にも「LEGACY_FALLBACK」にも
+一致させられず、デフォルトのNOT_LOADED分岐に落ちていた。その
+結果、ホーム荷主表示で
+  READY+shipperなし → NOT_LOADED → loadMonth() →
+  キャッシュ済みREADY（内容は変わらない） → 再度NOT_LOADED
+という再ロード・再描画ループが発生し得る状態だった。
+
+【修正内容】
+resolveShipperGroupsForYM(ym)の判定順序を、
+  1. peek(ym) が null／undefined（真のキャッシュミス）
+     → NOT_LOADED（loadMonth()を実行すべき唯一のケース）
+  2. status==='READY' && shipperが存在
+     → READY（Canonical、shipper.groupsのみ使用）
+  3. status==='READY' && shipperが存在しない
+     （その月にSHIPPER_AREA CURRENTが存在しない）
+     → LEGACY_FALLBACK
+  4. status==='LEGACY_FALLBACK'
+     → LEGACY_FALLBACK
+  5. Canonical基盤自体が利用不能
+     → UNAVAILABLE（呼出元でLEGACY_FALLBACKと同様に扱われる）
+という順序へ修正した。peek(ym)が非null（READYでも
+LEGACY_FALLBACKでも）で返ってきた時点で、必ずどちらかへ即座に
+確定させ、それ以上loadMonth()を呼び直さないようにした。
+新しい状態（state値）や新しい集計ロジックは追加せず、既存の
+判定ルールの修正のみを行った。
+
+【追加テスト】
+Node.js環境で、以下のケースを実行し期待通りの結果を確認した：
+・WORKER_SALES CURRENTあり／SHIPPER_AREA CURRENTなし
+  （loadMonth()結果：status:'READY', shipper:null）
+  → resolveShipperGroupsForYM() = 'LEGACY_FALLBACK'
+  → シミュレーションループ（最大10回反復）でloadMonth()相当の
+    呼出しが0回（NOT_LOADED分岐に一度も入らないため再ロード
+    自体が発生しない）であることを確認した
+  → 呼出元コード（homeShipperTop8Hook内の
+    `if (resolved.state === 'NOT_LOADED' && ...)`という条件）を
+    確認し、LEGACY_FALLBACK時はこの分岐をスキップして直接
+    groupsOf(ds)（既存Legacy荷主データ）を使用する経路に
+    入ることをコードレビューで確認した
+・READY+shipperあり → { state:'READY', isCanonical:true,
+  groups:[Canonicalのgroups] }
+・READY+shipper.groups=[] → { state:'READY', isCanonical:true,
+  groups:[] }（0件でもREADY判定のまま、Legacy補完されない
+  ことに変わりなし）
+・LEGACY_FALLBACK → { state:'LEGACY_FALLBACK', isCanonical:false,
+  groups:null }
+・peek=null（NOT_LOADED） → { state:'NOT_LOADED',
+  isCanonical:false, groups:null }
+
+いずれも意図通りの結果となり、初版で確認済みだった①〜⑪の
+テスト結果（前回CHANGELOG参照）にも影響がないことを確認した。
+
+【変更ファイル（今回の修正分）】
+- src/modules/shipper.js（resolveShipperGroupsForYM関数内のみ）
+- CHANGELOG.txt（本セクションの追記のみ）
+
+============================================================
+以下、D4-39初版のCHANGELOG（変更なし、参考として保持）
+============================================================
+
+
+【GitHub正本・基準SHAの確認】
+GitHub正本 seven123kick-art/center-dashboard の最新mainを取得し、
+HEADのSHAが指定された基準SHA
+1610cde19d552d01d78bf795752569db78aa1a26 と完全に一致することを
+確認した上で作業した。
+
+【確認済み事実の実コード検証】
+src/field/shipper.js（正しくはsrc/modules/shipper.js）の
+renderShipper()を実際に確認し、既にCANONICAL_ANALYSIS_READ_MODELS.
+peek(ym)→READY+shipper→canonicalState.shipper.groups/contracts
+という経路を持ち、未ロード時はloadMonth().then(()=>renderShipper())
+で自己再描画する既存パターンがあることを確認した。
+一方、ホーム画面の「荷主別売上 上位8社」（window.RENDER.
+onAfterDashboard内）と「前月・前年比較ミニ表示」
+（renderDashboardCompareMini、buildComparisonRows経由）は、
+groupsOf(ds)/groupsFromDS(ds)というLegacy Dataset直接参照のみを
+使用しており、Canonical Read Modelを一切利用していないことを
+実コードで確認した。
+
+【変更ファイル】
+- src/modules/shipper.js のみ
+
+============================================================
+実装内容
+============================================================
+
+■ 1. 共通ヘルパー resolveShipperGroupsForYM(ym) の追加
+対象月ymについてCANONICAL_ANALYSIS_READ_MODELS.peek(ym)を確認し、
+READY+shipperが存在すればCanonicalのshipper.groupsを、
+status==='LEGACY_FALLBACK'ならその旨を、まだロードされていない
+（peekがnull）ならNOT_LOADEDを返す薄いルーティング関数。
+新しい荷主集計アルゴリズムは含まない（既にcanonical_analysis_
+read_models.jsが計算済みのgroups配列をそのまま参照するだけ）。
+groupsOf(ds)自体は、ticketCountOf/renderShipperの別モンキーパッチ
+/onAfterTrend等、複数の既存呼び出し元があるため、意図しない
+影響を避けるため一切変更していない。
+
+■ 2. ホーム「荷主別売上 上位8社」Hookの書き換え
+window.RENDER.onAfterDashboard内の該当Hookを、名前付き関数式
+（homeShipperTop8Hook）による自己再帰パターンへ書き換えた。
+・resolveShipperGroupsForYMの結果がNOT_LOADEDの場合、
+  「確認済みデータを読み込んでいます…」という既存デザインに
+  沿ったメッセージを表示し、loadMonth()完了後に自分自身
+  （同じ関数参照）を再実行する（他のHookへは一切影響しない、
+  多重登録も発生しない）。
+・レンダートークン（__homeShipperTop8Token）により、対象月が
+  変更された後に古いloadMonth()結果が届いても、新しい月の表示を
+  上書きしないようにした。
+・Canonical READY月はshipper.groupsのみを使用し、0件でも
+  groupsOf(ds)（Legacy）で補完しない（空表示のみ）。
+・LEGACY_FALLBACK/未対応月は既存のgroupsOf(ds)をそのまま使用し、
+  既存の集計・描画ロジック（差分検算表示・棒グラフ描画等）は
+  一切変更していない。
+
+■ 3. 前月・前年比較ミニ表示の書き換え
+buildComparisonRows(ds)（既存、専用荷主分析画面のrenderCompare
+Panelが使用）の計算ロジック本体（sort/slice/countEffect/
+unitEffect分解）を、computeComparisonRowsFromGroups(curGroups,
+prevGroups, lyGroups)という共通内部関数へ抽出した。
+buildComparisonRows(ds)自体はこの共通関数を呼ぶだけの薄い
+ラッパーへ変更したが、Legacy取得ロジック（groupsFromDS/dsByYM/
+prevYM/lastYearYM）は一切変更していないため、戻り値・動作は
+従来と完全に同一である（Node.js環境で新旧実装を同一入力で実行し、
+JSON完全一致することを確認済み）。
+
+新規にbuildComparisonRowsForHome(ds)を追加し、当月・前月・前年
+同月それぞれについて、resolveShipperGroupsForYM経由でCanonical
+優先解決を行った上で、共通のcomputeComparisonRowsFromGroups()へ
+渡す構成とした。Canonicalのgroupオブジェクト（{code3,name,count,
+income,unit,contracts}）は、Legacy側が期待する{key,name,count,
+income,unit}という形状に変換してから渡している（keyはcode3を
+採用、既存のcode4||code3優先ルールとの整合を保った）。
+
+renderDashboardCompareMini()を、buildComparisonRowsForHome()の
+結果を使うよう書き換えた。3か月のいずれかがNOT_LOADEDの場合は
+「確認済みデータを読み込んでいます…」を表示し、必要な月だけを
+Promise.allで並列loadMonth()した上で、完了後に自分自身を
+再実行する。レンダートークン（__homeShipperCompareToken）により、
+対象月変更時に古い結果で新しい月を上書きしないようにした。
+
+【shipper.js内の複数IIFEスコープに関する対応】
+shipper.jsは複数の独立したトップレベルIIFEで構成されており、
+resolveShipperGroupsForYM（ホーム上位8社Hookと同じIIFE内、
+10-462行目）と、前月・前年比較のロジック（別の独立したIIFE、
+1281-1641行目）は直接参照し合えないスコープにあることを実装中に
+発見した。ロジックを複製せず共有するため、
+window.__D4_39_resolveShipperGroupsForYMという内部共有専用の
+参照を用意し、比較ロジック側からこれを呼び出す形にした。
+
+============================================================
+Canonical/Legacy選択ルール
+============================================================
+対象月ymごとに独立して以下を判定する：
+1. CANONICAL_ANALYSIS_READ_MODELS.peek(ym).status==='READY' かつ
+   shipperが存在 → その月はCanonicalのshipper.groupsのみを使用。
+   0件でもLegacyで補完しない。同一月でCanonical/Legacyを混ぜない。
+2. peek(ym)がnull（未ロード）→ loadMonth(ym)を実行し、完了後に
+   再描画する。ロード中は「確認済みデータを読み込んでいます…」
+   を表示する。
+3. status==='LEGACY_FALLBACK'またはCanonical基盤自体が利用不能
+   → 既存のgroupsOf(ds)/groupsFromDS(ds)（Legacy Dataset直接
+   参照）を使用する。
+
+前月・前年比較ミニ表示では、当月・前月・前年同月をそれぞれ
+独立してこのルールで判定するため、
+「当月Canonical・前月Legacy・前年Canonical」のような組合せも
+正しく成立する。ただし同一月内でCanonicalとLegacyのgroups配列を
+混ぜることは一切ない。
+
+============================================================
+テスト結果
+============================================================
+node --check src/modules/shipper.js : PASS
+
+Node.js環境で、resolveShipperGroupsForYM/resolveComparisonGroups
+ForYM/computeComparisonRowsFromGroupsと同一のロジックを実行し、
+以下を確認した：
+1. Canonical READY＋荷主あり → state:'READY', isCanonical:true,
+   Canonicalのgroupsがそのまま返る
+2. Canonical READY＋荷主0件 → state:'READY'のまま、groups:[]
+   （Legacy補完なし）
+3. SHIPPER_AREA CURRENTなし（LEGACY_FALLBACK）→
+   state:'LEGACY_FALLBACK', isCanonical:false
+4. 初回ホーム表示でcacheなし（peekがnull）→ state:'NOT_LOADED'
+   （呼出元がloadMonth()を実行する必要がある状態）
+5. レンダートークンによる競合防止：コードレビューにより、
+   __homeShipperTop8Token/__homeShipperCompareTokenが、
+   loadMonth().then()内で「発行時のトークンと現在のトークンが
+   一致する場合のみ」再描画を行う構造になっていることを確認した
+   （非同期処理中に対象月が変更されトークンがインクリメントされた
+   場合、古い結果は破棄される）。
+6. 当月Canonical／前月Legacy → 前月データがLegacyから正しく
+   取得され、countEffect等の比較計算が成立することを確認した
+7. 当月・前月ともCanonical → 両月ともneedsLoad:falseとなり、
+   Canonical同士で正しく比較できることを確認した
+8. 前年Canonicalなし（LEGACY_FALLBACK）→ 前年だけLegacy
+   fallbackし、needsLoad:falseで即座に解決されることを確認した
+9. 専用荷主分析画面（renderShipper/renderComparePanel）：
+   renderShipper()本体はバイト単位比較で完全一致（無変更）。
+   buildComparisonRows(ds)（薄いラッパー化後）は、同一入力に
+   対して旧実装とJSON完全一致の結果を返すことをNode.js環境で
+   実際に新旧両実装を実行して確認した。
+10. 作業者・商品・エリア・作業内容・便別採算への影響：
+    src/modules/shipper.js以外のファイルは今回一切変更していない
+    （diff -rqで確認済み）ため、これらの画面には影響しない。
+11. コンソールエラー：全JS構文チェックでエラー0件。実ブラウザでの
+    最終確認は本セッションでは実施できていない（残課題）。
+
+============================================================
+既存機能への影響
+============================================================
+なし。
+・groupsOf(ds)/groupsFromDS(ds)/buildComparisonRows(ds)の
+  Legacy取得ロジック自体は1行も変更していない。
+・renderShipper()（専用荷主分析画面のCanonical接続部分）は
+  バイト単位で完全一致（無変更）。
+・center.html/dashboard.jsは今回一切変更していない（diff確認済み）。
+・shipper.js以外の全ファイルは今回一切変更していない。
+・STATE、Repository、Supabase、CSV取込仕様、dashboard.jsの
+  PL/KPI計算には一切触れていない。
+
+============================================================
+懸念点・残課題
+============================================================
+・実ブラウザでの最終目視確認（コンソールエラー含む）は本セッション
+  では実施できていない。
+・shipper.js内の複数IIFEスコープをまたぐ共有手段として
+  window.__D4_39_resolveShipperGroupsForYMというグローバル参照を
+  追加した。これは技術的には新しいグローバル変数の追加だが、
+  荷主集計ロジック自体の複製を避けるための最小限の手段であり、
+  既存のwindow.CANONICAL_ANALYSIS_READ_MODELS等と同じ命名慣習
+  （window直下への機能公開）に沿っている。
+・Canonicalのgroupオブジェクト（code3ベース）とLegacyの
+  groupsFromDS（code4||code3優先）とで、荷主のキー解決方法が
+  完全に一致しない可能性がある（Canonical側にはcode4フィールドが
+  存在しないため）。実データでの荷主名寄せの一致率は今回のセッション
+  では検証できていない。
+
+============================================================
+最終判定
+============================================================
+PASS
+（ホーム画面の「荷主別売上 上位8社」「前月・前年比較ミニ表示」を
+Canonical Read Model優先へ移行し、専用荷主分析画面
+（renderShipper/renderComparePanel）への影響がないことを実装・
+検証で確認した。新しい荷主集計アルゴリズムは作成せず、既存の
+CANONICAL_ANALYSIS_READ_MODELS.shipperと既存のcountEffect/
+unitEffect計算ロジックを再利用した）
+
+============================================================
 Version6 D4-37: 作業内容分析 Canonical Read Model移行
 （2026-08-18）
 

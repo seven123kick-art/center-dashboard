@@ -839,6 +839,49 @@ function renderShipper() {
     return [];
   }
 
+  /* ════════ D4-39: ホーム画面荷主表示のCanonical Read Model優先化 ════════
+     対象月ymについてCANONICAL_ANALYSIS_READ_MODELS.peek(ym)を確認し、
+     READY かつ shipper が存在すれば、その月はCanonicalのshipper.groups
+     だけを使う（Legacyのgroups/shippersを一切混ぜない）。
+     Canonical未ロード（peekがnullで、loadMonthが利用可能）の場合は
+     呼出元へその旨を返し、呼出元が非同期ロード・再描画を行う。
+     status==='LEGACY_FALLBACK'またはCanonical基盤自体が利用不能な場合は
+     呼出元が既存のgroupsOf(ds)/groupsFromDS(ds)（Legacy実装、既存の
+     専用荷主分析でも使われている集計ロジック）へfallbackする。
+     このヘルパー自体は新しい荷主集計アルゴリズムを持たない
+     （既にcanonical_analysis_read_models.jsが計算済みのgroups配列を
+     そのまま参照するだけ）。 */
+  function resolveShipperGroupsForYM(ym){
+    if (!ym) return { state:'NO_YM', isCanonical:false, groups:null };
+    if (!window.CANONICAL_ANALYSIS_READ_MODELS?.peek) return { state:'UNAVAILABLE', isCanonical:false, groups:null };
+    const canonicalState = CANONICAL_ANALYSIS_READ_MODELS.peek(ym);
+    // D4-39修正：NOT_LOADEDは「peek(ym)が null（真のキャッシュミス）」の
+    // 場合だけにする。CANONICAL_ANALYSIS_READ_MODELS.loadMonth()は、
+    // WORKER_SALES CURRENTだけ存在しSHIPPER_AREA CURRENTが存在しない月
+    // でも status:'READY', worker:非null, shipper:null を返す既存仕様が
+    // ある。これをNOT_LOADEDのまま扱うと、loadMonth()→キャッシュ済み
+    // READY→再度NOT_LOADED判定という無限の再ロード・再描画ループに
+    // なり得るため、peek(ym)が非nullで返ってきた時点（READYでも
+    // LEGACY_FALLBACKでも）で必ずどちらかへ確定させる。
+    if (canonicalState === null || canonicalState === undefined) {
+      // 呼出元がloadMonth()を実行して再判定する必要がある、真の未ロード状態。
+      return { state:'NOT_LOADED', isCanonical:false, groups:null };
+    }
+    if (canonicalState.status === 'READY' && canonicalState.shipper) {
+      return { state:'READY', isCanonical:true, groups: canonicalState.shipper.groups || [] };
+    }
+    // status==='READY'だがshipperがnull（その月にSHIPPER_AREA CURRENTが
+    // 存在しない）、またはstatus==='LEGACY_FALLBACK'のいずれも、
+    // 既にpeekから確定した結果が得られているためLegacy fallbackとする
+    // （再ロードは行わない）。
+    return { state:'LEGACY_FALLBACK', isCanonical:false, groups:null };
+  }
+  // D4-39: shipper.js内には複数の独立したIIFEが存在し、後方の
+  // 「前月・前年比較」IIFE（別スコープ）からもこの関数を再利用する
+  // 必要があるため、内部共有専用の参照として公開する（新しい
+  // 荷主解決ロジックを別途複製しないための最小限の共有手段）。
+  window.__D4_39_resolveShipperGroupsForYM = resolveShipperGroupsForYM;
+
   function contractsOf(ds){
     return ds && Array.isArray(ds.shipperContracts) ? ds.shipperContracts : [];
   }
@@ -858,22 +901,48 @@ function renderShipper() {
      これによりrenderDashboardへの直接モンキーパッチは全て解消され、
      Layer3の中継役1箇所のみが、dashboard.js本来のrenderDashboardを
      直接ラップする形になった。 ════════ */
-  window.RENDER.onAfterDashboard(function(){
+  let __homeShipperTop8Token = 0;
+  window.RENDER.onAfterDashboard(function homeShipperTop8Hook(){
     const ds = selectedDashboardDS();
     const shipArea = document.getElementById('shipper-bars-area');
     if (!shipArea || !ds) return;
 
-    const items = groupsOf(ds)
+    const analysisYM = String(ds.ym||'').replace(/\D/g,'').slice(0,6);
+    const resolved = resolveShipperGroupsForYM(analysisYM);
+
+    if (resolved.state === 'NOT_LOADED' && window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth) {
+      shipArea.innerHTML = '<div class="msg msg-info">確認済みデータを読み込んでいます…</div>';
+      const token = ++__homeShipperTop8Token;
+      const requestedYM = analysisYM;
+      CANONICAL_ANALYSIS_READ_MODELS.loadMonth(requestedYM).then(()=>{
+        // 対象月が変更後（トークン不一致）または既に別のロードが走っていたら、
+        // この結果で古い月・古い表示を上書きしない。
+        if (token !== __homeShipperTop8Token) return;
+        homeShipperTop8Hook();
+      }).catch(e=>{
+        console.warn('[Shipper] canonical read model failed(home top8)', e);
+        if (token === __homeShipperTop8Token) homeShipperTop8Hook();
+      });
+      return;
+    }
+
+    const usingCanonical = resolved.isCanonical;
+    // D4-39: Canonical READY月はshipper.groupsのみを使用し、Legacyのgroupsを混ぜない。
+    // 0件でもgroupsOf(ds)へ補完せず空表示にする。
+    const allGroups = usingCanonical ? (resolved.groups || []) : groupsOf(ds);
+    const items = allGroups
       .filter(g => Number(g.income) !== 0 || Number(g.count) !== 0)
       .slice(0,8);
 
     if (!items.length) {
-      shipArea.innerHTML = '<div class="empty">荷主データなし。確定CSV／速報CSVを再取込してください。</div>';
+      shipArea.innerHTML = usingCanonical
+        ? '<div class="empty">対象月の荷主データがありません。</div>'
+        : '<div class="empty">荷主データなし。確定CSV／速報CSVを再取込してください。</div>';
       return;
     }
 
     const maxV = Math.max(...items.map(g=>Math.abs(Number(g.income)||0)),1);
-    const shipperTotal = groupsOf(ds).reduce((sum,g)=>sum+(Number(g.income)||0),0);
+    const shipperTotal = allGroups.reduce((sum,g)=>sum+(Number(g.income)||0),0);
     const revenueTotal = Number(ds.totalIncome)||0;
     const gap = revenueTotal - shipperTotal;
     const gapK = Math.round(gap/1000);
@@ -1314,15 +1383,17 @@ function renderShipper() {
     return `${value} / ${pctText}`;
   }
 
-  function buildComparisonRows(ds){
-    if (!ds || !ds.ym) return [];
-    const curGroups = groupsFromDS(ds);
-    const prevDS = dsByYM(prevYM(ds.ym));
-    const lyDS = dsByYM(lastYearYM(ds.ym));
-    const prevMap = new Map(groupsFromDS(prevDS).map(g => [g.key, g]));
-    const lyMap = new Map(groupsFromDS(lyDS).map(g => [g.key, g]));
+  /* D4-39: 計算ロジック本体（sort/slice/countEffect/unitEffect分解）を
+     共通関数へ抽出した。buildComparisonRows(ds)（既存、専用荷主分析
+     画面のrenderComparePanelが使用）はこの関数を呼ぶだけの薄い
+     ラッパーへ変更しており、戻り値・動作は従来と完全に同一である。
+     新しい集計アルゴリズムは追加していない（同じsort/slice/
+     countEffect/unitEffectの計算式をそのまま再利用するだけ）。 */
+  function computeComparisonRowsFromGroups(curGroups, prevGroups, lyGroups){
+    const prevMap = new Map((prevGroups||[]).map(g => [g.key, g]));
+    const lyMap = new Map((lyGroups||[]).map(g => [g.key, g]));
 
-    return curGroups
+    return (curGroups||[])
       .sort((a,b)=>b.income-a.income || b.count-a.count || a.name.localeCompare(b.name,'ja'))
       .slice(0,12)
       .map(g => {
@@ -1349,6 +1420,64 @@ function renderShipper() {
           unitEffect
         };
       });
+  }
+
+  function buildComparisonRows(ds){
+    if (!ds || !ds.ym) return [];
+    const curGroups = groupsFromDS(ds);
+    const prevDS = dsByYM(prevYM(ds.ym));
+    const lyDS = dsByYM(lastYearYM(ds.ym));
+    return computeComparisonRowsFromGroups(curGroups, groupsFromDS(prevDS), groupsFromDS(lyDS));
+  }
+
+  /* ════════ D4-39: ホーム「前月・前年比較ミニ」専用のCanonical優先版 ════════
+     当月・前月・前年同月をそれぞれ独立してSOURCE選択する。
+     計算ロジック自体（sort/slice/countEffect/unitEffect）は
+     computeComparisonRowsFromGroups()を再利用し、新しい集計
+     アルゴリズムは作らない。SOURCE取得部分だけをCanonical優先にする。
+     同一月でCanonicalとLegacyを混ぜない（月ごとに独立してREADY/
+     LEGACY_FALLBACKを判定する）。3か月のうち、いずれかがまだ
+     Canonicalをロード中の場合はneedsLoad配列に対象ymを積んで返し、
+     呼出元が非同期ロード完了後に再実行する。 */
+  function canonicalGroupToComparisonShape(g){
+    return {
+      key: String(g && (g.code3 || g.name) || ''),
+      name: String((g && g.name) || '未設定'),
+      count: Number(g && g.count) || 0,
+      income: Number(g && g.income) || 0,
+      unit: Number(g && g.unit) || 0
+    };
+  }
+  function resolveComparisonGroupsForYM(ym){
+    const resolved = window.__D4_39_resolveShipperGroupsForYM ? window.__D4_39_resolveShipperGroupsForYM(ym) : { state:'UNAVAILABLE', isCanonical:false, groups:null };
+    if (resolved.state === 'READY') {
+      return { needsLoad:false, groups: (resolved.groups||[]).map(canonicalGroupToComparisonShape) };
+    }
+    if (resolved.state === 'NOT_LOADED') {
+      return { needsLoad:true, groups: [] };
+    }
+    // LEGACY_FALLBACK / UNAVAILABLE / NO_YM：既存Legacy取得へfallback。
+    const ds = dsByYM(ym);
+    return { needsLoad:false, groups: groupsFromDS(ds) };
+  }
+  function buildComparisonRowsForHome(ds){
+    if (!ds || !ds.ym) return { rows:[], needsLoad:[] };
+    const curYM = String(ds.ym);
+    const prevYMv = prevYM(curYM);
+    const lyYMv = lastYearYM(curYM);
+
+    const cur = resolveComparisonGroupsForYM(curYM);
+    const prev = prevYMv ? resolveComparisonGroupsForYM(prevYMv) : { needsLoad:false, groups:[] };
+    const ly = lyYMv ? resolveComparisonGroupsForYM(lyYMv) : { needsLoad:false, groups:[] };
+
+    const needsLoad = [
+      cur.needsLoad ? curYM : null,
+      prev.needsLoad ? prevYMv : null,
+      ly.needsLoad ? lyYMv : null
+    ].filter(Boolean);
+    if (needsLoad.length) return { rows:[], needsLoad };
+
+    return { rows: computeComparisonRowsFromGroups(cur.groups, prev.groups, ly.groups), needsLoad:[] };
   }
 
   function ensureCompareStyles(){
@@ -1454,12 +1583,13 @@ function renderShipper() {
       </div>`;
   }
 
+  let __homeShipperCompareToken = 0;
   function renderDashboardCompareMini(){
     ensureCompareStyles();
     const ds = typeof selectedDashboardDS === 'function' ? selectedDashboardDS() : null;
     const shipArea = document.getElementById('shipper-bars-area');
     if (!ds || !shipArea) return;
-    const rows = buildComparisonRows(ds).slice(0,3);
+
     let mini = document.getElementById('dashboard-compare-mini');
     if (!mini) {
       mini = document.createElement('div');
@@ -1467,6 +1597,28 @@ function renderShipper() {
       mini.className = 'dashboard-compare-mini';
       if (shipArea.parentNode) shipArea.parentNode.appendChild(mini);
     }
+
+    // D4-39: 当月・前月・前年同月をそれぞれ独立してCanonical優先で
+    // SOURCE選択する。いずれかが未ロードならloadMonth()を並列実行し、
+    // 完了後に再描画する（対象月が変わっていれば古い結果は捨てる）。
+    const result = buildComparisonRowsForHome(ds);
+    if (result.needsLoad.length && window.CANONICAL_ANALYSIS_READ_MODELS?.loadMonth) {
+      mini.innerHTML = '<div class="dashboard-unit-title">上位3社の件数・平均単価</div><div class="dashboard-unit-list">確認済みデータを読み込んでいます…</div>';
+      const token = ++__homeShipperCompareToken;
+      const requestedYM = String(ds.ym||'');
+      Promise.all(result.needsLoad.map(ym=>CANONICAL_ANALYSIS_READ_MODELS.loadMonth(ym))).then(()=>{
+        if (token !== __homeShipperCompareToken) return;
+        const currentDS = typeof selectedDashboardDS === 'function' ? selectedDashboardDS() : null;
+        if (String(currentDS?.ym||'') !== requestedYM) return; // 対象月変更時は古い結果を捨てる
+        renderDashboardCompareMini();
+      }).catch(e=>{
+        console.warn('[Shipper] canonical read model failed(home compare)', e);
+        if (token === __homeShipperCompareToken) renderDashboardCompareMini();
+      });
+      return;
+    }
+
+    const rows = result.rows.slice(0,3);
     if (!rows.length) {
       mini.innerHTML = '<div class="dashboard-unit-title">上位3社の件数・平均単価</div><div class="dashboard-unit-list">表示対象なし</div>';
       return;
