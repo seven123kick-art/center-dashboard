@@ -1,3 +1,49 @@
+Version6 M1-1: 月次管理状態 Read Model 基盤
+（2026-08-18）
+
+【GitHub正本・基準SHA】
+seven123kick-art/center-dashboard
+4a24997e4b9605bfa49c957f4510484faaa556d3
+
+【変更ファイル】
+- src/core/data_catalog/monthly_management_status.js（新規）
+- center.html
+
+【目的】
+CURRENT Normalized Source / Canonical Analysis Read Model / Canonical Route Ledgerから、月ごとの「経営判断に使える範囲」を自動算出する読み取り専用基盤を追加。月次PLの確定状態と、作業者・荷主・配送・便別採算の分析完成度を分離して扱う。
+
+【主な仕様】
+1. PL_ACTUAL: CONFIRMED / PRELIMINARY / PARTIAL / MISSING / ERRORを判定。SKDL0003確定とSKDL0002速報を区別。
+2. WORKER_SALES: Canonical作業者Read Modelを確認し、未一致/競合があればPARTIAL。
+3. SHIPPER_AREA: Canonical荷主Read ModelのissuesがあればPARTIAL。
+4. DELIVERY_LIST: CURRENTがありCanonical Route Ledgerを使用できればREADY。
+5. ROUTE_PAYMENT: 便ごとのprofitabilityConfirmedを使用し、全便確定でCONFIRMED、一部未確定はPARTIAL。NO_RECORD / ZERO_PAYMENT / UNKNOWNを混同しない。
+6. CURRENT batchが存在する0件月とSOURCE未登録を区別。0件だからLegacyや0値で補完しない。
+7. DATA_PIPELINE_STATUSはIndexedDB上の監査補助情報として添付するが、CURRENT SOURCE実体より優先して業務状態を決めない。
+8. 状態はSTATE / IndexedDB / Supabaseへ重複保存せず、Read Modelとして都度算出・メモリcacheのみ。normalized-source-updated等でcache無効化。
+9. current_batches / source_signatureを返し、将来の月次CLOSED時に「どのCURRENT batchに対して締めたか」を記録できる土台を用意。
+
+【公開API】
+window.MONTHLY_MANAGEMENT_STATUS.build(YYYYMM)
+window.MONTHLY_MANAGEMENT_STATUS.peek(YYYYMM)
+window.MONTHLY_MANAGEMENT_STATUS.invalidate(YYYYMM)
+
+【テスト】
+- node --check src/core/data_catalog/monthly_management_status.js : PASS
+- VMテスト: CONFIRMED PL + 全分析READY -> overall CONFIRMED : PASS
+- VMテスト: PRELIMINARY PL + ROUTE_PAYMENT未登録 -> overall PRELIMINARY / 便別採算MISSING : PASS
+- VMテスト: PL未登録 -> overall INCOMPLETE : PASS
+- VMテスト: 作業者未一致 + 荷主issue + 便別一部未確定 -> CONFIRMED_WITH_WARNINGS / 各PARTIAL : PASS
+- CURRENT batch 0件をMISSING扱いしないこと : PASS
+- center.html script読込順（Canonical Analysis -> M1-1 -> Verification Detail）: PASS
+
+【今回未実装】
+- 月次状態のUI表示
+- 人によるCLOSED/承認
+- 月次締めRepository
+これらはM1-1のRead Model検証後に別工程で実装する。
+
+============================================================
 Version6 D4-40: 荷主分析 Canonical一本化・旧描画整理
 （2026-08-18）
 
