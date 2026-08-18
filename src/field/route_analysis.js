@@ -458,6 +458,41 @@
     return r?.profitabilityConfirmed === true || r?.linkLevel === '完全連動';
   }
 
+  /* ---------- D4-35: 傭車料状態の一意な表示・判定関数 ----------
+     一覧表・カード・詳細モーダル・KPI・Excel出力の全てが、
+     この2関数だけを使って傭車料の表示・確定判定を行う
+     （場所ごとに別判定を書かない、というご指示に従う）。
+
+     r.paymentStatus はCanonical経路（D4-34 CANONICAL_ROUTE_LEDGER）
+     でのみ設定される。Legacy経路（LEGACY_FALLBACK、D4-34以前の
+     src/core/ledger.js）はpaymentStatus自体を持たないため、
+     既存の表示・確定判定（r.paymentを常に確定額として扱う）を
+     そのまま維持する。これはLegacy側の内部ロジック
+     （src/core/ledger.jsのnum()による0埋め等）を今回変更しない
+     という原則、および既存機能を壊さないという原則に基づく
+     意図的な分岐であり、D4-34のCanonical/Legacy非混在原則
+     （同一集計内でCanonicalとLegacyを混在させない）自体は
+     一切変更していない。 */
+  function paymentText(r){
+    if (r?.paymentStatus === undefined) {
+      // Legacy経路：D4-34以前からの既存表示をそのまま維持する。
+      return Number(r?.payment) ? `${fmt(r.payment)}円` : (r?.payment === 0 ? '0円' : '―');
+    }
+    switch (r.paymentStatus) {
+      case 'KNOWN': return `${fmt(r.payment)}円`;
+      case 'ZERO_PAYMENT': return '0円（資料確認済）';
+      case 'NO_RECORD': return '傭車料資料に該当なし';
+      case 'SOURCE_NOT_REGISTERED': return '傭車料SOURCE未登録';
+      case 'UNKNOWN_AMOUNT': return '傭車料金額UNKNOWN';
+      default: return '―';
+    }
+  }
+
+  function isPaymentConfirmed(r){
+    if (r?.paymentStatus === undefined) return true; // Legacy経路は既存動作を維持
+    return r.paymentStatus === 'KNOWN' || r.paymentStatus === 'ZERO_PAYMENT';
+  }
+
   function marginRate(r){
     return isProfitConfirmed(r) && Number(r.sales) ? Number(r.margin) / Number(r.sales) * 100 : null;
   }
@@ -537,7 +572,7 @@
           <div class="route-detail-kpis">
             <div class="route-detail-kpi"><span>配送件数</span><strong>${fmt(r.count)}件</strong></div>
             <div class="route-detail-kpi"><span>売上</span><strong>${salesText(r)}</strong></div>
-            <div class="route-detail-kpi"><span>傭車支払</span><strong>${fmt(r.payment)}円</strong></div>
+            <div class="route-detail-kpi"><span>傭車支払</span><strong>${paymentText(r)}</strong></div>
             <div class="route-detail-kpi"><span>一次利益 / 利益率</span><strong class="${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${isProfitConfirmed(r)?`${fmt(r.margin)}円 / ${rate.toFixed(1)}%`:'― / ―'}</strong></div>
           </div>
           <div class="saas-content-card" style="box-shadow:none">
@@ -577,7 +612,14 @@
       r.operationType || '',
       Number(r.count)||0,
       isProfitConfirmed(r) ? (Number(r.sales)||0) : '未連動',
-      Number(r.payment)||0,
+      // D4-35: 未確定の傭車料（NO_RECORD/SOURCE_NOT_REGISTERED/UNKNOWN_AMOUNT）を
+      // 0円として出力しない。ZERO_PAYMENTだけは資料に基づく確定値のため数値0を出す。
+      // Legacy経路（paymentStatus未定義）は既存動作（Number(r.payment)||0）を維持する。
+      (r.paymentStatus===undefined) ? (Number(r.payment)||0)
+        : (isPaymentConfirmed(r) ? (Number(r.payment)||0) : paymentText(r)),
+      // 傭車料状態列：金額列だけでは「確定した0円」か「未確定」かを区別できないため、
+      // 状態が文字で判別できる専用列を追加する（一覧・カード・詳細と同じpaymentText()を使用）。
+      r.paymentStatus===undefined ? '' : paymentText(r),
       isProfitConfirmed(r) ? (Number(r.margin)||0) : '未確定',
       isProfitConfirmed(r) ? marginRate(r) : '',
       r.status || ''
@@ -585,8 +627,11 @@
     const totalCount=exportRows.reduce((s,r)=>s+(Number(r.count)||0),0);
     const confirmedRows=exportRows.filter(isProfitConfirmed);
     const totalSales=confirmedRows.reduce((s,r)=>s+(Number(r.sales)||0),0);
-    const totalPay=exportRows.reduce((s,r)=>s+(Number(r.payment)||0),0);
-    const confirmedPay=confirmedRows.reduce((s,r)=>s+(Number(r.payment)||0),0);
+    // D4-35: 傭車支払の合計は「金額が確定している便」だけを合算する
+    // （未確定便を0円扱いして全便分の支払が確定しているように見せない）。
+    const paymentConfirmedRows=exportRows.filter(isPaymentConfirmed);
+    const totalPay=paymentConfirmedRows.reduce((s,r)=>s+(Number(r.payment)||0),0);
+    const unconfirmedPaymentCount=exportRows.length-paymentConfirmedRows.length;
     const totalMargin=confirmedRows.reduce((s,r)=>s+(Number(r.margin)||0),0);
     return {
       title:'便別採算',
@@ -600,10 +645,12 @@
         name:'便別採算',
         summary:[{
           label:'集計',
-          columns:['対象便数','配送件数','売上','傭車支払','一次利益','利益率'],
-          rows:[[exportRows.length,totalCount,confirmedRows.length?totalSales:'未連動',totalPay,confirmedRows.length?totalMargin:'未確定',confirmedRows.length&&totalSales ? totalMargin/totalSales*100 : '']]
+          // D4-35: 傭車支払は金額確定便だけの合計であることが分かるよう、
+          // 見出し自体に明記する（未確定便が混在していても全便確定に見せない）。
+          columns:['対象便数','配送件数','売上','傭車支払（金額確定便のみ）','傭車料未確定便数','一次利益','利益率'],
+          rows:[[exportRows.length,totalCount,confirmedRows.length?totalSales:'未連動',totalPay,unconfirmedPaymentCount,confirmedRows.length?totalMargin:'未確定',confirmedRows.length&&totalSales ? totalMargin/totalSales*100 : '']]
         }],
-        columns:['配達日','便・ヘッドNo','作業者','所属会社','運行区分','件数','売上','傭車支払','一次利益','利益率(%)','状態'],
+        columns:['配達日','便・ヘッドNo','作業者','所属会社','運行区分','件数','売上','傭車支払','傭車料状態','一次利益','利益率(%)','状態'],
         rows
       }]
     };
@@ -668,15 +715,20 @@
     const totalCount=rows.reduce((s,r)=>s+r.count,0);
     const confirmedRows=rows.filter(isProfitConfirmed);
     const totalSales=confirmedRows.reduce((s,r)=>s+(Number(r.sales)||0),0);
-    const totalPay=rows.reduce((s,r)=>s+(Number(r.payment)||0),0);
+    // D4-35: 未確定の傭車料（NO_RECORD/SOURCE_NOT_REGISTERED/UNKNOWN_AMOUNT）を
+    // 0円扱いで合算しない。金額が確定している便（KNOWN/ZERO_PAYMENT、または
+    // Legacy経路）だけを対象にする。
+    const paymentConfirmedRows=rows.filter(isPaymentConfirmed);
+    const totalPay=paymentConfirmedRows.reduce((s,r)=>s+(Number(r.payment)||0),0);
+    const unconfirmedPaymentCount=rows.length-paymentConfirmedRows.length;
     const confirmedMargin=confirmedRows.reduce((s,r)=>s+(Number(r.margin)||0),0);
     const confirmedCount=confirmedRows.reduce((s,r)=>s+(Number(r.count)||0),0);
     const kpi=document.getElementById('route-kpi');
     if(kpi) kpi.innerHTML=`
       <div class="kpi-card"><div class="kpi-label">対象便数</div><div class="kpi-value">${fmt(rows.length)}<small style="font-size:11px;margin-left:4px">便</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">配送 ${fmt(totalCount)}件</div></div>
       <div class="kpi-card"><div class="kpi-label">売上</div><div class="kpi-value">${confirmedRows.length?`${fmt(totalSales)}<small style="font-size:11px;margin-left:4px">円</small>`:'未連動'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">完全連動 ${fmt(confirmedRows.length)}便${confirmedRows.length&&confirmedCount?` / 1件平均 ${fmt(totalSales/confirmedCount)}円`:''}</div></div>
-      <div class="kpi-card"><div class="kpi-label">傭車支払</div><div class="kpi-value">${fmt(totalPay)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">全取得便の支払合計</div></div>
-      <div class="kpi-card"><div class="kpi-label">一次利益</div><div class="kpi-value ${confirmedRows.length?(confirmedMargin>=0?'profit-positive':'profit-negative'):''}">${confirmedRows.length?`${fmt(confirmedMargin)}<small style="font-size:11px;margin-left:4px">円</small>`:'未確定'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">${confirmedRows.length&&totalSales?`完全連動分 利益率 ${(confirmedMargin/totalSales*100).toFixed(1)}%`:'売上連動後に確定'}</div></div>`;
+      <div class="kpi-card"><div class="kpi-label">傭車支払</div><div class="kpi-value">${fmt(totalPay)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">金額確定 ${fmt(paymentConfirmedRows.length)}便の支払合計${unconfirmedPaymentCount?`（未確定 ${fmt(unconfirmedPaymentCount)}便を除く）`:''}</div></div>
+      <div class="kpi-card"><div class="kpi-label">一次利益</div><div class="kpi-value ${confirmedRows.length?(confirmedMargin>=0?'profit-positive':'profit-negative'):''}">${confirmedRows.length?`${fmt(confirmedMargin)}<small style="font-size:11px;margin-left:4px">円</small>`:'未確定'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">${confirmedRows.length?`完全連動 ${fmt(confirmedRows.length)}便のみの集計${totalSales?`（利益率 ${(confirmedMargin/totalSales*100).toFixed(1)}%）`:''}`:'売上・傭車料が連動した便が確定後に表示'}</div></div>`;
 
     const diagnostic=document.getElementById('route-diagnostic');
     if(diagnostic && diag){
@@ -702,11 +754,11 @@
     const body=document.getElementById('route-tbody');
     if(body) body.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<tr onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')">
       <td>${esc(r.date)}</td><td><strong>${esc(r.headNumber)}</strong></td><td>${esc(r.worker||'未取得')}</td><td>${r.workerRegistered?`${esc(r.companyName||'未設定')}<div style="font-size:10px;color:var(--text3);margin-top:2px">${esc(r.operationType||'')}</div>`:'<span class="route-status warn">未登録</span>'}</td>
-      <td class="r">${fmt(r.count)}件</td><td class="r">${salesText(r)}</td><td class="r">${fmt(r.payment)}円</td><td class="r"><strong class="${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${marginText(r)}</strong></td><td class="r">${isProfitConfirmed(r)&&rate!==null?rate.toFixed(1)+'%':'—'}</td><td><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span><div style="font-size:10px;color:var(--text3);margin-top:3px">${esc(r.status||'')}</div></td>
+      <td class="r">${fmt(r.count)}件</td><td class="r">${salesText(r)}</td><td class="r">${paymentText(r)}</td><td class="r"><strong class="${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${marginText(r)}</strong></td><td class="r">${isProfitConfirmed(r)&&rate!==null?rate.toFixed(1)+'%':'—'}</td><td><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span><div style="font-size:10px;color:var(--text3);margin-top:3px">${esc(r.status||'')}</div></td>
     </tr>`}).join(''):`<tr><td colspan="10" style="padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</td></tr>`;
 
     const cards=document.getElementById('route-card-grid');
-    if(cards) cards.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<article class="route-profit-card" onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')"><div class="route-card-top"><div><div class="route-card-date">${esc(r.date)}</div><div class="route-card-title">${esc(r.headNumber)}</div><div class="route-card-worker">${esc(r.companyName||'未設定')} / ${esc(r.worker||'未取得')}</div></div><div><div class="route-card-profit-label">一次利益</div><div class="route-card-profit ${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${marginText(r)}</div><div style="text-align:right;margin-top:5px"><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span></div></div></div><div class="route-card-metrics"><div>売上<strong>${salesText(r)}</strong></div><div>傭車支払<strong>${fmt(r.payment)}円</strong></div><div>利益率<strong>${isProfitConfirmed(r)&&rate!==null?rate.toFixed(1)+'%':'—'}</strong></div></div></article>`}).join(''):`<div style="grid-column:1/-1;padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</div>`;
+    if(cards) cards.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<article class="route-profit-card" onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')"><div class="route-card-top"><div><div class="route-card-date">${esc(r.date)}</div><div class="route-card-title">${esc(r.headNumber)}</div><div class="route-card-worker">${esc(r.companyName||'未設定')} / ${esc(r.worker||'未取得')}</div></div><div><div class="route-card-profit-label">一次利益</div><div class="route-card-profit ${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${marginText(r)}</div><div style="text-align:right;margin-top:5px"><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span></div></div></div><div class="route-card-metrics"><div>売上<strong>${salesText(r)}</strong></div><div>傭車支払<strong>${paymentText(r)}</strong></div><div>利益率<strong>${isProfitConfirmed(r)&&rate!==null?rate.toFixed(1)+'%':'—'}</strong></div></div></article>`}).join(''):`<div style="grid-column:1/-1;padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</div>`;
     setView(viewMode);
   }
 

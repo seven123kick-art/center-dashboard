@@ -1,51 +1,183 @@
-Version6 D4-34 / Canonical Route Profitability Safety
-Date: 2026-08-17
-Base GitHub main: 10649ef02856df72a40a48f42ffeb282a039d5d2
+Version6 D4-35: 便別採算 UI・出力の未確定値安全表示
+（2026-08-17）
 
-実コード確認で判明した問題
-- D4-22 CANONICAL_ROUTE_LEDGER は PL_ACTUAL等を含む「どれか1つのCURRENT batch」があれば
-  Canonical便集計へ切り替えていた。
-- そのためDELIVERY_LISTがない月でもCanonical便側へ入る可能性があり、
-  便0件化や不完全な表示に切り替わる余地があった。
-- ROUTE_PAYMENTのNO_RECORDは利益確定には使われていなかったが、
-  route row上のpayment値は0へ補完されており、ZERO_PAYMENTとの意味の違いが弱かった。
+【前提・制約事項の正直な報告】
+ご指示は基準コミット4dc0d37f3ac672a67de41e5155bd8844734fa2bfから
+最新GitHubを取得して作業することを求めていたが、リポジトリの
+owner/repo名（URL）が本セッションでは提供されておらず、また
+本サンドボックス環境からGitHubへ直接pushする認証情報も持たない
+ため、以下の対応とした：
+・作業対象コードは、本セッションでアップロードされた
+  center-dashboard-main.zip（最新コードとして提供されたもの）を
+  使用した。
+・実装完了後、GitHubへの反映（コミット）は本セッションでは
+  実行できていない。反映作業はユーザー側で実施いただく必要が
+  あり、その場合のコミットSHAは本報告に含められない。
+この制約により、ご指示の完了報告項目「GitHubへ反映したコミット
+SHA」は、今回のセッションでは提供できない。
 
-D4-34修正
-1. Canonical便集計へ切り替える必須条件を DELIVERY_LIST CURRENT に限定。
-2. DELIVERY_LISTがなければ月全体をLegacyへfallback。
-3. CanonicalとLegacyを同一便集計内で混在させない。
-4. PAYMENT状態を正式に区別:
-   - KNOWN
-   - ZERO_PAYMENT
-   - NO_RECORD
-   - UNKNOWN_AMOUNT
-   - SOURCE_NOT_REGISTERED
-5. NO_RECORD/UNKNOWN/SOURCE未登録はpayment=null。0円補完しない。
-6. ZERO_PAYMENTだけはpayment=0として既知値扱い。
-7. 売上状態も KNOWN / UNMATCHED / UNKNOWN_AMOUNT / SOURCE_NOT_REGISTERED / NO_SLIPS に分離。
-8. 配送件数はDELIVERY_LIST掲載原票数を使用し、売上未一致でも0件にしない。
-9. 利益確定は「原票あり + 売上KNOWN + 支払KNOWN/ZERO_PAYMENT」の場合のみ。
-10. 便状態を 完全連動 / 部分連動 / 未連動 に分離。
-11. 診断へ
-    - 完全連動便
-    - 部分連動便
-    - 未連動便
-    - NO_RECORD
-    - ZERO_PAYMENT
-    - UNKNOWN_PAYMENT
-    等を追加。
-12. normalized-source-updatedで便Ledgerキャッシュを破棄。
+【目的】
+D4-34（canonical_route_ledger.js）が既に区別しているpaymentStatus
+（KNOWN/ZERO_PAYMENT/NO_RECORD/SOURCE_NOT_REGISTERED/
+UNKNOWN_AMOUNT）を、便別採算のUI（一覧・カード・詳細モーダル・
+KPI）とExcel出力まで一貫して安全に反映した。
 
-変更ファイル
-- src/core/data_catalog/canonical_route_ledger.js
-- CHANGELOG.txt
+【変更ファイル】
+- src/field/route_analysis.js のみ
 
-変更しないもの
-- route_analysis.js UI
-- SOURCE parser
-- Canonical Builder / Materializer
-- STATE / Repository / Supabase schema
-- 自社便推定ロジック（追加しない）
+============================================================
+変更内容
+============================================================
 
-検証
-- node --check PASS
+■ 共通表示・判定関数の新設（paymentText / isPaymentConfirmed）
+既存のisProfitConfirmed/salesText/marginTextと同じパターンで、
+paymentText(r)とisPaymentConfirmed(r)を新設した。
+
+  paymentText(r)：
+    r.paymentStatusが'KNOWN'         → "○○円"
+    r.paymentStatusが'ZERO_PAYMENT'  → "0円（資料確認済）"
+    r.paymentStatusが'NO_RECORD'     → "傭車料資料に該当なし"
+    r.paymentStatusが'SOURCE_NOT_REGISTERED' → "傭車料SOURCE未登録"
+    r.paymentStatusが'UNKNOWN_AMOUNT' → "傭車料金額UNKNOWN"
+    r.paymentStatusが未定義（Legacy経路） → 既存表示を維持
+
+  isPaymentConfirmed(r)：
+    KNOWN/ZERO_PAYMENTならtrue、それ以外（未確定）はfalse。
+    Legacy経路（paymentStatus未定義）は既存動作を維持し常にtrue。
+
+一覧表・カード表示・詳細モーダル・KPI・Excel出力の全てが、この
+2関数だけを使って傭車料の表示・確定判定を行うようにした
+（場所ごとに別判定を書いていない）。
+
+【Legacy経路の後方互換について】
+D4-34のCanonical Route Ledgerが生成するrouteオブジェクトのみ
+paymentStatusフィールドを持つ。D4-34以前からのLegacy経路
+（src/core/ledger.js由来、LEGACY_FALLBACK時）のrouteオブジェクトは
+paymentStatusを持たない。そのため、paymentText/isPaymentConfirmed
+は「paymentStatus未定義＝Legacy経路」と判定し、既存の表示・確定
+判定（r.paymentを常に確定額として扱う）をそのまま維持する設計と
+した。これはLegacy側の内部ロジック（src/core/ledger.jsのnum()に
+よる0埋め等）を今回変更しないという制約、および既存機能を壊さ
+ないという原則に基づく意図的な分岐であり、D4-34のCanonical/
+Legacy非混在原則（同一集計内でCanonicalとLegacyを混在させない）
+自体は一切変更していない。
+
+■ 1. 一覧表
+傭車支払列を fmt(r.payment)+'円' から paymentText(r) へ置換した。
+
+■ 2. カード表示
+傭車支払欄を fmt(r.payment)+'円' から paymentText(r) へ置換した。
+
+■ 3. 便詳細モーダル
+傭車支払欄を fmt(r.payment)+'円' から paymentText(r) へ置換した。
+
+■ 4. 上部KPI
+「傭車支払」KPIカードのtotalPay計算を、rows全件の
+Number(r.payment)||0合算から、isPaymentConfirmed(r)を満たす便
+だけの合算へ修正した。カード下部の補足文言を「全取得便の支払
+合計」（未確定便を含めて全便確定しているかのように見えた表現）
+から「金額確定 N便の支払合計（未確定 M便を除く）」へ変更し、
+未確定便が混在する場合にそれが分かるようにした。
+「一次利益」KPIカードにも、完全連動便の便数（confirmedRows.
+length）を明示する文言を追加した（従来は利益率のみの表示で、
+何便分の集計かが分かりにくかった）。
+
+■ 5. Excel出力
+buildExportData()内の2箇所を修正した：
+  a. 明細行の傭車支払セル：
+     Number(r.payment)||0 から、isPaymentConfirmed(r)なら数値
+     （KNOWN/ZERO_PAYMENT/Legacy）、未確定ならpaymentText(r)の
+     状態文字列を出力するよう変更した。
+  b. 傭車料状態列（新規追加）：
+     paymentText(r)をそのまま出力する専用列を追加した。ZERO_
+     PAYMENTの場合、傭車支払セルは数値0だが、この状態列に
+     「0円（資料確認済）」と表示されるため、未確定の0（数値上は
+     区別できない）と資料確認済みの0円を、この列から確実に
+     判別できる。
+  c. サマリー行のtotalPay：
+     画面KPIと同じくisPaymentConfirmed(r)を満たす便だけの合算
+     へ修正し、集計列見出しを「傭車支払（金額確定便のみ）」へ
+     変更、「傭車料未確定便数」列を追加した。
+
+■ 6. 診断メッセージ
+既存の診断メッセージ（notices.push、744行目付近）に、既に
+diag.routesWithoutPayment（未確定便数）を表示する仕組みが存在
+することを確認した。これは既にご指示の「未確定便が混在する場合、
+それが分かるようにする」という要件を満たしていたため、追加の
+変更は行っていない。
+
+============================================================
+テスト結果
+============================================================
+Node.js環境で、paymentText()/isPaymentConfirmed()の実装を実際に
+動かして以下5ケース＋関連ケースを検証した：
+
+1. KNOWN：paymentText="15,000円"、isPaymentConfirmed=true、
+   isProfitConfirmed=true（売上・傭車料とも確定、利益計算可）
+2. ZERO_PAYMENT：paymentText="0円（資料確認済）"、
+   isPaymentConfirmed=true、isProfitConfirmed=true
+   （利益計算可、傭車料が確定0円であることが明示される）
+3. NO_RECORD：paymentText="傭車料資料に該当なし"、
+   isPaymentConfirmed=false、isProfitConfirmed=false
+   （利益計算不可、0円扱いされていないことを確認）
+4. SOURCE_NOT_REGISTERED：paymentText="傭車料SOURCE未登録"、
+   isPaymentConfirmed=false、isProfitConfirmed=false
+5. UNKNOWN_AMOUNT：paymentText="傭車料金額UNKNOWN"、
+   isPaymentConfirmed=false、isProfitConfirmed=false
+
+Legacy経路（paymentStatus未定義）：paymentText="8,000円"、
+isPaymentConfirmed=trueとなり、既存表示が維持されることを確認した。
+
+KPI合計テスト：上記5ケースを1つのrows配列にまとめ、
+isPaymentConfirmedでフィルタした結果、金額確定便数=2件
+（KNOWN+ZERO_PAYMENTのみ）、totalPay=15,000円（NO_RECORD等の
+未確定分は加算されない）、未確定便数=3件と、期待通りの結果を
+確認した。
+
+Excel出力テスト：同じ5ケースで、明細行の傭車支払セルが
+KNOWN/ZERO_PAYMENTのみ数値（15000/0）、NO_RECORD/
+SOURCE_NOT_REGISTERED/UNKNOWN_AMOUNTは状態文字列になること、
+傭車料状態列には全ケースでpaymentText()の文言がそのまま出力
+されること、サマリー行のtotalPay=15,000円・
+unconfirmedPaymentCount=3件となることを確認した。
+
+============================================================
+既存機能への影響
+============================================================
+なし。
+・canonical_route_ledger.js（D4-34判定仕様ファイル）は今回
+  一切変更していない（ハッシュ確認済み）。
+・assets/css/features/route-analysis.cssは今回一切変更していない
+  （既存の#view-route-analysisスコープ内クラスのみで表現可能な
+  変更にとどめたため、新規CSS追加は不要と判断した）。
+・route_analysis.js以外のファイルは今回一切変更していない。
+・全JS構文チェック：エラー0件。
+・Legacy経路（D4-34以前のフォールバック）の表示・確定判定は
+  一切変更していない（paymentStatus未定義時の後方互換分岐で
+  維持）。
+
+============================================================
+D4-34仕様の維持確認
+============================================================
+・Canonical/Legacy非混在原則：canonical_route_ledger.jsの
+  buildMonth()自体（月全体をCanonicalまたはLegacyのどちらかへ
+  切り替える判定ロジック）は今回一切変更していない。今回の
+  paymentText/isPaymentConfirmedは、既に確定したrouteオブジェクト
+  の表示・集計方法を変えるだけであり、CanonicalとLegacyを1つの
+  集計内で混ぜる変更は行っていない。
+・paymentState()の5状態判定ロジック（NO_RECORD/ZERO_PAYMENT/
+  UNKNOWN_AMOUNT/SOURCE_NOT_REGISTERED/KNOWN）自体は変更して
+  いない。今回はこの既存の判定結果を、UI・Excel側で正しく
+  表示・集計するだけである。
+・0円による補完や自社便推定は、今回の変更にも一切含まれていない。
+
+============================================================
+最終判定
+============================================================
+PASS
+（一覧表・カード・詳細モーダル・KPI・Excel出力の全てが
+paymentText()/isPaymentConfirmed()という単一の共通関数を通じて
+傭車料状態を安全に表示・集計するようになった。D4-34の判定仕様・
+Canonical/Legacy非混在原則には一切触れていない。GitHubへの反映
+コミットSHAは、本セッションの権限・情報の制約により提供できて
+いない点を残課題として明記する）
