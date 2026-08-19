@@ -1,3 +1,9 @@
+M2-5H (2026-08-19) SKDL0001正式SOURCE取込0件不具合修正
+- daily_accounting_normalizer.jsのcategoryFor()がwindow.CONFIGを参照していたが、実CONFIGはsrc/app.jsのtop-level const CONFIGでありwindow.CONFIGには公開されていなかったため、全科目が未分類となり0件化していた。
+- categoryFor()は同一グローバルレキシカル環境のCONFIGを優先し、window.CONFIGは互換fallbackとしてのみ使用するよう修正。
+- 実ファイル SKDL0001(2).csv（CP932、3,051データ行、2026/06/01〜06/10）で、3,051行すべてが既存CONFIG科目定義へ分類可能、対象日10日を確認。
+- 科目定義・金額・日付変換・正式PL_DAILY_ACTUAL保存仕様は変更なし。
+
 M2-5G-R1 (2026-08-19) 着地予測監査UI表示先の配置修正
 - daily-forecast-import-rootが既にデータ管理view内に存在していたため、M2-5G初版ではcenter.htmlに追加されず、監査UIが非表示view側へ描画される状態が残っていた。
 - 既存daily-forecast-import-rootをデータ管理viewから着地予測viewへ移動。IDは1個だけを維持し、renderImportPanel()の描画先を着地予測画面へ正しく接続。
