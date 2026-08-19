@@ -14,6 +14,7 @@
   const UI_ID = 'landing-forecast-root';
   const IMPORT_ID = 'daily-forecast-import-root';
   let renderToken = 0;
+  let lastForecastPeriods = [];
 
   function escLocal(v){
     if (typeof esc === 'function') return esc(v);
@@ -120,14 +121,32 @@
     records.forEach(r => map.set(r.date, r));
     STATE.dailyRecords = Array.from(map.values()).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
   }
-  function yms(){
+  function legacyYMs(){
     const set = new Set((STATE.dailyRecords || []).map(r=>r.ym).filter(Boolean));
     (STATE.datasets || []).forEach(d=>d?.ym && set.add(d.ym));
     return Array.from(set).sort().reverse();
   }
-  function selectedYM(){
-    const sel = document.getElementById('landing-forecast-ym');
-    return sel?.value || yms()[0] || STATE.selYM || '';
+  async function forecastYMs(){
+    const legacy=legacyYMs(),repo=window.Repository?.NormalizedSource;
+    if(!repo?.listPeriods) return {periods:legacy,source:'LEGACY'};
+    try{
+      let listed=await repo.listPeriods('PL_DAILY_ACTUAL');
+      let formal=Array.isArray(listed?.periods)?listed.periods:[];
+      if(repo?.bootstrapPeriods&&legacy.some(ym=>!formal.includes(ym))){
+        const boot=await repo.bootstrapPeriods('PL_DAILY_ACTUAL',legacy);
+        if(boot?.ok) formal=Array.isArray(boot.periods)?boot.periods:formal;
+      }
+      const set=new Set(formal);
+      legacy.forEach(ym=>{if(!set.has(ym))set.add(ym);});
+      return {periods:Array.from(set).sort().reverse(),source:formal.length?'PERIOD_INDEX':'LEGACY',formalPeriods:new Set(formal)};
+    }catch(e){
+      console.warn('[M2-5B] period index unavailable',e);
+      return {periods:legacy,source:'LEGACY'};
+    }
+  }
+  function selectedYM(periods=lastForecastPeriods){
+    const sel=document.getElementById('landing-forecast-ym');
+    return sel?.value || periods[0] || STATE.selYM || '';
   }
   function recordsForYM(ym){ return (STATE.dailyRecords || []).filter(r=>r && r.ym === ym).sort((a,b)=>String(a.date).localeCompare(String(b.date))); }
   function sum(records, key){ return records.reduce((s,r)=>s+num(r[key]),0); }
@@ -345,12 +364,15 @@
       const token = ++renderToken;
       const root = document.getElementById(UI_ID);
       if (!root) return;
-      const months = yms();
+      const monthInfo = await forecastYMs();
+      if (token !== renderToken) return;
+      const months = monthInfo.periods || [];
+      lastForecastPeriods = months;
       if (!months.length) {
         root.innerHTML = `<div class="card"><div class="card-header"><span class="card-title">着地予測</span></div><div class="card-body" style="color:var(--text2)">日別実績データが未登録です。データ取込画面からSKDL0001を取り込んでください。</div></div>`;
         return;
       }
-      const ym = selectedYM();
+      const ym = selectedYM(months);
       let read = null;
       if (window.DAILY_FORECAST_READ_MODEL?.loadMonth) read = await DAILY_FORECAST_READ_MODEL.loadMonth(ym);
       if (token !== renderToken) return;
@@ -384,7 +406,7 @@
       const memoBadge = forecast.profit < 0 ? '<span class="badge badge-warn">要確認</span>' : (planProfit && forecast.profit/1000 < planProfit ? '<span class="badge badge-warn">要確認</span>' : '<span class="badge badge-ok">正常</span>');
       root.innerHTML = `<div class="lf-commandbar">
         <div class="lf-command-title">日別実績をもとに着地を予測します。 <span class="badge ${read.source==='PL_DAILY_ACTUAL'?'badge-ok':'badge-warn'}">${read.source==='PL_DAILY_ACTUAL'?'正式SOURCE':'旧データ互換'}</span></div>
-        <div class="lf-command-sub">予測モデル：${escLocal(forecast?.model||'LEGACY_WEIGHTED')}／有効履歴 ${fmtLocal(forecast?.historyCount||0)}か月／信頼度 ${escLocal(forecast?.confidence||'LOW')}${forecast?.modelReason?`　${escLocal(forecast.modelReason)}`:''}</div>
+        <div class="lf-command-sub">予測モデル：${escLocal(forecast?.model||'LEGACY_WEIGHTED')}／有効履歴 ${fmtLocal(forecast?.historyCount||0)}か月／信頼度 ${escLocal(forecast?.confidence||'LOW')}${forecast?.modelReason?`　${escLocal(forecast.modelReason)}`:''}／月一覧 ${monthInfo.source==='PERIOD_INDEX'?'正式Index':'旧データ互換'}</div>
         <div class="lf-toolbar-inner">
           <div class="lf-filter">
             <span class="lf-filter-label">対象月</span>

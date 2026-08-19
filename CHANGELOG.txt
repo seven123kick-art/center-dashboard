@@ -1,3 +1,12 @@
+M2-5B (2026-08-19) 着地予測 月一覧 Period Index移行
+- landing_forecast.jsの月一覧取得をNormalizedSourceRepository.listPeriods('PL_DAILY_ACTUAL')優先へ移行。
+- M2-5A以前の正式SOURCEは既存Legacy月を候補にbootstrapPeriods()へ渡し、manifest CURRENT確認済み月だけPeriod Indexへ登録。
+- Period Index登録済み月は正式月として扱い、同月Legacyを月一覧SOURCEとして補完しない。
+- 正式SOURCEが存在しない旧月だけLegacy互換として月一覧へ残す。
+- Period Index利用不能時はLegacy月一覧へfallbackし、既存データ閲覧を維持。
+- 月一覧取得元を画面に「正式Index / 旧データ互換」と表示。
+- STATE.dailyRecords自体はまだ削除せず、取込dual-write・旧月fallback撤去条件を次工程で監査する。
+
 M2-5A (2026-08-19) Normalized Source Period Index
 - NormalizedSourceRepositoryにdocument_type別のPeriod Indexを追加。
 - saveBatch()でbatch + manifest CURRENT保存成功後に対象periodをIndexへ冪等登録する。
