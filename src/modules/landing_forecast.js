@@ -25,13 +25,6 @@
   function fmtKLocal(v){ return typeof fmtK === 'function' ? fmtK(v) : Math.round(num(v)/1000).toLocaleString('ja-JP'); }
   function pctLocal(v){ return typeof pct === 'function' ? pct(v) : (num(v).toFixed(1) + '%'); }
   function ymLabelLocal(ym){ return typeof ymLabel === 'function' ? ymLabel(ym) : String(ym || ''); }
-  function toDateStr(v){
-    const s = String(v || '').replace(/[^0-9]/g,'');
-    if (s.length >= 8) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
-    const m = String(v || '').match(/(20\d{2})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/);
-    if (m) return `${m[1]}-${String(Number(m[2])).padStart(2,'0')}-${String(Number(m[3])).padStart(2,'0')}`;
-    return '';
-  }
   function ymFromDate(date){ return String(date || '').slice(0,7).replace('-',''); }
   function daysInMonth(ym){ return new Date(Number(ym.slice(0,4)), Number(ym.slice(4,6)), 0).getDate(); }
   function dateAt(ym, day){ return `${ym.slice(0,4)}-${ym.slice(4,6)}-${String(day).padStart(2,'0')}`; }
@@ -69,58 +62,6 @@
     return `<span style="color:${red ? '#dc2626' : sat ? '#2563eb' : 'inherit'}">${date.replace(/-/g,'/')}（${dow}）${isHoliday(date) ? ' 祝' : ''}</span>`;
   }
 
-  function categoryFor(label){
-    const s = String(label || '').replace(/[\s　\u3000]/g,'');
-    if ((CONFIG.INCOME_KEYS || []).includes(s) || (CONFIG.INCOME_SUB_KEYS || []).includes(s)) return 'revenue';
-    if ((CONFIG.LABOR_KEYS || []).includes(s) || s === '運行旅費') return 'labor';
-    if ((CONFIG.YOSHA_KEYS || []).includes(s)) return 'yosha';
-    if ((CONFIG.EXPENSE_KEYS || []).includes(s)) return 'other';
-    return '';
-  }
-  function amountOf(v){
-    const s = String(v ?? '').replace(/,/g,'').replace(/[円千]/g,'').replace(/[^\d.\-]/g,'');
-    if (!s || s === '-' || s === '.') return 0;
-    const n = Number(s);
-    return Number.isFinite(n) ? n : 0;
-  }
-  function parseDailyText(text, fileName=''){
-    const rows = CSV.toRows(text || '');
-    if (!rows.length) return [];
-    const header = rows[0].map(v => String(v || '').replace(/[\s　\u3000]/g,''));
-    const dateCol = header.findIndex(v => v === '計上日');
-    const labelCol = header.findIndex(v => v === '収支科目名' || v === '経費計上先収支科目名');
-    const amountCol = header.findIndex(v => v === '金額');
-    if (dateCol < 0 || labelCol < 0 || amountCol < 0) throw new Error('計上日・収支科目名・金額列が見つかりません');
-
-    const byDate = new Map();
-    for (let i=1; i<rows.length; i++) {
-      const row = rows[i];
-      const date = toDateStr(row[dateCol]);
-      if (!date) continue;
-      const label = String(row[labelCol] || '').replace(/[\s　\u3000]/g,'');
-      const cat = categoryFor(label);
-      if (!cat) continue;
-      const val = amountOf(row[amountCol]);
-      if (!byDate.has(date)) byDate.set(date, { date, ym:ymFromDate(date), revenue:0, labor:0, yosha:0, other:0, profit:0, rowCount:0, sourceFile:fileName });
-      const rec = byDate.get(date);
-      rec[cat] += val;
-      rec.rowCount += 1;
-    }
-    const importedAt = new Date().toISOString();
-    const out = [];
-    for (const rec of byDate.values()) {
-      rec.profit = rec.revenue - rec.labor - rec.yosha - rec.other;
-      rec.importedAt = importedAt;
-      out.push(rec);
-    }
-    return out.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-  }
-  function upsertDaily(records){
-    if (!Array.isArray(STATE.dailyRecords)) STATE.dailyRecords = [];
-    const map = new Map(STATE.dailyRecords.map(r => [r.date, r]));
-    records.forEach(r => map.set(r.date, r));
-    STATE.dailyRecords = Array.from(map.values()).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-  }
   function legacyYMs(){
     const set = new Set((STATE.dailyRecords || []).map(r=>r.ym).filter(Boolean));
     (STATE.datasets || []).forEach(d=>d?.ym && set.add(d.ym));

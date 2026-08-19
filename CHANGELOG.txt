@@ -1,3 +1,10 @@
+M2-5F (2026-08-19) 未使用Legacy取込コード撤去
+- M2-5Dで新規SKDL0001取込を正式PL_DAILY_ACTUALへ一本化したため、landing_forecast.jsから旧CSV解析・Legacy書込専用コードを削除。
+- 削除: parseDailyText(), upsertDaily(), categoryFor(), amountOf(), toDateStr()。
+- STATE.dailyRecords、legacyYMs()、recordsForYM()、Legacy監査/整理UIは既存Legacy月の閲覧・移行完了まで維持。
+- forecastByWeights()/simpleForecast()はForecast Engineのfallback・比較用途があるため削除しない。
+- 正式Normalized Sourceのbatch/manifest/監査履歴には変更なし。
+
 M2-5E (2026-08-19) Legacy残存監査・安全整理
 - 取込管理表で正式PL_DAILY_ACTUAL Period IndexとSTATE.dailyRecordsを月別突合。
 - 「正式SOURCEのみ」「正式SOURCEあり／Legacy整理可能」「Legacyのみ／要移行」を表示。
