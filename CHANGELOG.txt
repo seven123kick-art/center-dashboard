@@ -1,3 +1,14 @@
+M2-4A (2026-08-19) Forecast Engine 基盤
+- forecast_engine.jsを新設。UI/STATE/Repositoryへ直接アクセスしない純粋計算基盤として実装。
+- LEGACY_WEIGHTED / SIMPLE_RUN_RATE / HISTORICAL_PROGRESS / PRIOR_YEARの4モデルを定義。
+- 過去進捗は平均ではなく中央値を採用し、単月の異常値に引っ張られにくい構造とした。
+- 売上・人件費・傭車費・その他費用をmetric単位で個別予測可能にした。
+- UNKNOWNを0へ変換せず、対象metricにUNKNOWNがある場合はそのモデル計算を成立させない。
+- 過去確定月だけを学習/バックテスト対象にできるeligible/confirmed入力契約を定義。
+- バックテストは過去月を時系列に分離し、当時以前の履歴だけでHISTORICAL_PROGRESSを計算することで未来データ混入を防止。
+- MAPEを主評価指標とし、履歴6か月未満では既存固定ウェイトを暫定採用、6か月以上で実績誤差最小モデルを採用候補とする。
+- M2-4Aではlanding_forecast.jsの表示・採用モデル・既存予測結果は変更しない。
+
 M2-3 (2026-08-19) 着地予測 Read Model 正式接続
 - DAILY_FORECAST_READ_MODELを追加し、PL_DAILY_ACTUALのCURRENT batchを日別 revenue/labor/yosha/other/profitへ集約。
 - PL_DAILY_ACTUAL CURRENTが存在する月ではLegacyを混在・補完せず、正式SOURCEだけを使用。
