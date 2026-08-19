@@ -13,6 +13,7 @@
 
   const UI_ID = 'landing-forecast-root';
   const IMPORT_ID = 'daily-forecast-import-root';
+  let renderToken = 0;
 
   function escLocal(v){
     if (typeof esc === 'function') return esc(v);
@@ -270,7 +271,16 @@
       if (msg) msg.innerHTML = `<div style="white-space:pre-wrap;font-size:12px;font-weight:700;color:#065f46">${escLocal(`日別実績取込：${imported}日分\n` + logs.join('\n'))}</div>`;
       UI.toast(`日別実績を${imported}日分取り込みました`);
     },
-    deleteYM(ym){
+    async deleteYM(ym){
+      if (window.Repository?.NormalizedSource?.loadCurrent) {
+        try {
+          const current = await Repository.NormalizedSource.loadCurrent('PL_DAILY_ACTUAL',ym);
+          if (current?.ok && current.batch) {
+            UI.toast('この月は正式SOURCE登録済みです。削除ではなく訂正版SKDL0001を再取込してください','warn');
+            return;
+          }
+        } catch(_e){}
+      }
       if (!confirm(`${ymLabelLocal(ym)}の日別実績を削除しますか？`)) return;
       STATE.dailyRecords = (STATE.dailyRecords || []).filter(r=>r.ym !== ym);
       Repository.Storage.save();
@@ -316,7 +326,8 @@
         </div>
       </details>`;
     },
-    render(){
+    async render(){
+      const token = ++renderToken;
       const root = document.getElementById(UI_ID);
       if (!root) return;
       const months = yms();
@@ -325,7 +336,19 @@
         return;
       }
       const ym = selectedYM();
-      const records = recordsForYM(ym);
+      let read = null;
+      if (window.DAILY_FORECAST_READ_MODEL?.loadMonth) read = await DAILY_FORECAST_READ_MODEL.loadMonth(ym);
+      if (token !== renderToken) return;
+      if (!read) read = {status:'LEGACY_FALLBACK',source:'LEGACY',records:recordsForYM(ym),issues:[]};
+      if (read.status === 'ERROR') {
+        root.innerHTML = `<div class="card"><div class="card-header"><span class="card-title">着地予測</span></div><div class="card-body" style="color:#b91c1c">日別実績SOURCEを読み込めませんでした。データ確認画面でPL_DAILY_ACTUALの状態を確認してください。</div></div>`;
+        return;
+      }
+      const records = read.records || [];
+      if (read.status === 'PARTIAL') {
+        root.innerHTML = `<div class="card"><div class="card-header"><span class="card-title">着地予測</span><span class="badge badge-warn">未確定</span></div><div class="card-body" style="color:var(--text2);line-height:1.8">SKDL0001に金額UNKNOWNが${fmtLocal(read.issues?.length||0)}件あります。UNKNOWNを0として予測しないため、着地予測を停止しています。元データを確認してください。</div></div>`;
+        return;
+      }
       const cur = currentTotals(records);
       const simple = simpleForecast(records, ym);
       const b2c = forecastByWeights(records, ym) || simple;
@@ -343,7 +366,7 @@
       const memoAlertClass = forecast.profit < 0 ? 'is-alert' : (planProfit && forecast.profit/1000 < planProfit ? 'is-warn' : '');
       const memoBadge = forecast.profit < 0 ? '<span class="badge badge-warn">要確認</span>' : (planProfit && forecast.profit/1000 < planProfit ? '<span class="badge badge-warn">要確認</span>' : '<span class="badge badge-ok">正常</span>');
       root.innerHTML = `<div class="lf-commandbar">
-        <div class="lf-command-title">日別実績をもとに、BtoC家電配送向けの土日祝・月末補正で着地を予測します。</div>
+        <div class="lf-command-title">日別実績をもとに、BtoC家電配送向けの土日祝・月末補正で着地を予測します。 <span class="badge ${read.source==='PL_DAILY_ACTUAL'?'badge-ok':'badge-warn'}">${read.source==='PL_DAILY_ACTUAL'?'正式SOURCE':'旧データ互換'}</span></div>
         <div class="lf-toolbar-inner">
           <div class="lf-filter">
             <span class="lf-filter-label">対象月</span>

@@ -1,3 +1,12 @@
+M2-3 (2026-08-19) 着地予測 Read Model 正式接続
+- DAILY_FORECAST_READ_MODELを追加し、PL_DAILY_ACTUALのCURRENT batchを日別 revenue/labor/yosha/other/profitへ集約。
+- PL_DAILY_ACTUAL CURRENTが存在する月ではLegacyを混在・補完せず、正式SOURCEだけを使用。
+- 正式SOURCE未登録の旧月だけSTATE.dailyRecordsへfallbackし、既存データ互換を維持。
+- amount_known=false / null金額を0扱いせずPARTIALとして着地予測を停止。
+- landing_forecast.jsを非同期Read Model読取へ移行し、競合防止render tokenを追加。
+- 正式SOURCE登録済み月のLegacy削除操作を拒否し、訂正版SKDL0001再取込へ誘導。
+- 予測係数・計算式そのものはM2-3では変更しない。
+
 M2-2 (2026-08-19) SKDL0001 着地予測用SOURCE正式化
 - SKDL0001を PL_DAILY_ACTUAL としてData Catalogへ追加。月次PLの正本には使用せず、着地予測・月末突合専用と明示。
 - Daily Accounting Normalizer / Import Bridgeを追加し、計上日・科目・金額をNormalized Sourceへimmutable batch保存。
