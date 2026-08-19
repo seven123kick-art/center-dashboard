@@ -1,3 +1,10 @@
+M2-5G (2026-08-19) 着地予測UI接続漏れ・配送分析タブ誤表示修正
+- center.htmlの着地予測viewにdaily-forecast-import-rootを追加し、SKDL0001取込/Legacy監査UIを実表示可能にした。
+- navigation.jsで着地予測表示時にrenderImportPanel()も呼び出し、初回表示・NAV.refresh時の監査パネル描画を保証。
+- version2.cssで.analysis-hub-tabs[hidden]を明示的に非表示化。display:flexがHTML hidden属性を上書きし、非配送画面にも配送分析タブが見えてクリック時に配送分析へ遷移していた問題を修正。
+- landing_forecast.js内にNAV.go/route-analysis呼出しがないことを確認。誤遷移原因は着地予測ロジックではなく配送分析共通タブのhidden/CSS競合。
+- 既存の正式SOURCE/Legacyデータ、予測計算ロジック、配送分析本体は変更なし。
+
 M2-5F (2026-08-19) 未使用Legacy取込コード撤去
 - M2-5Dで新規SKDL0001取込を正式PL_DAILY_ACTUALへ一本化したため、landing_forecast.jsから旧CSV解析・Legacy書込専用コードを削除。
 - 削除: parseDailyText(), upsertDaily(), categoryFor(), amountOf(), toDateStr()。

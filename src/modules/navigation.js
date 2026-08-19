@@ -164,7 +164,7 @@ window.NAV = {
       case 'pl':         renderPL();           break;
       case 'budget-actual': if (window.BUDGET_ACTUAL_UI?.render) BUDGET_ACTUAL_UI.render(); break;
       case 'profit-structure': if (window.PROFIT_STRUCTURE_UI?.render) PROFIT_STRUCTURE_UI.render(); break;
-      case 'landing-forecast': if (window.LANDING_FORECAST_UI?.render) LANDING_FORECAST_UI.render(); break;
+      case 'landing-forecast': if (window.LANDING_FORECAST_UI?.render) LANDING_FORECAST_UI.render(); if (window.LANDING_FORECAST_UI?.renderImportPanel) LANDING_FORECAST_UI.renderImportPanel(); break;
       case 'trend':      renderTrend();        break;
       case 'shipper':    renderShipper();      break;
       case 'indicators': renderIndicators();   break;
