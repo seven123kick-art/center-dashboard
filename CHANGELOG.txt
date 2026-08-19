@@ -1,3 +1,9 @@
+M2-5G-R1 (2026-08-19) 着地予測監査UI表示先の配置修正
+- daily-forecast-import-rootが既にデータ管理view内に存在していたため、M2-5G初版ではcenter.htmlに追加されず、監査UIが非表示view側へ描画される状態が残っていた。
+- 既存daily-forecast-import-rootをデータ管理viewから着地予測viewへ移動。IDは1個だけを維持し、renderImportPanel()の描画先を着地予測画面へ正しく接続。
+- M2-5Gで修正済みの配送分析タブhidden/CSS競合とnavigation.jsのrenderImportPanel()呼出しは維持。
+- データ、予測計算、正式SOURCE/Legacy判定ロジックは変更なし。
+
 M2-5G (2026-08-19) 着地予測UI接続漏れ・配送分析タブ誤表示修正
 - center.htmlの着地予測viewにdaily-forecast-import-rootを追加し、SKDL0001取込/Legacy監査UIを実表示可能にした。
 - navigation.jsで着地予測表示時にrenderImportPanel()も呼び出し、初回表示・NAV.refresh時の監査パネル描画を保証。
