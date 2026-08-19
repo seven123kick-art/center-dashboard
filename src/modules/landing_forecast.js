@@ -262,6 +262,11 @@
       const arr = Array.from(files || []).filter(f=>/\.csv$/i.test(f.name));
       const msg = document.getElementById('daily-forecast-import-msg');
       if (!arr.length) { if(msg) msg.textContent='CSVを選択してください'; return; }
+      if (!window.DAILY_ACCOUNTING_IMPORT_BRIDGE?.normalizeCsvText || !window.DAILY_ACCOUNTING_IMPORT_BRIDGE?.persistRecords) {
+        if(msg) msg.textContent='Version6日別SOURCE取込基盤を読み込めません';
+        UI.toast('Version6日別SOURCE取込基盤を読み込めません','error');
+        return;
+      }
       let imported = 0;
       const logs = [];
       const normalizedByYM = new Map();
@@ -269,27 +274,23 @@
       for (const f of arr) {
         try {
           const text = await CSV.read(f);
-          const records = parseDailyText(text, f.name);
-          if (!records.length) throw new Error('日別集計できる行がありません');
-          upsertDaily(records);
-          if (window.DAILY_ACCOUNTING_IMPORT_BRIDGE?.normalizeCsvText) {
-            const normalized = DAILY_ACCOUNTING_IMPORT_BRIDGE.normalizeCsvText(text,{file_name:f.name});
-            normalized.forEach(r=>{
-              if(!normalizedByYM.has(r.year_month)) normalizedByYM.set(r.year_month,[]);
-              normalizedByYM.get(r.year_month).push(r);
-              if(!normalizedFilesByYM.has(r.year_month)) normalizedFilesByYM.set(r.year_month,new Set());
-              normalizedFilesByYM.get(r.year_month).add(f.name);
-            });
-          }
-          imported += records.length;
-          const ymSet = Array.from(new Set(records.map(r=>r.ym))).join(', ');
-          logs.push(`OK ${f.name}：${records.length}日分（${ymSet}）`);
+          const normalized = DAILY_ACCOUNTING_IMPORT_BRIDGE.normalizeCsvText(text,{file_name:f.name});
+          if (!normalized.length) throw new Error('日別集計できる行がありません');
+          normalized.forEach(r=>{
+            if(!normalizedByYM.has(r.year_month)) normalizedByYM.set(r.year_month,[]);
+            normalizedByYM.get(r.year_month).push(r);
+            if(!normalizedFilesByYM.has(r.year_month)) normalizedFilesByYM.set(r.year_month,new Set());
+            normalizedFilesByYM.get(r.year_month).add(f.name);
+          });
+          const dayKeys = new Set(normalized.map(r=>r.accounting_date).filter(Boolean));
+          imported += dayKeys.size;
+          const ymSet = Array.from(new Set(normalized.map(r=>r.year_month).filter(Boolean))).join(', ');
+          logs.push(`OK ${f.name}：${dayKeys.size}日分（${ymSet}）`);
         } catch(e) {
           logs.push(`NG ${f.name}：${e.message}`);
         }
       }
-      Repository.Storage.save();
-      if (normalizedByYM.size && window.DAILY_ACCOUNTING_IMPORT_BRIDGE?.persistRecords) {
+      if (normalizedByYM.size) {
         for (const [period, rows] of normalizedByYM.entries()) {
           try {
             const saved = await DAILY_ACCOUNTING_IMPORT_BRIDGE.persistRecords(rows,{period,source_file_names:[...(normalizedFilesByYM.get(period)||[])]});
@@ -299,7 +300,6 @@
           }
         }
       }
-      if (CLOUD?.pushAll) SYNC_COORDINATOR.syncPush({ onlyChanged:true }).then(r=>{ if(!r?.ok) throw new Error(r?.error||'クラウド同期に失敗しました'); }).catch(e=>{ console.warn('[D4-16] landing forecast cloud sync failed',e); UI.toast('日別実績はローカル保存済みですが、クラウド同期に失敗しました','warn'); });
       this.renderImportPanel();
       this.render();
       if (msg) msg.innerHTML = `<div style="white-space:pre-wrap;font-size:12px;font-weight:700;color:#065f46">${escLocal(`日別実績取込：${imported}日分\n` + logs.join('\n'))}</div>`;

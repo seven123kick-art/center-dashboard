@@ -1,3 +1,11 @@
+M2-5D (2026-08-19) SKDL0001新規取込 Legacy dual-write停止
+- landing_forecast.jsのSKDL0001新規取込をDAILY_ACCOUNTING_IMPORT_BRIDGE -> PL_DAILY_ACTUAL正式SOURCEのみに変更。
+- 新規取込時のparseDailyText() / upsertDaily() / STATE.dailyRecords書込を停止。
+- 新規取込時のRepository.Storage.save()および旧full-state cloud syncを停止。Normalized Source Repositoryの保存経路だけを使用する。
+- Version6日別SOURCE取込基盤が利用不能な場合はLegacyへ黙ってfallbackせず取込を停止してエラー表示する。
+- 既存STATE.dailyRecords、parseDailyText()、upsertDaily()は旧月閲覧・移行監査のため現段階では削除しないが、新しいLegacyデータは増加しない。
+- 正式SOURCE未登録の既存Legacy月に対する閲覧・削除互換は維持。
+
 M2-5B (2026-08-19) 着地予測 月一覧 Period Index移行
 - landing_forecast.jsの月一覧取得をNormalizedSourceRepository.listPeriods('PL_DAILY_ACTUAL')優先へ移行。
 - M2-5A以前の正式SOURCEは既存Legacy月を候補にbootstrapPeriods()へ渡し、manifest CURRENT確認済み月だけPeriod Indexへ登録。
