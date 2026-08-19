@@ -172,6 +172,21 @@
       profitRate: cur.revenue ? cur.profit / cur.revenue * 100 : 0
     };
   }
+  async function engineForecast(records, ym){
+    if (!window.FORECAST_ENGINE?.evaluate) return null;
+    let context={history:[],priorYear:null};
+    if (window.FORECAST_CONTEXT_LOADER?.load) {
+      try { context=await FORECAST_CONTEXT_LOADER.load(ym,{months:24}); }
+      catch(e){ console.warn('[M2-4B] forecast context unavailable',e); }
+    }
+    const evaluations={};
+    for (const metric of ['revenue','labor','yosha','other']) evaluations[metric]=FORECAST_ENGINE.evaluate({current:{ym,records},history:context.history||[],priorYear:context.priorYear||null,metric,calendar:{isHoliday}});
+    const value=metric=>evaluations[metric]?.selected?.forecast;
+    if (['revenue','labor','yosha','other'].some(k=>!Number.isFinite(Number(value(k))))) return null;
+    const revenue=Number(value('revenue')),labor=Number(value('labor')),yosha=Number(value('yosha')),other=Number(value('other')),profit=revenue-labor-yosha-other,re=evaluations.revenue;
+    return {revenue,labor,yosha,other,profit,profitRate:revenue?profit/revenue*100:0,progress:Number(re?.selected?.progress||0),factor:Number(re?.selected?.factor||1),model:re?.selection?.model||'LEGACY_WEIGHTED',modelReason:re?.selection?.reason||'',confidence:re?.selection?.confidence||'LOW',historyCount:Number(re?.history_count||0),evaluations};
+  }
+
   function planForYM(ym, label){
     if (!ym || typeof getPlanRowsForFiscalYear !== 'function') return null;
     const rows = getPlanRowsForFiscalYear(fiscalYearFromYM(ym));
@@ -351,11 +366,13 @@
       }
       const cur = currentTotals(records);
       const simple = simpleForecast(records, ym);
-      const b2c = forecastByWeights(records, ym) || simple;
+      const legacyForecast = forecastByWeights(records, ym) || simple;
       const lastDate = records.length ? records[records.length-1].date : '';
       const planRevenue = planForYM(ym, '営業収益');
       const planProfit = planForYM(ym, '粗利益');
-      const forecast = b2c || { revenue:0,labor:0,yosha:0,other:0,profit:0,profitRate:0,progress:0 };
+      const engineResult = await engineForecast(records, ym);
+      if (token !== renderToken) return;
+      const forecast = engineResult || legacyForecast || { revenue:0,labor:0,yosha:0,other:0,profit:0,profitRate:0,progress:0,model:'LEGACY_WEIGHTED',historyCount:0,confidence:'LOW',modelReason:'Forecast Engine未利用' };
       const simpleRevenueK = simple ? Math.round(simple.revenue/1000) : 0;
       const b2cRevenueK = Math.round(forecast.revenue/1000);
       const diffText = simple ? `${fmtLocal(b2cRevenueK - simpleRevenueK)}千円` : '-';
@@ -366,7 +383,8 @@
       const memoAlertClass = forecast.profit < 0 ? 'is-alert' : (planProfit && forecast.profit/1000 < planProfit ? 'is-warn' : '');
       const memoBadge = forecast.profit < 0 ? '<span class="badge badge-warn">要確認</span>' : (planProfit && forecast.profit/1000 < planProfit ? '<span class="badge badge-warn">要確認</span>' : '<span class="badge badge-ok">正常</span>');
       root.innerHTML = `<div class="lf-commandbar">
-        <div class="lf-command-title">日別実績をもとに、BtoC家電配送向けの土日祝・月末補正で着地を予測します。 <span class="badge ${read.source==='PL_DAILY_ACTUAL'?'badge-ok':'badge-warn'}">${read.source==='PL_DAILY_ACTUAL'?'正式SOURCE':'旧データ互換'}</span></div>
+        <div class="lf-command-title">日別実績をもとに着地を予測します。 <span class="badge ${read.source==='PL_DAILY_ACTUAL'?'badge-ok':'badge-warn'}">${read.source==='PL_DAILY_ACTUAL'?'正式SOURCE':'旧データ互換'}</span></div>
+        <div class="lf-command-sub">予測モデル：${escLocal(forecast?.model||'LEGACY_WEIGHTED')}／有効履歴 ${fmtLocal(forecast?.historyCount||0)}か月／信頼度 ${escLocal(forecast?.confidence||'LOW')}${forecast?.modelReason?`　${escLocal(forecast.modelReason)}`:''}</div>
         <div class="lf-toolbar-inner">
           <div class="lf-filter">
             <span class="lf-filter-label">対象月</span>

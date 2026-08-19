@@ -1,3 +1,11 @@
+M2-4B (2026-08-19) Forecast Engine 着地予測接続
+- forecast_context_loader.jsを追加。過去24か月のPL_DAILY_ACTUAL CURRENTを探索し、PL_ACTUALがCONFIRMEDの月だけを学習対象とする。
+- Legacy STATE.dailyRecordsは履歴学習へ混在させない。前年同月も正式日別SOURCE + PL確定月だけを利用。
+- landing_forecast.jsをForecast Engineへ接続し、revenue/labor/yosha/otherをmetric別に評価して利益を再計算。
+- 履歴6か月未満はLEGACY_WEIGHTEDを継続し、十分な履歴ができるまで現行予測を維持。
+- 画面に採用モデル・有効履歴月数・confidence・採用理由を表示。
+- LEGACY_WEIGHTEDを既存forecastByWeights()と同じ実績日ウェイト方式へ修正し、欠損日の誤算入を防止。
+
 M2-4A (2026-08-19) Forecast Engine 基盤
 - forecast_engine.jsを新設。UI/STATE/Repositoryへ直接アクセスしない純粋計算基盤として実装。
 - LEGACY_WEIGHTED / SIMPLE_RUN_RATE / HISTORICAL_PROGRESS / PRIOR_YEARの4モデルを定義。

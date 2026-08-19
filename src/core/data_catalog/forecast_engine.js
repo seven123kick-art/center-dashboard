@@ -84,11 +84,12 @@
     if(!last) return null;
     const partial=recordsThrough(records,last),actual=sumMetric(partial,metric);
     if(actual==null) return null;
+    const actualDates=new Set(partial.map(r=>String(r?.date||'')).filter(Boolean));
     let actualWeight=0,totalWeight=0;
     for(let d=1;d<=daysInMonth(ym);d++){
-      const w=legacyWeightOfDate(dateAt(ym,d),options);
+      const date=dateAt(ym,d),w=legacyWeightOfDate(date,options);
       totalWeight+=w;
-      if(d<=last) actualWeight+=w;
+      if(actualDates.has(date)) actualWeight+=w;
     }
     if(!(actualWeight>0&&totalWeight>0)) return null;
     const progress=actualWeight/totalWeight,factor=1/progress;
