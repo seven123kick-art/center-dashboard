@@ -42,6 +42,21 @@
   function manifestKey(dt,p){ return `${baseKey(dt,p)}::manifest`; }
   function batchKey(dt,p,batchId){ return `${baseKey(dt,p)}::batch::${token(batchId)}`; }
   function cacheId(dt,p,suffix){ return `${token(dt)}::${token(p)}::${suffix}`; }
+  function periodIndexKey(documentType){
+    const dt=clean(documentType).toUpperCase();
+    if(!SUPPORTED.has(dt)) throw new Error(`Unsupported document_type: ${dt||'(empty)'}`);
+    return `${PREFIX}::${dt}::period_index`;
+  }
+  function emptyPeriodIndex(dt){
+    return {schema_version:VERSION,kind:'NORMALIZED_SOURCE_PERIOD_INDEX',document_type:dt,periods:[],updated_at:null};
+  }
+  function normalizePeriodIndex(raw,dt){
+    const x=raw&&typeof raw==='object'?clone(raw):emptyPeriodIndex(dt);
+    x.schema_version=VERSION; x.kind='NORMALIZED_SOURCE_PERIOD_INDEX'; x.document_type=dt;
+    x.periods=[...new Set((Array.isArray(x.periods)?x.periods:[]).map(clean).filter(p=>/^\d{6}$/.test(p)))].sort().reverse();
+    x.updated_at=x.updated_at||null;
+    return x;
+  }
 
   function validateRecords(documentType,records){
     const dt=clean(documentType).toUpperCase(), rows=Array.isArray(records)?records:[], errors=[];
@@ -93,6 +108,50 @@
     return {ok:true,source:b.source,manifest:m.manifest,batch:b.batch,records:clone(b.batch.records||[])};
   }
 
+  async function loadPeriodIndex(documentType){
+    const dt=clean(documentType).toUpperCase();
+    if(!SUPPORTED.has(dt)) throw new Error(`Unsupported document_type: ${dt||'(empty)'}`);
+    const row=await cloud().fetchRealtimeState(periodIndexKey(dt));
+    return {ok:true,source:row?'CLOUD':'EMPTY',index:normalizePeriodIndex(row?.payload||null,dt)};
+  }
+
+  async function registerPeriod(documentType,period,meta={}){
+    const s=validateScope(documentType,period);
+    const current=await loadPeriodIndex(s.document_type);
+    const index=normalizePeriodIndex(current.index,s.document_type);
+    if(index.periods.includes(s.period)) return {ok:true,idempotent:true,index};
+    index.periods=[...index.periods,s.period].sort().reverse();
+    index.updated_at=meta.updated_at||new Date().toISOString();
+    const saved=await cloud().pushRealtimeState(periodIndexKey(s.document_type),index);
+    if(!saved?.ok) return {ok:false,error:saved?.error||'PERIOD_INDEX_CLOUD_SAVE_FAILED',index};
+    return {ok:true,index:clone(index)};
+  }
+
+  async function listPeriods(documentType){
+    const loaded=await loadPeriodIndex(documentType);
+    return {ok:true,source:loaded.source,periods:clone(loaded.index.periods),index:clone(loaded.index)};
+  }
+
+  // 移行時だけ使用する安全なbootstrap。候補年月を盲目的に登録せず、
+  // 各月manifestにCURRENT batchが存在することを確認した月だけIndexへ登録する。
+  async function bootstrapPeriods(documentType,candidatePeriods=[]){
+    const dt=clean(documentType).toUpperCase();
+    if(!SUPPORTED.has(dt)) throw new Error(`Unsupported document_type: ${dt||'(empty)'}`);
+    const candidates=[...new Set((Array.isArray(candidatePeriods)?candidatePeriods:[]).map(clean).filter(p=>/^\d{6}$/.test(p)))];
+    const verified=[];
+    for(const period of candidates){
+      const m=await loadManifest(dt,period);
+      if(m?.manifest?.current_batch_id) verified.push(period);
+    }
+    const current=await loadPeriodIndex(dt), index=normalizePeriodIndex(current.index,dt);
+    const merged=[...new Set([...index.periods,...verified])].sort().reverse();
+    if(JSON.stringify(merged)===JSON.stringify(index.periods)) return {ok:true,idempotent:true,periods:clone(merged),verified_periods:verified};
+    index.periods=merged; index.updated_at=new Date().toISOString();
+    const saved=await cloud().pushRealtimeState(periodIndexKey(dt),index);
+    if(!saved?.ok) return {ok:false,error:saved?.error||'PERIOD_INDEX_CLOUD_SAVE_FAILED',periods:clone(index.periods),verified_periods:verified};
+    return {ok:true,periods:clone(index.periods),verified_periods:verified};
+  }
+
   async function saveBatch(input={}){
     const s=validateScope(input.document_type,input.period), batchId=clean(input.batch_id);
     if(!batchId) return {ok:false,error:'BATCH_ID_REQUIRED'};
@@ -140,10 +199,20 @@
     const manifestSave=await cloud().pushRealtimeState(manifestKey(s.document_type,s.period),manifest);
     if(!manifestSave?.ok) return {ok:false,error:manifestSave?.error||'MANIFEST_CLOUD_SAVE_FAILED',batch_saved:true,batch_id:batchId};
 
+    let period_index_ok=null;
+    try{
+      const indexed=await registerPeriod(s.document_type,s.period,{updated_at:batch.saved_at});
+      period_index_ok=indexed?.ok===true;
+      if(!period_index_ok) console.warn('[NormalizedSourceRepository] period index update failed',indexed);
+    }catch(e){
+      period_index_ok=false;
+      console.warn('[NormalizedSourceRepository] period index update failed',e);
+    }
+
     let cache_ok=null; const st=storage();
     if(st?.setCached){ try{ cache_ok=await st.setCached(CACHE_KIND,cacheId(s.document_type,s.period,`batch::${token(batchId)}`),batch); }catch(e){ cache_ok=false; } }
     try{ window.dispatchEvent(new CustomEvent('normalized-source-updated',{detail:{document_type:s.document_type,period:s.period,batch_id:batchId}})); }catch(_e){}
-    return {ok:true,batch_id:batchId,supersedes_batch_id:supersedes,record_count:batch.record_count,cache_ok,manifest:clone(manifest)};
+    return {ok:true,batch_id:batchId,supersedes_batch_id:supersedes,record_count:batch.record_count,cache_ok,period_index_ok,manifest:clone(manifest)};
   }
 
   async function saveBatchObserved(input={}){
@@ -165,5 +234,5 @@
     return result;
   }
 
-  window.NORMALIZED_SOURCE_REPOSITORY=Object.freeze({VERSION,PREFIX,CACHE_KIND,SUPPORTED:Object.freeze([...SUPPORTED]),validateRecords,loadManifest,loadBatch,loadCurrent,saveBatch:saveBatchObserved});
+  window.NORMALIZED_SOURCE_REPOSITORY=Object.freeze({VERSION,PREFIX,CACHE_KIND,SUPPORTED:Object.freeze([...SUPPORTED]),validateRecords,loadManifest,loadBatch,loadCurrent,loadPeriodIndex,listPeriods,bootstrapPeriods,saveBatch:saveBatchObserved});
 })();

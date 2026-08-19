@@ -1,3 +1,11 @@
+M2-5A (2026-08-19) Normalized Source Period Index
+- NormalizedSourceRepositoryにdocument_type別のPeriod Indexを追加。
+- saveBatch()でbatch + manifest CURRENT保存成功後に対象periodをIndexへ冪等登録する。
+- listPeriods(documentType)で正式SOURCEの存在年月一覧を取得可能にした。
+- 既存データ移行用bootstrapPeriods(documentType,candidatePeriods)を追加。候補年月をそのまま登録せず、manifest CURRENTの存在を検証した月だけIndexへ登録する。
+- Period Index更新失敗で既に保存済みの正本batch/manifestを巻き戻さない。period_index_ok=falseを返し、bootstrapで修復可能な派生Indexとして扱う。
+- M2-5Aではlanding_forecastの月一覧はまだ変更しない。M2-5Bで既存月をbootstrap後、正式Period Index優先へ切り替える。
+
 M2-4B (2026-08-19) Forecast Engine 着地予測接続
 - forecast_context_loader.jsを追加。過去24か月のPL_DAILY_ACTUAL CURRENTを探索し、PL_ACTUALがCONFIRMEDの月だけを学習対象とする。
 - Legacy STATE.dailyRecordsは履歴学習へ混在させない。前年同月も正式日別SOURCE + PL確定月だけを利用。
