@@ -22,13 +22,42 @@
     {source:'SHIPPER_AREA',label:'荷主別配送エリア物量',required:['配達完了日','荷主コード','配達支店'],any:['住所','郵便番号','お届け先'],reason:'配達完了日・荷主コード・配達支店＋住所系列'}
   ];
   function contentClassify(t){const s=String(t||'');for(const x of CONTENT_SIGNATURES){if(x.required.every(k=>s.includes(k))&&(!x.any||x.any.some(k=>s.includes(k))))return {...x,confidence:'HIGH'};}return {source:'UNKNOWN',label:'判別不能',reason:'既知SOURCEの必須列構成に一致しない',confidence:'LOW'};}
-  function contentPeriods(t){const s=String(t||'').replace(/\r/g,''),out=new Set();let m;const rx=/(20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/g;while((m=rx.exec(s))){const mm=String(+m[2]).padStart(2,'0');if(+mm>=1&&+mm<=12)out.add(`${m[1]}${mm}`);}const compact=/(20\d{2})(0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])/g;while((m=compact.exec(s)))out.add(`${m[1]}${m[2]}`);return [...out].sort();}
-  function centerFromText(t){const s=String(t||'');if(/110203|\b203\b|北埼玉Ｃ|北埼玉C|北埼玉センター/.test(s))return '北埼玉センター';if(/戸田Ｃ|戸田C|戸田センター/.test(s))return '戸田センター';return '判定不能';}
-  function centerFromRows(rows,source){const flat=(rows||[]).slice(0,250).flat().map(v=>String(v??'')).join('\n'),direct=centerFromText(flat);if(direct!=='判定不能')return direct;if(source==='SHIPPER_AREA'){const h=(rows?.[0]||[]).map(v=>String(v??'').replace(/[\s　]/g,'')),i=h.findIndex(x=>/配達支店名|配送センター名|センター名/.test(x));if(i>=0){const vals=(rows||[]).slice(1,300).map(r=>String(r?.[i]??'')).filter(Boolean);if(vals.some(v=>/北埼玉/.test(v)))return '北埼玉センター';if(vals.some(v=>/戸田/.test(v)))return '戸田センター';}}return '判定不能';}
-  function periodsFromRows(rows,source){const h=(rows?.[0]||[]).map(v=>String(v??'').replace(/[\s　]/g,'')),names=source==='PL_CONFIRMED'?['計上日']:source==='WORKER_SALES'?['配達完了日','作業日','配送日','日付']:source==='SHIPPER_AREA'?['配達完了日','完了日','配送日','日付']:source==='ROUTE_PAYMENT'?['配達日']:[],i=h.findIndex(x=>names.some(n=>x.includes(n)));if(i<0)return contentPeriods((rows||[]).slice(0,300).flat().join('\n'));const out=new Set();for(const r of (rows||[]).slice(1,5000)){const p=contentPeriods(String(r?.[i]??''));p.forEach(x=>out.add(x));}return [...out].sort();}
+  // M2-5N: period detection is source-schema based. Never scan unrelated cells for date-like numbers.
+  function parseCsvRows(text){
+    const s=String(text||'').replace(/^\uFEFF/,''),rows=[];let row=[],cell='',quoted=false;
+    for(let i=0;i<s.length;i++){
+      const ch=s[i];
+      if(quoted){if(ch==='"'&&s[i+1]==='"'){cell+='"';i++;}else if(ch==='"')quoted=false;else cell+=ch;continue;}
+      if(ch==='"'){quoted=true;continue;}if(ch===','){row.push(cell);cell='';continue;}
+      if(ch==='\n'){row.push(cell.replace(/\r$/,''));rows.push(row);row=[];cell='';continue;}cell+=ch;
+    }
+    if(cell!==''||row.length){row.push(cell.replace(/\r$/,''));rows.push(row);}return rows;
+  }
+  function periodFromDateValue(v){
+    const s=String(v??'').trim();if(!s)return null;let m;
+    if((m=s.match(/^(20\d{2})(0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$/)))return `${m[1]}${m[2]}`;
+    if((m=s.match(/^(20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?$/))){const mm=String(+m[2]).padStart(2,'0'),dd=+m[3];if(+mm>=1&&+mm<=12&&dd>=1&&dd<=31)return `${m[1]}${mm}`;}
+    return null;
+  }
+  function filenamePeriod(name){const s=String(name||'');let m;if((m=s.match(/(?:^|\D)(20\d{2})[._\-]?(0[1-9]|1[0-2])(?:\D|$)/)))return `${m[1]}${m[2]}`;return null;}
+  const DATE_COLUMNS={PL_CONFIRMED:['計上日'],WORKER_SALES:['配達完了日'],SHIPPER_AREA:['配達完了日'],ROUTE_PAYMENT:['配達日']};
+  function periodsFromRows(rows,source){
+    const h=(rows?.[0]||[]).map(v=>String(v??'').replace(/[\s　]/g,'')),names=DATE_COLUMNS[source]||[],i=h.findIndex(x=>names.includes(x));
+    if(i<0)return [];
+    const out=new Set();for(const r of (rows||[]).slice(1)){const p=periodFromDateValue(r?.[i]);if(p)out.add(p);}return [...out].sort();
+  }
+  function centerNameFromValues(vals){const s=(vals||[]).map(v=>String(v??'')).join('\n');if(/110203|北埼玉Ｃ|北埼玉C|北埼玉センター/.test(s))return '北埼玉センター';if(/戸田Ｃ|戸田C|戸田センター/.test(s))return '戸田センター';return '判定不能';}
+  function centerFromText(t){return centerNameFromValues([t]);}
+  function centerFromRows(rows,source){
+    const h=(rows?.[0]||[]).map(v=>String(v??'').replace(/[\s　]/g,''));
+    const names=source==='PL_CONFIRMED'?['計上支店コード','計上支店名']:source==='SHIPPER_AREA'?['配達支店コード','配達支店名']:source==='ROUTE_PAYMENT'?['配達支店コード','配達支店名','センターコード','センター名']:[];
+    if(!names.length)return '判定不能';
+    const idx=h.map((x,i)=>names.includes(x)?i:-1).filter(i=>i>=0),vals=[];for(const r of (rows||[]).slice(1,1000))for(const i of idx)vals.push(r?.[i]);return centerNameFromValues(vals);
+  }
+  function periodAudit(periods,fileName){const fp=filenamePeriod(fileName);if(!fp||periods.length!==1)return '';return fp===periods[0]?' / ファイル名年月と内部日付一致':` / 注意: ファイル名年月 ${fp.slice(0,4)}/${fp.slice(4)} と内部日付 ${periods[0].slice(0,4)}/${periods[0].slice(4)} が不一致`;}
   async function ensureXlsx(){if(window.XLSX)return window.XLSX;if(window.EXPORT_SERVICE?.ensureXLSX)await EXPORT_SERVICE.ensureXLSX();else if(window.ASSETS?.xlsx)await ASSETS.xlsx();if(!window.XLSX)throw new Error('XLSXライブラリを読み込めませんでした');return window.XLSX;}
   function routePaymentSignature(rows){const h=(rows?.[0]||[]).map(v=>String(v??'').replace(/[\s　]/g,''));return ['ヘッド番号','配達日','傭車料'].every(k=>h.some(x=>x.includes(k)));}
-  async function analyzeExcelFile(f){const XLSX=await ensureXlsx(),wb=XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:false}),found=[];for(const sheetName of wb.SheetNames){const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:'',raw:false});if(!routePaymentSignature(rows))continue;found.push({rows,sheetName});}if(!found.length)return {source:'UNKNOWN',label:'判別不能',periods:[],center:'判定不能',confidence:'LOW',reason:'Excel内に既知SOURCEの列構成を確認できない'};const periods=new Set();found.forEach(x=>periodsFromRows(x.rows,'ROUTE_PAYMENT').forEach(p=>periods.add(p)));return {source:'ROUTE_PAYMENT',label:'配達ヘッド傭車料確認',periods:[...periods].sort(),center:centerFromRows(found[0].rows,'ROUTE_PAYMENT'),confidence:'HIGH',reason:'Excel内部列 ヘッド番号・配達日・傭車料'};}
+  async function analyzeExcelFile(f){const XLSX=await ensureXlsx(),wb=XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:false}),found=[];for(const sheetName of wb.SheetNames){const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:'',raw:false});if(!routePaymentSignature(rows))continue;found.push({rows,sheetName});}if(!found.length)return {source:'UNKNOWN',label:'判別不能',periods:[],center:'判定不能',confidence:'LOW',reason:'Excel内に既知SOURCEの列構成を確認できない'};const periods=new Set();found.forEach(x=>periodsFromRows(x.rows,'ROUTE_PAYMENT').forEach(p=>periods.add(p)));const ps=[...periods].sort(),center=centerFromRows(found[0].rows,'ROUTE_PAYMENT');return {source:'ROUTE_PAYMENT',label:'配達ヘッド傭車料確認',periods:ps,center,confidence:ps.length?'HIGH':'MEDIUM',reason:'Excel内部列 ヘッド番号・配達日・傭車料'+periodAudit(ps,f.name)};}
   async function analyzePdfFile(f){if(window.PLAN_PDF_IMPORT?.parseFile){try{const r=await PLAN_PDF_IMPORT.parseFile(f);return {source:'PLAN_BUDGET',label:'年度予算',periods:[],fiscalYear:String(r.fiscalYear),center:r.centerName||centerFromText(`${r.centerCode||''}`),confidence:'HIGH',reason:'PDF内部の年度・支店・主要予算科目をSKFL0001パーサーで確認'};}catch(e){}}return {source:'UNKNOWN',label:'判別不能PDF',periods:[],center:'判定不能',confidence:'LOW',reason:'既存PDFパーサーで既知SOURCEを確定できない'};}
   async function contentRegistered(source,ym){if(!ym||!Repository?.NormalizedSource?.loadManifest)return false;const type=source==='PL_CONFIRMED'?'PL_ACTUAL':source;try{const r=await Repository.NormalizedSource.loadManifest(type,ym);return !!r?.manifest?.current_batch_id;}catch(e){return false;}}
   function duplicateKey(r){if(!r||['UNKNOWN','ERROR','PENDING_PARSER','PL_DAILY_ACTUAL'].includes(r.source))return null;const ps=r.periods?.length===1?r.periods[0]:(r.fiscalYear?`FY${r.fiscalYear}`:null);return ps&&r.center&&r.center!=='判定不能'&&r.center!=='—'?`${r.source}|${ps}|${r.center}`:null;}
@@ -41,8 +70,11 @@
       if(!/\.csv$/i.test(f.name)){rows.push({file:f.name,source:'PENDING_PARSER',label:'未対応形式',periods:[],center:'—',confidence:'—',status:'要追加解析',reason:'対応形式外'});continue;}
       const csv=(typeof CSV!=='undefined'&&CSV)||window.CSV,body=csv?.read?await csv.read(f):await f.text();let daily=false;
       try{const bridge=window.DAILY_ACCOUNTING_IMPORT_BRIDGE;if(bridge?.normalizeCsvText){const dr=bridge.normalizeCsvText(body,{file_name:''}),days=new Set((dr||[]).map(r=>r.accounting_date).filter(Boolean));if(dr?.length&&days.size>1&&contentClassify(body).source==='UNKNOWN')daily=true;}}catch(e){}
-      if(daily){rows.push({file:f.name,source:'PL_DAILY_ACTUAL',label:'日次収支',periods:contentPeriods(body),center:centerFromText(body),confidence:'HIGH',status:'初期投入対象外',reason:'内容をSKDL0001日次構造として判定。当月運用SOURCEのため初期一括登録から除外'});continue;}
-      const c=contentClassify(body),parsed=csv?.parse?csv.parse(body):null,table=Array.isArray(parsed)?parsed:null,periods=table?periodsFromRows(table,c.source):contentPeriods(body),center=table?centerFromRows(table,c.source):centerFromText(body);let status=c.source==='UNKNOWN'?'要確認':'判別';if(periods.length>1)status+='・複数月';let registered=0;for(const ym of periods)if(await contentRegistered(c.source,ym))registered++;if(registered)status+=`・登録済${registered}月`;rows.push({file:f.name,source:c.source,label:c.label,periods,center,confidence:c.confidence,status,reason:c.reason});
+      if(daily){rows.push({file:f.name,source:'PL_DAILY_ACTUAL',label:'日次収支',periods:[...new Set((dr||[]).map(r=>r.year_month).filter(x=>/^\d{6}$/.test(x)))].sort(),center:'判定不能',confidence:'HIGH',status:'初期投入対象外',reason:'内容をSKDL0001日次構造として判定。当月運用SOURCEのため初期一括登録から除外'});continue;}
+      const c=contentClassify(body),table=parseCsvRows(body),periods=periodsFromRows(table,c.source),center=centerFromRows(table,c.source);let status=c.source==='UNKNOWN'?'要確認':'判別';
+      if(c.source!=='UNKNOWN'&&!periods.length)status+='・期間不明';if(periods.length>1)status+='・複数月';if(c.source!=='UNKNOWN'&&center==='判定不能')status+='・センター要確認';
+      let registered=0;for(const ym of periods)if(await contentRegistered(c.source,ym))registered++;if(registered)status+=`・登録済${registered}月`;
+      rows.push({file:f.name,source:c.source,label:c.label,periods,center,confidence:c.source!=='UNKNOWN'&&(!periods.length||center==='判定不能')?'MEDIUM':c.confidence,status,reason:c.reason+periodAudit(periods,f.name)});
     }catch(e){rows.push({file:f.name,source:'ERROR',label:'読取エラー',periods:[],center:'—',confidence:'LOW',status:'要確認',reason:e?.message||String(e)});}}
     const groups=new Map();for(const r of rows){const k=duplicateKey(r);if(k){if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}}for(const g of groups.values())if(g.length>1)g.forEach(r=>{r.status+=(r.status?'・':'')+'重複候補';r.reason+=` / 同一SOURCE・期間・センター ${g.length}件`;});
     const unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
