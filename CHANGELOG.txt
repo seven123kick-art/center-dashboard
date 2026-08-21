@@ -1,3 +1,11 @@
+M2-5R (2026-08-22) Repository起動依存の明示化
+- center.html の Repository Registry 読込を src/app.js より前へ移動。
+- registry.js は getter 方式で個別Repositoryの読込順に依存しない既存設計のため、その設計どおり起動前に名前空間だけを確実に公開する構成へ変更。
+- src/app.js のBoot開始時に window.Repository と Repository.Storage.load の存在を明示確認。
+- rawな「Repository is not defined」ReferenceErrorではなく、依存ファイルが読み込めない場合は確認対象を明示した起動エラーに変更。
+- Cloud同期、Readiness Gate、STATE、データ取込・保存ロジックには変更なし。
+- M2-5Qのデータ取込UI可読性改善は維持。
+
 M2-5Q (2026-08-22) データ取込 診断UI可読性改善
 - 初期データ自動判別の初期表示を、全ファイル技術情報の羅列から運用サマリー中心へ再構成。
 - 月別資料セットをカード表示化し、正常月と不足・重複・センター要確認月を視覚的に分離。

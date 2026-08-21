@@ -2721,8 +2721,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     await window.STARTUP_PROFILER?.measure?.('画面モジュール読込', () => loadScreenModules()) ?? await loadScreenModules();
 
     // 1. ローカル設定・キャッシュは復元するが、起動Gate通過前には画面へ描画しない。
+    // M2-5R: Repository Registry は boot の必須依存。
+    // 生の `Repository` 識別子を参照する前に window 経由で存在と実体を確認し、
+    // 読込失敗時に "Repository is not defined" という不明瞭な ReferenceError にしない。
+    if (!window.Repository) {
+      throw new Error('Repository Registry を読み込めませんでした。src/core/repository/registry.js の読込状態を確認してください。');
+    }
+    if (!window.Repository.Storage || typeof window.Repository.Storage.load !== 'function') {
+      throw new Error('Storage Repository を初期化できませんでした。src/core/repository/storage_repository.js の読込状態を確認してください。');
+    }
     window.STARTUP_PROFILER?.begin?.('ローカルStorage復元');
-    Repository.Storage.load();
+    window.Repository.Storage.load();
     window.STARTUP_PROFILER?.end?.('ローカルStorage復元');
     if (window.APP_BOOT_STATE) APP_BOOT_STATE.cloudSyncPending = true;
 
