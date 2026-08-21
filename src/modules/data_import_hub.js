@@ -94,6 +94,26 @@
     if(!diag.length)return '';
     return `<div class="dih-foot"><b>月別資料セット診断</b> — 初期履歴用4SOURCE（PL_CONFIRMED / WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT）の充足・重複を診断します。</div><div style="overflow:auto"><table class="data-table"><thead><tr><th>内部期間</th><th>センター</th><th>充足</th><th>不足SOURCE</th><th>重複候補</th></tr></thead><tbody>${diag.map(d=>`<tr><td>${esc(d.ym.slice(0,4)+'/'+d.ym.slice(4))}</td><td>${esc(d.centers.length===1?d.centers[0]:(d.centers.length?'複数センター':'判定不能'))}</td><td>${esc(d.present.length+'/'+INITIAL_MONTHLY_SOURCES.length)}</td><td>${esc(d.missing.length?d.missing.join(', '):'なし')}</td><td>${esc(d.duplicate.length?d.duplicate.join(', '):'なし')}</td></tr>`).join('')}</tbody></table></div>`;
   }
+  // M2-5P: registration readiness preview only. No persistence is performed.
+  function registrationReadiness(rows){
+    return rows.map(r=>{
+      const reasons=[];
+      const onePeriod=r.periods?.length===1;
+      if(['UNKNOWN','ERROR','PENDING_PARSER','PL_DAILY_ACTUAL'].includes(r.source))reasons.push(r.source==='PL_DAILY_ACTUAL'?'初期履歴対象外SOURCE':'SOURCE未確定');
+      if(!r.fiscalYear&&!onePeriod)reasons.push(r.periods?.length>1?'複数月':'内部期間不明');
+      if(!r.fiscalYear&&(r.center==='判定不能'||r.center==='—'))reasons.push('センター未確定');
+      if(String(r.status||'').includes('重複候補'))reasons.push('同一投入内の重複候補');
+      if(String(r.status||'').includes('登録済'))reasons.push('既存CURRENTあり');
+      if(r.confidence!=='HIGH')reasons.push('信頼度HIGH未満');
+      return {...r,ready:reasons.length===0,blockReasons:reasons};
+    });
+  }
+  function registrationPreviewHtml(items){
+    const ready=items.filter(x=>x.ready),hold=items.filter(x=>!x.ready);
+    return `<div class="dih-foot"><b>登録前プレビュー</b> — 自動登録可能候補と、人の確認が必要なファイルを分離します。ここでは保存しません。</div>
+      <div class="dih-summary"><div><span>登録候補</span><b>${ready.length}件</b></div><div><span>要確認/除外</span><b>${hold.length}件</b></div><div><span>保存実行</span><b>0件</b></div><div><span>判定</span><b>PREVIEW</b></div></div>
+      <div style="overflow:auto"><table class="data-table"><thead><tr><th>判定</th><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>理由</th></tr></thead><tbody>${items.map(r=>`<tr><td><b>${r.ready?'登録候補':'要確認'}</b></td><td>${esc(r.file)}</td><td>${esc(r.source)}</td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods?.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.ready?'SOURCE・期間・センター・信頼度・重複・既存CURRENTを確認済':r.blockReasons.join(' / '))}</td></tr>`).join('')}</tbody></table></div>`;
+  }
   async function analyzeInitialFiles(files){
     const arr=Array.from(files||[]);if(!arr.length)return;const result=document.getElementById('dih-content-result');if(result)result.innerHTML='<div class="dih-empty">内容を解析中…</div>';const rows=[];
     for(const f of arr){try{
@@ -111,8 +131,8 @@
     }catch(e){rows.push({file:f.name,source:'ERROR',label:'読取エラー',periods:[],center:'—',confidence:'LOW',status:'要確認',reason:e?.message||String(e)});}}
     supplementCenters(rows);
     const groups=new Map();for(const r of rows){const k=duplicateKey(r);if(k){if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}}for(const g of groups.values())if(g.length>1)g.forEach(r=>{r.status+=(r.status?'・':'')+'重複候補';r.reason+=` / 同一SOURCE・期間・センター ${g.length}件`;});
-    const diag=monthlySetDiagnosis(rows),unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
-    target.innerHTML=`<div class="dih-summary"><div><span>選択</span><b>${rows.length}件</b></div><div><span>自動判別</span><b>${rows.length-unresolved}件</b></div><div><span>要確認/追加解析</span><b>${unresolved}件</b></div><div><span>保存</span><b>0件</b></div></div><div style="overflow:auto"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>信頼度</th><th>状態</th><th>判定根拠</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.file)}</td><td><b>${esc(r.source)}</b><br><small>${esc(r.label)}</small></td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.confidence)}</td><td>${esc(r.status)}</td><td>${esc(r.reason)}</td></tr>`).join('')}</tbody></table></div>${monthlySetHtml(diag)}<div class="dih-foot">診断専用です。CURRENT・STATE・Cloudへの保存は行いません。ファイル名は判定根拠に使用していません。センター補完は同一投入バッチ・同一内部期間に明示センターが1種類だけ存在する場合に限定します。</div>`;
+    const diag=monthlySetDiagnosis(rows),preview=registrationReadiness(rows),unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
+    target.innerHTML=`<div class="dih-summary"><div><span>選択</span><b>${rows.length}件</b></div><div><span>自動判別</span><b>${rows.length-unresolved}件</b></div><div><span>要確認/追加解析</span><b>${unresolved}件</b></div><div><span>保存</span><b>0件</b></div></div><div style="overflow:auto"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>信頼度</th><th>状態</th><th>判定根拠</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.file)}</td><td><b>${esc(r.source)}</b><br><small>${esc(r.label)}</small></td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.confidence)}</td><td>${esc(r.status)}</td><td>${esc(r.reason)}</td></tr>`).join('')}</tbody></table></div>${monthlySetHtml(diag)}${registrationPreviewHtml(preview)}<div class="dih-foot">診断・登録前プレビュー専用です。CURRENT・STATE・Cloudへの保存は行いません。ファイル名は判定根拠に使用していません。センター補完は同一投入バッチ・同一内部期間に明示センターが1種類だけ存在する場合に限定します。</div>`;
   }
   function chooseInitialFiles(){const input=document.createElement('input');input.type='file';input.accept='.csv,.pdf,.xls,.xlsx,.zip';input.multiple=true;input.addEventListener('change',()=>analyzeInitialFiles(input.files),{once:true});input.click();}
   function contentDiagnosticHtml(){return `<section style="margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface1)"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><b style="font-size:14px">初期データ 自動判別</b><div style="font-size:11px;color:var(--text3);margin-top:3px">中身から資料種別・年月・センターを診断します。まだ登録はしません。</div></div><button type="button" class="btn" onclick="DATA_IMPORT_HUB.chooseInitialFiles()">ファイルをまとめて選択</button></div><div id="dih-content-result" style="margin-top:12px"></div></section>`;}
