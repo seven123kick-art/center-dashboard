@@ -300,31 +300,16 @@
       });
     },
     async renderImportPanel(){
-      const root = document.getElementById(IMPORT_ID);
-      if (!root) return;
+      const root=document.getElementById(IMPORT_ID);
+      if(!root)return;
+      const hasLegacy=(STATE.dailyRecords||[]).length>0;
+      if(!hasLegacy){root.innerHTML='';return;}
       const auditRows=await legacyAuditRows();
-      root.innerHTML = `<details class="card" style="margin-bottom:14px;border:2px solid #f59e0b;background:#fffbeb" open>
-        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #fde68a">
-          <div style="display:flex;align-items:center;gap:8px"><span class="card-title">📈 日別実績取込（着地予測用）</span><span class="badge badge-warn">SKDL0001</span></div>
-          <span style="font-size:11px;color:var(--text3)">▼ 展開</span>
-        </summary>
-        <div class="card-body" style="font-size:12px;color:var(--text2);line-height:1.8">
-          SKDL0001（日報）CSVから、計上日別に営業収益・人件費・傭車費・その他経費・粗利益を作成します。<br>
-          月次収支表の確定値は変更しません。着地予測画面だけで使用します。
-          <div class="upload-zone no-print" style="margin-top:10px;padding:18px;border-radius:8px;border:2px dashed #f59e0b;background:#fff;text-align:center;cursor:pointer"
-               onclick="document.getElementById('daily-forecast-file-input').click()"
-               ondragover="event.preventDefault();this.classList.add('drag')"
-               ondragleave="this.classList.remove('drag')"
-               ondrop="this.classList.remove('drag');event.preventDefault();LANDING_FORECAST_UI.importFiles(event.dataTransfer.files)">
-            <input type="file" id="daily-forecast-file-input" accept=".csv" multiple style="display:none" onchange="LANDING_FORECAST_UI.importFiles(this.files);this.value=''">
-            <div style="font-size:24px;color:#f59e0b;margin-bottom:6px">⬆</div>
-            <div style="font-size:13px;font-weight:900;color:var(--text)">SKDL0001を選択またはドロップ</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px">赤日・土日・月末補正の着地予測に使用します</div>
-          </div>
-          <div id="daily-forecast-import-msg" style="margin-top:8px"></div>
-          <div style="margin-top:12px;overflow:auto">
-            <table class="data-table"><thead><tr><th>年月</th><th>正式SOURCE</th><th>Legacy日数</th><th>正式日数</th><th class="r">Legacy営業収益</th><th class="r">正式営業収益</th><th>6項目照合</th><th>移行監査</th><th></th></tr></thead><tbody>${auditRows}</tbody></table>
-          </div>
+      root.innerHTML=`<details class="card no-print" style="margin-bottom:14px" open>
+        <summary class="card-header" style="cursor:pointer;list-style:none"><span class="card-title">旧日別データ 移行監査</span></summary>
+        <div class="card-body" style="font-size:12px;color:var(--text2)">
+          SKDL0001の取込入口は「データ取込」へ統合しました。この欄は旧Legacyデータの移行確認だけに使用します。
+          <div style="margin-top:12px;overflow:auto"><table class="data-table"><thead><tr><th>年月</th><th>正式SOURCE</th><th>Legacy日数</th><th>正式日数</th><th class="r">Legacy営業収益</th><th class="r">正式営業収益</th><th>6項目照合</th><th>移行監査</th><th></th></tr></thead><tbody>${auditRows}</tbody></table></div>
         </div>
       </details>`;
     },
