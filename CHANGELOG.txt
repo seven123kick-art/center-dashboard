@@ -1,3 +1,13 @@
+M2-5L (2026-08-21) CONTENT-BASED IMPORT 事前診断 Phase1
+- 既存Data Import Hub上部に「初期データ 自動判別」を統合。既存BulkImportとの別画面・別導線は増やさない。
+- CSVのファイル名ではなく内部列構成から PL_CONFIRMED / WORKER_SALES / SHIPPER_AREA を判定。
+- CSV内部の日付から対象年月、内部支店コード/名称からセンターを診断。
+- 複数月混在、既存CURRENT登録済み月、判別不能を事前表示。
+- SKDL0001は内容パーサーで日次構造を判定し、初期一括登録対象外として表示。
+- PDF/XLS/XLSX/ZIPは現段階では要追加解析と明示し、勝手に分類しない。
+- Phase1は完全な読取専用。CURRENT / STATE / Cloudへの保存処理を持たない。
+- 既存8 SOURCE個別取込、着地予測、BulkImport登録ロジックは変更なし。
+
 M2-5K (2026-08-21) SKDL0001取込入口のData Import Hub統合
 - データ取込Hubに「日次収支・着地予測実績 / SKDL0001 / PL_DAILY_ACTUAL」を追加。主要SOURCEは7→8種類。
 - SKDL0001はHubで対象年月を選択して取込。CSV内年月が選択年月と異なる場合は保存せずエラーとする。
