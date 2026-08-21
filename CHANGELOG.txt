@@ -1,3 +1,10 @@
+M2-5J (2026-08-21) Legacy整理の正式SOURCE照合ガード追加
+- 正式PL_DAILY_ACTUALとLegacyを日数・営業収益・人件費・傭車費・その他経費・粗利益の6項目で照合。
+- 全一致かつ正式SOURCEがREADY・issuesなしの場合だけLegacy整理ボタンを表示。
+- 削除直前にも同じ6項目を再照合し、不一致・PARTIAL・読込失敗時は削除を拒否する二重ガードを追加。
+- 監査表の列見出しを分離し、Legacy/正式の日数・営業収益・照合結果を明示。
+- 正式SOURCE、Legacyデータ、予測計算ロジック自体は変更なし。
+
 M2-5I (2026-08-21) SKDL0001正式SOURCE取込0件の根本原因修正
 - daily_accounting_import_bridge.jsがCSV.toRows()実行前にwindow.CSV?.toRowsを依存確認していたが、CSVはsrc/app.jsのtop-level constでwindow.CSVには公開されていないため、常にDEPENDENCY_UNAVAILABLEとなっていた。
 - Bridgeは同一グローバルレキシカル環境のCSVを優先し、window.CSVは互換fallbackとしてのみ使用するよう修正。

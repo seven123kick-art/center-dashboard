@@ -186,24 +186,31 @@
       <div class="kpi-sub-row"><span class="kpi-sub">計画 ${planText}${rateText != null ? `／達成率予測 ${rateText}` : ''}</span></div>
     </div>`;
   }
+  function totalsForAudit(records){
+    const rows=Array.isArray(records)?records:[];
+    const revenue=sum(rows,'revenue'),labor=sum(rows,'labor'),yosha=sum(rows,'yosha'),other=sum(rows,'other');
+    return {days:new Set(rows.map(r=>r?.date).filter(Boolean)).size,revenue,labor,yosha,other,profit:revenue-labor-yosha-other};
+  }
+  function sameAuditTotals(a,b){return ['days','revenue','labor','yosha','other','profit'].every(k=>Number(a?.[k]||0)===Number(b?.[k]||0));}
   async function legacyAuditRows(){
     const legacyByYm=new Map();
-    (STATE.dailyRecords||[]).forEach(r=>{
-      if(!r?.ym)return;
-      if(!legacyByYm.has(r.ym))legacyByYm.set(r.ym,{days:new Set(),revenue:0});
-      const o=legacyByYm.get(r.ym); if(r.date)o.days.add(r.date); o.revenue+=num(r.revenue);
-    });
-    const repo=window.Repository?.NormalizedSource;
-    let formal=[];
-    if(repo?.listPeriods){try{const x=await repo.listPeriods('PL_DAILY_ACTUAL');formal=Array.isArray(x?.periods)?x.periods:[];}catch(e){console.warn('[M2-5E] period index audit failed',e);}}
+    (STATE.dailyRecords||[]).forEach(r=>{if(r?.ym){if(!legacyByYm.has(r.ym))legacyByYm.set(r.ym,[]);legacyByYm.get(r.ym).push(r);}});
+    const repo=window.Repository?.NormalizedSource;let formal=[];
+    if(repo?.listPeriods){try{const x=await repo.listPeriods('PL_DAILY_ACTUAL');formal=Array.isArray(x?.periods)?x.periods:[];}catch(e){console.warn('[M2-5J] period index audit failed',e);}}
     const months=Array.from(new Set([...formal,...legacyByYm.keys()])).sort().reverse();
-    if(!months.length)return '<tr><td colspan="6" style="color:var(--text3);padding:10px">日別実績はまだありません</td></tr>';
-    return months.map(ym=>{
-      const legacy=legacyByYm.get(ym),hasFormal=formal.includes(ym);
-      const status=hasFormal&&legacy?'正式SOURCEあり／Legacy整理可能':hasFormal?'正式SOURCEのみ':legacy?'Legacyのみ／要移行':'確認不能';
-      const action=hasFormal&&legacy?`<button class="btn btn-danger" style="font-size:11px;padding:2px 8px" onclick="LANDING_FORECAST_UI.cleanupLegacyYM('${ym}')">Legacy整理</button>`:(!hasFormal&&legacy?`<button class="btn btn-danger" style="font-size:11px;padding:2px 8px" onclick="LANDING_FORECAST_UI.deleteYM('${ym}')">旧データ削除</button>`:'');
-      return `<tr><td>${ymLabelLocal(ym)}</td><td>${hasFormal?'あり':'なし'}</td><td>${legacy?`${fmtLocal(legacy.days.size)}日`:'なし'}</td><td class="r">${legacy?`${fmtKLocal(legacy.revenue)}千円`:'—'}</td><td><span class="badge ${hasFormal?'badge-ok':'badge-warn'}">${status}</span></td><td class="r">${action}</td></tr>`;
-    }).join('');
+    if(!months.length)return '<tr><td colspan="9" style="color:var(--text3);padding:10px">日別実績はまだありません</td></tr>';
+    const out=[];
+    for(const ym of months){
+      const legacyRows=legacyByYm.get(ym)||[],hasLegacy=legacyRows.length>0,hasFormal=formal.includes(ym),lt=totalsForAudit(legacyRows);
+      let ft=null,ready=false,err=null;
+      if(hasFormal&&window.DAILY_FORECAST_READ_MODEL?.loadMonth){try{const x=await DAILY_FORECAST_READ_MODEL.loadMonth(ym);if(x?.source==='PL_DAILY_ACTUAL'&&(x.status==='READY'||x.status==='PARTIAL')){ft=totalsForAudit(x.records||[]);ready=x.status==='READY'&&!((x.issues||[]).length);}else err=x?.status||'LOAD_FAILED';}catch(e){err=e?.message||String(e);}}
+      const matched=hasFormal&&hasLegacy&&ready&&sameAuditTotals(ft,lt);
+      let status='確認不能',action='';
+      if(hasFormal&&hasLegacy){if(matched){status='全項目一致／Legacy整理可能';action=`<button class="btn btn-danger" style="font-size:11px;padding:2px 8px" onclick="LANDING_FORECAST_UI.cleanupLegacyYM('${ym}')">Legacy整理</button>`;}else if(!ready)status=`正式SOURCE照合不能${err?`（${escLocal(err)}）`:''}`;else status='差異あり／整理禁止';}
+      else if(hasFormal)status='正式SOURCEのみ';else if(hasLegacy)status='Legacyのみ／要移行';
+      out.push(`<tr><td>${ymLabelLocal(ym)}</td><td>${hasFormal?'あり':'なし'}</td><td>${hasLegacy?`${fmtLocal(lt.days)}日`:'なし'}</td><td>${ft?`${fmtLocal(ft.days)}日`:'—'}</td><td class="r">${hasLegacy?`${fmtKLocal(lt.revenue)}千円`:'—'}</td><td class="r">${ft?`${fmtKLocal(ft.revenue)}千円`:'—'}</td><td>${ft&&hasLegacy?(sameAuditTotals(ft,lt)?'一致':'差異'):'—'}</td><td><span class="badge ${matched?'badge-ok':hasFormal&&hasLegacy?'badge-warn':'badge-muted'}">${status}</span></td><td class="r">${action}</td></tr>`);
+    }
+    return out.join('');
   }
 
   const api = window.LANDING_FORECAST_UI = {
@@ -255,18 +262,15 @@
       UI.toast(`日別実績を${imported}日分取り込みました`);
     },
     async cleanupLegacyYM(ym){
-      const repo=window.Repository?.NormalizedSource;
-      if(!repo?.loadCurrent){UI.toast('正式SOURCEを確認できないため整理できません','warn');return;}
-      try{const current=await repo.loadCurrent('PL_DAILY_ACTUAL',ym,{preferCache:true});if(!current?.ok||!current.batch){UI.toast('正式SOURCEが確認できないためLegacyを削除しません','warn');return;}}
-      catch(e){UI.toast('正式SOURCE確認に失敗したためLegacyを削除しません','warn');return;}
-      const count=(STATE.dailyRecords||[]).filter(r=>r?.ym===ym).length;
-      if(!count){UI.toast('整理対象のLegacyデータはありません');return;}
-      if(!confirm(`${ymLabelLocal(ym)}は正式SOURCE登録済みです。重複するLegacy日別実績 ${count}件を整理しますか？`))return;
-      STATE.dailyRecords=(STATE.dailyRecords||[]).filter(r=>r?.ym!==ym);
-      Repository.Storage.save();
-      if(CLOUD?.pushAll)SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(e=>console.warn('[M2-5E] legacy cleanup cloud sync failed',e));
-      await this.renderImportPanel(); this.render();
-      UI.toast(`${ymLabelLocal(ym)}の重複Legacyデータを整理しました`);
+      const legacyRows=recordsForYM(ym),lt=totalsForAudit(legacyRows);let loaded=null;
+      try{loaded=await window.DAILY_FORECAST_READ_MODEL?.loadMonth?.(ym);}catch(_e){}
+      const ready=loaded?.source==='PL_DAILY_ACTUAL'&&loaded?.status==='READY'&&!((loaded?.issues||[]).length),ft=ready?totalsForAudit(loaded.records||[]):null;
+      if(!ready||!sameAuditTotals(ft,lt)){UI.toast('正式SOURCEとLegacyの6項目が一致しないため整理しません','warn');await this.renderImportPanel();return;}
+      const count=legacyRows.length;if(!count){UI.toast('整理対象のLegacyデータはありません');return;}
+      if(!confirm(`${ymLabelLocal(ym)}は正式SOURCEとの6項目一致を確認済みです。重複するLegacy日別実績 ${count}件を整理しますか？`))return;
+      STATE.dailyRecords=(STATE.dailyRecords||[]).filter(r=>r?.ym!==ym);Repository.Storage.save();
+      if(CLOUD?.pushAll)SYNC_COORDINATOR.syncPush({onlyChanged:true}).catch(e=>console.warn('[M2-5J] legacy cleanup cloud sync failed',e));
+      await this.renderImportPanel();this.render();UI.toast(`${ymLabelLocal(ym)}の重複Legacyデータを整理しました`);
     },
     async deleteYM(ym){
       if (window.Repository?.NormalizedSource?.loadCurrent) {
@@ -319,7 +323,7 @@
           </div>
           <div id="daily-forecast-import-msg" style="margin-top:8px"></div>
           <div style="margin-top:12px;overflow:auto">
-            <table class="data-table"><thead><tr><th>年月</th><th>正式SOURCE</th><th>Legacy</th><th class="r">Legacy営業収益</th><th>移行監査</th><th></th></tr></thead><tbody>${auditRows}</tbody></table>
+            <table class="data-table"><thead><tr><th>年月</th><th>正式SOURCE</th><th>Legacy日数</th><th>正式日数</th><th class="r">Legacy営業収益</th><th class="r">正式営業収益</th><th>6項目照合</th><th>移行監査</th><th></th></tr></thead><tbody>${auditRows}</tbody></table>
           </div>
         </div>
       </details>`;
