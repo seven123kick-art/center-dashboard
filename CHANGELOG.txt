@@ -802,3 +802,11 @@ paymentText()/isPaymentConfirmed()という単一の共通関数を通じて
 Canonical/Legacy非混在原則には一切触れていない。GitHubへの反映
 コミットSHAは、本セッションの権限・情報の制約により提供できて
 いない点を残課題として明記する）
+
+2026-08-21 M2-5M 初期データ自動判別拡張
+- CSV内部の日付列を優先して対象年月を抽出。YYYY/MM/DD・YYYY-MM-DD・YYYYMMDDを対象化。
+- WORKER_SALES / SHIPPER_AREA のセンター判定を内部行から補強。ファイル名は判定根拠に使用しない。
+- 配達ヘッド傭車料確認 xls/xlsx を既存SheetJS基盤で内容解析し、ヘッド番号・配達日・傭車料の列構成から ROUTE_PAYMENT と判定。
+- SKFL0001 PDFを既存PLAN_PDF_IMPORT.parseFileへ接続し、年度・センター・主要予算科目から PLAN_BUDGET と判定。
+- 同一SOURCE・同一期間・同一センターが複数選択された場合「重複候補」を表示。
+- ZIPは誤判定防止のため引き続き要追加解析。診断段階ではCURRENT/STATE/Cloudへ保存しない。
