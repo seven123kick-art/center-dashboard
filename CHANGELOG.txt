@@ -1,3 +1,9 @@
+M2-5I (2026-08-21) SKDL0001正式SOURCE取込0件の根本原因修正
+- daily_accounting_import_bridge.jsがCSV.toRows()実行前にwindow.CSV?.toRowsを依存確認していたが、CSVはsrc/app.jsのtop-level constでwindow.CSVには公開されていないため、常にDEPENDENCY_UNAVAILABLEとなっていた。
+- Bridgeは同一グローバルレキシカル環境のCSVを優先し、window.CSVは互換fallbackとしてのみ使用するよう修正。
+- landing_forecast.jsは取込例外をファイル別NGログへ変換するため、全ファイル失敗時でも最終toastが「0日分」と表示されていたことを確認。
+- M2-5HのCONFIG参照修正は維持。データ、科目定義、日付・金額変換、正式PL_DAILY_ACTUAL保存仕様は変更なし。
+
 M2-5H (2026-08-19) SKDL0001正式SOURCE取込0件不具合修正
 - daily_accounting_normalizer.jsのcategoryFor()がwindow.CONFIGを参照していたが、実CONFIGはsrc/app.jsのtop-level const CONFIGでありwindow.CONFIGには公開されていなかったため、全科目が未分類となり0件化していた。
 - categoryFor()は同一グローバルレキシカル環境のCONFIGを優先し、window.CONFIGは互換fallbackとしてのみ使用するよう修正。
