@@ -353,6 +353,7 @@
         if(importBusy){window.UI?.toast?.('データ取込処理中です','warn');return;}
         const label=kind==='worker'?'作業者別売上明細':'荷主別配送エリア物量';
         showImportProgress(label,p,'ファイルを読み込んでいます…');
+        window.DATA_IMPORT_HUB_MODAL_ACTIVE=true;
         try{
           updateImportProgress('ファイル内容と対象年月を確認しています…');
           if(kind==='worker'){
@@ -368,6 +369,8 @@
         }catch(e){
           const msg=e?.message||String(e);
           finishImportProgress(false,msg);
+        }finally{
+          window.DATA_IMPORT_HUB_MODAL_ACTIVE=false;
         }
       },{once:true});
       input.click();return;

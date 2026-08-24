@@ -123,7 +123,9 @@ IMPORT.deleteFieldData = function(ym) {
       const bg = type === 'error' ? '#fee2e2' : type === 'warn' ? '#fef3c7' : '#dcfce7';
       el.innerHTML = `<div style="padding:8px 10px;border-radius:8px;background:${bg};color:${color};font-weight:700;margin:6px 0">${esc2(text)}</div>`;
     }
-    if (typeof UI !== 'undefined' && UI.toast) UI.toast(text, type === 'error' ? 'error' : type === 'warn' ? 'warn' : 'ok');
+    if (!window.DATA_IMPORT_HUB_MODAL_ACTIVE && typeof UI !== 'undefined' && UI.toast) {
+      UI.toast(text, type === 'error' ? 'error' : type === 'warn' ? 'warn' : 'ok');
+    }
   }
 
   function ensureState(){
