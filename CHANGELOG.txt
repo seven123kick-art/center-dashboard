@@ -1,3 +1,17 @@
+M2-6A (2026-08-22) 初期履歴の安全な実登録
+- M2-5P/Qの自動判別・登録前プレビューから、利用者が明示操作した場合だけ初期履歴をNormalized Source Repositoryへ一括登録できる処理を追加。
+- 一括登録対象は PL_CONFIRMED / WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT の4SOURCEに限定。SKDL0001、年度予算、未確定SOURCE等は対象外。
+- 登録候補は対象年月1件・HIGH信頼度・センター確定・選択中センター一致・同一投入内重複なし・既存CURRENTなしを必須条件とする。
+- 実行直前に各SOURCEのCURRENTを再確認し、既存CURRENTが存在する場合は上書きせずスキップする。
+- WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT は既存 SOURCE_NORMALIZER と Repository.NormalizedSource.saveBatch() を再利用。
+- PL_CONFIRMED は既存 ACCOUNTING_IMPORT_BRIDGE の normalizeCsvText()/persistRecords() を再利用し、CONFIRMED immutableルールを維持。
+- 正規化後にもdocument_type・year_month・内部日付の整合を再検証してから保存する。
+- 保存成功月は既存 CANONICAL_MATERIALIZER で再構築。再構築失敗はSOURCE保存を巻き戻さず、結果画面へ明示する。
+- 保存中は normalized-source-updated によるデータ取込画面の再描画を抑止し、全件終了後に状態を再読込する。
+- 保存結果は 保存/スキップ/失敗 を件数表示し、失敗・スキップ理由を詳細表示する。
+- 既存STATEへの初期履歴書込みや既存CURRENTの自動改訂は行わない。
+- 基準コード: GitHub main commit 45ddc18519a5d19dfec854e0d0331bdfd1896687。M2-5Rはcenter.html/src/app.js/CHANGELOGのみ変更で、data_import_hub.jsはM2-5Qから変更なしをGitHub compareで確認。
+
 M2-5R (2026-08-22) Repository起動依存の明示化
 - center.html の Repository Registry 読込を src/app.js より前へ移動。
 - registry.js は getter 方式で個別Repositoryの読込順に依存しない既存設計のため、その設計どおり起動前に名前空間だけを確実に公開する構成へ変更。
