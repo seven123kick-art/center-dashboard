@@ -296,18 +296,48 @@
     let el=document.getElementById('data-import-progress');
     if(el)return el;
     el=document.createElement('div');el.id='data-import-progress';el.className='data-import-progress';el.hidden=true;
-    el.innerHTML=`<div class="data-import-progress__panel" role="status" aria-live="polite"><div class="data-import-progress__spinner"></div><div class="data-import-progress__title">データを読み込んでいます</div><div class="data-import-progress__source"></div><div class="data-import-progress__month"></div><div class="data-import-progress__bar"><span></span></div><div class="data-import-progress__step">ファイルを確認しています…</div><div class="data-import-progress__note">完了するまでこの画面のままお待ちください。</div></div>`;
+    el.innerHTML=`<div class="data-import-progress__panel" role="status" aria-live="polite">
+      <div class="data-import-progress__spinner"></div>
+      <div class="data-import-progress__result-icon" aria-hidden="true"></div>
+      <div class="data-import-progress__title">データを読み込んでいます</div>
+      <div class="data-import-progress__source"></div>
+      <div class="data-import-progress__month"></div>
+      <div class="data-import-progress__bar"><span></span></div>
+      <div class="data-import-progress__step">ファイルを確認しています…</div>
+      <div class="data-import-progress__result"></div>
+      <div class="data-import-progress__note">完了するまでこの画面のままお待ちください。</div>
+      <button type="button" class="data-import-progress__close">確認</button>
+    </div>`;
+    el.querySelector('.data-import-progress__close').addEventListener('click',()=>hideImportProgress(true));
     document.body.appendChild(el);return el;
   }
   function showImportProgress(label,p,step){
     const el=importProgressEl();importBusy=true;
+    el.classList.remove('is-success','is-error');
+    el.querySelector('.data-import-progress__title').textContent='データを読み込んでいます';
     el.querySelector('.data-import-progress__source').textContent=label;
     el.querySelector('.data-import-progress__month').textContent=/^\d{6}$/.test(p)?`${p.slice(0,4)}年${Number(p.slice(4))}月`:'';
     el.querySelector('.data-import-progress__step').textContent=step||'ファイルを読み込んでいます…';
+    el.querySelector('.data-import-progress__result').textContent='';
+    el.querySelector('.data-import-progress__note').textContent='完了するまでこの画面のままお待ちください。';
     el.hidden=false;document.documentElement.classList.add('data-import-busy');
   }
   function updateImportProgress(step){const el=document.getElementById('data-import-progress');if(el&&!el.hidden)el.querySelector('.data-import-progress__step').textContent=step;}
-  function hideImportProgress(){importBusy=false;const el=document.getElementById('data-import-progress');if(el)el.hidden=true;document.documentElement.classList.remove('data-import-busy');}
+  function finishImportProgress(ok,message){
+    const el=importProgressEl();importBusy=false;
+    el.classList.add(ok?'is-success':'is-error');
+    el.classList.remove(ok?'is-error':'is-success');
+    el.querySelector('.data-import-progress__title').textContent=ok?'データ取込が完了しました':'データを取り込めませんでした';
+    el.querySelector('.data-import-progress__step').textContent=ok?'登録状態を更新しました':'取込処理を完了できませんでした';
+    el.querySelector('.data-import-progress__result').textContent=message||'';
+    el.querySelector('.data-import-progress__note').textContent=ok?'内容を確認して「確認」を押してください。':'内容を確認してから再度お試しください。';
+    document.documentElement.classList.remove('data-import-busy');
+  }
+  function hideImportProgress(force){
+    if(importBusy&&!force)return;
+    importBusy=false;const el=document.getElementById('data-import-progress');if(el)el.hidden=true;
+    document.documentElement.classList.remove('data-import-busy');
+  }
   function choose(kind){
     const p=period(document.getElementById('data-import-hub-month')?.value);
     if(!/^\d{6}$/.test(p)){window.UI?.toast?.('対象年月を選択してください','warn');return;}
@@ -334,8 +364,11 @@
           }
           updateImportProgress('登録状態を更新しています…');
           await refresh();
-        }catch(e){window.UI?.toast?.(e?.message||String(e),'error');}
-        finally{hideImportProgress();}
+          finishImportProgress(true,`${label} / ${/^\d{6}$/.test(p)?`${p.slice(0,4)}年${Number(p.slice(4))}月`:p} / クラウド・正規化SOURCEの登録状態を更新しました`);
+        }catch(e){
+          const msg=e?.message||String(e);
+          finishImportProgress(false,msg);
+        }
       },{once:true});
       input.click();return;
     }

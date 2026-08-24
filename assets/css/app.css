@@ -47,3 +47,23 @@
 .data-import-progress__step{font-size:14px;font-weight:700;color:#4f6376}.data-import-progress__note{margin-top:9px;font-size:12px;color:#7a858c}.data-import-busy{cursor:progress}
 @keyframes dataImportSpin{to{transform:rotate(360deg)}}@keyframes dataImportBar{from{transform:translateX(-35%)}to{transform:translateX(175%)}}
 @media(prefers-reduced-motion:reduce){.data-import-progress__spinner,.data-import-progress__bar span{animation:none}.data-import-progress__bar span{width:100%}}
+
+/* M2-6D: import result stays in the same center modal */
+.data-import-progress__result-icon,.data-import-progress__result,.data-import-progress__close{display:none}
+.data-import-progress.is-success .data-import-progress__spinner,
+.data-import-progress.is-error .data-import-progress__spinner,
+.data-import-progress.is-success .data-import-progress__bar,
+.data-import-progress.is-error .data-import-progress__bar{display:none}
+.data-import-progress.is-success .data-import-progress__result-icon,
+.data-import-progress.is-error .data-import-progress__result-icon{display:flex;width:48px;height:48px;margin:0 auto 14px;border-radius:50%;align-items:center;justify-content:center;font-size:28px;font-weight:800}
+.data-import-progress.is-success .data-import-progress__result-icon{background:#e7f7ee;color:#23865b}
+.data-import-progress.is-success .data-import-progress__result-icon::before{content:"✓"}
+.data-import-progress.is-error .data-import-progress__result-icon{background:#fdecef;color:#b84658}
+.data-import-progress.is-error .data-import-progress__result-icon::before{content:"!"}
+.data-import-progress.is-success .data-import-progress__result,
+.data-import-progress.is-error .data-import-progress__result{display:block;margin:18px 0 0;padding:13px 16px;border-radius:12px;font-size:13px;line-height:1.65;text-align:left;white-space:pre-wrap}
+.data-import-progress.is-success .data-import-progress__result{background:#f0faf4;color:#315f4a}
+.data-import-progress.is-error .data-import-progress__result{background:#fff2f4;color:#8e3947}
+.data-import-progress.is-success .data-import-progress__close,
+.data-import-progress.is-error .data-import-progress__close{display:inline-flex;margin-top:18px;min-width:112px;justify-content:center;border:0;border-radius:10px;padding:10px 22px;background:#2eaf7d;color:#fff;font:inherit;font-weight:800;cursor:pointer}
+.data-import-progress.is-error .data-import-progress__close{background:#b84a5c}
