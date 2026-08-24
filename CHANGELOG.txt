@@ -1,3 +1,15 @@
+M2-6B (2026-08-24) 取込年月のSingle Source of Truth化・誤月保存防止
+- データ取込ハブの対象年月と、従来作業者/商品CSV取込の年月セレクタ同期で月を2桁（04等）に統一。
+  従来は「4」をselectへ代入しており、option値「04」と一致せず、最新月等へ戻る余地があった。
+- データ取込ハブからWORKER_SALES / SHIPPER_AREAを選ぶ場合、従来hidden inputのonchangeに依存せず、
+  handleFilesForYM(files, 対象年月) を明示呼出しするよう変更。
+- 作業者別CSV / 商品・住所CSVは保存前に正規化レコードの内部配達日から実年月を再確認。
+  画面対象年月と一致しないファイルはSTATE・Cloud・Normalized Sourceへ保存する前に停止し、実年月を表示。
+- ファイル名は年月の正本にしない。内部日付と画面対象年月の一致を保存条件とする。
+- 初期履歴の一括自動判別は複数年月を扱う用途のため、従来どおり内部日付で月別に診断する。
+- ROUTE_PAYMENTは既存実装が配達日から年月を算出して月別保存しているため変更なし。
+- GitHubへの直接書込みなし。2026-08-24 01:07取得の全コードZIPを正本として修正。
+
 M2-6A (2026-08-22) 初期履歴の安全な実登録
 - M2-5P/Qの自動判別・登録前プレビューから、利用者が明示操作した場合だけ初期履歴をNormalized Source Repositoryへ一括登録できる処理を追加。
 - 一括登録対象は PL_CONFIRMED / WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENT の4SOURCEに限定。SKDL0001、年度予算、未確定SOURCE等は対象外。

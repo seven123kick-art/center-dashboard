@@ -294,6 +294,24 @@ IMPORT.deleteFieldData = function(ym) {
   function selectedWorkerYM(){ return ymFromFiscalMonth(document.getElementById('field-worker-fy-select')?.value, document.getElementById('field-worker-month-select')?.value); }
   function selectedProductYM(){ return ymFromFiscalMonth(document.getElementById('field-product-fy-select')?.value, document.getElementById('field-product-month-select')?.value); }
 
+  function normalizedRecordPeriods(records){
+    const out = new Set();
+    for (const r of (Array.isArray(records) ? records : [])) {
+      const d = String(r?.delivery_date || '').trim();
+      const m = d.match(/^(20\d{2})-(\d{2})-\d{2}$/);
+      if (m) out.add(`${m[1]}${m[2]}`);
+    }
+    return [...out].sort();
+  }
+  function assertNormalizedImportPeriod(records, expectedYM, fileName, label){
+    const periods = normalizedRecordPeriods(records);
+    if (!periods.length) return;
+    if (periods.length !== 1 || periods[0] !== expectedYM) {
+      const actual = periods.map(x=>`${x.slice(0,4)}年${Number(x.slice(4))}月`).join('・');
+      throw new Error(`${label}「${fileName}」の内部日付は ${actual} です。画面の対象年月 ${ymText(expectedYM)} と一致しないため保存を中止しました。`);
+    }
+  }
+
   function csvRowsFromText(text){ return CSV && CSV.toRows ? CSV.toRows(text) : []; }
   async function readCsvFile(file){ return CSV && CSV.read ? CSV.read(file) : await file.text(); }
 
@@ -894,9 +912,11 @@ IMPORT.deleteFieldData = function(ym) {
       assertNotForeignCsv(rows0, text, 'worker', file.name, '作業者別CSV');
       assertOwnCsvSignature(rows0, file.name, 'worker', '作業者別CSV');
       if (!window.SOURCE_NORMALIZER?.normalizeWorkerSalesRows) throw new Error('SOURCE_NORMALIZERがロードされていません');
-      normalizedRows.push(...SOURCE_NORMALIZER.normalizeWorkerSalesRows(rows0, {
+      const normalizedFileRows = SOURCE_NORMALIZER.normalizeWorkerSalesRows(rows0, {
         file_name:file.name, year_month:ym, center_id:window.CENTER?.id || null
-      }));
+      });
+      assertNormalizedImportPeriod(normalizedFileRows, ym, file.name, '作業者別CSV');
+      normalizedRows.push(...normalizedFileRows);
       const parsed = parseWorkerCsvRows(rows0, file.name);
       combined.lineRowCount += parsed.lineRowCount || 0;
       combined.includedAmount += Number(parsed.includedAmount || 0);
@@ -1024,9 +1044,11 @@ IMPORT.deleteFieldData = function(ym) {
       assertNotForeignCsv(rows0, text, 'product', file.name, '商品・住所CSV');
       assertOwnCsvSignature(rows0, file.name, 'product', '商品・住所CSV');
       if (!window.SOURCE_NORMALIZER?.normalizeShipperAreaRows) throw new Error('SOURCE_NORMALIZERがロードされていません');
-      normalizedRows.push(...SOURCE_NORMALIZER.normalizeShipperAreaRows(rows0, {
+      const normalizedFileRows = SOURCE_NORMALIZER.normalizeShipperAreaRows(rows0, {
         file_name:file.name, year_month:ym, center_id:window.CENTER?.id || null
-      }));
+      });
+      assertNormalizedImportPeriod(normalizedFileRows, ym, file.name, '商品・住所CSV');
+      normalizedRows.push(...normalizedFileRows);
       const parsed = parseProductAddressRows(rows0, file.name);
       rawRows += parsed.rawRows;
       detailRows += parsed.detailRows;

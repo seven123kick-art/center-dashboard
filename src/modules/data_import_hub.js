@@ -260,9 +260,9 @@
   function chooseInitialFiles(){const input=document.createElement('input');input.type='file';input.accept='.csv,.pdf,.xls,.xlsx,.zip';input.multiple=true;input.addEventListener('change',()=>analyzeInitialFiles(input.files),{once:true});input.click();}
   function contentDiagnosticHtml(){return `<section style="margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface1)"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><b style="font-size:14px">初期データ 自動判別</b><div style="font-size:11px;color:var(--text3);margin-top:3px">中身から資料種別・年月・センターを診断します。まだ登録はしません。</div></div><button type="button" class="btn" onclick="DATA_IMPORT_HUB.chooseInitialFiles()">ファイルをまとめて選択</button></div><div id="dih-content-result" style="margin-top:12px"></div></section>`;}
 
-  function syncLegacy(p){if(!/^\d{6}$/.test(p))return;const y=+p.slice(0,4),m=+p.slice(4),fy=m>=4?y:y-1;
+  function syncLegacy(p){if(!/^\d{6}$/.test(p))return;const y=+p.slice(0,4),m=+p.slice(4),fy=m>=4?y:y-1,mm=String(m).padStart(2,'0');
     const pre=document.getElementById('preliminary-pl-month');if(pre)pre.value=`${p.slice(0,4)}-${p.slice(4)}`;
-    [['field-worker-fy-select','field-worker-month-select'],['field-product-fy-select','field-product-month-select']].forEach(([a,b])=>{const A=document.getElementById(a),B=document.getElementById(b);if(A)A.value=String(fy);if(B)B.value=String(m);A?.dispatchEvent(new Event('change',{bubbles:true}));B?.dispatchEvent(new Event('change',{bubbles:true}));});
+    [['field-worker-fy-select','field-worker-month-select'],['field-product-fy-select','field-product-month-select']].forEach(([a,b])=>{const A=document.getElementById(a),B=document.getElementById(b);if(A)A.value=String(fy);if(B)B.value=mm;A?.dispatchEvent(new Event('change',{bubbles:true}));B?.dispatchEvent(new Event('change',{bubbles:true}));});
     const py=document.getElementById('plan-year-sel');if(py)py.value=String(fy);
   }
   async function importDaily(files,p){
@@ -299,7 +299,24 @@
       const input=document.createElement('input');input.type='file';input.accept='.csv';input.multiple=true;
       input.addEventListener('change',()=>importDaily(input.files,p),{once:true});input.click();return;
     }
-    const ids={plan:'plan-pdf-file-input',prelim:'preliminary-pl-file',confirmed:'file-input',worker:'field-worker-file-input',shipper:'field-product-file-input',delivery:'route-pdf-file-input',payment:'route-head-payment-file-input'};
+    if(kind==='worker'||kind==='shipper'){
+      const input=document.createElement('input');input.type='file';input.accept='.csv';input.multiple=true;
+      input.addEventListener('change',async()=>{
+        if(!input.files?.length)return;
+        try{
+          if(kind==='worker'){
+            if(!window.FIELD_WORKER_IMPORT2?.handleFilesForYM)throw new Error('作業者別CSV取込基盤を読み込めません');
+            await FIELD_WORKER_IMPORT2.handleFilesForYM(input.files,p);
+          }else{
+            if(!window.FIELD_PRODUCT_IMPORT2?.handleFilesForYM)throw new Error('荷主別配送エリア物量取込基盤を読み込めません');
+            await FIELD_PRODUCT_IMPORT2.handleFilesForYM(input.files,p);
+          }
+          await refresh();
+        }catch(e){window.UI?.toast?.(e?.message||String(e),'error');}
+      },{once:true});
+      input.click();return;
+    }
+    const ids={plan:'plan-pdf-file-input',prelim:'preliminary-pl-file',confirmed:'file-input',delivery:'route-pdf-file-input',payment:'route-head-payment-file-input'};
     const input=document.getElementById(ids[kind]); if(!input)return;
     input.value='';
     if(kind==='plan')input.addEventListener('change',async()=>{if(!input.files?.length)return;await window.PLAN_PDF_IMPORT?.importSelected?.();await refresh();},{once:true});
