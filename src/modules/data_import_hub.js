@@ -291,6 +291,23 @@
     window.LANDING_FORECAST_UI?.render?.();
     window.UI?.toast?.(`SKDL0001を${days}日分取り込みました${logs.some(x=>x.startsWith('NG'))?'（一部NGあり）':''}`,logs.some(x=>x.startsWith('NG'))?'warn':undefined);
   }
+  let importBusy=false;
+  function importProgressEl(){
+    let el=document.getElementById('data-import-progress');
+    if(el)return el;
+    el=document.createElement('div');el.id='data-import-progress';el.className='data-import-progress';el.hidden=true;
+    el.innerHTML=`<div class="data-import-progress__panel" role="status" aria-live="polite"><div class="data-import-progress__spinner"></div><div class="data-import-progress__title">データを読み込んでいます</div><div class="data-import-progress__source"></div><div class="data-import-progress__month"></div><div class="data-import-progress__bar"><span></span></div><div class="data-import-progress__step">ファイルを確認しています…</div><div class="data-import-progress__note">完了するまでこの画面のままお待ちください。</div></div>`;
+    document.body.appendChild(el);return el;
+  }
+  function showImportProgress(label,p,step){
+    const el=importProgressEl();importBusy=true;
+    el.querySelector('.data-import-progress__source').textContent=label;
+    el.querySelector('.data-import-progress__month').textContent=/^\d{6}$/.test(p)?`${p.slice(0,4)}年${Number(p.slice(4))}月`:'';
+    el.querySelector('.data-import-progress__step').textContent=step||'ファイルを読み込んでいます…';
+    el.hidden=false;document.documentElement.classList.add('data-import-busy');
+  }
+  function updateImportProgress(step){const el=document.getElementById('data-import-progress');if(el&&!el.hidden)el.querySelector('.data-import-progress__step').textContent=step;}
+  function hideImportProgress(){importBusy=false;const el=document.getElementById('data-import-progress');if(el)el.hidden=true;document.documentElement.classList.remove('data-import-busy');}
   function choose(kind){
     const p=period(document.getElementById('data-import-hub-month')?.value);
     if(!/^\d{6}$/.test(p)){window.UI?.toast?.('対象年月を選択してください','warn');return;}
@@ -303,7 +320,11 @@
       const input=document.createElement('input');input.type='file';input.accept='.csv';input.multiple=true;
       input.addEventListener('change',async()=>{
         if(!input.files?.length)return;
+        if(importBusy){window.UI?.toast?.('データ取込処理中です','warn');return;}
+        const label=kind==='worker'?'作業者別売上明細':'荷主別配送エリア物量';
+        showImportProgress(label,p,'ファイルを読み込んでいます…');
         try{
+          updateImportProgress('ファイル内容と対象年月を確認しています…');
           if(kind==='worker'){
             if(!window.FIELD_WORKER_IMPORT2?.handleFilesForYM)throw new Error('作業者別CSV取込基盤を読み込めません');
             await FIELD_WORKER_IMPORT2.handleFilesForYM(input.files,p);
@@ -311,8 +332,10 @@
             if(!window.FIELD_PRODUCT_IMPORT2?.handleFilesForYM)throw new Error('荷主別配送エリア物量取込基盤を読み込めません');
             await FIELD_PRODUCT_IMPORT2.handleFilesForYM(input.files,p);
           }
+          updateImportProgress('登録状態を更新しています…');
           await refresh();
         }catch(e){window.UI?.toast?.(e?.message||String(e),'error');}
+        finally{hideImportProgress();}
       },{once:true});
       input.click();return;
     }
