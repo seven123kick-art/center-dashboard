@@ -118,7 +118,7 @@ let renderShipper;
     if(!state){el.innerHTML='<div class="msg msg-info">確認済みデータを読み込んでいます…</div>';return;}
     if(state.status==='READY'&&state.shipper){
       const issues=state.shipper.issues?.length||0;
-      el.innerHTML=issues?`<div class="msg msg-warn">データ経路：Canonical。${issues}原票は荷主コード競合または金額UNKNOWNのため合計から除外しています。</div>`:'<div class="msg msg-info">データ経路：Canonical（確認済みCURRENT SOURCE）</div>';
+      el.innerHTML=issues?`<div class="msg msg-warn">データ経路：Canonical会計（PL_ACTUAL確定）。${issues}行は金額UNKNOWNのため合計から除外しています。</div>`:'<div class="msg msg-info">データ経路：Canonical会計（PL_ACTUAL確定CURRENT）</div>';
       return;
     }
     el.innerHTML=`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${_escLocal(state.reason||'正規化SOURCE未登録')}</div>`;
@@ -180,7 +180,7 @@ let renderShipper;
     const chartItems = mode === 'detail' ? contracts.slice(0,10) : groups.slice(0,10);
 
     if (title) title.textContent = mode === 'detail' ? '契約別売上（荷主コード別）' : '荷主別売上（グループ統合）';
-    if (sub) sub.textContent = mode === 'detail' ? 'Y列荷主コード別／AB列重複除外' : 'Y列荷主コード頭3桁でグループ化／AB列重複除外';
+    if (sub) sub.textContent = mode === 'detail' ? '荷主基本コード全桁で契約別集計' : '荷主基本コードを0補完し左4桁でグループ化';
 
     if (typeof CHART_MGR !== 'undefined') {
       CHART_MGR.make('c-shipper-bar', {
@@ -648,7 +648,7 @@ let renderShipper;
       groups:groupsOf(ds),
       contracts:contractsOf(ds),
       canonicalState,
-      reason:canonicalState.reason || (canonicalState.status === 'READY' ? 'SHIPPER_AREA CURRENT SOURCE未登録' : 'Canonical Read Model未利用')
+      reason:canonicalState.reason || (canonicalState.status === 'READY' ? 'PL_ACTUAL CURRENT SOURCE未登録' : 'Canonical Read Model未利用')
     };
   };
 

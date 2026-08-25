@@ -78,45 +78,118 @@
     };
   }
 
-  function chooseShipperMeta(recordsBySlip,slipId,slipNo){
-    const list=recordsBySlip.get(slipNo)||[];
-    const codes=[...new Set(list.map(x=>clean(x.source_shipper_code)).filter(Boolean))];
-    const names=[...new Set(list.map(x=>clean(x.source_shipper_name)).filter(Boolean))];
-    if(codes.length!==1) return {ok:false,reason:codes.length?'荷主コード競合':'荷主コード未取得',codes,names};
-    const code=codes[0];
-    return {ok:true,code,code3:code3(code),name:names[0]||code,contractName:names[0]||code};
+  function normalizeShipperCode(v){
+    let c=clean(v).replace(/\.0$/,'').replace(/[^0-9A-Za-z]/g,'');
+    if(!c)return '';
+    if(!c.startsWith('0'))c='0'+c;
+    return c;
+  }
+  function shipperGroupCode(code){return normalizeShipperCode(code).slice(0,4);}
+  function simplifyShipperName(name){
+    const n=clean(name).replace(/（.*?）/g,'').replace(/\(.*?\)/g,'').trim();
+    if(/でんきち|デンキチ/i.test(n))return 'でんきち';
+    if(/コジマ/i.test(n))return 'コジマ';
+    if(/ビックカメラ|ビック/i.test(n))return 'ビックカメラ';
+    if(/ジェイトップ/i.test(n))return 'ジェイトップ';
+    if(/スリーエス/i.test(n))return 'スリーエスサンキ家具';
+    if(/プラスカーゴ/i.test(n))return 'プラスカーゴサービス';
+    if(/フジ医療器/i.test(n))return 'フジ医療器';
+    return n||'未設定';
+  }
+  function majorityShipperName(values,simplify=true){
+    const counts=new Map();
+    for(const value of values||[]){
+      const n=simplify?simplifyShipperName(value):(clean(value)||'未設定');
+      counts.set(n,(counts.get(n)||0)+1);
+    }
+    if(!counts.size)return '未設定';
+    return [...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'ja'))[0][0];
+  }
+  function classifyOtherIncomeFact(f){
+    const account=clean(f?.account_name);
+    if(account.includes('雑'))return '雑収入';
+    if(account.includes('調整'))return '調整';
+    if(account.includes('値引'))return '値引戻し';
+    if(account.includes('返品'))return '返品関連';
+    if(account.includes('手数料'))return '手数料';
+    return account||'その他';
   }
 
   function makeShipperReadModel(materialized,period){
     const snap=materialized?.snapshot||{}, e=snap.entities||{};
-    const slips=safe(e.BUSINESS_SLIP), sales=safe(e.SALES_DETAIL);
-    const normalized=safe(materialized?.normalized?.SHIPPER_AREA?.records);
-    const normalizedBySlip=new Map();
-    normalized.forEach(r=>{const no=clean(r.slip_no);if(!no)return;if(!normalizedBySlip.has(no))normalizedBySlip.set(no,[]);normalizedBySlip.get(no).push(r);});
-    const salesBySlip=new Map();
-    sales.forEach(d=>{if(!d?.slip_id)return;if(!salesBySlip.has(d.slip_id))salesBySlip.set(d.slip_id,[]);salesBySlip.get(d.slip_id).push(d);});
-    const groups=new Map(),contracts=new Map();
-    const issues=[];
-    slips.forEach(slip=>{
-      const slipNo=clean(slip.slip_no); if(!slipNo)return;
-      const meta=chooseShipperMeta(normalizedBySlip,slip.slip_id,slipNo);
-      if(!meta.ok){ if((normalizedBySlip.get(slipNo)||[]).length) issues.push({slip_no:slipNo,reason:meta.reason}); return; }
-      const details=salesBySlip.get(slip.slip_id)||[];
-      if(!details.length) return;
-      const amounts=details.map(x=>numberOrNull(x.amount));
-      if(amounts.some(v=>v===null)){ issues.push({slip_no:slipNo,reason:'売上金額UNKNOWN'}); return; }
-      const income=amounts.reduce((a,v)=>a+v,0);
-      const full=meta.code, c3=meta.code3||full;
-      if(!contracts.has(full))contracts.set(full,{code:full,groupCode:c3,name:meta.contractName,count:0,income:0,slips:new Set()});
-      const c=contracts.get(full); if(!c.slips.has(slipNo)){c.slips.add(slipNo);c.count++;c.income+=income;}
-      if(!groups.has(c3))groups.set(c3,{code3:c3,name:meta.name,count:0,income:0,slips:new Set(),contracts:new Set()});
-      const g=groups.get(c3); g.contracts.add(full); if(!g.slips.has(slipNo)){g.slips.add(slipNo);g.count++;g.income+=income;}
-    });
-    const contractList=[...contracts.values()].map(c=>({code:c.code,groupCode:c.groupCode,name:c.name,groupName:groups.get(c.groupCode)?.name||c.groupCode,count:c.count,income:c.income,unit:c.count?Math.round(c.income/c.count):0})).sort((a,b)=>b.income-a.income||b.count-a.count);
-    const groupList=[...groups.values()].map(g=>({code3:g.code3,name:g.name,count:g.count,income:g.income,unit:g.count?Math.round(g.income/g.count):0,contracts:[...g.contracts].map(code=>contractList.find(c=>c.code===code)).filter(Boolean).sort((a,b)=>b.income-a.income)})).sort((a,b)=>b.income-a.income||b.count-a.count);
-    return {ym:period,groups:groupList,contracts:contractList,issues,source:'CANONICAL',dataPath:'CANONICAL',current_batch_id:snap?.materialization?.current_batches?.SHIPPER_AREA||null};
-  }
+    const facts=safe(e.ACCOUNTING_FACT).filter(f=>
+      f?.document_type==='PL_ACTUAL' &&
+      f?.document_state==='CONFIRMED' &&
+      clean(f?.account_name).includes('収入')
+    );
+    const groups=new Map(), contracts=new Map(), allSlips=new Set(), issues=[];
+    let totalIncome=0, targetRows=0, skippedNoCode=0;
 
+    facts.forEach((f,rowIndex)=>{
+      targetRows++;
+      const amount=numberOrNull(f.amount);
+      if(amount===null){
+        issues.push({source_record_id:f.source_record_id||null,reason:'売上金額UNKNOWN'});
+        return;
+      }
+      totalIncome+=amount;
+
+      const rawCode=clean(f.shipper_base_code);
+      const hasCode=!!rawCode;
+      const fullCode=hasCode?normalizeShipperCode(rawCode):'9999';
+      const gKey=hasCode?shipperGroupCode(fullCode):'9999';
+      if(!gKey){skippedNoCode++;return;}
+      if(!hasCode)skippedNoCode++;
+
+      const shipperName=hasCode?(clean(f.source_shipper_name)||'未設定'):'その他収入（荷主未設定）';
+      const otherClass=classifyOtherIncomeFact(f);
+      const contractName=hasCode?(clean(f.source_contract_name)||shipperName||'未設定'):otherClass;
+      const contractKey=hasCode?fullCode:`9999_${otherClass}`;
+      const slip=clean(f.slip_no)||`__row_slip_${rowIndex}`;
+
+      if(hasCode)allSlips.add(slip);
+      if(!groups.has(gKey))groups.set(gKey,{code4:gKey,names:new Set(),slips:new Set(),income:0,contracts:new Set(),breakdown:new Map()});
+      const g=groups.get(gKey);
+      g.names.add(shipperName);
+      if(hasCode)g.slips.add(slip);
+      g.income+=amount;
+
+      if(!hasCode){
+        g.breakdown.set(otherClass,(g.breakdown.get(otherClass)||0)+amount);
+        return;
+      }
+
+      if(!contracts.has(contractKey))contracts.set(contractKey,{code:contractKey,groupCode:gKey,shipperNames:new Set(),contractNames:new Set(),slips:new Set(),income:0});
+      const c=contracts.get(contractKey);
+      c.shipperNames.add(shipperName); c.contractNames.add(contractName); c.slips.add(slip); c.income+=amount;
+      g.contracts.add(contractKey);
+    });
+
+    const contractList=[...contracts.values()].map(c=>{
+      const name=majorityShipperName(c.contractNames,false);
+      return {
+        code:c.code,groupCode:c.groupCode,name,
+        shipperName:majorityShipperName(c.shipperNames,true),contractName:name,
+        count:c.slips.size,income:c.income,unit:c.slips.size?Math.round(c.income/c.slips.size):0
+      };
+    }).sort((a,b)=>b.income-a.income||b.count-a.count||a.code.localeCompare(b.code,'ja'));
+
+    const groupList=[...groups.values()].map(g=>({
+      code4:g.code4,code3:g.code4,name:majorityShipperName(g.names,true),
+      count:g.slips.size,income:g.income,unit:g.code4==='9999'?null:(g.slips.size?Math.round(g.income/g.slips.size):0),
+      isOther:g.code4==='9999',
+      contracts:[...g.contracts].map(code=>contractList.find(c=>c.code===code)).filter(Boolean).sort((a,b)=>b.income-a.income||b.count-a.count||a.code.localeCompare(b.code,'ja')),
+      breakdown:[...g.breakdown.entries()].map(([name,income])=>({name,income})).sort((a,b)=>b.income-a.income)
+    })).sort((a,b)=>b.income-a.income||b.count-a.count||a.name.localeCompare(b.name,'ja'));
+
+    return {
+      ym:period,groups:groupList,contracts:contractList,issues,
+      ticketCount:allSlips.size,totalIncome,targetRows,skippedNoCode,
+      sourceRule:'Canonical PL_ACTUAL(CONFIRMED)：収支科目名に「収入」を含む行 / 金額合算 / 原票番号ユニーク件数 / 荷主基本コード0補完左4桁統合 / 荷主コードなし収入も売上へ含む',
+      source:'CANONICAL',dataPath:'CANONICAL_ACCOUNTING',
+      current_batch_id:snap?.materialization?.current_batches?.PL_ACTUAL||null
+    };
+  }
 
   function makeFieldProductAreaReadModel(materialized,period){
     const records=safe(materialized?.normalized?.SHIPPER_AREA?.records);
@@ -160,8 +233,8 @@
       try{
         const m=await CANONICAL_MATERIALIZER.materialize({period:ym});
         const batches=m?.snapshot?.materialization?.current_batches||{};
-        if(!batches.WORKER_SALES&&!batches.SHIPPER_AREA){const out={status:'LEGACY_FALLBACK',period:ym,reason:'Normalized CURRENT source not registered'};monthCache.set(ym,out);return out;}
-        const out={status:'READY',period:ym,materialized:m,worker:batches.WORKER_SALES?makeWorkerReadModel(m,ym):null,shipper:batches.SHIPPER_AREA?makeShipperReadModel(m,ym):null,fieldProductArea:batches.SHIPPER_AREA?makeFieldProductAreaReadModel(m,ym):null};
+        if(!batches.WORKER_SALES&&!batches.SHIPPER_AREA&&!batches.PL_ACTUAL){const out={status:'LEGACY_FALLBACK',period:ym,reason:'Normalized CURRENT source not registered'};monthCache.set(ym,out);return out;}
+        const out={status:'READY',period:ym,materialized:m,worker:batches.WORKER_SALES?makeWorkerReadModel(m,ym):null,shipper:batches.PL_ACTUAL?makeShipperReadModel(m,ym):null,fieldProductArea:batches.SHIPPER_AREA?makeFieldProductAreaReadModel(m,ym):null};
         monthCache.set(ym,out);return out;
       }catch(e){const out={status:'LEGACY_FALLBACK',period:ym,reason:e?.message||String(e)};monthCache.set(ym,out);return out;}
       finally{loading.delete(ym);}

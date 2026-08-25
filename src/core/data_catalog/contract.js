@@ -540,6 +540,8 @@
       slip_no: field('string', false), head_no: field('string', false),
       shipper_base_code: field('string', false), shipper_contract_code: field('string', false),
       shipper_account_source_code: field('string', false, 'SKDLの荷主基本コード+荷主契約コード。SHIPPER_AREA荷主コードとの照合用'),
+      source_shipper_name: field('string', false, 'SKDL確定収支の荷主名。荷主分析表示用'),
+      source_contract_name: field('string', false, 'SKDL確定収支の契約名。契約別分析表示用'),
       employee_code: field('string', false),
       source_file_id: field('string', false), source_record_id: field('string', true),
     },

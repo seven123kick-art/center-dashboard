@@ -1,3 +1,14 @@
+M2-7A (2026-08-25) Canonical荷主分析の会計SOURCE統一
+- 荷主分析Canonicalの売上正本を SHIPPER_AREA + WORKER_SALES から PL_ACTUAL(CONFIRMED) / ACCOUNTING_FACT へ変更。
+- Legacy確定仕様と同じく「収支科目名に収入を含む行」の金額を合算。
+- 荷主基本コードは既存Legacyと同じ正規化後の左4桁で荷主統合、全桁で契約別集計。
+- 原票番号ユニークで件数を集計。荷主コードなしの収入は「その他収入（荷主未設定）」として売上へ含め、件数・単価・契約別から除外。
+- PL_ACTUAL Normalized Sourceが既に保持する荷主名・契約名・照合コードをACCOUNTING_FACTへ透過。
+- SHIPPER_AREAは商品・配送エリア・照合SOURCEとして維持し、荷主会計売上の正本には使用しない。
+- 荷主画面のCanonical表示文言をPL_ACTUAL確定CURRENT・左4桁仕様へ更新。
+- 保存処理・Normalized Source登録処理・既存Legacy集計ロジックは変更なし。
+- 2026-08-24 09:47:35取得の全コードZIPを正本として修正。GitHub直接書込みなし。
+
 M2-6E (2026-08-24) データ取込結果通知の中央一本化
 - 全コード確認により、右下青通知の発生元は src/field/field_core.js の共通 msg() → UI.toast と特定。
 - データ取込ハブの中央モーダル経由中だけ toast を抑止し、中央の処理中→成功/失敗→確認へ一本化。

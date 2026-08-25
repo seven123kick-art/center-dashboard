@@ -30,6 +30,8 @@
       account_code:r.account_code, account_name:r.account_name, subaccount_code:r.subaccount_code, subaccount_name:r.subaccount_name,
       amount:r.amount, slip_no:r.slip_no, head_no:r.head_no,
       shipper_base_code:r.shipper_base_code, shipper_contract_code:r.shipper_contract_code,
+      shipper_account_source_code:r.shipper_account_source_code,
+      source_shipper_name:r.source_shipper_name, source_contract_name:r.source_contract_name,
       employee_code:r.employee_code, source_file_id:r.source_file_id, source_record_id:r.source_record_id,
       value_status:r.document_state==='CONFIRMED'?'CONFIRMED':'PRELIMINARY'
     }));
