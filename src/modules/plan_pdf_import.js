@@ -64,16 +64,17 @@
   }
   function setMsg(text,type=''){const el=document.getElementById('plan-pdf-import-msg');if(el){el.textContent=text||'';el.className=type==='error'?'text-danger':'';}}
   async function importSelected(){
-    const file=document.getElementById('plan-pdf-file-input')?.files?.[0]; if(!file){setMsg('SKFL0001 PDFを選択してください。','error');return;}
-    if(!/\.pdf$/i.test(file.name)){setMsg('PDFファイルを選択してください。','error');return;}
+    const file=document.getElementById('plan-pdf-file-input')?.files?.[0]; if(!file){const m='SKFL0001 PDFを選択してください。';setMsg(m,'error');return {ok:false,error:m};}
+    if(!/\.pdf$/i.test(file.name)){const m='PDFファイルを選択してください。';setMsg(m,'error');return {ok:false,error:m};}
     setMsg('PDFを解析しています…');
     try{
       const r=await parseFile(file),selected=String(document.getElementById('plan-year-sel')?.value||'');
       if(selected&&selected!==String(r.fiscalYear)){throw new Error(`選択年度は${selected}年度ですが、PDFは${r.fiscalYear}年度です。年度を確認してください。`);}
       if(!window.PLAN?.importParsed)throw new Error('計画保存基盤を読み込めません。');
       const ok=await PLAN.importParsed(r.rows,r.fiscalYear,{source_type:'SKFL0001_PDF',file_name:file.name,center_code:r.centerCode,center_name:r.centerName,item_count:r.itemCount,month_status:r.monthStatus,coverage:r.coverage});
-      if(ok!==false){setMsg(`${r.fiscalYear}年度 SKFL0001を取込みました（${r.itemCount}科目 / ${r.coverage==='FIRST_HALF_ONLY'?'上期予算・下期未策定':'12か月予算'}）`);const input=document.getElementById('plan-pdf-file-input');if(input)input.value='';}
-    }catch(e){setMsg(e?.message||String(e),'error');}
+      if(ok!==false){const message=`${r.fiscalYear}年度 SKFL0001を取込みました（${r.itemCount}科目 / ${r.coverage==='FIRST_HALF_ONLY'?'上期予算・下期未策定':'12か月予算'}）`;setMsg(message);const input=document.getElementById('plan-pdf-file-input');if(input)input.value='';return {ok:true,message,fiscalYear:r.fiscalYear,itemCount:r.itemCount};}
+      return {ok:false,error:'年度予算の保存結果を確認できませんでした。'};
+    }catch(e){const message=e?.message||String(e);setMsg(message,'error');return {ok:false,error:message};}
   }
   document.addEventListener('DOMContentLoaded',()=>{const input=document.getElementById('plan-pdf-file-input');if(input)input.addEventListener('change',()=>{const n=document.getElementById('plan-pdf-file-name');if(n)n.textContent=input.files?.[0]?.name||'未選択';});});
   window.PLAN_PDF_IMPORT=Object.freeze({parseFile,importSelected});

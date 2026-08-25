@@ -950,6 +950,9 @@ const IMPORT = {
     for (const f of files) {
       try {
         const text = await CSV.read(f);
+        if(importType==='confirmed' && window.ACCOUNTING_IMPORT_BRIDGE?.normalizeCsvText){
+          ACCOUNTING_IMPORT_BRIDGE.normalizeCsvText(text,{period:ym,document_state:'CONFIRMED',file_name:f.name});
+        }
         const rows = CSV.parseSKDL(text, monthCol);
         if (!rows) {
           if (opt.strict) { strictFailures.push(`${f.name}: データ行が見つかりません`); continue; }

@@ -234,7 +234,7 @@
     }catch(_){ return true; } // 読めない場合は既存の解析処理側の判定に委ねる（過検知を避ける）
   }
 
-  async function importFiles(files){
+  async function importFiles(files,expectedYm=''){
     const all=[...files];
     const arr=all.filter(f=>/\.pdf$/i.test(f.name));
     const msg=document.getElementById('route-import-msg');
@@ -268,6 +268,11 @@
           if(!byYm.has(ym)) byYm.set(ym,[]);
           byYm.get(ym).push(r);
         }
+      }
+      const detectedYms=[...new Set([...byYm.keys(),...normalizedDeliveryByYm.keys()])].sort();
+      if(expectedYm && (detectedYms.length!==1 || detectedYms[0]!==expectedYm)){
+        const actual=detectedYms.length?detectedYms.map(x=>`${x.slice(0,4)}年${Number(x.slice(4))}月`).join('、'):'判定不能';
+        throw new Error(`PDF内部の配達日は ${actual} です。画面の対象年月 ${expectedYm.slice(0,4)}年${Number(expectedYm.slice(4))}月 と一致しないため保存を中止しました。`);
       }
       STATE.routeData = Array.isArray(STATE.routeData) ? STATE.routeData : [];
       for(const [ym,routes] of byYm){
@@ -303,9 +308,12 @@
       }
       if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルから${parsedRouteCount}便を取り込みました。${normalizedDeliveryFailed?` <span style=\"color:#92400e\">/ 正規化SOURCE保存未確認 ${normalizedDeliveryFailed}ヶ月</span>`:` / 正規化SOURCE保存済 ${normalizedDeliverySaved}ヶ月`}</span>`;
       render();
+      return {ok:normalizedDeliveryFailed===0,count:parsedRouteCount,savedMonths:normalizedDeliverySaved,failedMonths:normalizedDeliveryFailed};
     }catch(e){
       console.error(e);
       if(msg) msg.innerHTML=`<span style="color:#991b1b;font-weight:700">取込エラー：${esc(e.message)}</span>`;
+      if(expectedYm) throw e;
+      return {ok:false,error:e?.message||String(e)};
     }
   }
 
@@ -346,7 +354,7 @@
     return out;
   }
 
-  async function importHeadPaymentFiles(files){
+  async function importHeadPaymentFiles(files,expectedYm=''){
     const all=[...files];
     const arr=all.filter(f=>/\.(xls|xlsx)$/i.test(f.name));
     const msg=document.getElementById('route-head-payment-import-msg');
@@ -387,6 +395,11 @@
         }
       }
       if(!total) throw new Error('配達ヘッド傭車料データを1件も取得できませんでした');
+      const detectedYms=[...new Set([...byYm.keys(),...normalizedByYm.keys()])].sort();
+      if(expectedYm && (detectedYms.length!==1 || detectedYms[0]!==expectedYm)){
+        const actual=detectedYms.length?detectedYms.map(x=>`${x.slice(0,4)}年${Number(x.slice(4))}月`).join('、'):'判定不能';
+        throw new Error(`Excel内部の配達日は ${actual} です。画面の対象年月 ${expectedYm.slice(0,4)}年${Number(expectedYm.slice(4))}月 と一致しないため保存を中止しました。`);
+      }
       STATE.routeData=Array.isArray(STATE.routeData)?STATE.routeData:[];
       for(const [ym,items] of byYm){
         const old=STATE.routeData.find(x=>x.ym===ym)||{ym,routes:[]};
@@ -422,8 +435,11 @@
         : ` / 正規化SOURCE保存済 ${normalizedSaved}ヶ月`;
       if(msg) msg.innerHTML=`<span style="color:#065f46;font-weight:700">${arr.length}ファイルから${total}件の配達ヘッド傭車料を取り込みました。${normalizedNote}</span>`;
       render();
+      return {ok:normalizedFailed===0,count:total,savedMonths:normalizedSaved,failedMonths:normalizedFailed};
     }catch(e){
       console.error(e); if(msg) msg.innerHTML=`<span style="color:#991b1b;font-weight:700">取込エラー：${esc(e.message)}</span>`;
+      if(expectedYm) throw e;
+      return {ok:false,error:e?.message||String(e)};
     }
   }
 

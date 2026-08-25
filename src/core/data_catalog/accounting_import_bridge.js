@@ -17,7 +17,13 @@
     if(!/^\d{6}$/.test(period)) throw new Error('INVALID_PERIOD');
     if(state!=='PRELIMINARY'&&state!=='CONFIRMED') throw new Error('UNSUPPORTED_DOCUMENT_STATE');
     if(!window.ACCOUNTING_NORMALIZER?.normalizeRows||!window.CSV?.toRows) throw new Error('DEPENDENCY_UNAVAILABLE');
-    return ACCOUNTING_NORMALIZER.normalizeRows(CSV.toRows(text),{document_state:state,year_month:period,file_name:input.file_name||null,source_file_id:input.source_file_id||null});
+    const records=ACCOUNTING_NORMALIZER.normalizeRows(CSV.toRows(text),{document_state:state,year_month:period,file_name:input.file_name||null,source_file_id:input.source_file_id||null});
+    const actualPeriods=[...new Set(records.map(r=>String(r?.accounting_date||'').replace(/\D/g,'').slice(0,6)).filter(x=>/^\d{6}$/.test(x)))].sort();
+    if(actualPeriods.length!==1||actualPeriods[0]!==period){
+      const actual=actualPeriods.length?actualPeriods.map(x=>`${x.slice(0,4)}年${Number(x.slice(4))}月`).join('、'):'判定不能';
+      throw new Error(`CSV内部の計上日は ${actual} です。画面の対象年月 ${period.slice(0,4)}年${Number(period.slice(4))}月 と一致しないため保存を中止しました。`);
+    }
+    return records;
   }
   async function persistRecords(records,input={}){
     const period=clean(input.period), state=clean(input.document_state).toUpperCase();

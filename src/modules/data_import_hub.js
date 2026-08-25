@@ -201,8 +201,20 @@
     if(!window.confirm(`${activeCenter}の初期履歴 ${items.length}件を登録します。\n既存CURRENTは上書きしません。\nNormalized Source Repository / Cloudへ保存します。よろしいですか？`))return;
     initialImportSaving=true;
     const btn=document.getElementById('dih-initial-register-btn');if(btn)btn.disabled=true;
+    showImportProgress(`初期履歴 ${items.length}件`,'','保存前の最終検証をしています…');
     const results=[],affected=new Set();let saved=0,skipped=0,failed=0;
     try{
+      const preflightErrors=[];
+      for(const item of items){
+        try{
+          await buildInitialRecords(item);
+          const repoType=item.source==='PL_CONFIRMED'?'PL_ACTUAL':item.source,ym=item.periods?.[0];
+          const before=await Repository.NormalizedSource.loadManifest(repoType,ym);
+          if(before?.manifest?.current_batch_id)preflightErrors.push(`${ym} ${item.source}: 既存CURRENTあり`);
+        }catch(e){preflightErrors.push(`${item.periods?.[0]||'—'} ${item.source}: ${e?.message||e}`);}
+      }
+      if(preflightErrors.length)throw new Error(`保存前検証で ${preflightErrors.length}件の問題を確認したため、保存は0件です。\n${preflightErrors.join('\n')}`);
+      updateImportProgress('検証完了。Normalized Source / Cloudへ登録しています…');
       for(let i=0;i<items.length;i++){
         const item=items[i];
         setInitialRegisterStatus(`<strong>${i+1}/${items.length}</strong> ${esc(item.periods?.[0]||'')} ${esc(item.source)} を確認・登録中…`,'is-running');
@@ -224,12 +236,16 @@
       }
       const resultHtml=`<div class="dih-register-result"><strong>初期履歴登録結果</strong><span>保存 ${saved}件 / スキップ ${skipped}件 / 失敗 ${failed}件${materializeErrors.length?` / 再構築エラー ${materializeErrors.length}か月`:''}</span></div>${(failed||skipped||materializeErrors.length)?`<details class="dih-detail-toggle" open><summary>登録結果の詳細</summary><div class="dih-detail-body"><div class="dih-result-scroll"><table class="data-table"><thead><tr><th>結果</th><th>年月</th><th>SOURCE</th><th>ファイル</th><th>詳細</th></tr></thead><tbody>${results.filter(x=>x.status!=='保存済').map(x=>`<tr><td>${esc(x.status)}</td><td>${esc(x.item.periods?.[0]||'')}</td><td>${esc(x.item.source)}</td><td>${esc(x.item.file)}</td><td>${esc(x.detail)}</td></tr>`).join('')}${materializeErrors.map(x=>`<tr><td>再構築</td><td colspan="4">${esc(x)}</td></tr>`).join('')}</tbody></table></div></div></details>`:''}`;
       setInitialRegisterStatus(resultHtml,failed?'is-error':'is-ok');
-      window.UI?.toast?.(`初期履歴を保存 ${saved}件${failed?` / 失敗 ${failed}件`:''}`,failed?'warn':undefined);
+      if(failed)finishImportProgress(false,`初期履歴登録：保存 ${saved}件 / 失敗 ${failed}件。詳細は画面内の登録結果を確認してください。`);
+      else finishImportProgress(true,`初期履歴登録完了：保存 ${saved}件 / スキップ ${skipped}件 / 失敗 0件`);
       const files=session.files;
       await refresh();
       await analyzeInitialFiles(files);
       const refreshed=document.getElementById('dih-initial-register-status');
       if(refreshed){refreshed.className=`dih-register-status ${failed?'is-error':'is-ok'}`;refreshed.innerHTML=resultHtml;}
+    }catch(e){
+      setInitialRegisterStatus(`<div class="dih-register-result"><strong>登録中止</strong><span>${esc(e?.message||String(e))}</span></div>`,'is-error');
+      finishImportProgress(false,e?.message||String(e));
     }finally{
       initialImportSaving=false;
       const nextBtn=document.getElementById('dih-initial-register-btn');if(nextBtn)nextBtn.disabled=false;
@@ -237,7 +253,9 @@
   }
 
   async function analyzeInitialFiles(files){
-    const arr=Array.from(files||[]);if(!arr.length)return;const result=document.getElementById('dih-content-result');if(result)result.innerHTML='<div class="dih-empty">内容を解析中…</div>';const rows=[];
+    const arr=Array.from(files||[]);if(!arr.length)return;
+    showImportProgress(`まとめて選択 ${arr.length}ファイル`,'','ファイル内容・資料種別・内部期間を解析しています…');
+    const result=document.getElementById('dih-content-result');if(result)result.innerHTML='<div class="dih-empty">内容を解析中…</div>';const rows=[];
     for(const f of arr){try{
       if(/\.(xls|xlsx)$/i.test(f.name)){const x=await analyzeExcelFile(f);rows.push({_file:f,file:f.name,...x,status:x.source==='UNKNOWN'?'要確認':'判別'});continue;}
       if(/\.pdf$/i.test(f.name)){const x=await analyzePdfFile(f);rows.push({_file:f,file:f.name,...x,status:x.source==='UNKNOWN'?'要確認':'判別'});continue;}
@@ -256,6 +274,8 @@
     const diag=monthlySetDiagnosis(rows),preview=registrationReadiness(rows),unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
     initialImportSession={files:arr,rows,preview,analyzed_at:new Date().toISOString(),center_id:window.CENTER?.id||null,center_name:window.CENTER?.name||null};
     target.innerHTML=`<div class="dih-summary"><div><span>選択</span><b>${rows.length}件</b></div><div><span>自動判別</span><b>${rows.length-unresolved}件</b></div><div><span>要確認/追加解析</span><b>${unresolved}件</b></div><div><span>保存</span><b>0件</b></div></div>${monthlySetHtml(diag)}${registrationPreviewHtml(preview)}<details class="dih-detail-toggle"><summary>全ファイルの技術判定 ${rows.length}件</summary><div class="dih-detail-body"><div class="dih-result-scroll dih-technical-table"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>信頼度</th><th>状態</th><th>判定根拠</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.file)}</td><td><b>${esc(r.source)}</b><small>${esc(r.label)}</small></td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.confidence)}</td><td>${esc(r.status)}</td><td>${esc(r.reason)}</td></tr>`).join('')}</tbody></table></div></div></details><div class="dih-foot">診断・登録前プレビュー専用です。CURRENT・STATE・Cloudへの保存は行いません。ファイル名は判定根拠に使用していません。センター補完は同一投入バッチ・同一内部期間に明示センターが1種類だけ存在する場合に限定します。</div>`;
+    const ready=preview.filter(x=>x.ready).length,hold=preview.length-ready;
+    finishImportProgress(true,`解析完了：選択 ${rows.length}件 / 自動判別 ${rows.length-unresolved}件 / 登録候補 ${ready}件 / 要確認・除外 ${hold+unresolved}件\nこの時点では保存していません。`);
   }
   function chooseInitialFiles(){const input=document.createElement('input');input.type='file';input.accept='.csv,.pdf,.xls,.xlsx,.zip';input.multiple=true;input.addEventListener('change',()=>analyzeInitialFiles(input.files),{once:true});input.click();}
   function contentDiagnosticHtml(){return `<section style="margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface1)"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><b style="font-size:14px">初期データ 自動判別</b><div style="font-size:11px;color:var(--text3);margin-top:3px">中身から資料種別・年月・センターを診断します。まだ登録はしません。</div></div><button type="button" class="btn" onclick="DATA_IMPORT_HUB.chooseInitialFiles()">ファイルをまとめて選択</button></div><div id="dih-content-result" style="margin-top:12px"></div></section>`;}
@@ -267,30 +287,32 @@
   }
   async function importDaily(files,p){
     const arr=Array.from(files||[]).filter(f=>/\.csv$/i.test(f.name));
-    if(!arr.length){window.UI?.toast?.('SKDL0001 CSVを選択してください','warn');return;}
-    const csv=(typeof CSV!=='undefined'&&CSV)||window.CSV;
-    const bridge=window.DAILY_ACCOUNTING_IMPORT_BRIDGE;
-    if(!csv?.read||!bridge?.normalizeCsvText||!bridge?.persistRecords){window.UI?.toast?.('日次SOURCE取込基盤を読み込めません','error');return;}
-    const byYM=new Map(),names=new Map();let days=0;const logs=[];
+    if(!arr.length)throw new Error('SKDL0001 CSVを選択してください');
+    const csv=(typeof CSV!=='undefined'&&CSV)||window.CSV,bridge=window.DAILY_ACCOUNTING_IMPORT_BRIDGE;
+    if(!csv?.read||!bridge?.normalizeCsvText||!bridge?.persistRecords)throw new Error('日次SOURCE取込基盤を読み込めません');
+    const validated=[],byYM=new Map(),names=new Map();let days=0;
     for(const f of arr){
-      try{
-        const text=await csv.read(f),rows=bridge.normalizeCsvText(text,{file_name:f.name});
-        if(!rows.length)throw new Error('日別集計できる行がありません');
-        const periods=[...new Set(rows.map(r=>r.year_month).filter(Boolean))];
-        if(periods.some(x=>x!==p))throw new Error(`選択年月 ${p} とCSV対象年月 ${periods.join(',')} が一致しません`);
-        rows.forEach(r=>{if(!byYM.has(r.year_month))byYM.set(r.year_month,[]);byYM.get(r.year_month).push(r);if(!names.has(r.year_month))names.set(r.year_month,new Set());names.get(r.year_month).add(f.name);});
-        days+=new Set(rows.map(r=>r.accounting_date).filter(Boolean)).size;
-        logs.push(`OK ${f.name}`);
-      }catch(e){logs.push(`NG ${f.name}: ${e?.message||e}`);}
+      const text=await csv.read(f),rows=bridge.normalizeCsvText(text,{file_name:f.name});
+      if(!rows.length)throw new Error(`${f.name}: 日別集計できる行がありません`);
+      const periods=[...new Set(rows.map(r=>r.year_month).filter(Boolean))].sort();
+      if(periods.length!==1||periods[0]!==p){
+        const actual=periods.length?periods.map(x=>`${x.slice(0,4)}年${Number(x.slice(4))}月`).join('、'):'判定不能';
+        throw new Error(`${f.name}: CSV内部日付は ${actual} です。画面の対象年月 ${p.slice(0,4)}年${Number(p.slice(4))}月 と一致しないため保存を中止しました。`);
+      }
+      validated.push({f,rows});
+    }
+    for(const {f,rows} of validated){
+      rows.forEach(r=>{if(!byYM.has(r.year_month))byYM.set(r.year_month,[]);byYM.get(r.year_month).push(r);if(!names.has(r.year_month))names.set(r.year_month,new Set());names.get(r.year_month).add(f.name);});
+      days+=new Set(rows.map(r=>r.accounting_date).filter(Boolean)).size;
     }
     for(const [ym,rows] of byYM){
       const saved=await bridge.persistRecords(rows,{period:ym,source_file_names:[...(names.get(ym)||[])]});
       if(!saved?.ok)throw new Error(saved?.error||`${ym} の保存に失敗しました`);
     }
-    await refresh();
-    window.LANDING_FORECAST_UI?.render?.();
-    window.UI?.toast?.(`SKDL0001を${days}日分取り込みました${logs.some(x=>x.startsWith('NG'))?'（一部NGあり）':''}`,logs.some(x=>x.startsWith('NG'))?'warn':undefined);
+    await refresh();window.LANDING_FORECAST_UI?.render?.();
+    return {ok:true,count:arr.length,days};
   }
+
   let importBusy=false;
   function importProgressEl(){
     let el=document.getElementById('data-import-progress');
@@ -344,7 +366,7 @@
     syncLegacy(p);
     if(kind==='daily'){
       const input=document.createElement('input');input.type='file';input.accept='.csv';input.multiple=true;
-      input.addEventListener('change',()=>importDaily(input.files,p),{once:true});input.click();return;
+      input.addEventListener('change',async()=>{if(!input.files?.length)return;showImportProgress('日次収支・着地予測実績',p,'CSV内部日付を確認しています…');try{const r=await importDaily(input.files,p);finishImportProgress(true,`日次収支 / ${p.slice(0,4)}年${Number(p.slice(4))}月 / ${r.days}日分を登録しました`);}catch(e){finishImportProgress(false,e?.message||String(e));}},{once:true});input.click();return;
     }
     if(kind==='worker'||kind==='shipper'){
       const input=document.createElement('input');input.type='file';input.accept='.csv';input.multiple=true;
@@ -375,13 +397,22 @@
       },{once:true});
       input.click();return;
     }
-    const ids={plan:'plan-pdf-file-input',prelim:'preliminary-pl-file',confirmed:'file-input',delivery:'route-pdf-file-input',payment:'route-head-payment-file-input'};
-    const input=document.getElementById(ids[kind]); if(!input)return;
-    input.value='';
-    if(kind==='plan')input.addEventListener('change',async()=>{if(!input.files?.length)return;await window.PLAN_PDF_IMPORT?.importSelected?.();await refresh();},{once:true});
-    else if(kind==='prelim')input.addEventListener('change',async()=>{if(!input.files?.length)return;await window.DATA_IMPORT_MANAGEMENT?.importPreliminary?.();await refresh();},{once:true});
-    else if(kind==='confirmed')input.addEventListener('change',()=>{if(!input.files?.length)return;document.querySelectorAll('input[name="manual-import-type"]').forEach(r=>{r.checked=r.value==='confirmed';});},{once:true});
-    input.click();
+    if(kind==='plan'){
+      const input=document.getElementById('plan-pdf-file-input');if(!input)return;input.value='';
+      input.addEventListener('change',async()=>{if(!input.files?.length)return;showImportProgress('年度予算',p,'PDF内部の年度・センター・主要科目を確認しています…');try{const r=await window.PLAN_PDF_IMPORT?.importSelected?.();if(!r?.ok)throw new Error(r?.error||'年度予算を登録できませんでした');await refresh();finishImportProgress(true,r.message||`${fyOf(p)}年度の年度予算を登録しました`);}catch(e){finishImportProgress(false,e?.message||String(e));}},{once:true});input.click();return;
+    }
+    if(kind==='prelim'){
+      const input=document.getElementById('preliminary-pl-file');if(!input)return;input.value='';
+      input.addEventListener('change',async()=>{if(!input.files?.length)return;showImportProgress('月次収支 速報',p,'CSV内部の計上日と対象年月を確認しています…');try{await window.DATA_IMPORT_MANAGEMENT?.importPreliminary?.();const cur=await Repository.NormalizedSource.loadCurrent('PL_ACTUAL',p);const st=cur?.records?.[0]?.document_state;if(st!=='PRELIMINARY')throw new Error('速報CURRENTの登録を確認できませんでした。画面内のエラー内容を確認してください。');await refresh();finishImportProgress(true,`月次収支 速報 / ${p.slice(0,4)}年${Number(p.slice(4))}月 / PRELIMINARY CURRENTを登録しました`);}catch(e){finishImportProgress(false,e?.message||String(e));}},{once:true});input.click();return;
+    }
+    if(kind==='confirmed'){
+      const input=document.createElement('input');input.type='file';input.accept='.csv';input.multiple=true;
+      input.addEventListener('change',async()=>{if(!input.files?.length)return;document.querySelectorAll('input[name="manual-import-type"]').forEach(r=>{r.checked=r.value==='confirmed';});showImportProgress('月次収支 確定',p,'CSV内部の計上日と対象年月を確認しています…');try{await IMPORT.processCSV(input.files,p,{replace:true,awaitCloud:true,strict:true});await refresh();finishImportProgress(true,`月次収支 確定 / ${p.slice(0,4)}年${Number(p.slice(4))}月 / ${input.files.length}ファイルを登録しました`);}catch(e){finishImportProgress(false,e?.message||String(e));}},{once:true});input.click();return;
+    }
+    if(kind==='delivery'||kind==='payment'){
+      const input=document.createElement('input');input.type='file';input.multiple=true;input.accept=kind==='delivery'?'.pdf':'.xls,.xlsx';
+      input.addEventListener('change',async()=>{if(!input.files?.length)return;const label=kind==='delivery'?'配達持出予定リスト':'配達ヘッド傭車料確認';showImportProgress(label,p,'ファイル内部の配達日と対象年月を確認しています…');try{const r=kind==='delivery'?await window.ROUTE_ANALYSIS_UI?.importFiles?.(input.files,p):await window.ROUTE_ANALYSIS_UI?.importHeadPaymentFiles?.(input.files,p);if(!r?.ok)throw new Error(r?.error||`${label}の正規化SOURCE保存を確認できませんでした`);await refresh();finishImportProgress(true,`${label} / ${p.slice(0,4)}年${Number(p.slice(4))}月 / ${r.count}件を登録しました`);}catch(e){finishImportProgress(false,e?.message||String(e));}},{once:true});input.click();return;
+    }
   }
   async function statusFor(d,p){
     if(d.id==='PLAN_BUDGET'){const fy=fyOf(p),x=window.STATE?.planData?.[fy];if(!x)return {status:'MISSING',text:'未登録',detail:`${fy}年度`};const cov=x.coverage||x.sourceMeta?.coverage||'UNKNOWN';return {status:'CURRENT',text:cov==='FIRST_HALF_ONLY'?'上期策定済':'登録済',detail:`${fy}年度 · ${x.sourceMeta?.source_type||'SOURCE'}`};}

@@ -1,3 +1,20 @@
+M2-8A (2026-08-25) 全SOURCE取込モーダル・保存前検証統一
+- 最新全コードZIP center-dashboard-main(20260825-122738).zip を正本に監査して修正。
+- データ管理8資料の取込を中央モーダル（読込/検証/保存/成功/失敗）へ統一。
+- SKDL0001は全選択ファイルの内部年月を先に検証し、1件でも不一致なら保存0件。
+- SKDL0002/0003はACCOUNTING_SOURCE_RECORDのaccounting_dateから内部年月を検証し、画面対象年月不一致を保存前に拒否。
+- SKDL0003 Legacy STATE更新前にも同じ内部年月検証を実施。
+- DELIVERY_LIST PDF / ROUTE_PAYMENT Excelは内部配達日の月と画面対象年月を保存前に照合。不一致・複数月はSTATE/Normalized Source保存前に拒否。
+- 年度予算は既存のPDF内部年度チェックを維持し、結果を中央モーダルへ集約。
+- 初期ファイルまとめて選択の解析中/解析完了も中央モーダル表示。
+- 初期履歴一括登録は全候補を保存前にpreflightし、年月/センター/既存CURRENT等に1件でも問題があれば保存0件で中止。
+- 右下toastに依存せず、データ管理ハブ経由の結果確認を中央モーダルへ統一。
+- 既存直接取込画面の互換経路は削除していない。
+- GitHub直接書込みなし。
+
+削除候補メモ:
+- /app.js : 現行 center.html は /src/app.js を読み込む。最終削除フェーズで全参照再確認後に削除可否確定。
+
 M2-7A (2026-08-25) Canonical荷主分析の会計SOURCE統一
 - 荷主分析Canonicalの売上正本を SHIPPER_AREA + WORKER_SALES から PL_ACTUAL(CONFIRMED) / ACCOUNTING_FACT へ変更。
 - Legacy確定仕様と同じく「収支科目名に収入を含む行」の金額を合算。
