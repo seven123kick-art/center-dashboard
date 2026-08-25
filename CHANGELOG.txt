@@ -1,30 +1,15 @@
-2026-08-25 Data Import Fix
+2026-08-25 月次収支速報 取込修正
 
 変更ファイル:
-- center.html
-- src/app.js
-- src/modules/data_import_hub.js
+- src/core/data_catalog/accounting_import_bridge.js
 - src/modules/data_import_management.js
 
 修正内容:
-1. 月次収支 速報
-   - importPreliminary() が内部エラーを握りつぶさず呼出元へ伝播するよう修正。
-   - 保存結果を返却し、CURRENTの全レコードからPRELIMINARY登録を再確認。
-   - 年月不一致・保存失敗等の本来のエラーを中央モーダルへ表示。
-   - SOURCE保存成功後のCanonical再構築失敗は区別して表示。
+1. 月次収支速報のCSV依存判定を修正。
+   CSVはsrc/app.jsのtop-level constで定義されておりwindow.CSVには公開されないため、
+   window.CSV?.toRowsだけを確認するとDEPENDENCY_UNAVAILABLEになる問題を修正。
+2. 日次収支と同じく、同一グローバルレキシカル環境のCSVを優先し、window.CSVをfallbackとして使用。
+3. 月次速報ファイル読込側も同じCSV取得方式へ統一。
+4. CSV解析基盤が本当に利用不能な場合は、DEPENDENCY_UNAVAILABLEという内部コードではなく日本語メッセージを表示。
 
-2. 年度予算
-   - データ管理の主導線をPDF選択から既存仕様のExcelコピー＆ペーストへ復帰。
-   - データ取込一覧の年度予算ボタンから「補助取込・設定」の貼付欄へ直接移動。
-   - ボタン文言を「コピー＆ペーストで登録／差替」に変更。
-   - 取込開始・完了・エラーを他SOURCEと同じ中央モーダルで表示。
-   - 中央モーダル使用中は年度予算の右下トースト結果を重複表示しない。
-
-検証:
-- node --check src/app.js : OK
-- node --check src/modules/data_import_hub.js : OK
-- node --check src/modules/data_import_management.js : OK
-
-注意:
-- GitHubへの直接書込みは実施していません。
-- 元ZIP内の業務ロジックを確認したうえで変更しています。
+業務ロジック・年月不一致拒否・PRELIMINARY CURRENT確認仕様は変更していません。

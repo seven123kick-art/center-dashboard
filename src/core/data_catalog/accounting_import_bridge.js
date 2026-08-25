@@ -16,8 +16,9 @@
     const period=clean(input.period), state=clean(input.document_state).toUpperCase();
     if(!/^\d{6}$/.test(period)) throw new Error('INVALID_PERIOD');
     if(state!=='PRELIMINARY'&&state!=='CONFIRMED') throw new Error('UNSUPPORTED_DOCUMENT_STATE');
-    if(!window.ACCOUNTING_NORMALIZER?.normalizeRows||!window.CSV?.toRows) throw new Error('DEPENDENCY_UNAVAILABLE');
-    const records=ACCOUNTING_NORMALIZER.normalizeRows(CSV.toRows(text),{document_state:state,year_month:period,file_name:input.file_name||null,source_file_id:input.source_file_id||null});
+    const csv=(typeof CSV!=='undefined'&&CSV)||window.CSV;
+    if(!window.ACCOUNTING_NORMALIZER?.normalizeRows||!csv?.toRows) throw new Error('速報CSVの解析基盤を読み込めません。画面を再読み込みしてから再度お試しください。');
+    const records=ACCOUNTING_NORMALIZER.normalizeRows(csv.toRows(text),{document_state:state,year_month:period,file_name:input.file_name||null,source_file_id:input.source_file_id||null});
     const actualPeriods=[...new Set(records.map(r=>String(r?.accounting_date||'').replace(/\D/g,'').slice(0,6)).filter(x=>/^\d{6}$/.test(x)))].sort();
     if(actualPeriods.length!==1||actualPeriods[0]!==period){
       const actual=actualPeriods.length?actualPeriods.map(x=>`${x.slice(0,4)}年${Number(x.slice(4))}月`).join('、'):'判定不能';

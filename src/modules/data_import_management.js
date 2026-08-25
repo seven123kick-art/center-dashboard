@@ -19,7 +19,8 @@
     setMsg('内容を確認して保存しています…');
     try{ await window.DATA_PIPELINE_STATUS?.setStage?.(period,'PL_ACTUAL','SOURCE','OK',{message:'SKDL0002 file selected',detail:{file_name:file.name}}); }catch(_e){}
     try{
-      const text=window.CSV?.read?await CSV.read(file):await file.text();
+      const csv=(typeof CSV!=='undefined'&&CSV)||window.CSV;
+      const text=csv?.read?await csv.read(file):await file.text();
       const r=await ACCOUNTING_IMPORT_BRIDGE.persistCsvText(text,{period,document_state:'PRELIMINARY',file_name:file.name});
       if(!r?.ok)throw new Error(r?.error||'保存に失敗しました');
       if(document.getElementById('preliminary-pl-file'))document.getElementById('preliminary-pl-file').value='';
