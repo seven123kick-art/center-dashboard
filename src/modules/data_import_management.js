@@ -11,29 +11,36 @@
   function setMsg(text,type=''){const el=document.getElementById('preliminary-pl-msg');if(el){el.textContent=text||'';el.className=`dim-message ${type?`is-${type}`:''}`;}}
   async function importPreliminary(){
     const month=document.getElementById('preliminary-pl-month')?.value||'', period=periodFromMonth(month), file=document.getElementById('preliminary-pl-file')?.files?.[0];
-    if(!/^\d{6}$/.test(period)){setMsg('対象年月を選択してください。','error');return;}
-    if(!file){setMsg('SKDL0002のCSVを選択してください。','error');return;}
-    if(!/\.csv$/i.test(file.name)){setMsg('CSVファイルを選択してください。','error');return;}
-    if(!window.ACCOUNTING_IMPORT_BRIDGE?.persistCsvText){setMsg('速報取込基盤を読み込めません。','error');return;}
+    const fail=message=>{setMsg(message,'error');throw new Error(message);};
+    if(!/^\d{6}$/.test(period))return fail('対象年月を選択してください。');
+    if(!file)return fail('SKDL0002のCSVを選択してください。');
+    if(!/\.csv$/i.test(file.name))return fail('CSVファイルを選択してください。');
+    if(!window.ACCOUNTING_IMPORT_BRIDGE?.persistCsvText)return fail('速報取込基盤を読み込めません。');
     setMsg('内容を確認して保存しています…');
     try{ await window.DATA_PIPELINE_STATUS?.setStage?.(period,'PL_ACTUAL','SOURCE','OK',{message:'SKDL0002 file selected',detail:{file_name:file.name}}); }catch(_e){}
     try{
       const text=window.CSV?.read?await CSV.read(file):await file.text();
       const r=await ACCOUNTING_IMPORT_BRIDGE.persistCsvText(text,{period,document_state:'PRELIMINARY',file_name:file.name});
       if(!r?.ok)throw new Error(r?.error||'保存に失敗しました');
-      setMsg(`SKDL0002速報を登録しました（${period.slice(0,4)}年${Number(period.slice(4))}月 / ${r.record_count||0}行）`,'ok');
       if(document.getElementById('preliminary-pl-file'))document.getElementById('preliminary-pl-file').value='';
       const status=document.getElementById('normalized-status-month');if(status)status.value=month;
       await refresh();
+      let canonicalOk=true,canonicalError='';
       if(window.CANONICAL_MATERIALIZER?.materialize){
-        try{
-          await CANONICAL_MATERIALIZER.materialize({period});
-        }catch(e){
+        try{await CANONICAL_MATERIALIZER.materialize({period});}
+        catch(e){
+          canonicalOk=false;canonicalError=e?.message||String(e);
           console.error('[DataImportManagement] Canonical rebuild failed after preliminary import',e);
-          setMsg(`SKDL0002速報は登録済みですが、表示用データの再構築に失敗しました。データ確認画面で再構築してください。${e?.message?`（${e.message}）`:''}`,'error');
         }
       }
-    }catch(e){setMsg(e?.message||String(e),'error');}
+      const result={ok:true,period,record_count:r.record_count||0,batch_id:r.batch_id||null,canonical_ok:canonicalOk,canonical_error:canonicalError};
+      setMsg(canonicalOk
+        ?`SKDL0002速報を登録しました（${period.slice(0,4)}年${Number(period.slice(4))}月 / ${result.record_count}行）`
+        :`SKDL0002速報は登録済みですが、表示用データの再構築に失敗しました。データ確認画面で再構築してください。（${canonicalError}）`,canonicalOk?'ok':'error');
+      return result;
+    }catch(e){
+      const message=e?.message||String(e);setMsg(message,'error');throw e;
+    }
   }
   const PIPELINE_STATUS_LABELS=Object.freeze({OK:'正常',PARTIAL:'部分完了',FAILED:'失敗',RUNNING:'処理中',UNKNOWN:'未確認'});
   const PIPELINE_STAGE_LABELS=Object.freeze({SOURCE:'SOURCE',NORMALIZED:'NORMALIZED',CANONICAL:'CANONICAL',DISPLAY_SNAPSHOT:'SNAPSHOT',CLOUD:'CLOUD'});

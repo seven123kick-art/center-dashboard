@@ -338,7 +338,7 @@
     el.classList.remove('is-success','is-error');
     el.querySelector('.data-import-progress__title').textContent='データを読み込んでいます';
     el.querySelector('.data-import-progress__source').textContent=label;
-    el.querySelector('.data-import-progress__month').textContent=/^\d{6}$/.test(p)?`${p.slice(0,4)}年${Number(p.slice(4))}月`:'';
+    el.querySelector('.data-import-progress__month').textContent=/^\d{6}$/.test(p)?`${p.slice(0,4)}年${Number(p.slice(4))}月`:/^\d{4}$/.test(String(p||''))?`${p}年度`:'';
     el.querySelector('.data-import-progress__step').textContent=step||'ファイルを読み込んでいます…';
     el.querySelector('.data-import-progress__result').textContent='';
     el.querySelector('.data-import-progress__note').textContent='完了するまでこの画面のままお待ちください。';
@@ -398,12 +398,19 @@
       input.click();return;
     }
     if(kind==='plan'){
-      const input=document.getElementById('plan-pdf-file-input');if(!input)return;input.value='';
-      input.addEventListener('change',async()=>{if(!input.files?.length)return;showImportProgress('年度予算',p,'PDF内部の年度・センター・主要科目を確認しています…');try{const r=await window.PLAN_PDF_IMPORT?.importSelected?.();if(!r?.ok)throw new Error(r?.error||'年度予算を登録できませんでした');await refresh();finishImportProgress(true,r.message||`${fyOf(p)}年度の年度予算を登録しました`);}catch(e){finishImportProgress(false,e?.message||String(e));}},{once:true});input.click();return;
+      const fy=fyOf(p);
+      window.DATA_MANAGEMENT_NAV?.go?.('import');
+      window.setTimeout(()=>{
+        const area=document.getElementById('plan-paste-area');
+        const details=area?.closest('details');if(details)details.open=true;
+        const year=document.getElementById('plan-year-sel');if(year)year.value=fy;
+        area?.scrollIntoView?.({behavior:'smooth',block:'center'});area?.focus?.();
+      },80);
+      return;
     }
     if(kind==='prelim'){
       const input=document.getElementById('preliminary-pl-file');if(!input)return;input.value='';
-      input.addEventListener('change',async()=>{if(!input.files?.length)return;showImportProgress('月次収支 速報',p,'CSV内部の計上日と対象年月を確認しています…');try{await window.DATA_IMPORT_MANAGEMENT?.importPreliminary?.();const cur=await Repository.NormalizedSource.loadCurrent('PL_ACTUAL',p);const st=cur?.records?.[0]?.document_state;if(st!=='PRELIMINARY')throw new Error('速報CURRENTの登録を確認できませんでした。画面内のエラー内容を確認してください。');await refresh();finishImportProgress(true,`月次収支 速報 / ${p.slice(0,4)}年${Number(p.slice(4))}月 / PRELIMINARY CURRENTを登録しました`);}catch(e){finishImportProgress(false,e?.message||String(e));}},{once:true});input.click();return;
+      input.addEventListener('change',async()=>{if(!input.files?.length)return;showImportProgress('月次収支 速報',p,'CSV内部の計上日と対象年月を確認しています…');try{if(!window.DATA_IMPORT_MANAGEMENT?.importPreliminary)throw new Error('月次収支速報の取込基盤を読み込めません');const r=await DATA_IMPORT_MANAGEMENT.importPreliminary();if(!r?.ok)throw new Error(r?.error||'月次収支速報を登録できませんでした');const cur=await Repository.NormalizedSource.loadCurrent('PL_ACTUAL',p);const states=[...new Set((cur?.records||[]).map(x=>x?.document_state).filter(Boolean))];if(!states.includes('PRELIMINARY'))throw new Error(`速報の保存後確認に失敗しました（CURRENT=${states.join(',')||'なし'}）。保存状態を再確認してください。`);await refresh();const suffix=r.canonical_ok===false?` / SOURCE登録済み・表示再構築は要確認（${r.canonical_error||'詳細不明'}）`:` / ${r.record_count||cur?.records?.length||0}行`;finishImportProgress(true,`月次収支 速報 / ${p.slice(0,4)}年${Number(p.slice(4))}月 / PRELIMINARY CURRENT登録済み${suffix}`);}catch(e){finishImportProgress(false,e?.message||String(e));}},{once:true});input.click();return;
     }
     if(kind==='confirmed'){
       const input=document.createElement('input');input.type='file';input.accept='.csv';input.multiple=true;
@@ -424,10 +431,10 @@
   }
   async function refresh(){const host=document.getElementById('data-import-hub-root');if(!host)return;const p=period(document.getElementById('data-import-hub-month')?.value);if(!/^\d{6}$/.test(p)){host.innerHTML='<div class="dih-empty">対象年月を選択してください。</div>';return;}syncLegacy(p);host.innerHTML='<div class="dih-empty">登録状態を確認中…</div>';const rows=[];for(const d of DOCS){try{rows.push([d,await statusFor(d,p)])}catch(e){rows.push([d,{status:'ERROR',text:'確認エラー',detail:e?.message||String(e)}])}}
     const missing=rows.filter(([,s])=>s.status==='MISSING').length,errors=rows.filter(([,s])=>s.status==='ERROR').length;
-    host.innerHTML=contentDiagnosticHtml()+`<div class="dih-summary"><div><span>対象</span><b>${esc(p.slice(0,4))}年${esc(String(+p.slice(4)))}月</b></div><div><span>主要SOURCE</span><b>${DOCS.length}</b></div><div><span>未登録</span><b>${missing}</b></div><div><span>確認エラー</span><b>${errors}</b></div></div><div class="dih-grid">${rows.map(([d,s])=>`<article class="dih-source"><div class="dih-source-top"><div><small>${esc(d.code)}</small><h3>${esc(d.label)}</h3></div><span class="dih-status is-${esc(s.status.toLowerCase())}">${esc(s.text)}</span></div><div class="dih-meta"><span>単位：${esc(d.scope)}</span><span>${esc(s.detail||'')}</span>${s.revisions!=null?`<span>Revision ${esc(s.revisions)}</span>`:''}</div><div class="dih-actions"><button type="button" class="btn" onclick="DATA_IMPORT_HUB.choose('${esc(d.action)}')">${s.status==='MISSING'?'ファイルを選択':'差替・改訂を取込'}</button>${s.revisions>1?`<button type="button" class="btn dih-history-btn" onclick="DATA_IMPORT_HUB.showHistory('${esc(d.repo||d.id)}')">履歴</button>`:''}</div><div class="dih-history-panel" data-history-type="${esc(d.repo||d.id)}" hidden></div></article>`).join('')}</div><div class="dih-foot">CURRENT・RevisionはNormalized Source Repositoryを正本として表示します。SKDL0001は着地予測用の日次SOURCE、SKDL0003は後日確定する月次正本として別管理します。</div>`;
+    host.innerHTML=contentDiagnosticHtml()+`<div class="dih-summary"><div><span>対象</span><b>${esc(p.slice(0,4))}年${esc(String(+p.slice(4)))}月</b></div><div><span>主要SOURCE</span><b>${DOCS.length}</b></div><div><span>未登録</span><b>${missing}</b></div><div><span>確認エラー</span><b>${errors}</b></div></div><div class="dih-grid">${rows.map(([d,s])=>`<article class="dih-source"><div class="dih-source-top"><div><small>${esc(d.code)}</small><h3>${esc(d.label)}</h3></div><span class="dih-status is-${esc(s.status.toLowerCase())}">${esc(s.text)}</span></div><div class="dih-meta"><span>単位：${esc(d.scope)}</span><span>${esc(s.detail||'')}</span>${s.revisions!=null?`<span>Revision ${esc(s.revisions)}</span>`:''}</div><div class="dih-actions"><button type="button" class="btn" onclick="DATA_IMPORT_HUB.choose('${esc(d.action)}')">${d.action==='plan'?(s.status==='MISSING'?'コピー＆ペーストで登録':'コピー＆ペーストで差替'):(s.status==='MISSING'?'ファイルを選択':'差替・改訂を取込')}</button>${s.revisions>1?`<button type="button" class="btn dih-history-btn" onclick="DATA_IMPORT_HUB.showHistory('${esc(d.repo||d.id)}')">履歴</button>`:''}</div><div class="dih-history-panel" data-history-type="${esc(d.repo||d.id)}" hidden></div></article>`).join('')}</div><div class="dih-foot">CURRENT・RevisionはNormalized Source Repositoryを正本として表示します。SKDL0001は着地予測用の日次SOURCE、SKDL0003は後日確定する月次正本として別管理します。</div>`;
   }
   async function showHistory(type){const p=period(document.getElementById('data-import-hub-month')?.value),panel=document.querySelector(`[data-history-type="${CSS.escape(type)}"]`);if(!panel||!/^\d{6}$/.test(p))return;panel.hidden=!panel.hidden;if(panel.hidden)return;if(type==='PLAN_BUDGET'){panel.innerHTML='<div class="dih-history-empty">予算は現在の年度計画を表示しています。</div>';return;}try{const r=await Repository.NormalizedSource.loadManifest(type,p),bs=Array.isArray(r?.manifest?.batches)?r.manifest.batches.slice().reverse():[];panel.innerHTML=bs.length?bs.map(b=>`<div><b>${esc(b.revision_status||'—')}</b><span>${esc(b.record_count??'—')}行</span><span>${esc(b.saved_at||'')}</span></div>`).join(''):'<div class="dih-history-empty">履歴はありません。</div>';}catch(e){panel.innerHTML=`<div class="dih-history-empty">${esc(e?.message||String(e))}</div>`;}}
   function init(){const m=document.getElementById('data-import-hub-month');if(m&&!m.value){const now=new Date(),y=now.getFullYear(),mm=String(now.getMonth()+1).padStart(2,'0');m.value=`${y}-${mm}`;}m?.addEventListener('change',refresh);refresh();window.addEventListener('normalized-source-updated',()=>{if(!initialImportSaving)refresh();});}
   document.addEventListener('DOMContentLoaded',init);
-  window.DATA_IMPORT_HUB=Object.freeze({refresh,choose,showHistory,chooseInitialFiles,analyzeInitialFiles,registerInitialReady});
+  window.DATA_IMPORT_HUB=Object.freeze({refresh,choose,showHistory,chooseInitialFiles,analyzeInitialFiles,registerInitialReady,showProgress:showImportProgress,finishProgress:finishImportProgress,updateProgress:updateImportProgress});
 })();

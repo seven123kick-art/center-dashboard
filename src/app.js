@@ -2564,7 +2564,7 @@ const PUBLISH = { go() { UI.toast('GitHub Pages での公開はHTMLファイル�
 const PLAN = {
   async importParsed(plan, fy, sourceMeta={}) {
     fy = String(fy || getSelectedFiscalYear('plan-year-sel'));
-    if (!plan || typeof plan !== 'object' || !Object.keys(plan).length) { UI.toast('計画データを解析できませんでした','warn'); return false; }
+    if (!plan || typeof plan !== 'object' || !Object.keys(plan).length) { if(!window.DATA_IMPORT_HUB_MODAL_ACTIVE)UI.toast('計画データを解析できませんでした','warn'); return false; }
     if (STATE.planData[fy]) {
       const src = sourceMeta.source_type === 'SKFL0001_PDF' ? 'SKFL0001 PDF' : '今回のデータ';
       const ok = confirm(`${fy}年度の計画データは既に登録されています。\n\n${src}で、${fy}年度の計画データをすべて入れ替えますか？\n\n※差分追加ではありません。既存の${fy}年度計画を削除してから登録します。`);
@@ -2576,8 +2576,8 @@ const PLAN = {
     Repository.Storage.save();
     const count = Object.keys(plan).length;
     renderImport(); NAV.refresh();
-    try { const r=await SYNC_COORDINATOR.syncSmart(); if(r&&r.ok) UI.toast(`${fy}年度 計画データを完全入替し、クラウド同期しました（${count}科目）`); else UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`,'warn'); }
-    catch(_e){ UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`,'warn'); }
+    try { const r=await SYNC_COORDINATOR.syncSmart(); if(!window.DATA_IMPORT_HUB_MODAL_ACTIVE){if(r&&r.ok) UI.toast(`${fy}年度 計画データを完全入替し、クラウド同期しました（${count}科目）`); else UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`,'warn');} }
+    catch(_e){ if(!window.DATA_IMPORT_HUB_MODAL_ACTIVE)UI.toast(`${fy}年度 計画データは保存しましたが、クラウド同期に失敗しました`,'warn'); }
     return true;
   },
   async importFromPaste() {
@@ -2585,10 +2585,21 @@ const PLAN = {
     const text = document.getElementById('plan-paste-area')?.value||'';
     const msg  = document.getElementById('plan-import-msg');
     if (!text.trim()) { UI.toast('貼付欄が空です','warn'); if (msg) msg.textContent = '貼付欄が空です'; return; }
-    const plan = CSV.parsePlan(text);
-    if (!plan) { UI.toast('計画データを解析できませんでした。タブ区切りでペーストしてください。','warn'); if (msg) msg.textContent = '解析失敗'; return; }
-    const ok=await this.importParsed(plan,fy,{source_type:'PASTE_TEXT'});
-    if(ok!==false){ const area=document.getElementById('plan-paste-area'); if(area)area.value=''; if(msg)msg.textContent=`${fy}年度 完全入替完了: ${Object.keys(plan).length}科目`; }
+    window.DATA_IMPORT_HUB?.showProgress?.('年度予算',String(fy),'貼り付けデータの年度・科目を確認しています…');
+    window.DATA_IMPORT_HUB_MODAL_ACTIVE=true;
+    try{
+      const plan = CSV.parsePlan(text);
+      if (!plan) throw new Error('計画データを解析できませんでした。Excelの計画表をタブ区切りのままコピー＆ペーストしてください。');
+      window.DATA_IMPORT_HUB?.updateProgress?.('年度予算を保存し、登録状態を更新しています…');
+      const ok=await this.importParsed(plan,fy,{source_type:'PASTE_TEXT'});
+      if(ok===false){window.DATA_IMPORT_HUB?.finishProgress?.(false,'年度予算の登録をキャンセルしました。');return;}
+      const area=document.getElementById('plan-paste-area'); if(area)area.value='';
+      if(msg)msg.textContent=`${fy}年度 完全入替完了: ${Object.keys(plan).length}科目`;
+      window.DATA_IMPORT_HUB?.finishProgress?.(true,`年度予算 / ${fy}年度 / ${Object.keys(plan).length}科目を登録しました`);
+    }catch(e){
+      const message=e?.message||String(e);if(msg)msg.textContent=message;
+      window.DATA_IMPORT_HUB?.finishProgress?.(false,message);
+    }finally{window.DATA_IMPORT_HUB_MODAL_ACTIVE=false;}
   },
   clear() {
     const fy = getSelectedFiscalYear('plan-year-sel');

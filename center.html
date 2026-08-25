@@ -1304,8 +1304,8 @@
         </div>
         <div class="card-body">
           <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8">
-            月次収支一覧表 <strong>SKFL0001（計画）PDFをそのまま取込み</strong>できます。PDFから年度・4月〜翌3月・科目別予算を読み取ります。<br>
-            従来のExcelコピー＆ペーストも予備手段として残しています。
+            年度予算は、<strong>Excelの計画表をコピー＆ペーストして登録</strong>します。対象年度を確認してから貼り付けてください。<br>
+            登録時は内容を解析し、保存中・完了・エラーを中央モーダルで表示します。
           </div>
           <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
             <label style="font-size:11px;font-weight:600;color:var(--text2)">対象年度：</label>
@@ -1314,17 +1314,7 @@
             <span style="font-size:11px;color:var(--text2)">年度</span>
             <span style="font-size:11px;color:var(--text3)">（4月始まり）</span>
           </div>
-          <div class="plan-pdf-import" style="margin:10px 0 12px;padding:12px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2,#f8fafc)">
-            <div style="font-size:12px;font-weight:700;margin-bottom:7px">推奨：SKFL0001 PDFから取込</div>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <input type="file" id="plan-pdf-file-input" accept=".pdf,application/pdf" style="font-size:11px">
-              <button class="btn btn-primary" type="button" onclick="PLAN_PDF_IMPORT.importSelected()" style="font-size:12px">PDFから予算を取込む</button>
-              <span id="plan-pdf-file-name" style="font-size:11px;color:var(--text3)">未選択</span>
-            </div>
-            <div id="plan-pdf-import-msg" style="font-size:11px;color:var(--text2);margin-top:7px"></div>
-            <div style="font-size:10px;color:var(--text3);margin-top:5px">上期・下期2ページの月次値を読取り、既存の予実差異分析と同じ計画データへ保存します。単位：千円。</div>
-          </div>
-          <details style="margin-top:8px"><summary style="cursor:pointer;font-size:11px;color:var(--text2);font-weight:700">従来のコピー＆ペースト取込</summary>
+          <details style="margin-top:8px" open><summary style="cursor:pointer;font-size:11px;color:var(--text2);font-weight:700">Excelコピー＆ペースト取込</summary>
           <textarea id="plan-paste-area"
             placeholder="Excelの計画データをここにペースト（Ctrl+V）&#10;&#10;例:&#10;営業収益&#9;357,277&#9;31,400&#9;29,475&#9;...&#10;人件費&#9;82,554&#9;7,370&#9;6,435&#9;..."
             style="width:100%;height:140px;font-size:11px;font-family:monospace;padding:8px;border:1px solid var(--border2);border-radius:6px;resize:vertical;color:var(--text)"></textarea>
