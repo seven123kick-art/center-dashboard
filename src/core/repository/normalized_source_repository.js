@@ -41,6 +41,13 @@
   function baseKey(dt,p){ const s=validateScope(dt,p); return `${PREFIX}::${s.document_type}::${s.period}`; }
   function manifestKey(dt,p){ return `${baseKey(dt,p)}::manifest`; }
   function batchKey(dt,p,batchId){ return `${baseKey(dt,p)}::batch::${token(batchId)}`; }
+  function batchChunkKey(dt,p,batchId,idx){ return `${batchKey(dt,p,batchId)}::chunk::${String(idx).padStart(4,'0')}`; }
+  const BATCH_CHUNK_RECORDS=500;
+  function splitRecords(records,size=BATCH_CHUNK_RECORDS){
+    const rows=Array.isArray(records)?records:[], out=[];
+    for(let i=0;i<rows.length;i+=size) out.push(rows.slice(i,i+size));
+    return out;
+  }
   function cacheId(dt,p,suffix){ return `${token(dt)}::${token(p)}::${suffix}`; }
   function periodIndexKey(documentType){
     const dt=clean(documentType).toUpperCase();
@@ -96,8 +103,21 @@
     if(options.preferCache===true&&st?.getCached){ const c=await st.getCached(CACHE_KIND,cid); if(c) return {ok:true,source:'CACHE',batch:clone(c)}; }
     const row=await cloud().fetchRealtimeState(batchKey(s.document_type,s.period,id));
     if(!row) return {ok:false,error:'BATCH_NOT_FOUND'};
-    if(st?.setCached){ try{ await st.setCached(CACHE_KIND,cid,row.payload); }catch(e){ console.warn('[NormalizedSourceRepository] cache refresh failed',e); } }
-    return {ok:true,source:'CLOUD',batch:clone(row.payload)};
+    let batch=clone(row.payload);
+    // v1互換: 旧batchはrecordsを同一rowに保持。新しい大容量batchはrecordsをchunk rowへ分割する。
+    if(batch?.chunked===true){
+      const count=Number(batch.chunk_count)||0, records=[];
+      if(count<1) return {ok:false,error:'BATCH_CHUNK_METADATA_INVALID'};
+      for(let i=0;i<count;i++){
+        const part=await cloud().fetchRealtimeState(batchChunkKey(s.document_type,s.period,id,i));
+        if(!part?.payload||!Array.isArray(part.payload.records)) return {ok:false,error:`BATCH_CHUNK_NOT_FOUND:${i}`};
+        records.push(...part.payload.records);
+      }
+      if(Number(batch.record_count)!==records.length) return {ok:false,error:'BATCH_CHUNK_RECORD_COUNT_MISMATCH'};
+      batch.records=records;
+    }
+    if(st?.setCached){ try{ await st.setCached(CACHE_KIND,cid,batch); }catch(e){ console.warn('[NormalizedSourceRepository] cache refresh failed',e); } }
+    return {ok:true,source:'CLOUD',batch:clone(batch)};
   }
 
   async function loadCurrent(documentType,period,options={}){
@@ -186,7 +206,26 @@
     if(priorId&&supersedes!==priorId) return {ok:false,error:'REVISION_CHAIN_MISMATCH',expected_supersedes_batch_id:priorId};
 
     const batch=makeBatch({document_type:s.document_type,period:s.period,batch_id:batchId,source_file_id:input.source_file_id,supersedes_batch_id:supersedes,records:vr.records,meta:input.meta||{}});
-    const batchSave=await cloud().pushRealtimeState(batchKey(s.document_type,s.period,batchId),batch);
+    // 大容量の月次収支等を1つのJSONB rowへupsertするとDB statement timeoutになり得るため、
+    // 500 record単位でimmutable chunkへ分割する。小容量batchと既存batchの形式は維持する。
+    let batchSave;
+    if(batch.records.length>BATCH_CHUNK_RECORDS){
+      const chunks=splitRecords(batch.records);
+      for(let i=0;i<chunks.length;i++){
+        const chunkPayload={
+          schema_version:VERSION,kind:'NORMALIZED_SOURCE_BATCH_CHUNK',
+          document_type:s.document_type,period:s.period,batch_id:batchId,
+          chunk_index:i,chunk_count:chunks.length,record_count:chunks[i].length,
+          records:clone(chunks[i])
+        };
+        const saved=await cloud().pushRealtimeState(batchChunkKey(s.document_type,s.period,batchId,i),chunkPayload);
+        if(!saved?.ok) return {ok:false,error:saved?.error||`BATCH_CHUNK_CLOUD_SAVE_FAILED:${i}`,chunk_saved_count:i,batch_id:batchId};
+      }
+      const header=Object.assign({},batch,{records:[],chunked:true,chunk_count:chunks.length,chunk_record_limit:BATCH_CHUNK_RECORDS});
+      batchSave=await cloud().pushRealtimeState(batchKey(s.document_type,s.period,batchId),header);
+    }else{
+      batchSave=await cloud().pushRealtimeState(batchKey(s.document_type,s.period,batchId),batch);
+    }
     if(!batchSave?.ok) return {ok:false,error:batchSave?.error||'BATCH_CLOUD_SAVE_FAILED'};
 
     const manifest=normalizeManifest(current.manifest,s.document_type,s.period);

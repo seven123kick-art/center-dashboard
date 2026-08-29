@@ -1,15 +1,23 @@
-2026-08-25 月次収支速報 取込修正
+経営管理システム Version6
+月次収支速報 statement timeout 修正
+作成日: 2026-08-28
 
 変更ファイル:
-- src/core/data_catalog/accounting_import_bridge.js
-- src/modules/data_import_management.js
+- src/core/repository/normalized_source_repository.js
 
-修正内容:
-1. 月次収支速報のCSV依存判定を修正。
-   CSVはsrc/app.jsのtop-level constで定義されておりwindow.CSVには公開されないため、
-   window.CSV?.toRowsだけを確認するとDEPENDENCY_UNAVAILABLEになる問題を修正。
-2. 日次収支と同じく、同一グローバルレキシカル環境のCSVを優先し、window.CSVをfallbackとして使用。
-3. 月次速報ファイル読込側も同じCSV取得方式へ統一。
-4. CSV解析基盤が本当に利用不能な場合は、DEPENDENCY_UNAVAILABLEという内部コードではなく日本語メッセージを表示。
+確認した原因:
+- NormalizedSourceRepository.saveBatch() は全recordsを1つのJSON payloadとして
+  center_realtime_stateへupsertしていた。
+- 月次収支速報はこの大容量batch保存時にSupabase/PostgreSQLから
+  "canceling statement due to statement timeout" が返っている。
+- 読込モーダル、CSV解析、対象年月確認までは完了している。
 
-業務ロジック・年月不一致拒否・PRELIMINARY CURRENT確認仕様は変更していません。
+修正:
+- 500 recordsを超えるNormalized Source batchを500件単位のimmutable chunkへ分割保存。
+- batch本体は軽量headerとして保存し、manifest CURRENT切替は全chunk保存成功後のみ実行。
+- loadBatch()はchunkを再結合し、record_count一致を検証。
+- 既存の非chunk batchは従来どおり読み込める後方互換を維持。
+- 500件以下のbatchは従来方式を維持。
+- CONFIRMED immutable / PRELIMINARY downgrade禁止 / revision chainは変更なし。
+
+GitHubへの直接書込みは行っていません。
