@@ -1,3 +1,15 @@
+M2-10B (2026-09-02) full_state v34 reader直接再帰の修正
+- 対象: M2-10で導入した src/core/cloud.js の _downloadFullState()。
+- 原因確定: v34 reader内のroot pointer取得が誤って `await this._downloadFullState()` になっており、
+  キャッシュの無いシークレット/別PCでは `_downloadFullState -> _downloadFullState` の直接再帰で
+  `Maximum call stack size exceeded` が発生していた。
+- 通常ウィンドウで起動できたのは、検証済みローカル状態による復旧経路が先に成立していたため。
+- 修正: _downloadFullState() のroot pointer取得を低レベルprimitive
+  `_downloadJSON(this._fullStateKey())` に戻し、以降だけv34 root判定→5 slice読込→joinを行う。
+- fallbackや上書き処理を追加した修正ではない。誤った再帰を除去し、v34 reader本来の責務分離へ修正。
+- full_state v34のatomic root / generation slice / manifest fullStateUpdatedAt / 検証済みローカル初回復旧設計は維持。
+- GitHub直接書込みなし。
+
 M2-10 (2026-09-02) full_state根本再設計・検証済みローカル復旧
 - 正本: center-dashboard-main(20260902-070642).zip。GitHub直接書込みなし。
 - 根本原因1: full_stateは「軽量台帳」とコメントされていたが、routeData/dailyRecords/master/plan/capacity/memos/library等を1オブジェクトに持ち、

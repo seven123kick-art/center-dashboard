@@ -738,7 +738,10 @@ var CLOUD = window.CLOUD = {
   },
 
   async _downloadFullState() {
-    const root = await this._downloadFullState();
+    // root pointerそのものは低レベルJSON readerで1回だけ取得する。
+    // ここで _downloadFullState() を呼ぶと直接再帰となり、キャッシュの無い端末で
+    // Maximum call stack size exceeded になる。
+    const root = await this._downloadJSON(this._fullStateKey());
     if (!root || typeof root !== 'object') return root;
 
     // v34より前のlegacy full_stateはそのまま返す（後方互換）。
@@ -1030,7 +1033,7 @@ var CLOUD = window.CLOUD = {
           if (sb) await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]);
         } catch(e) {}
       }
-      // manifest / full_state は軽量かつ savedAt を含むため、常にアップロードする。
+      // manifestは台帳、full_stateはv34のatomic root+世代sliceとして保存する。
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
       await this._uploadFullState(this._makeFullState());
       UI.updateCloudBadge('ok');
