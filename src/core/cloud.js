@@ -16,6 +16,7 @@ var CLOUD = window.CLOUD = {
   _fieldPullPromises: null,
   _fieldPullDone: null,
   _manifestFastCache: null,
+  _lastFullStateSavedAt: null,
 
   _cfg() {
     const def = { url: CONFIG.SUPABASE_URL, key: CONFIG.SUPABASE_KEY, bucket: CONFIG.SUPABASE_BUCKET };
@@ -342,7 +343,7 @@ var CLOUD = window.CLOUD = {
   },
   _metaFromDbRows(rows = []) {
     const manifest = {
-      version: 32,
+      version: 34,
       center: CENTER.id,
       savedAt: new Date().toISOString(),
       datasets: [],
@@ -410,7 +411,10 @@ var CLOUD = window.CLOUD = {
       }
       if (key === this._dbStateKey(this._fullStateKey())) {
         manifest.fullStateUpdatedAt = updatedAt;
-        manifest.hasDailyRecords = !!(payload && Array.isArray(payload.dailyRecords) && payload.dailyRecords.length);
+        manifest.hasDailyRecords = !!(
+          (payload && Array.isArray(payload.dailyRecords) && payload.dailyRecords.length) ||
+          payload?.hasDailyRecords
+        );
       }
       if (key === this._dbStateKey(this._planKey())) { manifest.hasPlanData = true; manifest.planDataUpdatedAt = updatedAt; }
       if (key === this._dbStateKey(this._capacityKey())) { manifest.hasCapacity = true; manifest.capacityUpdatedAt = updatedAt; }
@@ -545,6 +549,8 @@ var CLOUD = window.CLOUD = {
   _workerMonthKey(ym) { return `${CENTER.id}/field/worker/${ym}.json`; },
   _productMonthKey(ym) { return `${CENTER.id}/field/product/${ym}.json`; },
   _fullStateKey() { return `${CENTER.id}/full_state.json`; },
+  _fullStateSliceKey(gen, name) { return `${CENTER.id}/full_state_v34/${String(gen)}/${String(name)}.json`; },
+  _fullStateSlicePrefix(gen) { return `${CENTER.id}/full_state_v34/${String(gen)}/`; },
   _planKey() { return `${CENTER.id}/plan/data.json`; },
   _memosKey() { return `${CENTER.id}/memos/data.json`; },
   _libraryKey() { return `${CENTER.id}/library/data.json`; },
@@ -562,9 +568,12 @@ var CLOUD = window.CLOUD = {
     const workerCsv = Array.isArray(STATE.workerCsvData) ? STATE.workerCsvData : [];
     const productCsv = Array.isArray(STATE.productAddressData) ? STATE.productAddressData : [];
     return {
-      version: 33,
+      version: 34,
       center: CENTER.id,
       savedAt: new Date().toISOString(),
+      // manifest.savedAt と full_state Revisionを分離する。
+      // 月次SOURCEだけを更新してもfull_state再取得を強制しない。
+      fullStateUpdatedAt: this._lastFullStateSavedAt || null,
       datasets: STATE.datasets.filter(d => d.source !== 'history').map(d => ({
         ym:d.ym,
         type:d.type || 'confirmed',
@@ -622,6 +631,140 @@ var CLOUD = window.CLOUD = {
       reportKnowledge: STATE.reportKnowledge || { policies:{}, references:[] },
       deleted: STATE.deleted || {},
     };
+  },
+
+  _splitFullState(full) {
+    const f = full && typeof full === 'object' ? full : {};
+    return {
+      core: {
+        version: 34, center: CENTER.id, savedAt: f.savedAt || new Date().toISOString(),
+        fiscalYear: f.fiscalYear || null, deleted: f.deleted || {}
+      },
+      operations: {
+        dailyRecords: Array.isArray(f.dailyRecords) ? f.dailyRecords : [],
+        routeData: Array.isArray(f.routeData) ? f.routeData : []
+      },
+      masters: {
+        companyMaster: Array.isArray(f.companyMaster) ? f.companyMaster : [],
+        workerMaster: Array.isArray(f.workerMaster) ? f.workerMaster : []
+      },
+      planning: {
+        capacity: f.capacity || null,
+        planData: f.planData || {}
+      },
+      collaboration: {
+        memos: f.memos || {},
+        library: Array.isArray(f.library) ? f.library : [],
+        reportKnowledge: f.reportKnowledge || { policies:{}, references:[] }
+      }
+    };
+  },
+
+  _joinFullState(parts, envelope) {
+    const core = parts.core || {}, op = parts.operations || {}, masters = parts.masters || {};
+    const planning = parts.planning || {}, collab = parts.collaboration || {};
+    const full = {
+      version: 34,
+      center: core.center || envelope?.center || CENTER.id,
+      savedAt: envelope?.savedAt || core.savedAt || null,
+      fiscalYear: core.fiscalYear || null,
+      capacity: planning.capacity || null,
+      planData: planning.planData || {},
+      dailyRecords: Array.isArray(op.dailyRecords) ? op.dailyRecords : [],
+      routeData: Array.isArray(op.routeData) ? op.routeData : [],
+      companyMaster: Array.isArray(masters.companyMaster) ? masters.companyMaster : [],
+      workerMaster: Array.isArray(masters.workerMaster) ? masters.workerMaster : [],
+      memos: collab.memos || {},
+      library: Array.isArray(collab.library) ? collab.library : [],
+      reportKnowledge: collab.reportKnowledge || { policies:{}, references:[] },
+      deleted: core.deleted || {}
+    };
+    if (full.center !== CENTER.id) throw new Error(`主要状態データのセンターが一致しません: ${full.center}`);
+    return full;
+  },
+
+  async _uploadFullState(fullState, options = {}) {
+    const full = sanitizedCloneForExport(fullState || {});
+    if (!full || typeof full !== 'object') throw new Error('主要状態データが不正です');
+    if (full.center && full.center !== CENTER.id) throw new Error('主要状態データのセンターが一致しません');
+
+    // full_state.json 自体を巨大JSONにしない。
+    // 世代固有の5 sliceを全て保存した後、最後に小さいroot pointerだけを切替える。
+    // 途中失敗時は旧rootが残るため、起動正本が半端な世代を指すことはない。
+    const generation = (crypto && crypto.randomUUID)
+      ? crypto.randomUUID().replace(/-/g,'')
+      : `${Date.now()}_${Math.random().toString(36).slice(2,10)}`;
+    const savedAt = new Date().toISOString();
+    full.savedAt = savedAt;
+    full.version = 34;
+    full.center = CENTER.id;
+    const slices = this._splitFullState(full);
+    const names = ['core','operations','masters','planning','collaboration'];
+
+    // 切替前rootをrawで読む。壊れた旧chunk rootでも、ここでは復号せずpayloadだけを見る。
+    let previousRoot = null;
+    try { previousRoot = await this._dbGetState(this._dbStateKey(this._fullStateKey())); } catch(_e) {}
+
+    for (const name of names) {
+      const result = await this._uploadJSON(this._fullStateSliceKey(generation, name), slices[name], options);
+      if (!result?.ok) throw new Error(`主要状態データの分割保存に失敗しました: ${name}`);
+    }
+
+    const envelope = {
+      version: 34,
+      __full_state_sharded: true,
+      center: CENTER.id,
+      savedAt,
+      generation,
+      slices: names,
+      hasDailyRecords: slices.operations.dailyRecords.length > 0,
+      hasRouteData: slices.operations.routeData.length > 0,
+      companyMasterCount: slices.masters.companyMaster.length,
+      workerMasterCount: slices.masters.workerMaster.length
+    };
+    const rootResult = await this._uploadJSON(this._fullStateKey(), envelope, options);
+    if (!rootResult?.ok) throw new Error('主要状態データのroot切替に失敗しました');
+    this._lastFullStateSavedAt = savedAt;
+
+    // 旧v34世代だけをroot切替後に削除。現在書込中の別世代は対象にしない。
+    if (previousRoot?.__full_state_sharded && previousRoot.generation && previousRoot.generation !== generation) {
+      try {
+        await this._dbDeletePrefix(this._dbStateKey(this._fullStateSlicePrefix(previousRoot.generation)));
+      } catch(e) {
+        console.warn('[CLOUD] 旧full_state v34世代の掃除失敗（新世代保存は完了済み）:', e?.message || e);
+      }
+    }
+    return { ok:true, sharded:true, generation, savedAt };
+  },
+
+  async _downloadFullState() {
+    const root = await this._downloadFullState();
+    if (!root || typeof root !== 'object') return root;
+
+    // v34より前のlegacy full_stateはそのまま返す（後方互換）。
+    if (!root.__full_state_sharded) {
+      if (root.savedAt) this._lastFullStateSavedAt = root.savedAt;
+      return root;
+    }
+
+    if (root.center && root.center !== CENTER.id) throw new Error('主要状態データのセンターが一致しません');
+    const gen = String(root.generation || '').trim();
+    const names = Array.isArray(root.slices) ? root.slices : [];
+    const required = ['core','operations','masters','planning','collaboration'];
+    if (!gen || required.some(x => !names.includes(x))) throw new Error('主要状態データのroot情報が不完全です');
+
+    const parts = {};
+    for (const name of required) {
+      try {
+        const part = await this._downloadJSON(this._fullStateSliceKey(gen, name));
+        if (!part || typeof part !== 'object') throw new Error('sliceなし');
+        parts[name] = part;
+      } catch(e) {
+        throw new Error(`主要状態データのslice取得に失敗しました: ${name} (${e?.message || e})`);
+      }
+    }
+    this._lastFullStateSavedAt = root.savedAt || null;
+    return this._joinFullState(parts, root);
   },
 
   _applyFullState(full) {
@@ -845,7 +988,7 @@ var CLOUD = window.CLOUD = {
       for (const w of workers) await this._uploadJSON(this._workerMonthKey(ym), w);
       for (const pr of products) await this._uploadJSON(this._productMonthKey(ym), pr);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
-      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      await this._uploadFullState(this._makeFullState());
       UI.updateCloudBadge('ok');
       return { ok:true };
     } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
@@ -858,7 +1001,7 @@ var CLOUD = window.CLOUD = {
     try {
       await this._uploadJSON(this._capacityKey(), STATE.capacity);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
-      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      await this._uploadFullState(this._makeFullState());
       UI.updateCloudBadge('ok');
       return { ok:true };
     } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
@@ -889,7 +1032,7 @@ var CLOUD = window.CLOUD = {
       }
       // manifest / full_state は軽量かつ savedAt を含むため、常にアップロードする。
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
-      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      await this._uploadFullState(this._makeFullState());
       UI.updateCloudBadge('ok');
       return { ok:true };
     } catch(e) { UI.updateCloudBadge('error'); return { ok:false, error:e.message }; }
@@ -1141,7 +1284,7 @@ var CLOUD = window.CLOUD = {
     if (STATE.memos && Object.keys(STATE.memos).length) await this._uploadJSON(this._memosKey(), STATE.memos);
     if (STATE.library && STATE.library.length) await this._uploadJSON(this._libraryKey(), STATE.library);
     await this._uploadJSON(this._manifestKey(), this._makeManifest());
-    await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+    await this._uploadFullState(this._makeFullState());
     STORE.save();
     UI.updateCloudBadge('ok');
     return { ok:true, migrated:true, source:'legacy_shared_bundle_migrated', datasets, workers, products };
@@ -1180,7 +1323,7 @@ var CLOUD = window.CLOUD = {
   },
   async pullFullState() {
     try {
-      const full = await this._downloadJSON(this._fullStateKey());
+      const full = await this._downloadFullState();
       if (!full) return { ok:false, error:'full_stateなし' };
       const ok = this._applyFullState(full);
       if (!ok) return { ok:false, error:'full_state適用失敗' };
@@ -1273,7 +1416,7 @@ var CLOUD = window.CLOUD = {
       }
 
       if (manifest.hasDailyRecords) {
-        const full = await this._downloadJSON(this._fullStateKey());
+        const full = await this._downloadFullState();
         if (full && Array.isArray(full.dailyRecords)) {
           STATE.dailyRecords = full.dailyRecords;
           changed++;
@@ -1331,7 +1474,7 @@ var CLOUD = window.CLOUD = {
     // 割り込んで pushAll と交差する再入の穴があった。
     // _busy は最後まで保持し、処理中の STORE.save による自動同期予約は suppress する。
     const run = async () => {
-      const cloudFull = await this._downloadJSON(this._fullStateKey());
+      const cloudFull = await this._downloadFullState();
       const localFull = this._makeFullState();
 
       // 先に full_state をマージ
@@ -1347,7 +1490,7 @@ var CLOUD = window.CLOUD = {
 
       // manifest取得後の最新STATEを full_state として再保存
       const finalFull = this._makeFullState();
-      await this._uploadJSON(this._fullStateKey(), finalFull);
+      await this._uploadFullState(finalFull);
 
       await this._uploadJSON(this._planKey(), STATE.planData || {});
       for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
@@ -1383,7 +1526,7 @@ var CLOUD = window.CLOUD = {
       for (const w of (STATE.workerCsvData || []).filter(d => d && d.ym)) await this._uploadJSON(this._workerMonthKey(w.ym), w);
       for (const pr of (STATE.productAddressData || []).filter(d => d && d.ym)) await this._uploadJSON(this._productMonthKey(pr.ym), pr);
       await this._uploadJSON(this._manifestKey(), this._makeManifest());
-      await this._uploadJSON(this._fullStateKey(), this._makeFullState());
+      await this._uploadFullState(this._makeFullState());
       try { await sb.storage.from(this._bucket()).remove([this._legacyKey(), this._fieldKey()]); } catch(e) {}
       UI.updateCloudBadge('ok');
       return { ok:true };
@@ -1478,14 +1621,18 @@ var CLOUD = window.CLOUD = {
       return { ok: false, error: e.message };
     }
   },
-  async downloadJSON(key) { return this._downloadJSON(key); },
+  async downloadJSON(key) {
+    return key === this._fullStateKey() ? this._downloadFullState() : this._downloadJSON(key);
+  },
   /**
    * 指定キーへJSONをアップロードする（通信責務を表す名前として意図的に
    * putObjectと命名。内部実装名_uploadJSON()はそのまま公開しない
    * ―― Version6 Phase3の設計判断）。
    * 内部実装（チャンク分割・差分スキップ等）は一切変更していない。
    */
-  async putObject(key, value, options = {}) { return this._uploadJSON(key, value, options); },
+  async putObject(key, value, options = {}) {
+    return key === this._fullStateKey() ? this._uploadFullState(value, options) : this._uploadJSON(key, value, options);
+  },
   async dbGetState(stateKey) { return this._dbGetState(stateKey); },
   dbStateKey(key) { return this._dbStateKey(key); },
   applyFullState(full) { return this._applyFullState(full); },

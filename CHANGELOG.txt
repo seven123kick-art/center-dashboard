@@ -1,3 +1,24 @@
+M2-10 (2026-09-02) full_state根本再設計・検証済みローカル復旧
+- 正本: center-dashboard-main(20260902-070642).zip。GitHub直接書込みなし。
+- 根本原因1: full_stateは「軽量台帳」とコメントされていたが、routeData/dailyRecords/master/plan/capacity/memos/library等を1オブジェクトに持ち、
+  容量超過時は複数DB chunkへ分割される、起動必須の非原子的な単一障害点になっていた。
+- 根本原因2: manifest v33はfullStateUpdatedAtを持たず、StartupReadinessはmanifest.savedAtをfull_state Revisionの代用にしていた。
+  そのため月次SOURCEだけの更新でもfull_state変更扱いとなり、毎回壊れたfull_stateを再取得して起動停止していた。
+- full_state v34:
+  * full_state.jsonは小さいatomic root pointerのみ。
+  * core / operations / masters / planning / collaboration の5 sliceを世代固有キーへ先に保存。
+  * 全slice成功後だけroot pointerを切替。途中失敗では旧rootを維持。
+  * sliceは世代固有でimmutable。大容量sliceがchunk化されても別writerと同一state_keyを共有しない。
+  * 旧v34世代cleanupはroot切替前に存在した直前世代だけ。
+  * legacy full_stateは引き続き読込可能。
+- manifest v34にfullStateUpdatedAtを正式追加し、manifest更新時刻とfull_state Revisionを分離。
+- 現在すでに壊れている北埼玉full_stateの救出:
+  * 同一ブラウザ・同一センターで過去にREADY検証済みmarkerが存在する場合のみ、STOREから復元済みローカル主要状態を一時救出元として許可。
+  * 月次収支/予算/キャパ等の独立Cloud正本は通常起動処理で改めて照合。
+  * すべての照合が成功した後だけ、新v34 full_state + manifestをCloudへ再生成。
+  * 新規端末/検証履歴なし端末では勝手にローカルから復旧せず従来どおり停止。
+- 経営数値の最新性ゲートは維持。失敗途中の状態をREADY表示しない。
+
 M2-9A (2026-08-29) full_state分割データ競合破損の防止・読込復旧
 - 最新全コード center-dashboard-main(20260829-025511).zip を正本に実コード確認。
 - LOAD_FAILED「分割データの取得に失敗しました: kitasaitama/full_state.json #1」の経路を src/core/cloud.js まで特定。

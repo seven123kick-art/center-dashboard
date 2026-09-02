@@ -221,6 +221,8 @@ TODO(V6以降)
                 // 起動同期でここを取得しないと、別端末・キャッシュ消失後に便別採算だけ
                 // 「配達持出PDFなし」「所属会社なし」になるため、月別CSV取得より先に復元する。
                 let bootCloudFull = null;
+                let fullStateRecoveredFromVerifiedLocal = false;
+                let fullStateRecoveryError = null;
                 const verifiedMarker = window.STARTUP_READINESS?.getVerifiedMarker
                     ? await STARTUP_READINESS.getVerifiedMarker() : null;
                 const markerForCenter = verifiedMarker && verifiedMarker.centerId === window.CENTER?.id ? verifiedMarker : null;
@@ -245,7 +247,18 @@ TODO(V6以降)
                         CR.applyFullState(mergedFull);
                     } catch (e) {
                         console.warn('[SyncCoordinator.syncBoot] full_state取得失敗:', e?.message || e);
-                        return { ok:false, stage:'FULL_STATE', readiness:'LOAD_FAILED', error:e?.message || String(e) };
+                        const recoverable = window.STARTUP_READINESS?.canRecoverVerifiedLocalFullState
+                            ? await STARTUP_READINESS.canRecoverVerifiedLocalFullState()
+                            : false;
+                        if (!recoverable) {
+                            return { ok:false, stage:'FULL_STATE', readiness:'LOAD_FAILED', error:e?.message || String(e) };
+                        }
+                        // 同一ブラウザで過去にREADY検証済みのローカル主要状態だけを一時救出。
+                        // 月次・予算・キャパ等の独立Cloud正本はこの後に通常どおり再取得/照合する。
+                        bootCloudFull = CR.buildFullState();
+                        fullStateRecoveredFromVerifiedLocal = true;
+                        fullStateRecoveryError = e?.message || String(e);
+                        console.warn('[SyncCoordinator.syncBoot] 検証済みローカル主要状態で復旧継続:', fullStateRecoveryError);
                     }
                 }
 
@@ -361,6 +374,25 @@ TODO(V6以降)
                 if (typeof sanitizePersonalDataState === 'function') sanitizePersonalDataState(STATE);
                 if (window.FIELD_DATA_ACCESS?.invalidate) window.FIELD_DATA_ACCESS.invalidate();
                 if (changed) window.STORAGE_REPOSITORY.save();
+
+                // 壊れたlegacy full_stateから検証済みローカル状態で復旧した場合のみ、
+                // 独立Cloud正本の照合がすべて成功したこの地点で新v34 full_stateを再生成する。
+                // 読込途中・月次SOURCE失敗時には書き戻さない。
+                if (fullStateRecoveredFromVerifiedLocal) {
+                    try {
+                        const repaired = await CR.pushFullState(CR.buildFullState());
+                        if (!repaired?.ok) throw new Error(repaired?.error || '主要状態データの再生成に失敗しました');
+                        // fullStateUpdatedAtを含む新Manifestを最後に保存する。
+                        const repairedManifest = CR.buildManifest();
+                        const manifestSaved = await CR.pushManifest(repairedManifest);
+                        if (!manifestSaved?.ok) throw new Error(manifestSaved?.error || '復旧後Manifestの保存に失敗しました');
+                        manifest = repairedManifest;
+                        changed++;
+                    } catch (e) {
+                        return { ok:false, stage:'FULL_STATE', readiness:'LOAD_FAILED',
+                            error:`主要状態データの復旧再生成に失敗しました: ${e?.message || e}` };
+                    }
+                }
 
                 if (typeof window.UI !== 'undefined' && window.UI && typeof window.UI.updateCloudBadge === 'function') window.UI.updateCloudBadge('ok');
                 const verifiedAt = new Date().toISOString();

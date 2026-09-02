@@ -167,7 +167,20 @@
     if(marker.fingerprint!==manifestFingerprint(manifest)) return false;
     return localMatchesManifest(manifest);
   }
+
+  async function canRecoverVerifiedLocalFullState(){
+    const marker=await getVerifiedMarker();
+    if(!marker || marker.centerId!==window.CENTER?.id || !marker.verifiedAt) return false;
+    if(!window.STATE || !window.CLOUD_REPOSITORY?.buildFullState) return false;
+    try{
+      const full=CLOUD_REPOSITORY.buildFullState();
+      if(!full || full.center!==window.CENTER?.id) return false;
+      // 過去にREADYまで通過した同一センターのIndexedDB/Local状態だけを救出元として許可。
+      // 新規端末・検証履歴なし端末では自動復旧しない。
+      return true;
+    }catch(_e){return false;}
+  }
   window.STARTUP_READINESS={ setProgress, showFailure, markVerified, withTimeout,
     manifestFingerprint, localMatchesManifest, getVerifiedMarker, saveVerifiedMarker, canUseVerifiedLocal,
-    sourceRevision, datasetRevisionMap, fullStateRevision };
+    sourceRevision, datasetRevisionMap, fullStateRevision, canRecoverVerifiedLocalFullState };
 })();
