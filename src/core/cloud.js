@@ -268,6 +268,63 @@ var CLOUD = window.CLOUD = {
     if (error) return { ok:false, error:error.message };
     return { ok:true };
   },
+
+  // 指定した世代だけを削除する。別クライアントが書込中の新世代には触れない。
+  async _dbDeleteChunkGeneration(stateKey, gen) {
+    const g = String(gen || '').trim();
+    if (!g) return { ok:true, skipped:true };
+    return this._dbDeletePrefix(`${stateKey}::chunk::${g}::`);
+  },
+
+  // pointerが壊れている場合、DBに残る世代付きchunkから「全chunkが揃いJSON解析できる」
+  // 世代だけを候補にし、updated_atが最も新しい完全世代を読込用に復旧する。
+  // 読込時にクラウドを書き換えず、検証済みの完全世代を返すだけにする。
+  async _dbRecoverCompleteChunkGeneration(key, stateKey, pointer) {
+    const prefix = `${stateKey}::chunk::`;
+    const listed = await this._dbListStates(prefix, { withPayload:true });
+    if (!listed?.ok || !Array.isArray(listed.rows) || !listed.rows.length) return null;
+
+    const groups = new Map();
+    const reKey = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}([^:]+)::(\\d{4})$`);
+    for (const row of listed.rows) {
+      const stateKeyRow = String(row?.state_key || '');
+      const m = stateKeyRow.match(reKey);
+      if (!m) continue; // 世代なしv1 chunkは安全な世代判定ができないため自動復旧対象外
+      const gen = m[1], idx = Number(m[2]);
+      if (!groups.has(gen)) groups.set(gen, { gen, parts:new Map(), latest:'' });
+      const g = groups.get(gen);
+      if (row?.payload && typeof row.payload.text === 'string') g.parts.set(idx, row.payload.text);
+      const u = String(row?.updated_at || '');
+      if (u > g.latest) g.latest = u;
+    }
+
+    const candidates = [];
+    for (const g of groups.values()) {
+      if (!g.parts.size) continue;
+      const max = Math.max(...g.parts.keys());
+      let complete = true, joined = '';
+      for (let i=0; i<=max; i++) {
+        if (!g.parts.has(i)) { complete=false; break; }
+        joined += g.parts.get(i);
+      }
+      if (!complete) continue;
+      try {
+        const value = JSON.parse(joined);
+        if (!value || typeof value !== 'object') continue;
+        candidates.push({ gen:g.gen, value, latest:g.latest, chunks:max+1 });
+      } catch(_e) {}
+    }
+    if (!candidates.length) return null;
+
+    // pointerが示す世代が完全ならそれを最優先。それ以外は最新の完全世代。
+    const pointerGen = String(pointer?.gen || '');
+    const pointed = candidates.find(x=>x.gen===pointerGen);
+    if (pointed) return pointed;
+    candidates.sort((a,b)=>String(b.latest).localeCompare(String(a.latest)));
+    const recovered = candidates[0];
+    console.warn(`[CLOUD] ${key} のpointer世代が不完全なため、検証済み完全世代 ${recovered.gen} (${recovered.chunks} chunks) から読込復旧しました。`);
+    return recovered;
+  },
   async _dbListStates(prefix = '', options = {}) {
     const sb = await this._client();
     if (!sb) return { ok:false, error:'Supabase未設定' };
@@ -635,14 +692,19 @@ var CLOUD = window.CLOUD = {
       return { ok:true, db:true, skipped:true };
     }
 
+    // 保存開始時点のpointerを記録する。cleanupはこの「直前世代」だけを対象にし、
+    // 同時に別処理/別端末が書き始めた新世代chunkを削除しない。
+    let previousPointer = null;
+    try { previousPointer = await this._dbGetState(stateKey); } catch(_e) {}
+
     // jsonb 1行へ巨大CSVを入れない。大きいものはDB上で分割保存する。
     const chunkThreshold = 280 * 1024;
     if (json.length <= chunkThreshold) {
-      // 重要：先に本体行を確定させてから旧chunkを掃除する。
-      // （旧実装は「削除→書込」の順で、途中失敗時にpointerが宙に浮きデータ消失に見えた）
       await this._dbUpsertState(stateKey, value);
-      try { await this._dbDeleteChunksExceptGen(stateKey, null); } catch(e) {
-        console.warn('[CLOUD] 旧chunk掃除失敗（本体保存は完了済み）:', key, e?.message || e);
+      if (previousPointer?.__db_chunked && previousPointer.gen) {
+        try { await this._dbDeleteChunkGeneration(stateKey, previousPointer.gen); } catch(e) {
+          console.warn('[CLOUD] 直前chunk世代の掃除失敗（本体保存は完了済み）:', key, e?.message || e);
+        }
       }
       this._rememberPushed(stateKey, hash);
       return { ok:true, db:true, chunked:false };
@@ -676,8 +738,13 @@ var CLOUD = window.CLOUD = {
     };
     await this._dbUpsertState(stateKey, pointer);
 
-    try { await this._dbDeleteChunksExceptGen(stateKey, gen); } catch(e) {
-      console.warn('[CLOUD] 旧世代chunk掃除失敗（保存自体は完了済み）:', key, e?.message || e);
+    // 全世代を「自分以外削除」してはいけない。
+    // 並行writerがpointer切替前に準備中のchunkまで消す競合が起きるため、
+    // 保存開始時点でpointerが指していた直前世代だけを削除する。
+    if (previousPointer?.__db_chunked && previousPointer.gen && previousPointer.gen !== gen) {
+      try { await this._dbDeleteChunkGeneration(stateKey, previousPointer.gen); } catch(e) {
+        console.warn('[CLOUD] 直前chunk世代の掃除失敗（保存自体は完了済み）:', key, e?.message || e);
+      }
     }
     this._rememberPushed(stateKey, hash);
     return { ok:true, db:true, chunked:true, chunks:chunks.length, gen };
@@ -694,17 +761,25 @@ var CLOUD = window.CLOUD = {
     if (first && first.__db_chunked && Number(first.chunks) > 0) {
       // version:2（世代付き）と version:1（世代なし）の両対応
       const useGen = !!first.gen;
-      let joined = '';
+      let joined = '', missingIndex = -1;
       for (let i=0; i<Number(first.chunks); i++) {
         const ck = useGen ? this._dbChunkKeyGen(stateKey, first.gen, i) : this._dbChunkKey(stateKey, i);
         const part = await this._dbGetState(ck);
-        if (!part || typeof part.text !== 'string') {
-          if (cacheFallback) return cacheFallback;
-          throw new Error(`分割データの取得に失敗しました: ${key} #${i+1}`);
-        }
+        if (!part || typeof part.text !== 'string') { missingIndex=i; break; }
         joined += part.text;
       }
-      value = JSON.parse(joined);
+      if (missingIndex >= 0) {
+        // 世代付きpointerなら、DB上に残る完全世代を検証して復旧を試す。
+        // 「一部chunkがある」だけでは採用せず、連番完備+JSON解析成功を必須にする。
+        const recovered = useGen ? await this._dbRecoverCompleteChunkGeneration(key, stateKey, first) : null;
+        if (recovered) value = recovered.value;
+        else {
+          if (cacheFallback) return cacheFallback;
+          throw new Error(`分割データの取得に失敗しました: ${key} #${missingIndex+1}（完全な復旧世代も確認できません）`);
+        }
+      } else {
+        value = JSON.parse(joined);
+      }
     }
 
     // 旧Storage分割ポインタがDBに入っていた場合の互換
