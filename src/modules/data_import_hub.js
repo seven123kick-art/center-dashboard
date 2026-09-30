@@ -302,11 +302,7 @@
       const monthText=a=>a.map(x=>`${x.slice(0,4)}/${x.slice(4)}`).join('、');
       if(failed)finishImportProgress(false,`一括取込：保存 ${saved}月SOURCE / 既存CURRENTスキップ ${skipped}件 / 失敗 ${failed}件。詳細は画面内の登録結果を確認してください。`);
       else finishImportProgress(true,`一括取込完了：保存 ${saved}月SOURCE${savedMonths.length?`（${monthText(savedMonths)}）`:''} / 既存CURRENTスキップ ${skipped}件${skippedMonths.length?`（${monthText(skippedMonths)}）`:''} / 失敗 0件`);
-      const files=session.files;
       await refresh();
-      await analyzeInitialFiles(files);
-      const refreshed=document.getElementById('dih-initial-register-status');
-      if(refreshed){refreshed.className=`dih-register-status ${failed?'is-error':'is-ok'}`;refreshed.innerHTML=resultHtml;}
     }catch(e){
       setInitialRegisterStatus(`<div class="dih-register-result"><strong>登録中止</strong><span>${esc(e?.message||String(e))}</span></div>`,'is-error');
       finishImportProgress(false,e?.message||String(e));
@@ -351,7 +347,7 @@
     initialImportSession={files:arr,rows,expanded,preview,analyzed_at:new Date().toISOString(),center_id:window.CENTER?.id||null,center_name:window.CENTER?.name||null};
     target.innerHTML=`<div class="dih-summary"><div><span>選択</span><b>${rows.length}件</b></div><div><span>自動判別</span><b>${rows.length-unresolved}件</b></div><div><span>要確認/追加解析</span><b>${unresolved}件</b></div><div><span>保存</span><b>0件</b></div></div>${monthlySetHtml(diag)}${registrationPreviewHtml(preview)}<details class="dih-detail-toggle"><summary>全ファイルの技術判定 ${rows.length}件</summary><div class="dih-detail-body"><div class="dih-result-scroll dih-technical-table"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>信頼度</th><th>状態</th><th>判定根拠</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.file)}</td><td><b>${esc(r.source)}</b><small>${esc(r.label)}</small></td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.confidence)}</td><td>${esc(r.status)}</td><td>${esc(r.reason)}</td></tr>`).join('')}</tbody></table></div></div></details><div class="dih-foot">診断・登録前プレビュー専用です。CURRENT・STATE・Cloudへの保存は行いません。ファイル名は判定根拠に使用していません。センター情報がない月次SOURCEは選択中センターを使用し、ファイル内部に別センターが明示されている場合は不一致として停止します。</div>`;
     const ready=preview.filter(x=>x.ready).length,hold=preview.length-ready;
-    finishImportProgress(true,`解析完了：選択 ${rows.length}件 / 自動判別 ${rows.length-unresolved}件 / 登録候補 ${ready}件 / 要確認・除外 ${hold+unresolved}件\nこの時点では保存していません。`);
+    finishInitialAnalysis(`選択 ${rows.length}件 / 自動判別 ${rows.length-unresolved}件 / 登録候補 ${ready}件 / 要確認・除外 ${hold+unresolved}件\nまだ保存していません。`,ready);
   }
   function chooseInitialFiles(){const input=document.createElement('input');input.type='file';input.accept='.csv,.pdf,.xls,.xlsx,.zip';input.multiple=true;input.addEventListener('change',()=>analyzeInitialFiles(input.files).catch(e=>finishImportProgress(false,e?.message||String(e))),{once:true});input.click();}
   function contentDiagnosticHtml(){return `<section style="margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface1)"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><b style="font-size:14px">まとめて投入（自動仕分け）</b><div style="font-size:11px;color:var(--text3);margin-top:3px">資料種類を自動判別し、複数月ファイルは内部日付で月別に分割します。下の各カードは対象月への個別投入です。</div></div><button type="button" class="btn" onclick="DATA_IMPORT_HUB.chooseInitialFiles()">ファイルをまとめて選択</button></div><div id="dih-content-result" style="margin-top:12px"></div></section>`;}
@@ -406,12 +402,24 @@
       <div class="data-import-progress__note">完了するまでこの画面のままお待ちください。</div>
       <button type="button" class="data-import-progress__close">確認</button>
     </div>`;
-    el.querySelector('.data-import-progress__close').addEventListener('click',()=>hideImportProgress(true));
+    el.querySelector('.data-import-progress__close').addEventListener('click',()=>{
+      const btn=el.querySelector('.data-import-progress__close');
+      const action=btn?.dataset?.action||'close';
+      if(action==='register-initial'){
+        hideImportProgress(true);
+        btn.dataset.action='close';
+        btn.textContent='確認';
+        window.setTimeout(()=>registerInitialReady(),0);
+        return;
+      }
+      hideImportProgress(true);
+    });
     document.body.appendChild(el);return el;
   }
   function showImportProgress(label,p,step){
     const el=importProgressEl();importBusy=true;
     el.classList.remove('is-success','is-error');
+    const closeBtn=el.querySelector('.data-import-progress__close');if(closeBtn){closeBtn.dataset.action='close';closeBtn.textContent='確認';}
     el.querySelector('.data-import-progress__title').textContent='データを読み込んでいます';
     el.querySelector('.data-import-progress__source').textContent=label;
     el.querySelector('.data-import-progress__month').textContent=/^\d{6}$/.test(p)?`${p.slice(0,4)}年${Number(p.slice(4))}月`:/^\d{4}$/.test(String(p||''))?`${p}年度`:'';
@@ -429,6 +437,20 @@
     el.querySelector('.data-import-progress__step').textContent=ok?'登録状態を更新しました':'取込処理を完了できませんでした';
     el.querySelector('.data-import-progress__result').textContent=message||'';
     el.querySelector('.data-import-progress__note').textContent=ok?'内容を確認して「確認」を押してください。':'内容を確認してから再度お試しください。';
+    document.documentElement.classList.remove('data-import-busy');
+  }
+  function finishInitialAnalysis(message,readyCount){
+    const el=importProgressEl();importBusy=false;
+    el.classList.add('is-success');el.classList.remove('is-error');
+    el.querySelector('.data-import-progress__title').textContent='登録前の解析が完了しました';
+    el.querySelector('.data-import-progress__step').textContent=`登録候補 ${readyCount}件を確認しました`;
+    el.querySelector('.data-import-progress__result').textContent=message||'';
+    el.querySelector('.data-import-progress__note').textContent=readyCount?'下のボタンを押すとNormalized Source Repository / Cloudへ保存します。':'登録できる候補はありません。';
+    const btn=el.querySelector('.data-import-progress__close');
+    if(btn){
+      btn.dataset.action=readyCount?'register-initial':'close';
+      btn.textContent=readyCount?`${readyCount}件を登録する`:'確認';
+    }
     document.documentElement.classList.remove('data-import-busy');
   }
   function hideImportProgress(force){
