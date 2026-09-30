@@ -782,5 +782,5 @@
     setView(viewMode);
   }
 
-  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,joinedRows,setView,openDetail,closeDetail,exportExcel,printView};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,closeDetail,exportExcel,printView};
 })();
