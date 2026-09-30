@@ -77,7 +77,7 @@
     return {source:'UNKNOWN',label:'判別不能PDF',periods:[],center:'判定不能',confidence:'LOW',reason:'既存PDFパーサーで既知SOURCEを確定できない'};
   }
   async function contentRegistered(source,ym){if(!ym||!Repository?.NormalizedSource?.loadManifest)return false;const type=source==='PL_CONFIRMED'?'PL_ACTUAL':source;try{const r=await Repository.NormalizedSource.loadManifest(type,ym);return !!r?.manifest?.current_batch_id;}catch(e){return false;}}
-  function duplicateKey(r){if(!r||['UNKNOWN','ERROR','PENDING_PARSER','PL_DAILY_ACTUAL'].includes(r.source))return null;const ps=r.periods?.length===1?r.periods[0]:(r.fiscalYear?`FY${r.fiscalYear}`:null);return ps&&r.center&&r.center!=='判定不能'&&r.center!=='—'?`${r.source}|${ps}|${r.center}`:null;}
+  function duplicateKey(r){if(!r||['UNKNOWN','ERROR','PENDING_PARSER','PL_DAILY_ACTUAL','DELIVERY_LIST'].includes(r.source))return null;const ps=r.periods?.length===1?r.periods[0]:(r.fiscalYear?`FY${r.fiscalYear}`:null);return ps&&r.center&&r.center!=='判定不能'&&r.center!=='—'?`${r.source}|${ps}|${r.center}`:null;}
   // M2-5O: center supplementation uses only explicit evidence inside the same selected batch and same internal period.
   const INITIAL_MONTHLY_SOURCES=['PL_CONFIRMED','WORKER_SALES','SHIPPER_AREA','DELIVERY_LIST','ROUTE_PAYMENT'];
   function supplementCenters(rows){
@@ -130,7 +130,26 @@
       }
     }
     supplementCenters(expanded);
-    return expanded;
+    // DELIVERY_LISTは日別PDFが複数ファイルになるため、同一月・同一センターを
+    // 1つの月次SOURCE候補へ統合する。重複排除は保存時に配達日+ヘッド番号で行う。
+    const deliveryGroups=new Map(),out=[];
+    for(const r of expanded){
+      if(r.source!=='DELIVERY_LIST'){out.push(r);continue;}
+      const ym=r.periods?.[0],key=`${ym}|${r.center||''}`;
+      if(!deliveryGroups.has(key)){
+        deliveryGroups.set(key,{...r,_files:[],files:[],file:''});
+      }
+      const g=deliveryGroups.get(key);
+      if(r._file)g._files.push(r._file);
+      if(r.file)g.files.push(r.file);
+    }
+    for(const g of deliveryGroups.values()){
+      g.file=g.files.join('、');
+      g.status=`${g.status||''}・月次統合`;
+      g.reason=`${g.reason||''} / DELIVERY_LIST ${g.files.length}ファイルを同月SOURCEへ統合`;
+      out.push(g);
+    }
+    return out;
   }
 
   function monthlySetDiagnosis(rows){
@@ -224,8 +243,22 @@
       records=normalizer(csv.toRows(text),{file_name:file.name,year_month:null,center_id:centerId});
     }else if(item.source==='DELIVERY_LIST'){
       if(!window.ROUTE_ANALYSIS_UI?.parseDeliveryPdf||!window.SOURCE_NORMALIZER?.normalizeDeliveryListRoutes)throw new Error('DELIVERY_LISTのPDF解析基盤を読み込めません。');
-      const routes=await ROUTE_ANALYSIS_UI.parseDeliveryPdf(file);
-      records=SOURCE_NORMALIZER.normalizeDeliveryListRoutes(routes,{file_name:file.name,center_id:centerId});
+      const files=(item._files?.length?item._files:[file]).filter(Boolean);
+      const merged=new Map();
+      for(const pdf of files){
+        const routes=await ROUTE_ANALYSIS_UI.parseDeliveryPdf(pdf);
+        const normalized=SOURCE_NORMALIZER.normalizeDeliveryListRoutes(routes,{file_name:pdf.name,center_id:centerId});
+        for(const rec of normalized){
+          const key=`${rec.delivery_date||''}|${rec.head_number||rec.headNumber||''}`;
+          if(!merged.has(key))merged.set(key,rec);
+          else{
+            const prev=merged.get(key);
+            const slips=[...new Set([...(prev.slip_numbers||prev.slips||[]),...(rec.slip_numbers||rec.slips||[])])];
+            merged.set(key,{...prev,...rec,slip_numbers:slips});
+          }
+        }
+      }
+      records=[...merged.values()];
     }else if(item.source==='ROUTE_PAYMENT'){
       if(!window.SOURCE_NORMALIZER?.normalizeRoutePaymentRows)throw new Error('ROUTE_PAYMENTの正規化基盤を読み込めません。');
       const XLSX=await ensureXlsx(),wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:false});
@@ -265,8 +298,8 @@
     }
     return Repository.NormalizedSource.saveBatch({
       document_type:repoType,period:ym,batch_id:initialBatchId(repoType,ym),
-      source_file_id:null,source_file_name:item.file,records,
-      meta:{source_file_names:[item.file],imported_at:new Date().toISOString(),usage:'INITIAL_HISTORY_IMPORT'}
+      source_file_id:null,source_file_name:item.source==='DELIVERY_LIST'?'DELIVERY_LIST_MONTHLY_MERGED':item.file,records,
+      meta:{source_file_names:item.files?.length?item.files:[item.file],imported_at:new Date().toISOString(),usage:'INITIAL_HISTORY_IMPORT'}
     });
   }
   function setInitialRegisterStatus(html,cls=''){
