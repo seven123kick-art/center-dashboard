@@ -66,56 +66,34 @@
   // M2-5O: center supplementation uses only explicit evidence inside the same selected batch and same internal period.
   const INITIAL_MONTHLY_SOURCES=['PL_CONFIRMED','WORKER_SALES','SHIPPER_AREA','ROUTE_PAYMENT'];
   function supplementCenters(rows){
-    const evidence=new Map();
-    for(const r of rows){
-      if(r.center==='判定不能'||r.center==='—'||r.periods?.length!==1||r.confidence!=='HIGH')continue;
-      const ym=r.periods[0];if(!evidence.has(ym))evidence.set(ym,new Set());evidence.get(ym).add(r.center);
-    }
-    for(const r of rows){
-      if(r.center!=='判定不能'||r.periods?.length!==1||['UNKNOWN','ERROR','PENDING_PARSER','PL_DAILY_ACTUAL'].includes(r.source))continue;
-      const centers=[...(evidence.get(r.periods[0])||[])];
-      if(centers.length!==1)continue;
-      r.center=centers[0];r.centerSupplemented=true;
-      r.status=String(r.status||'').replace(/・センター要確認/g,'');
-      r.reason+=` / 同一投入バッチ・同一内部期間の明示センターから補完: ${centers[0]}`;
-      if(r.confidence==='MEDIUM')r.confidence='HIGH';
-    }
-  }
-  // 一括投入は1ファイル=1月を前提にしない。
-  // 資料自動判別の後、内部日付で年月ごとの登録候補へ展開する。
-  // 各SOURCEカードからの個別投入は従来どおり画面対象月との一致を必須とする。
-  async function expandMonthlyRegistrationCandidates(rows){
-    const expanded=[];
-    for(const r of rows){
-      if(!INITIAL_MONTHLY_SOURCES.includes(r.source)||!Array.isArray(r.periods)||!r.periods.length){
-        expanded.push({...r}); continue;
-      }
-      for(const ym of r.periods){
-        const registered=await contentRegistered(r.source,ym);
-        expanded.push({
-          ...r, periods:[ym], sourcePeriods:[...r.periods],
-          splitFromMultiMonth:r.periods.length>1, existingCurrent:registered,
-          status:`${r.status||''}${r.periods.length>1?'・月別分割':''}${registered?'・登録済':''}`,
-          reason:`${r.reason||''}${r.periods.length>1?` / 内部日付から ${ym.slice(0,4)}/${ym.slice(4)} を月別登録候補化`:''}`
-        });
-      }
-    }
-    // WORKER_SALES等、帳票自体にセンター列がないSOURCEは、
-    // 従来どおり同一投入バッチ・同一内部月の明示センターが1種類の時だけ補完する。
-    supplementCenters(expanded);
-    return expanded;
-  }
+    const activeCenter=String(window.CENTER?.name||'').trim();
+    if(!activeCenter)return rows;
 
-  function monthlySetDiagnosis(rows){
-    const months=[...new Set(rows.flatMap(r=>r.periods?.length===1?r.periods:[]))].sort(),out=[];
-    for(const ym of months){
-      const rs=rows.filter(r=>r.periods?.length===1&&r.periods[0]===ym),present=new Set(rs.map(r=>r.source));
-      const missing=INITIAL_MONTHLY_SOURCES.filter(x=>!present.has(x));
-      const centers=[...new Set(rs.map(r=>r.center).filter(x=>x&&x!=='判定不能'&&x!=='—'))];
-      const duplicate=INITIAL_MONTHLY_SOURCES.filter(src=>rs.filter(r=>r.source===src).length>1);
-      out.push({ym,present:[...present].filter(x=>INITIAL_MONTHLY_SOURCES.includes(x)),missing,centers,duplicate});
+    for(const r of rows){
+      const detected=String(r.center||'').trim();
+      const unresolved=!detected||detected==='判定不能'||detected==='—';
+
+      // ファイル内部でセンターが判定できている場合は、それを最優先する。
+      if(!unresolved){
+        if(detected!==activeCenter){
+          r.centerConflict=true;
+          r.status=`${r.status||''}・センター不一致`;
+          r.reason=`${r.reason||''} / ファイル内センター ${detected} と選択中センター ${activeCenter} が不一致`;
+        }
+        continue;
+      }
+
+      // センター列を持たない月次SOURCEは、このセンター画面の選択値を登録先にする。
+      // UNKNOWN/ERROR/PENDING_PARSERには適用しない。
+      if(INITIAL_MONTHLY_SOURCES.includes(r.source)){
+        r.center=activeCenter;
+        r.centerConfidence='SELECTED_CENTER';
+        r.centerFallback=true;
+        r.status=`${r.status||''}・選択センター`;
+        r.reason=`${r.reason||''} / ファイル内センター情報なし→選択中センター ${activeCenter} を使用`;
+      }
     }
-    return out;
+    return rows;
   }
   function monthlySetHtml(diag){
     if(!diag.length)return '';
@@ -133,8 +111,9 @@
       if(!INITIAL_MONTHLY_SOURCES.includes(r.source))reasons.push(r.source==='PL_DAILY_ACTUAL'?'初期履歴対象外SOURCE':'初期履歴一括登録対象外SOURCE');
       if(['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source))reasons.push('SOURCE未確定');
       if(!r.fiscalYear&&!onePeriod)reasons.push('内部期間不明');
-      if(!r.fiscalYear&&(r.center==='判定不能'||r.center==='—'))reasons.push('センター未確定');
-      if(onePeriod&&activeCenter&&r.center!=='判定不能'&&r.center!=='—'&&r.center!==activeCenter)reasons.push(`選択中センター不一致（${activeCenter}）`);
+      if(r.centerConflict)reasons.push(`選択中センター不一致（${activeCenter}）`);
+      else if(!r.fiscalYear&&(r.center==='判定不能'||r.center==='—'))reasons.push('センター未確定');
+      if(!r.centerConflict&&onePeriod&&activeCenter&&r.center!=='判定不能'&&r.center!=='—'&&r.center!==activeCenter)reasons.push(`選択中センター不一致（${activeCenter}）`);
       if(String(r.status||'').includes('重複候補'))reasons.push('同一投入内の重複候補');
       // 既存CURRENTは登録時にその月だけSKIPし、他月の一括登録は止めない。
       if(r.confidence!=='HIGH')reasons.push('信頼度HIGH未満');
