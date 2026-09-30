@@ -695,7 +695,11 @@
     const token=++renderToken;
     setup();
     const sel=document.getElementById('route-ym-select');
-    const yms=window.LEDGER?.availableMonths ? LEDGER.availableMonths() : [...new Set([...(STATE.routeData||[]).map(x=>x.ym), ...(STATE.workerCsvData||[]).map(x=>x.ym), ...(STATE.datasets||[]).map(x=>x.ym)])].filter(Boolean).sort();
+    const legacyMonths=window.LEDGER?.availableMonths ? LEDGER.availableMonths() : [...new Set([...(STATE.routeData||[]).map(x=>x.ym), ...(STATE.workerCsvData||[]).map(x=>x.ym), ...(STATE.datasets||[]).map(x=>x.ym)])].filter(Boolean).sort();
+    const yms=window.CANONICAL_ROUTE_LEDGER?.availableMonths
+      ? await CANONICAL_ROUTE_LEDGER.availableMonths()
+      : legacyMonths;
+    if(token!==renderToken)return;
     if(sel){
       const cur=sel.value;
       sel.innerHTML=yms.map(ym=>`<option value="${ym}">${ym.slice(0,4)}年${Number(ym.slice(4,6))}月</option>`).join('');
