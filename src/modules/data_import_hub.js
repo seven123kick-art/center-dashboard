@@ -254,6 +254,19 @@
     const el=document.getElementById('dih-initial-register-status');
     if(el){el.className=`dih-register-status ${cls}`;el.innerHTML=html||'';}
   }
+  async function runBounded(items,limit,worker,onProgress){
+    const rows=Array.isArray(items)?items:[],out=new Array(rows.length);
+    let cursor=0,done=0;
+    const runners=Array.from({length:Math.min(Math.max(1,limit||1),rows.length)},async()=>{
+      while(true){
+        const idx=cursor++;
+        if(idx>=rows.length)return;
+        try{out[idx]=await worker(rows[idx],idx);}catch(error){out[idx]={kind:'failed',error};}
+        done++;try{onProgress?.(done,rows.length,out[idx],idx);}catch(_e){}
+      }
+    });
+    await Promise.all(runners);return out;
+  }
   async function registerInitialReady(){
     if(initialImportSaving)return;
     const session=initialImportSession,items=(session?.preview||[]).filter(x=>x.ready);
@@ -276,16 +289,22 @@
       }
       if(preflightErrors.length)throw new Error(`保存前検証で ${preflightErrors.length}件の問題を確認したため、保存は0件です。\n${preflightErrors.join('\n')}`);
       updateImportProgress('検証完了。Normalized Source / Cloudへ登録しています…');
-      for(let i=0;i<items.length;i++){
-        const item=items[i];
-        setInitialRegisterStatus(`<strong>${i+1}/${items.length}</strong> ${esc(item.periods?.[0]||'')} ${esc(item.source)} を確認・登録中…`,'is-running');
-        try{
-          const r=await persistInitialCandidate(item);
-          if(r?.ok){saved++;affected.add(item.periods[0]);results.push({item,status:'保存済',detail:`${r.record_count??'—'}行`});}
-          else if(r?.error==='CURRENT_ALREADY_EXISTS'){skipped++;results.push({item,status:'スキップ',detail:'実行時点で既存CURRENTを確認'});}
-          else{failed++;results.push({item,status:'失敗',detail:r?.error||'保存結果を確認できません'});}
-        }catch(e){failed++;results.push({item,status:'失敗',detail:e?.message||String(e)});}
-      }
+      const saveResults=await runBounded(items,3,async(item)=>{
+        const r=await persistInitialCandidate(item);
+        if(r?.ok)return {kind:'saved',item,result:r};
+        if(r?.error==='CURRENT_ALREADY_EXISTS')return {kind:'skipped',item,result:r};
+        return {kind:'failed',item,error:new Error(r?.error||'保存結果を確認できません')};
+      },(done,total,r)=>{
+        const item=r?.item;
+        setInitialRegisterStatus('<strong>'+done+'/'+total+'</strong> '+esc(item?.periods?.[0]||'')+' '+esc(item?.source||'')+' Cloud登録完了','is-running');
+        updateImportProgress('Cloud登録 '+done+'/'+total+'件 完了…');
+      });
+      saveResults.forEach((r,idx)=>{
+        const item=r?.item||items[idx];
+        if(r?.kind==='saved'){saved++;affected.add(item.periods[0]);results.push({item,status:'保存済',detail:(r.result?.record_count??'—')+'行'});}
+        else if(r?.kind==='skipped'){skipped++;results.push({item,status:'スキップ',detail:'実行時点で既存CURRENTを確認'});}
+        else{failed++;results.push({item,status:'失敗',detail:r?.error?.message||String(r?.error||'保存結果を確認できません')});}
+      });
       const materializeErrors=[];
       if(window.CANONICAL_MATERIALIZER?.materialize){
         for(const ym of [...affected].sort()){
