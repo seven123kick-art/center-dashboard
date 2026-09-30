@@ -1,3 +1,13 @@
+M2-11 (2026-09-30) まとめて投入の複数月自動分割
+- 正本: center-dashboard-main(20260930-124729).zip。GitHub直接書込みなし。
+- 実コード確認: 資料種類の自動判別は既に実装済み。問題は一括登録が periods.length===1 を必須とし、複数月ファイルを除外していたこと。
+- 一括投入: 自動判別後、内部日付から月別候補へ展開。WORKER_SALES / SHIPPER_AREA / ROUTE_PAYMENTは対象月をNormalizerへ強制せず、正規化後にdelivery_dateで月別切出し。
+- 既存CURRENTの月はその月だけSKIP。他の未登録月は保存継続。
+- センター補完は同一投入バッチ・同一内部月に明示センターが1種類だけという既存安全条件を維持。
+- 個別投入: 各SOURCEカードからの取込は従来どおり画面対象月との一致を必須とし、月違いを拒否。
+- UI文言を「まとめて投入（自動仕分け）」へ整理し、完了モーダルに保存月/スキップ月を表示。
+- 既存パイプライン（判別→候補化→正規化→保存）の月単位モデルを修正。別fallbackや上乗せ処理は追加していない。
+
 M2-10B (2026-09-02) full_state v34 reader直接再帰の修正
 - 対象: M2-10で導入した src/core/cloud.js の _downloadFullState()。
 - 原因確定: v34 reader内のroot pointer取得が誤って `await this._downloadFullState()` になっており、

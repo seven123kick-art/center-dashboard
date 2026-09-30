@@ -81,6 +81,31 @@
       if(r.confidence==='MEDIUM')r.confidence='HIGH';
     }
   }
+  // 一括投入は1ファイル=1月を前提にしない。
+  // 資料自動判別の後、内部日付で年月ごとの登録候補へ展開する。
+  // 各SOURCEカードからの個別投入は従来どおり画面対象月との一致を必須とする。
+  async function expandMonthlyRegistrationCandidates(rows){
+    const expanded=[];
+    for(const r of rows){
+      if(!INITIAL_MONTHLY_SOURCES.includes(r.source)||!Array.isArray(r.periods)||!r.periods.length){
+        expanded.push({...r}); continue;
+      }
+      for(const ym of r.periods){
+        const registered=await contentRegistered(r.source,ym);
+        expanded.push({
+          ...r, periods:[ym], sourcePeriods:[...r.periods],
+          splitFromMultiMonth:r.periods.length>1, existingCurrent:registered,
+          status:`${r.status||''}${r.periods.length>1?'・月別分割':''}${registered?'・登録済':''}`,
+          reason:`${r.reason||''}${r.periods.length>1?` / 内部日付から ${ym.slice(0,4)}/${ym.slice(4)} を月別登録候補化`:''}`
+        });
+      }
+    }
+    // WORKER_SALES等、帳票自体にセンター列がないSOURCEは、
+    // 従来どおり同一投入バッチ・同一内部月の明示センターが1種類の時だけ補完する。
+    supplementCenters(expanded);
+    return expanded;
+  }
+
   function monthlySetDiagnosis(rows){
     const months=[...new Set(rows.flatMap(r=>r.periods?.length===1?r.periods:[]))].sort(),out=[];
     for(const ym of months){
@@ -107,18 +132,18 @@
       const onePeriod=r.periods?.length===1;
       if(!INITIAL_MONTHLY_SOURCES.includes(r.source))reasons.push(r.source==='PL_DAILY_ACTUAL'?'初期履歴対象外SOURCE':'初期履歴一括登録対象外SOURCE');
       if(['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source))reasons.push('SOURCE未確定');
-      if(!r.fiscalYear&&!onePeriod)reasons.push(r.periods?.length>1?'複数月':'内部期間不明');
+      if(!r.fiscalYear&&!onePeriod)reasons.push('内部期間不明');
       if(!r.fiscalYear&&(r.center==='判定不能'||r.center==='—'))reasons.push('センター未確定');
       if(onePeriod&&activeCenter&&r.center!=='判定不能'&&r.center!=='—'&&r.center!==activeCenter)reasons.push(`選択中センター不一致（${activeCenter}）`);
       if(String(r.status||'').includes('重複候補'))reasons.push('同一投入内の重複候補');
-      if(String(r.status||'').includes('登録済'))reasons.push('既存CURRENTあり');
+      // 既存CURRENTは登録時にその月だけSKIPし、他月の一括登録は止めない。
       if(r.confidence!=='HIGH')reasons.push('信頼度HIGH未満');
       return {...r,ready:reasons.length===0,blockReasons:[...new Set(reasons)]};
     });
   }
   function registrationPreviewHtml(items){
     const ready=items.filter(x=>x.ready),hold=items.filter(x=>!x.ready);
-    const action=ready.length?`<div class="dih-register-action"><div><strong>${ready.length}件を初期履歴として登録できます</strong><span>既存CURRENTは上書きしません。実行時に再確認してからNormalized Source Repositoryへ保存します。</span></div><button type="button" class="btn btn-primary" id="dih-initial-register-btn" onclick="DATA_IMPORT_HUB.registerInitialReady()">登録候補を一括登録</button></div>`:'';
+    const action=ready.length?`<div class="dih-register-action"><div><strong>${ready.length}件の月別SOURCEを登録できます</strong><span>複数月ファイルは内部日付で月別分割します。既存CURRENTはその月だけスキップし、他の未登録月は続けて保存します。</span></div><button type="button" class="btn btn-primary" id="dih-initial-register-btn" onclick="DATA_IMPORT_HUB.registerInitialReady()">登録候補を一括登録</button></div>`:'';
     return `<section class="dih-result-section"><div class="dih-result-heading"><b>登録前プレビュー</b><span>実行ボタンを押すまで保存しません</span></div><div class="dih-summary"><div><span>登録候補</span><b>${ready.length}件</b></div><div><span>要確認/除外</span><b>${hold.length}件</b></div><div><span>保存実行</span><b>0件</b></div><div><span>判定</span><b>PREVIEW</b></div></div>${action}<div id="dih-initial-register-status" class="dih-register-status"></div>${hold.length?`<div class="dih-result-scroll"><table class="data-table"><thead><tr><th>判定</th><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>理由</th></tr></thead><tbody>${hold.map(r=>`<tr><td><span class="dih-result-badge is-hold">要確認</span></td><td>${esc(r.file)}</td><td>${esc(r.source)}</td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods?.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.blockReasons.join(' / '))}</td></tr>`).join('')}</tbody></table></div>`:`<div class="dih-empty">要確認ファイルはありません。</div>`}<details class="dih-detail-toggle"><summary>登録候補 ${ready.length}件を確認</summary><div class="dih-detail-body"><div class="dih-result-scroll"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th></tr></thead><tbody>${ready.map(r=>`<tr><td>${esc(r.file)}</td><td>${esc(r.source)}</td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods?.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td></tr>`).join('')}</tbody></table></div></div></details></section>`;
   }
 
@@ -152,22 +177,30 @@
       if(!normalizer)throw new Error(`${item.source} の正規化基盤を読み込めません。`);
       const text=await readCsvText(file),csv=(typeof CSV!=='undefined'&&CSV)||window.CSV;
       if(!csv?.toRows)throw new Error('CSV行解析基盤を読み込めません。');
-      records=normalizer(csv.toRows(text),{file_name:file.name,year_month:ym,center_id:centerId});
+      records=normalizer(csv.toRows(text),{file_name:file.name,year_month:null,center_id:centerId});
     }else if(item.source==='ROUTE_PAYMENT'){
       if(!window.SOURCE_NORMALIZER?.normalizeRoutePaymentRows)throw new Error('ROUTE_PAYMENTの正規化基盤を読み込めません。');
       const XLSX=await ensureXlsx(),wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:false});
       for(const sheetName of wb.SheetNames){
         const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:'',raw:false});
         if(!routePaymentSignature(rows))continue;
-        records.push(...SOURCE_NORMALIZER.normalizeRoutePaymentRows(rows,{file_name:`${file.name}#${sheetName}`,year_month:ym,center_id:centerId}));
+        records.push(...SOURCE_NORMALIZER.normalizeRoutePaymentRows(rows,{file_name:`${file.name}#${sheetName}`,year_month:null,center_id:centerId}));
       }
     }else throw new Error(`初期履歴一括登録の対象外SOURCEです: ${item.source}`);
     if(!records.length)throw new Error('正規化レコードを1件も作成できませんでした。');
     const wrongType=records.find(r=>item.source==='PL_CONFIRMED'?r?.document_type!=='PL_ACTUAL':r?.document_type!==item.source);
     if(wrongType)throw new Error('正規化後のdocument_typeが診断結果と一致しません。');
+    const dateKey=item.source==='PL_CONFIRMED'?'accounting_date':'delivery_date';
+
+    if(item.source!=='PL_CONFIRMED'){
+      const dated=records.filter(r=>datePeriod(r?.[dateKey]));
+      const selected=dated.filter(r=>datePeriod(r[dateKey])===ym).map(r=>({...r,year_month:ym}));
+      if(!selected.length)throw new Error(`内部日付に ${ym.slice(0,4)}年${Number(ym.slice(4))}月 のレコードがありません。`);
+      return selected;
+    }
+
     const wrongYm=records.find(r=>r?.year_month&&r.year_month!==ym);
     if(wrongYm)throw new Error(`正規化後の対象年月が一致しません（${wrongYm.year_month}）。`);
-    const dateKey=item.source==='PL_CONFIRMED'?'accounting_date':'delivery_date';
     const wrongDate=records.find(r=>r?.[dateKey]&&datePeriod(r[dateKey])&&datePeriod(r[dateKey])!==ym);
     if(wrongDate)throw new Error(`内部日付が対象年月と一致しません（${wrongDate[dateKey]}）。`);
     return records;
@@ -208,9 +241,8 @@
       for(const item of items){
         try{
           await buildInitialRecords(item);
-          const repoType=item.source==='PL_CONFIRMED'?'PL_ACTUAL':item.source,ym=item.periods?.[0];
-          const before=await Repository.NormalizedSource.loadManifest(repoType,ym);
-          if(before?.manifest?.current_batch_id)preflightErrors.push(`${ym} ${item.source}: 既存CURRENTあり`);
+          // 既存CURRENTは persistInitialCandidate() が当該月だけSKIPする。
+          // 未登録の別月まで一括投入を中止しない。
         }catch(e){preflightErrors.push(`${item.periods?.[0]||'—'} ${item.source}: ${e?.message||e}`);}
       }
       if(preflightErrors.length)throw new Error(`保存前検証で ${preflightErrors.length}件の問題を確認したため、保存は0件です。\n${preflightErrors.join('\n')}`);
@@ -236,8 +268,11 @@
       }
       const resultHtml=`<div class="dih-register-result"><strong>初期履歴登録結果</strong><span>保存 ${saved}件 / スキップ ${skipped}件 / 失敗 ${failed}件${materializeErrors.length?` / 再構築エラー ${materializeErrors.length}か月`:''}</span></div>${(failed||skipped||materializeErrors.length)?`<details class="dih-detail-toggle" open><summary>登録結果の詳細</summary><div class="dih-detail-body"><div class="dih-result-scroll"><table class="data-table"><thead><tr><th>結果</th><th>年月</th><th>SOURCE</th><th>ファイル</th><th>詳細</th></tr></thead><tbody>${results.filter(x=>x.status!=='保存済').map(x=>`<tr><td>${esc(x.status)}</td><td>${esc(x.item.periods?.[0]||'')}</td><td>${esc(x.item.source)}</td><td>${esc(x.item.file)}</td><td>${esc(x.detail)}</td></tr>`).join('')}${materializeErrors.map(x=>`<tr><td>再構築</td><td colspan="4">${esc(x)}</td></tr>`).join('')}</tbody></table></div></div></details>`:''}`;
       setInitialRegisterStatus(resultHtml,failed?'is-error':'is-ok');
-      if(failed)finishImportProgress(false,`初期履歴登録：保存 ${saved}件 / 失敗 ${failed}件。詳細は画面内の登録結果を確認してください。`);
-      else finishImportProgress(true,`初期履歴登録完了：保存 ${saved}件 / スキップ ${skipped}件 / 失敗 0件`);
+      const savedMonths=[...new Set(results.filter(x=>x.status==='保存済').map(x=>x.item?.periods?.[0]).filter(Boolean))].sort();
+      const skippedMonths=[...new Set(results.filter(x=>x.status==='スキップ').map(x=>x.item?.periods?.[0]).filter(Boolean))].sort();
+      const monthText=a=>a.map(x=>`${x.slice(0,4)}/${x.slice(4)}`).join('、');
+      if(failed)finishImportProgress(false,`一括取込：保存 ${saved}月SOURCE / 既存CURRENTスキップ ${skipped}件 / 失敗 ${failed}件。詳細は画面内の登録結果を確認してください。`);
+      else finishImportProgress(true,`一括取込完了：保存 ${saved}月SOURCE${savedMonths.length?`（${monthText(savedMonths)}）`:''} / 既存CURRENTスキップ ${skipped}件${skippedMonths.length?`（${monthText(skippedMonths)}）`:''} / 失敗 0件`);
       const files=session.files;
       await refresh();
       await analyzeInitialFiles(files);
@@ -271,14 +306,14 @@
     }catch(e){rows.push({_file:f,file:f.name,source:'ERROR',label:'読取エラー',periods:[],center:'—',confidence:'LOW',status:'要確認',reason:e?.message||String(e)});}}
     supplementCenters(rows);
     const groups=new Map();for(const r of rows){const k=duplicateKey(r);if(k){if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}}for(const g of groups.values())if(g.length>1)g.forEach(r=>{r.status+=(r.status?'・':'')+'重複候補';r.reason+=` / 同一SOURCE・期間・センター ${g.length}件`;});
-    const diag=monthlySetDiagnosis(rows),preview=registrationReadiness(rows),unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
-    initialImportSession={files:arr,rows,preview,analyzed_at:new Date().toISOString(),center_id:window.CENTER?.id||null,center_name:window.CENTER?.name||null};
+    const diag=monthlySetDiagnosis(rows),expanded=await expandMonthlyRegistrationCandidates(rows),preview=registrationReadiness(expanded),unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
+    initialImportSession={files:arr,rows,expanded,preview,analyzed_at:new Date().toISOString(),center_id:window.CENTER?.id||null,center_name:window.CENTER?.name||null};
     target.innerHTML=`<div class="dih-summary"><div><span>選択</span><b>${rows.length}件</b></div><div><span>自動判別</span><b>${rows.length-unresolved}件</b></div><div><span>要確認/追加解析</span><b>${unresolved}件</b></div><div><span>保存</span><b>0件</b></div></div>${monthlySetHtml(diag)}${registrationPreviewHtml(preview)}<details class="dih-detail-toggle"><summary>全ファイルの技術判定 ${rows.length}件</summary><div class="dih-detail-body"><div class="dih-result-scroll dih-technical-table"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>信頼度</th><th>状態</th><th>判定根拠</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.file)}</td><td><b>${esc(r.source)}</b><small>${esc(r.label)}</small></td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.confidence)}</td><td>${esc(r.status)}</td><td>${esc(r.reason)}</td></tr>`).join('')}</tbody></table></div></div></details><div class="dih-foot">診断・登録前プレビュー専用です。CURRENT・STATE・Cloudへの保存は行いません。ファイル名は判定根拠に使用していません。センター補完は同一投入バッチ・同一内部期間に明示センターが1種類だけ存在する場合に限定します。</div>`;
     const ready=preview.filter(x=>x.ready).length,hold=preview.length-ready;
     finishImportProgress(true,`解析完了：選択 ${rows.length}件 / 自動判別 ${rows.length-unresolved}件 / 登録候補 ${ready}件 / 要確認・除外 ${hold+unresolved}件\nこの時点では保存していません。`);
   }
   function chooseInitialFiles(){const input=document.createElement('input');input.type='file';input.accept='.csv,.pdf,.xls,.xlsx,.zip';input.multiple=true;input.addEventListener('change',()=>analyzeInitialFiles(input.files),{once:true});input.click();}
-  function contentDiagnosticHtml(){return `<section style="margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface1)"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><b style="font-size:14px">初期データ 自動判別</b><div style="font-size:11px;color:var(--text3);margin-top:3px">中身から資料種別・年月・センターを診断します。まだ登録はしません。</div></div><button type="button" class="btn" onclick="DATA_IMPORT_HUB.chooseInitialFiles()">ファイルをまとめて選択</button></div><div id="dih-content-result" style="margin-top:12px"></div></section>`;}
+  function contentDiagnosticHtml(){return `<section style="margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface1)"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><b style="font-size:14px">まとめて投入（自動仕分け）</b><div style="font-size:11px;color:var(--text3);margin-top:3px">資料種類を自動判別し、複数月ファイルは内部日付で月別に分割します。下の各カードは対象月への個別投入です。</div></div><button type="button" class="btn" onclick="DATA_IMPORT_HUB.chooseInitialFiles()">ファイルをまとめて選択</button></div><div id="dih-content-result" style="margin-top:12px"></div></section>`;}
 
   function syncLegacy(p){if(!/^\d{6}$/.test(p))return;const y=+p.slice(0,4),m=+p.slice(4),fy=m>=4?y:y-1,mm=String(m).padStart(2,'0');
     const pre=document.getElementById('preliminary-pl-month');if(pre)pre.value=`${p.slice(0,4)}-${p.slice(4)}`;
