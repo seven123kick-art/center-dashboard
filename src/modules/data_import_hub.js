@@ -89,13 +89,14 @@
         r.center=activeCenter;
         r.centerConfidence='SELECTED_CENTER';
         r.centerFallback=true;
+        if(r.confidence==='MEDIUM' && Array.isArray(r.periods) && r.periods.length)r.confidence='HIGH';
         r.status=`${r.status||''}・選択センター`;
         r.reason=`${r.reason||''} / ファイル内センター情報なし→選択中センター ${activeCenter} を使用`;
       }
     }
     return rows;
   }
-  async function expandMonthlyRegistrationCandidates(rows){
+  function expandMonthlyRegistrationCandidates(rows){
     const expanded=[];
     for(const r of rows){
       if(!INITIAL_MONTHLY_SOURCES.includes(r.source)||!Array.isArray(r.periods)||!r.periods.length){
@@ -297,22 +298,35 @@
       if(/\.pdf$/i.test(f.name)){const x=await analyzePdfFile(f);rows.push({_file:f,file:f.name,...x,status:x.source==='UNKNOWN'?'要確認':'判別'});continue;}
       if(/\.zip$/i.test(f.name)){rows.push({_file:f,file:f.name,source:'PENDING_PARSER',label:'ZIP',periods:[],center:'—',confidence:'—',status:'要追加解析',reason:'ZIPは展開前のため内容SOURCEを確定しない'});continue;}
       if(!/\.csv$/i.test(f.name)){rows.push({_file:f,file:f.name,source:'PENDING_PARSER',label:'未対応形式',periods:[],center:'—',confidence:'—',status:'要追加解析',reason:'対応形式外'});continue;}
-      const csv=(typeof CSV!=='undefined'&&CSV)||window.CSV,body=csv?.read?await csv.read(f):await f.text();let daily=false;
-      try{const bridge=window.DAILY_ACCOUNTING_IMPORT_BRIDGE;if(bridge?.normalizeCsvText){const dr=bridge.normalizeCsvText(body,{file_name:''}),days=new Set((dr||[]).map(r=>r.accounting_date).filter(Boolean));if(dr?.length&&days.size>1&&contentClassify(body).source==='UNKNOWN')daily=true;}}catch(e){}
-      if(daily){rows.push({_file:f,file:f.name,source:'PL_DAILY_ACTUAL',label:'日次収支',periods:[...new Set((dr||[]).map(r=>r.year_month).filter(x=>/^\d{6}$/.test(x)))].sort(),center:'判定不能',confidence:'HIGH',status:'初期投入対象外',reason:'内容をSKDL0001日次構造として判定。当月運用SOURCEのため初期一括登録から除外'});continue;}
-      const c=contentClassify(body),table=parseCsvRows(body),periods=periodsFromRows(table,c.source),center=centerFromRows(table,c.source);let status=c.source==='UNKNOWN'?'要確認':'判別';
+      const csv=(typeof CSV!=='undefined'&&CSV)||window.CSV,body=csv?.read?await csv.read(f):await f.text();
+      const c=contentClassify(body);
+      // 既知SOURCEはここで確定する。日次収支パーサーはUNKNOWN時だけfallback実行し、
+      // WORKER_SALES等の大容量CSVを二重正規化しない。
+      if(c.source==='UNKNOWN'){
+        let dr=null,daily=false;
+        try{
+          const bridge=window.DAILY_ACCOUNTING_IMPORT_BRIDGE;
+          if(bridge?.normalizeCsvText){
+            dr=bridge.normalizeCsvText(body,{file_name:''});
+            const days=new Set((dr||[]).map(r=>r.accounting_date).filter(Boolean));
+            daily=!!(dr?.length&&days.size>1);
+          }
+        }catch(e){}
+        if(daily){rows.push({_file:f,file:f.name,source:'PL_DAILY_ACTUAL',label:'日次収支',periods:[...new Set((dr||[]).map(r=>r.year_month).filter(x=>/^\d{6}$/.test(x)))].sort(),center:'判定不能',confidence:'HIGH',status:'初期投入対象外',reason:'内容をSKDL0001日次構造として判定。当月運用SOURCEのため初期一括登録から除外'});continue;}
+      }
+      const table=parseCsvRows(body),periods=periodsFromRows(table,c.source),center=centerFromRows(table,c.source);let status=c.source==='UNKNOWN'?'要確認':'判別';
       if(c.source!=='UNKNOWN'&&!periods.length)status+='・期間不明';if(periods.length>1)status+='・複数月';if(c.source!=='UNKNOWN'&&center==='判定不能')status+='・センター要確認';
       rows.push({_file:f,file:f.name,source:c.source,label:c.label,periods,center,confidence:c.source!=='UNKNOWN'&&(!periods.length||center==='判定不能')?'MEDIUM':c.confidence,status,reason:c.reason+periodAudit(periods,f.name)});
     }catch(e){rows.push({_file:f,file:f.name,source:'ERROR',label:'読取エラー',periods:[],center:'—',confidence:'LOW',status:'要確認',reason:e?.message||String(e)});}}
     supplementCenters(rows);
     const groups=new Map();for(const r of rows){const k=duplicateKey(r);if(k){if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}}for(const g of groups.values())if(g.length>1)g.forEach(r=>{r.status+=(r.status?'・':'')+'重複候補';r.reason+=` / 同一SOURCE・期間・センター ${g.length}件`;});
-    const diag=monthlySetDiagnosis(rows),expanded=await expandMonthlyRegistrationCandidates(rows),preview=registrationReadiness(expanded),unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
+    const diag=monthlySetDiagnosis(rows),expanded=expandMonthlyRegistrationCandidates(rows),preview=registrationReadiness(expanded),unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
     initialImportSession={files:arr,rows,expanded,preview,analyzed_at:new Date().toISOString(),center_id:window.CENTER?.id||null,center_name:window.CENTER?.name||null};
     target.innerHTML=`<div class="dih-summary"><div><span>選択</span><b>${rows.length}件</b></div><div><span>自動判別</span><b>${rows.length-unresolved}件</b></div><div><span>要確認/追加解析</span><b>${unresolved}件</b></div><div><span>保存</span><b>0件</b></div></div>${monthlySetHtml(diag)}${registrationPreviewHtml(preview)}<details class="dih-detail-toggle"><summary>全ファイルの技術判定 ${rows.length}件</summary><div class="dih-detail-body"><div class="dih-result-scroll dih-technical-table"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>信頼度</th><th>状態</th><th>判定根拠</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.file)}</td><td><b>${esc(r.source)}</b><small>${esc(r.label)}</small></td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.confidence)}</td><td>${esc(r.status)}</td><td>${esc(r.reason)}</td></tr>`).join('')}</tbody></table></div></div></details><div class="dih-foot">診断・登録前プレビュー専用です。CURRENT・STATE・Cloudへの保存は行いません。ファイル名は判定根拠に使用していません。センター情報がない月次SOURCEは選択中センターを使用し、ファイル内部に別センターが明示されている場合は不一致として停止します。</div>`;
     const ready=preview.filter(x=>x.ready).length,hold=preview.length-ready;
     finishImportProgress(true,`解析完了：選択 ${rows.length}件 / 自動判別 ${rows.length-unresolved}件 / 登録候補 ${ready}件 / 要確認・除外 ${hold+unresolved}件\nこの時点では保存していません。`);
   }
-  function chooseInitialFiles(){const input=document.createElement('input');input.type='file';input.accept='.csv,.pdf,.xls,.xlsx,.zip';input.multiple=true;input.addEventListener('change',()=>analyzeInitialFiles(input.files),{once:true});input.click();}
+  function chooseInitialFiles(){const input=document.createElement('input');input.type='file';input.accept='.csv,.pdf,.xls,.xlsx,.zip';input.multiple=true;input.addEventListener('change',()=>analyzeInitialFiles(input.files).catch(e=>finishImportProgress(false,e?.message||String(e))),{once:true});input.click();}
   function contentDiagnosticHtml(){return `<section style="margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface1)"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><b style="font-size:14px">まとめて投入（自動仕分け）</b><div style="font-size:11px;color:var(--text3);margin-top:3px">資料種類を自動判別し、複数月ファイルは内部日付で月別に分割します。下の各カードは対象月への個別投入です。</div></div><button type="button" class="btn" onclick="DATA_IMPORT_HUB.chooseInitialFiles()">ファイルをまとめて選択</button></div><div id="dih-content-result" style="margin-top:12px"></div></section>`;}
 
   function syncLegacy(p){if(!/^\d{6}$/.test(p))return;const y=+p.slice(0,4),m=+p.slice(4),fy=m>=4?y:y-1,mm=String(m).padStart(2,'0');
