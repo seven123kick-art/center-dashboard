@@ -38,15 +38,21 @@
     return r;
   }
   function routePaymentsFromNormalized(records, routes){
-    const byHead=new Map();
-    arr(records).forEach(r=>{if(r&&!r.is_deleted&&clean(r.head_no)) byHead.set(clean(r.head_no),r);});
+    const byRoute=new Map();
+    arr(records).forEach(r=>{
+      if(!r||r.is_deleted)return;
+      const head=clean(r.head_no),date=clean(r.delivery_date);
+      if(head)byRoute.set(`${date}|${head}`,r);
+    });
     const out=[];
     const seen=new Set();
     arr(routes).forEach(r=>{
-      const head=clean(r?.head_no); if(!head||seen.has(head)) return; seen.add(head);
-      const src=byHead.get(head)||null;
+      const head=clean(r?.head_no),date=clean(r?.delivery_date);
+      const key=`${date}|${head}`;
+      if(!head||seen.has(key)) return; seen.add(key);
+      const src=byRoute.get(key)||null;
       out.push({
-        route_payment_id:`RP_${head}`,
+        route_payment_id:`RP_${date}_${head}`,
         route_payment_id_is_temporary:true,
         route_id:r.route_id,
         delivery_date:r.delivery_date||src?.delivery_date||null,
