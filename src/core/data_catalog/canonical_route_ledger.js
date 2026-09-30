@@ -219,6 +219,20 @@
     };
   }
 
+  async function availableMonths(){
+    const legacy=window.LEDGER?.availableMonths?.()||[];
+    if(!window.Repository?.NormalizedSource?.listPeriods) return [...new Set(legacy)].sort();
+    try{
+      const r=await Repository.NormalizedSource.listPeriods('DELIVERY_LIST');
+      // 便別採算の月一覧は便の基礎SOURCEであるDELIVERY_LISTを正本とする。
+      // Legacy月も移行期間中は残し、Normalized CURRENT登録月を必ず選択可能にする。
+      return [...new Set([...(r?.periods||[]),...legacy])].filter(x=>/^\d{6}$/.test(String(x))).sort();
+    }catch(e){
+      console.warn('[CanonicalRouteLedger] period index load failed',e);
+      return [...new Set(legacy)].sort();
+    }
+  }
+
   async function buildMonth(period,{force=false}={}){
     const ym=clean(period);
     if(!/^\d{6}$/.test(ym)) return {ym,routes:[],rows:[],diagnostics:null,source:'EMPTY'};
@@ -272,5 +286,5 @@
     if(p) invalidate(p);
   });
 
-  window.CANONICAL_ROUTE_LEDGER=Object.freeze({buildMonth,invalidate,_internal:Object.freeze({build,paymentState,salesState})});
+  window.CANONICAL_ROUTE_LEDGER=Object.freeze({buildMonth,availableMonths,invalidate,_internal:Object.freeze({build,paymentState,salesState})});
 })();
