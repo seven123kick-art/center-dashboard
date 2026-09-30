@@ -43,6 +43,19 @@
   function batchKey(dt,p,batchId){ return `${baseKey(dt,p)}::batch::${token(batchId)}`; }
   function batchChunkKey(dt,p,batchId,idx){ return `${batchKey(dt,p,batchId)}::chunk::${String(idx).padStart(4,'0')}`; }
   const BATCH_CHUNK_RECORDS=500;
+  const BATCH_CHUNK_CONCURRENCY=3;
+  async function saveChunksBounded(chunks,writer,limit=BATCH_CHUNK_CONCURRENCY){
+    const results=new Array(chunks.length);let cursor=0;
+    const workers=Array.from({length:Math.min(limit,chunks.length)},async()=>{
+      while(true){
+        const i=cursor++;
+        if(i>=chunks.length)return;
+        results[i]=await writer(chunks[i],i);
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
   function splitRecords(records,size=BATCH_CHUNK_RECORDS){
     const rows=Array.isArray(records)?records:[], out=[];
     for(let i=0;i<rows.length;i+=size) out.push(rows.slice(i,i+size));
@@ -211,15 +224,19 @@
     let batchSave;
     if(batch.records.length>BATCH_CHUNK_RECORDS){
       const chunks=splitRecords(batch.records);
-      for(let i=0;i<chunks.length;i++){
+      const chunkResults=await saveChunksBounded(chunks,async(chunk,i)=>{
         const chunkPayload={
           schema_version:VERSION,kind:'NORMALIZED_SOURCE_BATCH_CHUNK',
           document_type:s.document_type,period:s.period,batch_id:batchId,
-          chunk_index:i,chunk_count:chunks.length,record_count:chunks[i].length,
-          records:clone(chunks[i])
+          chunk_index:i,chunk_count:chunks.length,record_count:chunk.length,
+          records:clone(chunk)
         };
-        const saved=await cloud().pushRealtimeState(batchChunkKey(s.document_type,s.period,batchId,i),chunkPayload);
-        if(!saved?.ok) return {ok:false,error:saved?.error||`BATCH_CHUNK_CLOUD_SAVE_FAILED:${i}`,chunk_saved_count:i,batch_id:batchId};
+        return cloud().pushRealtimeState(batchChunkKey(s.document_type,s.period,batchId,i),chunkPayload);
+      });
+      const failedChunk=chunkResults.findIndex(x=>!x?.ok);
+      if(failedChunk>=0){
+        const failedResult=chunkResults[failedChunk];
+        return {ok:false,error:failedResult?.error||`BATCH_CHUNK_CLOUD_SAVE_FAILED:${failedChunk}`,chunk_saved_count:chunkResults.filter(x=>x?.ok).length,batch_id:batchId};
       }
       const header=Object.assign({},batch,{records:[],chunked:true,chunk_count:chunks.length,chunk_record_limit:BATCH_CHUNK_RECORDS});
       batchSave=await cloud().pushRealtimeState(batchKey(s.document_type,s.period,batchId),header);
