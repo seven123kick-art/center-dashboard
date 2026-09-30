@@ -113,13 +113,9 @@
         if (!r) continue;
         const headNo = safeString(r.headNumber).trim();
         const date = safeString(r.date).trim();
-        // 【業務仕様確定】head_noは会社共通・日付を跨いだ再利用なし・
-        // 他センターとの重複なしの強い業務キーであるため、Canonical上の
-        // route_idはhead_no単独を基準とする。ym/delivery_date/center_id
-        // は一意性条件ではなく、将来の整合確認／CONFLICT検出材料として
-        // 最初に観測された値を保持するにとどめる（今回はCONFLICT判定
-        // ロジック自体は実装しない）。
-        const routeId = tempKey('ROUTE', headNo);
+        // 月次SOURCEでは同じヘッド番号が別日に再利用され得る。
+        // 便の一意性は配達日+ヘッド番号で保持し、別日の便を混在させない。
+        const routeId = tempKey('ROUTE', date, headNo);
 
         if (!deliveryRoutesById.has(routeId)) {
           deliveryRoutesById.set(routeId, {
@@ -198,15 +194,11 @@
           // 自体はroute.slipsから確実に読み取れるため生成する。
           // ただし完了/不在等の状態はSOURCEに存在しないため常に
           // UNKNOWNとする（「最後に出現した日＝完了」という推測は
-          // 行わない）。業務キーはslip_no+head_no。
-          // 同じ原票の再持出（別head_no）は別Attemptとして区別される
-          // （潰さない）一方、同一slip_no+head_noがSOURCE解析上
-          // 複数回現れても、Mapによりこの読取Canonical Snapshot上では
-          // 重複生成しない（SOURCE履歴自体を削除する意味ではない）。
-          const attemptKey = `${slipNo}|${headNo}`;
+          // 行わない）。再持出を正しく残すため業務キーはslip_no+date+head_no。
+          const attemptKey = `${slipNo}|${date}|${headNo}`;
           if (!deliveryAttemptsByKey.has(attemptKey)) {
             deliveryAttemptsByKey.set(attemptKey, {
-              attempt_id: tempKey('ATTEMPT', slipNo, headNo),
+              attempt_id: tempKey('ATTEMPT', slipNo, date, headNo),
               attempt_id_is_temporary: true,
               slip_id: slipId,
               route_id: routeId,
