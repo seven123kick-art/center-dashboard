@@ -279,16 +279,13 @@
     showImportProgress(`初期履歴 ${items.length}件`,'','保存前の最終検証をしています…');
     const results=[],affected=new Set();let saved=0,skipped=0,failed=0;
     try{
-      const preflightErrors=[];
-      for(const item of items){
-        try{
-          await buildInitialRecords(item);
-          // 既存CURRENTは persistInitialCandidate() が当該月だけSKIPする。
-          // 未登録の別月まで一括投入を中止しない。
-        }catch(e){preflightErrors.push(`${item.periods?.[0]||'—'} ${item.source}: ${e?.message||e}`);}
+      // PREVIEW時点で内容・SOURCE・期間・センターを検証済み。
+      // 保存直前に全ファイルを再正規化すると大容量CSVを二重解析するため、
+      // ここではセッション/センター整合性だけを確認し、各候補は保存処理内で1回だけ正規化する。
+      if(session.center_id!==(window.CENTER?.id||null)||session.center_name!==(window.CENTER?.name||null)){
+        throw new Error('解析後に選択中センターが変更されています。もう一度ファイルを解析してください。');
       }
-      if(preflightErrors.length)throw new Error(`保存前検証で ${preflightErrors.length}件の問題を確認したため、保存は0件です。\n${preflightErrors.join('\n')}`);
-      updateImportProgress('検証完了。Normalized Source / Cloudへ登録しています…');
+      updateImportProgress('Normalized Source / Cloudへ登録しています…');
       const saveResults=await runBounded(items,3,async(item)=>{
         const r=await persistInitialCandidate(item);
         if(r?.ok)return {kind:'saved',item,result:r};
