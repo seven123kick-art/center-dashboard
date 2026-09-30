@@ -60,11 +60,26 @@
   async function ensureXlsx(){if(window.XLSX)return window.XLSX;if(window.EXPORT_SERVICE?.ensureXLSX)await EXPORT_SERVICE.ensureXLSX();else if(window.ASSETS?.xlsx)await ASSETS.xlsx();if(!window.XLSX)throw new Error('XLSXライブラリを読み込めませんでした');return window.XLSX;}
   function routePaymentSignature(rows){const h=(rows?.[0]||[]).map(v=>String(v??'').replace(/[\s　]/g,''));return ['ヘッド番号','配達日','傭車料'].every(k=>h.some(x=>x.includes(k)));}
   async function analyzeExcelFile(f){const XLSX=await ensureXlsx(),wb=XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:false}),found=[];for(const sheetName of wb.SheetNames){const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:'',raw:false});if(!routePaymentSignature(rows))continue;found.push({rows,sheetName});}if(!found.length)return {source:'UNKNOWN',label:'判別不能',periods:[],center:'判定不能',confidence:'LOW',reason:'Excel内に既知SOURCEの列構成を確認できない'};const periods=new Set();found.forEach(x=>periodsFromRows(x.rows,'ROUTE_PAYMENT').forEach(p=>periods.add(p)));const ps=[...periods].sort(),center=centerFromRows(found[0].rows,'ROUTE_PAYMENT');return {source:'ROUTE_PAYMENT',label:'配達ヘッド傭車料確認',periods:ps,center,confidence:ps.length?'HIGH':'MEDIUM',reason:'Excel内部列 ヘッド番号・配達日・傭車料'+periodAudit(ps,f.name)};}
-  async function analyzePdfFile(f){if(window.PLAN_PDF_IMPORT?.parseFile){try{const r=await PLAN_PDF_IMPORT.parseFile(f);return {source:'PLAN_BUDGET',label:'年度予算',periods:[],fiscalYear:String(r.fiscalYear),center:r.centerName||centerFromText(`${r.centerCode||''}`),confidence:'HIGH',reason:'PDF内部の年度・支店・主要予算科目をSKFL0001パーサーで確認'};}catch(e){}}return {source:'UNKNOWN',label:'判別不能PDF',periods:[],center:'判定不能',confidence:'LOW',reason:'既存PDFパーサーで既知SOURCEを確定できない'};}
+  async function analyzePdfFile(f){
+    // 配達持出予定リストは便別採算と同じ実績パーサーを共通利用する。
+    // ファイル名や画面の対象年月では判定せず、PDF内部の配達日・ヘッド番号を根拠にする。
+    if(window.ROUTE_ANALYSIS_UI?.parseDeliveryPdf){
+      try{
+        const routes=await ROUTE_ANALYSIS_UI.parseDeliveryPdf(f);
+        const periods=[...new Set((routes||[]).map(r=>datePeriod(r?.date)).filter(x=>/^\d{6}$/.test(x)))].sort();
+        const valid=(routes||[]).filter(r=>r?.date&&r?.headNumber);
+        if(valid.length&&periods.length){
+          return {source:'DELIVERY_LIST',label:'配達持出予定リスト',periods,center:'判定不能',confidence:'HIGH',reason:`PDF内部の配達日・ヘッド番号を確認（${valid.length}便）`};
+        }
+      }catch(e){}
+    }
+    if(window.PLAN_PDF_IMPORT?.parseFile){try{const r=await PLAN_PDF_IMPORT.parseFile(f);return {source:'PLAN_BUDGET',label:'年度予算',periods:[],fiscalYear:String(r.fiscalYear),center:r.centerName||centerFromText(`${r.centerCode||''}`),confidence:'HIGH',reason:'PDF内部の年度・支店・主要予算科目をSKFL0001パーサーで確認'};}catch(e){}}
+    return {source:'UNKNOWN',label:'判別不能PDF',periods:[],center:'判定不能',confidence:'LOW',reason:'既存PDFパーサーで既知SOURCEを確定できない'};
+  }
   async function contentRegistered(source,ym){if(!ym||!Repository?.NormalizedSource?.loadManifest)return false;const type=source==='PL_CONFIRMED'?'PL_ACTUAL':source;try{const r=await Repository.NormalizedSource.loadManifest(type,ym);return !!r?.manifest?.current_batch_id;}catch(e){return false;}}
   function duplicateKey(r){if(!r||['UNKNOWN','ERROR','PENDING_PARSER','PL_DAILY_ACTUAL'].includes(r.source))return null;const ps=r.periods?.length===1?r.periods[0]:(r.fiscalYear?`FY${r.fiscalYear}`:null);return ps&&r.center&&r.center!=='判定不能'&&r.center!=='—'?`${r.source}|${ps}|${r.center}`:null;}
   // M2-5O: center supplementation uses only explicit evidence inside the same selected batch and same internal period.
-  const INITIAL_MONTHLY_SOURCES=['PL_CONFIRMED','WORKER_SALES','SHIPPER_AREA','ROUTE_PAYMENT'];
+  const INITIAL_MONTHLY_SOURCES=['PL_CONFIRMED','WORKER_SALES','SHIPPER_AREA','DELIVERY_LIST','ROUTE_PAYMENT'];
   function supplementCenters(rows){
     const activeCenter=String(window.CENTER?.name||'').trim();
     if(!activeCenter)return rows;
@@ -207,6 +222,10 @@
       const text=await readCsvText(file),csv=(typeof CSV!=='undefined'&&CSV)||window.CSV;
       if(!csv?.toRows)throw new Error('CSV行解析基盤を読み込めません。');
       records=normalizer(csv.toRows(text),{file_name:file.name,year_month:null,center_id:centerId});
+    }else if(item.source==='DELIVERY_LIST'){
+      if(!window.ROUTE_ANALYSIS_UI?.parseDeliveryPdf||!window.SOURCE_NORMALIZER?.normalizeDeliveryListRoutes)throw new Error('DELIVERY_LISTのPDF解析基盤を読み込めません。');
+      const routes=await ROUTE_ANALYSIS_UI.parseDeliveryPdf(file);
+      records=SOURCE_NORMALIZER.normalizeDeliveryListRoutes(routes,{file_name:file.name,center_id:centerId});
     }else if(item.source==='ROUTE_PAYMENT'){
       if(!window.SOURCE_NORMALIZER?.normalizeRoutePaymentRows)throw new Error('ROUTE_PAYMENTの正規化基盤を読み込めません。');
       const XLSX=await ensureXlsx(),wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:false});
