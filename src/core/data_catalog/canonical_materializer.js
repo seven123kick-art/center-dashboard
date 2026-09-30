@@ -67,16 +67,20 @@
   }
 
   function routeDataFromDeliveryList(records,period){
-    const byHead=new Map();
+    const byRoute=new Map();
     arr(records).forEach(rec=>{
       if(!rec||rec.is_deleted) return;
-      const head=clean(rec.head_no); if(!head) return;
-      if(!byHead.has(head)) byHead.set(head,{date:rec.delivery_date||null,headNumber:head,worker:rec.source_worker1_label||'',slips:[]});
-      const r=byHead.get(head);
+      const head=clean(rec.head_no),date=clean(rec.delivery_date);
+      if(!head) return;
+      // ヘッド番号は月内で再利用されるため、便の一意キーは配達日+ヘッド番号。
+      // head_no単独でまとめると別日の便・原票が1便へ混ざる。
+      const key=`${date}|${head}`;
+      if(!byRoute.has(key)) byRoute.set(key,{date:date||null,headNumber:head,worker:rec.source_worker1_label||'',slips:[]});
+      const r=byRoute.get(key);
       if(!r.worker&&rec.source_worker1_label) r.worker=rec.source_worker1_label;
       if(rec.slip_no&&!r.slips.includes(clean(rec.slip_no))) r.slips.push(clean(rec.slip_no));
     });
-    return byHead.size?[{ym:period,routes:[...byHead.values()],source:'normalized_delivery_list'}]:[];
+    return byRoute.size?[{ym:period,routes:[...byRoute.values()],source:'normalized_delivery_list'}]:[];
   }
 
   async function materializeCore(input={}){
