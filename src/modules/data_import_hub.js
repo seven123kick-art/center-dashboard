@@ -118,6 +118,33 @@
     return expanded;
   }
 
+  function monthlySetDiagnosis(rows){
+    const byMonth=new Map();
+    for(const r of rows||[]){
+      if(!INITIAL_MONTHLY_SOURCES.includes(r.source))continue;
+      for(const ym of (r.periods||[])){
+        if(!/^\d{6}$/.test(String(ym)))continue;
+        if(!byMonth.has(ym))byMonth.set(ym,{ym,items:[],present:[],missing:[],duplicate:[],centers:[]});
+        byMonth.get(ym).items.push(r);
+      }
+    }
+    const out=[];
+    for(const d of byMonth.values()){
+      const sourceCounts=new Map();
+      const centers=new Set();
+      for(const r of d.items){
+        sourceCounts.set(r.source,(sourceCounts.get(r.source)||0)+1);
+        if(r.center&&r.center!=='判定不能'&&r.center!=='—')centers.add(r.center);
+      }
+      d.present=INITIAL_MONTHLY_SOURCES.filter(x=>sourceCounts.has(x));
+      d.missing=INITIAL_MONTHLY_SOURCES.filter(x=>!sourceCounts.has(x));
+      d.duplicate=[...sourceCounts.entries()].filter(([,n])=>n>1).map(([x])=>x);
+      d.centers=[...centers];
+      out.push(d);
+    }
+    return out.sort((a,b)=>a.ym.localeCompare(b.ym));
+  }
+
   function monthlySetHtml(diag){
     if(!diag.length)return '';
     const isOk=d=>!d.missing.length&&!d.duplicate.length&&d.centers.length===1;
