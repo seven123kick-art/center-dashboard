@@ -1,4 +1,4 @@
-/* route_analysis.js : 配達持出PDF × 作業者売上CSV × SKDL0001 の便別採算分析 */
+/* route_analysis.js : DELIVERY_LIST × WORKER_SALES / SHIPPER_AREA × ROUTE_PAYMENT の便別採算分析 */
 'use strict';
 (function(){
   if (window.ROUTE_ANALYSIS_UI) return;
@@ -756,7 +756,7 @@
       if(!diag.sourceStatus.routePdf) missing.push('配達持出リストPDF');
       if(!diag.sourceStatus.workerCsv) missing.push('作業者別CSV');
       if(!diag.sourceStatus.productCsv) missing.push('荷主別CSV');
-      if(!diag.sourceStatus.skdl0001 && !diag.sourceStatus.headPayment) missing.push('SKDL0001 または 配達ヘッド傭車料');
+      if(!diag.sourceStatus.headPayment) missing.push('配達ヘッド傭車料（ROUTE_PAYMENT）');
       const notices=[];
       if(ledger.source==='CANONICAL') notices.push('<div class="msg msg-info">データ経路：Canonical（確認済みCURRENT SOURCEから再構築）</div>');
       else if(ledger.source==='LEGACY_FALLBACK') notices.push(`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${esc(ledger.fallbackReason||'正規化SOURCE未登録')}</div>`);
