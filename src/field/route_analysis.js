@@ -124,18 +124,46 @@
   function parsePageRoutes(text,items){
     const base=parsePageText(text,items);
     const raw=(items||[]).map(it=>String(it?.str||'').normalize('NFKC').replace(/\u0000/g,' ').trim()).filter(Boolean);
-    const spaced=String(text||raw.join(' ')).normalize('NFKC').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ').replace(/\s+/g,' ').trim();
-    const heads=[...spaced.matchAll(/(?:^|\D)(38\d{8})(?=\D|$)/g)];
-    if(heads.length<=1)return base.headNumber&&base.date?[base]:[];
-    const out=[];
-    for(let i=0;i<heads.length;i++){
-      const head=heads[i][1],start=heads[i].index||0,end=i+1<heads.length?(heads[i+1].index||spaced.length):spaced.length;
-      const segment=spaced.slice(start,end);
-      const slips=[...new Set((segment.match(/(?:^|\D)([59]\d{11})(?=\D|$)/g)||[]).map(v=>(v.match(/[59]\d{11}/)||[])[0]).filter(Boolean))];
-      let worker='';
-      const wm=segment.match(/作業者\s*[:：]?\s*(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店|\s+20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}|\s+Page\s*\d|$)/);
-      if(wm)worker=wm[1].trim();
-      out.push({...base,headNumber:head,worker:worker||base.worker,slips,_debug:{...(base._debug||{}),multiHeadCount:heads.length}});
+    const lines=pdfTextLines(items);
+    // PDF文字は「3812 454446」のように数字が複数itemへ分割される。
+    // 空白を残した全文正規表現では複数ヘッド/原票を落とすため、
+    // 視覚行ごとに数字だけを連結して帳票キーを抽出する。
+    const lineInfo=lines.map((line,idx)=>{
+      const digits=String(line||'').replace(/\D/g,'');
+      return {
+        idx,line,digits,
+        heads:[...new Set(digits.match(/38\d{8}/g)||[])],
+        slips:[...new Set(digits.match(/[59]\d{11}/g)||[])]
+      };
+    });
+    const foundHeads=[];
+    lineInfo.forEach(x=>x.heads.forEach(h=>foundHeads.push({head:h,line:x.idx})));
+    // text itemの座標が取れないfallbackでも、item境界を消して全候補を拾う。
+    if(!foundHeads.length){
+      const dense=raw.join('').replace(/\D/g,'');
+      [...new Set(dense.match(/38\d{8}/g)||[])].forEach((h,i)=>foundHeads.push({head:h,line:i}));
+    }
+    if(!foundHeads.length)return base.headNumber&&base.date?[base]:[];
+
+    const unique=[];
+    const seen=new Set();
+    for(const h of foundHeads){
+      const k=`${base.date}|${h.head}`;
+      if(seen.has(k))continue;
+      seen.add(k);unique.push(h);
+    }
+    const out=unique.map(h=>({...base,headNumber:h.head,slips:[],_debug:{...(base._debug||{}),multiHeadCount:unique.length,headLine:h.line}}));
+
+    // 各原票は、帳票上で直前に現れたヘッドへ所属させる。
+    // ヘッドがページヘッダーに1つだけならページ内の全原票をその便へ付与する。
+    for(const x of lineInfo){
+      for(const slip of x.slips){
+        let target=0;
+        for(let i=0;i<unique.length;i++){
+          if(unique[i].line<=x.idx)target=i;else break;
+        }
+        if(out[target]&&!out[target].slips.includes(slip))out[target].slips.push(slip);
+      }
     }
     return out;
   }
