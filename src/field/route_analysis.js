@@ -123,26 +123,36 @@
 
   function parsePageRoutes(text,items){
     const base=parsePageText(text,items);
-    const raw=(items||[]).map(it=>String(it?.str||'').normalize('NFKC').replace(/\u0000/g,' ').trim()).filter(Boolean);
     const lines=pdfTextLines(items);
-    // PDF文字は「3812 454446」のように数字が複数itemへ分割される。
-    // 空白を残した全文正規表現では複数ヘッド/原票を落とすため、
-    // 視覚行ごとに数字だけを連結して帳票キーを抽出する。
+    // 実帳票では1ファイル=1日、複数ページに複数ヘッドが混在する。
+    // ヘッドNoは「38固定」ではなく、診断で 3865516301 等も確認できるため
+    // 38から始まる10桁を視覚行から抽出する。長い原票/日時の部分一致は除外する。
     const lineInfo=lines.map((line,idx)=>{
-      const digits=String(line||'').replace(/\D/g,'');
-      return {
-        idx,line,digits,
-        heads:[...new Set(digits.match(/38\d{8}/g)||[])],
-        slips:[...new Set(digits.match(/[59]\d{11}/g)||[])]
-      };
+      const normalized=String(line||'').normalize('NFKC');
+      const tokens=normalized.split(/\s+/).filter(Boolean);
+      const heads=[];
+      const slips=[];
+      for(const token of tokens){
+        const digits=token.replace(/\D/g,'');
+        if(/^38\d{8}$/.test(digits)) heads.push(digits);
+        // 実データ診断では原票番号は500026674512のような12桁。
+        if(/^5\d{11}$/.test(digits)) slips.push(digits);
+      }
+      // PDF item分割で番号が割れた場合だけ、行全体連結も補助的に見る。
+      const dense=normalized.replace(/\D/g,'');
+      if(!heads.length){
+        const m=dense.match(/(?:^|\D)(38\d{8})(?!\d)/);
+        if(m)heads.push(m[1]);
+      }
+      if(!slips.length){
+        const ms=normalized.match(/(?<!\d)5\d{11}(?!\d)/g)||[];
+        slips.push(...ms);
+      }
+      return {idx,line,heads:[...new Set(heads)],slips:[...new Set(slips)]};
     });
+
     const foundHeads=[];
     lineInfo.forEach(x=>x.heads.forEach(h=>foundHeads.push({head:h,line:x.idx})));
-    // text itemの座標が取れないfallbackでも、item境界を消して全候補を拾う。
-    if(!foundHeads.length){
-      const dense=raw.join('').replace(/\D/g,'');
-      [...new Set(dense.match(/38\d{8}/g)||[])].forEach((h,i)=>foundHeads.push({head:h,line:i}));
-    }
     if(!foundHeads.length)return base.headNumber&&base.date?[base]:[];
 
     const unique=[];
@@ -154,8 +164,6 @@
     }
     const out=unique.map(h=>({...base,headNumber:h.head,slips:[],_debug:{...(base._debug||{}),multiHeadCount:unique.length,headLine:h.line}}));
 
-    // 各原票は、帳票上で直前に現れたヘッドへ所属させる。
-    // ヘッドがページヘッダーに1つだけならページ内の全原票をその便へ付与する。
     for(const x of lineInfo){
       for(const slip of x.slips){
         let target=0;
