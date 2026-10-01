@@ -125,49 +125,55 @@
     const base=parsePageText(text,items);
     const lines=pdfTextLines(items);
 
-    // 配達持出予定リストの実PDFでは、PDF.jsのtext item境界は帳票列境界と一致しない。
-    // 診断で実際に「20260601 3812440015 ... 500026674512」の各列が
-    // 同じ視覚行へ連結されることを確認したため、item単位の番号推測は行わない。
-    // 帳票の明細行構造「配達日8桁 + ヘッド10桁」をアンカーに便を確定する。
+    // 便の正本アンカーは帳票ヘッダーの「配達日」「ヘッド番号」。
+    // 実PDFでは日付とヘッドが別text item/別列になるため、
+    // 数字を連結して「日付8桁+ヘッド10桁」が隣接することを要求しない。
+    // 各ページのヘッダーから日付・ヘッドを確定し、同一ヘッドの複数ページは後段で統合する。
     const routes=new Map();
-    let currentKey='';
-    for(let idx=0;idx<lines.length;idx++){
-      const line=String(lines[idx]||'').normalize('NFKC');
-      const dense=line.replace(/\D/g,'');
-      const anchors=[...dense.matchAll(/(20\d{6})(38\d{8})/g)];
-      if(anchors.length){
-        // 20YYYYMMDD に見える数字列は、日付として実在する場合だけ採用する。
-        // 金額・電話番号等の偶然一致を年月として登録候補化しない。
-        for(const m of anchors){
-          const ymd=m[1];
-          const yyyy=Number(ymd.slice(0,4)),mm=Number(ymd.slice(4,6)),dd=Number(ymd.slice(6,8));
-          const dt=new Date(Date.UTC(yyyy,mm-1,dd));
-          const validDate=yyyy>=2000&&yyyy<=2099&&mm>=1&&mm<=12&&dd>=1&&dd<=31&&
-            dt.getUTCFullYear()===yyyy&&dt.getUTCMonth()===mm-1&&dt.getUTCDate()===dd;
-          if(!validDate)continue;
-          const date=`${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
-          const head=m[2];
-          const key=`${date}|${head}`;
-          if(!routes.has(key)){
-            routes.set(key,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'validated-delivery-date+head',anchorLine:idx}});
-          }
-          currentKey=key;
-        }
-      }
+    const validYmd=ymd=>{
+      if(!/^20\d{6}$/.test(ymd))return '';
+      const yyyy=Number(ymd.slice(0,4)),mm=Number(ymd.slice(4,6)),dd=Number(ymd.slice(6,8));
+      const dt=new Date(Date.UTC(yyyy,mm-1,dd));
+      if(yyyy<2000||yyyy>2099||mm<1||mm>12||dd<1||dd>31||
+        dt.getUTCFullYear()!==yyyy||dt.getUTCMonth()!==mm-1||dt.getUTCDate()!==dd)return '';
+      return `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
+    };
+    const dateLine=lines.find(v=>/配達日/.test(v))||'';
+    const headLine=lines.find(v=>/ヘッド番号/.test(v))||dateLine;
+    const dateMatch=dateLine.match(/配達日\s*[:：]?\s*(20\d{2})[\/\-年]\s*(\d{1,2})[\/\-月]\s*(\d{1,2})日?/);
+    const headMatch=headLine.match(/ヘッド番号\s*[:：]?\s*(38\d{8})/);
+    let date='';
+    if(dateMatch){
+      const ymd=`${dateMatch[1]}${String(dateMatch[2]).padStart(2,'0')}${String(dateMatch[3]).padStart(2,'0')}`;
+      date=validYmd(ymd);
+    }
+    const head=headMatch?.[1]||'';
+    if(date&&head){
+      const key=`${date}|${head}`;
+      routes.set(key,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'delivery-header-labels'}});
+    }
 
-      // 原票番号も同じ実PDF診断で 500026674512 の12桁を確認。
-      // 明細行にアンカーがある場合はその便へ、継続行なら直前の便へ所属させる。
-      const slipMatches=[...new Set(dense.match(/5\d{11}/g)||[])];
-      if(slipMatches.length&&currentKey&&routes.has(currentKey)){
-        const r=routes.get(currentKey);
-        r.slips=[...new Set([...(r.slips||[]),...slipMatches])];
+    // ヘッダーが特殊配置のPDFだけ、同一視覚行の厳格アンカーへ退避する。
+    if(!routes.size){
+      for(let idx=0;idx<lines.length;idx++){
+        const dense=String(lines[idx]||'').normalize('NFKC').replace(/\D/g,'');
+        for(const m of dense.matchAll(/(20\d{6})(38\d{8})/g)){
+          const parsedDate=validYmd(m[1]); if(!parsedDate)continue;
+          const key=`${parsedDate}|${m[2]}`;
+          routes.set(key,{...base,date:parsedDate,headNumber:m[2],slips:[],_debug:{...(base._debug||{}),anchor:'same-line-date+head',anchorLine:idx}});
+        }
       }
     }
 
-    if(routes.size)return [...routes.values()];
+    // 原票は明細行の12桁原票番号。ヘッダー確定後はページ内の全明細をその便へ所属させる。
+    // 5始まりだけでなく、実帳票で確認できる9始まりも対象にする。
+    const slips=[...new Set(lines.flatMap(line=>{
+      const dense=String(line||'').normalize('NFKC').replace(/\D/g,'');
+      return dense.match(/[59]\d{11}/g)||[];
+    }))];
+    for(const r of routes.values())r.slips=slips;
 
-    // 帳票構造アンカーが1件も取れないPDFだけ従来のページ単位結果へ退避する。
-    // ここで無理に38系数字を便と推測しない。
+    if(routes.size)return [...routes.values()];
     return base.headNumber&&base.date?[base]:[];
   }
 
