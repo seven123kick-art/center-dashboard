@@ -123,55 +123,56 @@
 
   function parsePageRoutes(text,items){
     const base=parsePageText(text,items);
+    const rawItems=(items||[]).map((it,idx)=>({
+      idx,
+      text:String(it?.str||'').normalize('NFKC').replace(/\u0000/g,' ').trim(),
+      x:Number(Array.isArray(it?.transform)?it.transform[4]:0),
+      y:Number(Array.isArray(it?.transform)?it.transform[5]:0)
+    })).filter(x=>x.text);
     const lines=pdfTextLines(items);
-    // 実帳票では1ファイル=1日、複数ページに複数ヘッドが混在する。
-    // ヘッドNoは「38固定」ではなく、診断で 3865516301 等も確認できるため
-    // 38から始まる10桁を視覚行から抽出する。長い原票/日時の部分一致は除外する。
-    const lineInfo=lines.map((line,idx)=>{
-      const normalized=String(line||'').normalize('NFKC');
-      const tokens=normalized.split(/\s+/).filter(Boolean);
-      const heads=[];
-      const slips=[];
-      for(const token of tokens){
-        const digits=token.replace(/\D/g,'');
-        if(/^38\d{8}$/.test(digits)) heads.push(digits);
-        // 実データ診断では原票番号は500026674512のような12桁。
-        if(/^5\d{11}$/.test(digits)) slips.push(digits);
-      }
-      // PDF item分割で番号が割れた場合だけ、行全体連結も補助的に見る。
-      const dense=normalized.replace(/\D/g,'');
-      if(!heads.length){
-        const m=dense.match(/(?:^|\D)(38\d{8})(?!\d)/);
-        if(m)heads.push(m[1]);
-      }
-      if(!slips.length){
-        const ms=normalized.match(/(?<!\d)5\d{11}(?!\d)/g)||[];
-        slips.push(...ms);
-      }
-      return {idx,line,heads:[...new Set(heads)],slips:[...new Set(slips)]};
-    });
 
-    const foundHeads=[];
-    lineInfo.forEach(x=>x.heads.forEach(h=>foundHeads.push({head:h,line:x.idx})));
-    if(!foundHeads.length)return base.headNumber&&base.date?[base]:[];
+    // 実帳票診断では「数字行サンプル」に複数の38系10桁が出る一方、
+    // 視覚行の連結値には日付・原票・金額も混ざる。まずPDF item単位で厳密抽出し、
+    // item内に埋め込まれた場合だけ非数字境界付きで拾う。
+    const candidates=[];
+    for(const it of rawItems){
+      const ms=it.text.match(/(?<!\d)38\d{8}(?!\d)/g)||[];
+      for(const head of ms)candidates.push({head,item:it.idx,y:it.y,x:it.x});
+    }
+    // item境界で 38 + 8桁 が分割される帳票だけ、近接itemを補完。
+    for(let i=0;i<rawItems.length-1;i++){
+      const a=rawItems[i],b=rawItems[i+1];
+      if(Math.abs(a.y-b.y)>3.2)continue;
+      const ad=a.text.replace(/\D/g,''),bd=b.text.replace(/\D/g,'');
+      const joined=ad+bd;
+      if(/^38\d{8}$/.test(joined))candidates.push({head:joined,item:a.idx,y:a.y,x:a.x});
+    }
 
+    // ページ内では同一ヘッドの明細行が繰り返されるので一便へ集約。
     const unique=[];
     const seen=new Set();
-    for(const h of foundHeads){
-      const k=`${base.date}|${h.head}`;
-      if(seen.has(k))continue;
-      seen.add(k);unique.push(h);
+    for(const c of candidates){
+      if(seen.has(c.head))continue;
+      seen.add(c.head);unique.push(c);
     }
-    const out=unique.map(h=>({...base,headNumber:h.head,slips:[],_debug:{...(base._debug||{}),multiHeadCount:unique.length,headLine:h.line}}));
+    if(!unique.length)return base.headNumber&&base.date?[base]:[];
 
-    for(const x of lineInfo){
-      for(const slip of x.slips){
-        let target=0;
-        for(let i=0;i<unique.length;i++){
-          if(unique[i].line<=x.idx)target=i;else break;
-        }
-        if(out[target]&&!out[target].slips.includes(slip))out[target].slips.push(slip);
+    // 原票番号は診断で 500026674512 等の12桁を確認済み。
+    const slips=[];
+    for(const it of rawItems){
+      for(const slip of (it.text.match(/(?<!\d)5\d{11}(?!\d)/g)||[])){
+        slips.push({slip,item:it.idx,y:it.y,x:it.x});
       }
+    }
+
+    const out=unique.map(h=>({...base,headNumber:h.head,slips:[],_debug:{...(base._debug||{}),multiHeadCount:unique.length,headItem:h.item}}));
+    // 原票はPDF内部順で直前に現れたヘッドへ所属させる。
+    for(const sp of slips){
+      let target=0;
+      for(let i=0;i<unique.length;i++){
+        if(unique[i].item<=sp.item)target=i;else break;
+      }
+      if(out[target]&&!out[target].slips.includes(sp.slip))out[target].slips.push(sp.slip);
     }
     return out;
   }
