@@ -227,7 +227,16 @@
         }catch(_){ }
       }
       const pageRoutes=parsePageRoutes(text,items);
-      diagnostics.push({page:p,head:pageRoutes.map(r=>r.headNumber).join(','),date:pageRoutes[0]?.date||'',routeCount:pageRoutes.length,items:items.length,fallbackChars,engine:engineName,source});
+      const compact=String(text||'').normalize('NFKC').replace(/\u0000/g,' ').replace(/\s+/g,' ').trim();
+      const digitRuns=(pdfTextLines(items)||[]).map(x=>String(x||'').replace(/\D/g,'')).filter(Boolean);
+      diagnostics.push({
+        page:p,head:pageRoutes.map(r=>r.headNumber).join(','),date:pageRoutes[0]?.date||'',routeCount:pageRoutes.length,
+        slipCount:[...new Set(pageRoutes.flatMap(r=>r.slips||[]))].length,
+        items:items.length,fallbackChars,engine:engineName,source,
+        textChars:compact.length,
+        textSample:compact.slice(0,500),
+        digitSamples:digitRuns.slice(0,40)
+      });
       for(const r of pageRoutes){
         r._source_page=p;
         if(!r.headNumber||!r.date) continue;
