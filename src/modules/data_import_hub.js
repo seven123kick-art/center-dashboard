@@ -551,11 +551,14 @@
     el.querySelector('.data-import-progress__title').textContent='登録前の解析が完了しました';
     el.querySelector('.data-import-progress__step').textContent=`登録候補 ${readyCount}件を確認しました`;
     el.querySelector('.data-import-progress__result').textContent=message||'';
-    el.querySelector('.data-import-progress__note').textContent=readyCount?'下のボタンを押すとNormalized Source Repository / Cloudへ保存します。':'登録できる候補はありません。';
+    el.querySelector('.data-import-progress__note').textContent=readyCount?'解析結果を確認してから、画面上の保存ボタンで登録してください。':'登録できる候補はありません。';
     const btn=el.querySelector('.data-import-progress__close');
     if(btn){
-      btn.dataset.action=readyCount?'register-initial':'close';
-      btn.textContent=readyCount?`${readyCount}件を登録する`:'確認';
+      // 解析完了モーダルは保存操作を兼ねない。
+      // まず閉じて登録前プレビュー（診断を含む）を確認し、
+      // 保存は画面上の「この登録候補を保存する」から明示的に実行する。
+      btn.dataset.action='close';
+      btn.textContent=readyCount?'解析結果を確認':'確認';
     }
     document.documentElement.classList.remove('data-import-busy');
   }
