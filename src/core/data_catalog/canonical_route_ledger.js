@@ -40,6 +40,7 @@
     if(!slipIds.length) return '原票未取得';
     if(salesStatus==='SOURCE_NOT_REGISTERED') return '売上SOURCE未登録';
     if(salesStatus==='UNMATCHED') return '売上未一致';
+    if(salesStatus==='PARTIAL_MATCH') return '売上一部未一致';
     if(salesStatus==='UNKNOWN_AMOUNT') return '売上金額UNKNOWN';
     if(paymentStatus==='SOURCE_NOT_REGISTERED') return '傭車料SOURCE未登録';
     if(paymentStatus==='NO_RECORD') return '傭車料資料に該当なし';
@@ -95,7 +96,12 @@
       const slipIds=[...new Set(ats.map(x=>x.slip_id).filter(Boolean))];
       const slipNos=slipIds.map(id=>slipNoById.get(id)).filter(Boolean);
       const details=slipIds.flatMap(id=>salesBySlip.get(id)||[]);
-      const sState=salesState(details,slipIds,hasDetailBatch);
+      let sState=salesState(details,slipIds,hasDetailBatch);
+      const matchedSlipIds=[...new Set(details.map(x=>x?.slip_id).filter(Boolean))];
+      const missingSalesSlipIds=slipIds.filter(id=>!matchedSlipIds.includes(id));
+      // 便に複数原票がある場合、一部だけ売上明細が見つかっても「完全連動」にしない。
+      // 全原票に売上明細が存在し、かつ全金額が確定した時だけKNOWN。
+      if(sState==='KNOWN'&&missingSalesSlipIds.length) sState='PARTIAL_MATCH';
       const salesKnown=sState==='KNOWN';
       const salesAmount=salesKnown?details.reduce((a,x)=>a+Number(x.amount),0):null;
 
@@ -204,6 +210,13 @@
         unregisteredWorkers:[...new Set(rows.filter(r=>r.worker&&!r.workerRegistered).map(r=>r.worker))],
         pdfNoiseWorkerCount:0,
         routesWithoutSales:rows.filter(r=>r.salesStatus!=='KNOWN').length,
+        unmatchedSalesDetails:rows.filter(r=>r.salesStatus!=='KNOWN').map(r=>({
+          date:r.date,headNumber:r.headNumber,status:r.salesStatus,
+          slipNos:[...(r.slips||[])]
+        })),
+        unmatchedPaymentDetails:rows.filter(r=>!['KNOWN','ZERO_PAYMENT'].includes(r.paymentStatus)).map(r=>({
+          date:r.date,headNumber:r.headNumber,status:r.paymentStatus
+        })),
 
         integrationRate:routeSlipTotal?salesLinkedSlipTotal/routeSlipTotal*100:0,
         fullyLinkedRoutes:rows.filter(r=>r.linkLevel==='完全連動').length,
