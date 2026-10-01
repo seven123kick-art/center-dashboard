@@ -136,14 +136,20 @@
       const dense=line.replace(/\D/g,'');
       const anchors=[...dense.matchAll(/(20\d{6})(38\d{8})/g)];
       if(anchors.length){
-        // 通常は1視覚行1明細。複数アンカーがあっても各便を独立して保持する。
+        // 20YYYYMMDD に見える数字列は、日付として実在する場合だけ採用する。
+        // 金額・電話番号等の偶然一致を年月として登録候補化しない。
         for(const m of anchors){
           const ymd=m[1];
+          const yyyy=Number(ymd.slice(0,4)),mm=Number(ymd.slice(4,6)),dd=Number(ymd.slice(6,8));
+          const dt=new Date(Date.UTC(yyyy,mm-1,dd));
+          const validDate=yyyy>=2000&&yyyy<=2099&&mm>=1&&mm<=12&&dd>=1&&dd<=31&&
+            dt.getUTCFullYear()===yyyy&&dt.getUTCMonth()===mm-1&&dt.getUTCDate()===dd;
+          if(!validDate)continue;
           const date=`${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
           const head=m[2];
           const key=`${date}|${head}`;
           if(!routes.has(key)){
-            routes.set(key,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'delivery-date+head',anchorLine:idx}});
+            routes.set(key,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'validated-delivery-date+head',anchorLine:idx}});
           }
           currentKey=key;
         }
