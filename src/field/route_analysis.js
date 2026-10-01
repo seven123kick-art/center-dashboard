@@ -121,6 +121,25 @@
     return {headNumber:head,date,worker,slips,_debug:{dateSource,itemCount:rawItems.length,denseHead:dense.slice(0,220)}};
   }
 
+  function parsePageRoutes(text,items){
+    const base=parsePageText(text,items);
+    const raw=(items||[]).map(it=>String(it?.str||'').normalize('NFKC').replace(/\u0000/g,' ').trim()).filter(Boolean);
+    const spaced=String(text||raw.join(' ')).normalize('NFKC').replace(/\u0000/g,' ').replace(/[　\t]+/g,' ').replace(/\s+/g,' ').trim();
+    const heads=[...spaced.matchAll(/(?:^|\D)(38\d{8})(?=\D|$)/g)];
+    if(heads.length<=1)return base.headNumber&&base.date?[base]:[];
+    const out=[];
+    for(let i=0;i<heads.length;i++){
+      const head=heads[i][1],start=heads[i].index||0,end=i+1<heads.length?(heads[i+1].index||spaced.length):spaced.length;
+      const segment=spaced.slice(start,end);
+      const slips=[...new Set((segment.match(/(?:^|\D)([59]\d{11})(?=\D|$)/g)||[]).map(v=>(v.match(/[59]\d{11}/)||[])[0]).filter(Boolean))];
+      let worker='';
+      const wm=segment.match(/作業者\s*[:：]?\s*(.+?)(?=\s+配達持出リスト|\s+作業者TEL|\s+支店|\s+20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}|\s+Page\s*\d|$)/);
+      if(wm)worker=wm[1].trim();
+      out.push({...base,headNumber:head,worker:worker||base.worker,slips,_debug:{...(base._debug||{}),multiHeadCount:heads.length}});
+    }
+    return out;
+  }
+
   async function operatorTextFallback(page, lib){
     // Some legacy/encrypted PDFs return zero items from getTextContent() even though
     // PDF.js can decode the page's text drawing operators.  Read those decoded
@@ -179,15 +198,17 @@
           if(fallbackChars) source='operator';
         }catch(_){ }
       }
-      const r=parsePageText(text,items);
-      r._source_page=p;
-      diagnostics.push({page:p,head:r.headNumber,date:r.date,items:items.length,fallbackChars,engine:engineName,source});
-      if(!r.headNumber||!r.date) continue;
-      const key=`${r.date}|${r.headNumber}`;
-      const old=map.get(key)||{...r,slips:[]};
-      if(!old.worker&&r.worker) old.worker=r.worker;
-      old.slips=[...new Set([...(old.slips||[]),...(r.slips||[])])];
-      map.set(key,old);
+      const pageRoutes=parsePageRoutes(text,items);
+      diagnostics.push({page:p,head:pageRoutes.map(r=>r.headNumber).join(','),date:pageRoutes[0]?.date||'',routeCount:pageRoutes.length,items:items.length,fallbackChars,engine:engineName,source});
+      for(const r of pageRoutes){
+        r._source_page=p;
+        if(!r.headNumber||!r.date) continue;
+        const key=`${r.date}|${r.headNumber}`;
+        const old=map.get(key)||{...r,slips:[]};
+        if(!old.worker&&r.worker) old.worker=r.worker;
+        old.slips=[...new Set([...(old.slips||[]),...(r.slips||[])])];
+        map.set(key,old);
+      }
     }
     try{await pdf.destroy();}catch(_){ }
     const routes=[...map.values()];
