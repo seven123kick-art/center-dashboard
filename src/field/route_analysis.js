@@ -231,14 +231,27 @@
       }
       const pageRoutes=parsePageRoutes(text,items);
       const compact=String(text||'').normalize('NFKC').replace(/\u0000/g,' ').replace(/\s+/g,' ').trim();
-      const digitRuns=(pdfTextLines(items)||[]).map(x=>String(x||'').replace(/\D/g,'')).filter(Boolean);
+      const visualLines=pdfTextLines(items)||[];
+      const digitRuns=visualLines.map(x=>String(x||'').replace(/\D/g,'')).filter(Boolean);
+      // 診断は「結果」だけでなく、便抽出に使う実際の視覚行を残す。
+      // これで同一PDF内の2便目以降が、日付省略・別列・別ページ等のどの構造なのかを
+      // 推測せずブラウザ上で確認できる。
+      const routeEvidence=visualLines.map((line,i)=>{
+        const normalized=String(line||'').normalize('NFKC');
+        const dense=normalized.replace(/\D/g,'');
+        const hasHead=/38\d{8}/.test(dense);
+        const hasSlip=/[59]\d{11}/.test(dense);
+        const hasDate=/20\d{6}/.test(dense);
+        return (hasHead||hasSlip||hasDate)?{line:i+1,text:normalized.slice(0,420),digits:dense.slice(0,220)}:null;
+      }).filter(Boolean).slice(0,120);
       diagnostics.push({
         page:p,head:pageRoutes.map(r=>r.headNumber).join(','),date:pageRoutes[0]?.date||'',routeCount:pageRoutes.length,
         slipCount:[...new Set(pageRoutes.flatMap(r=>r.slips||[]))].length,
         items:items.length,fallbackChars,engine:engineName,source,
         textChars:compact.length,
         textSample:compact.slice(0,500),
-        digitSamples:digitRuns.slice(0,40)
+        digitSamples:digitRuns.slice(0,40),
+        routeEvidence
       });
       for(const r of pageRoutes){
         r._source_page=p;
