@@ -204,10 +204,28 @@
       return {...r,ready:reasons.length===0,blockReasons:[...new Set(reasons)]};
     });
   }
+  async function enrichDeliveryPreview(items){
+    for(const item of items||[]){
+      if(item.source!=='DELIVERY_LIST'||!item.ready)continue;
+      try{
+        const records=await buildInitialRecords(item);
+        item.previewRouteCount=records.length;
+        item.previewSlipCount=new Set(records.flatMap(r=>r.slip_numbers||r.slips||[]).filter(Boolean)).size;
+        item.previewFileCount=item._files?.length||item.files?.length||1;
+      }catch(e){item.previewError=e?.message||String(e);}
+    }
+    return items;
+  }
+  function previewExtra(r){
+    if(r.source!=='DELIVERY_LIST')return '';
+    if(r.previewError)return `<br><small>事前集計エラー: ${esc(r.previewError)}</small>`;
+    return `<br><small>${fmt(r.previewFileCount||0)}ファイル / 解析便数 ${fmt(r.previewRouteCount||0)}便 / 原票数 ${fmt(r.previewSlipCount||0)}件</small>`;
+  }
+
   function registrationPreviewHtml(items){
     const ready=items.filter(x=>x.ready),hold=items.filter(x=>!x.ready);
     const action=ready.length?`<div class="dih-register-action"><div><strong>${ready.length}件の月別SOURCEを登録できます</strong><span>複数月ファイルは内部日付で月別分割します。既存CURRENTはその月だけスキップし、他の未登録月は続けて保存します。</span></div><button type="button" class="btn btn-primary" id="dih-initial-register-btn" onclick="DATA_IMPORT_HUB.registerInitialReady()">この登録候補を保存する</button></div>`:'';
-    return `<section class="dih-result-section"><div class="dih-result-heading"><b>登録前プレビュー</b><span>実行ボタンを押すまで保存しません</span></div><div class="dih-summary"><div><span>登録候補</span><b>${ready.length}件</b></div><div><span>要確認/除外</span><b>${hold.length}件</b></div><div><span>保存実行</span><b>0件</b></div><div><span>判定</span><b>PREVIEW</b></div></div>${action}<div id="dih-initial-register-status" class="dih-register-status"></div>${hold.length?`<div class="dih-result-scroll"><table class="data-table"><thead><tr><th>判定</th><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>理由</th></tr></thead><tbody>${hold.map(r=>`<tr><td><span class="dih-result-badge is-hold">要確認</span></td><td>${esc(r.file)}</td><td>${esc(r.source)}</td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods?.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.blockReasons.join(' / '))}</td></tr>`).join('')}</tbody></table></div>`:`<div class="dih-empty">要確認ファイルはありません。</div>`}<details class="dih-detail-toggle"><summary>登録候補 ${ready.length}件を確認</summary><div class="dih-detail-body"><div class="dih-result-scroll"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th></tr></thead><tbody>${ready.map(r=>`<tr><td>${esc(r.file)}</td><td>${esc(r.source)}</td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods?.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td></tr>`).join('')}</tbody></table></div></div></details></section>`;
+    return `<section class="dih-result-section"><div class="dih-result-heading"><b>登録前プレビュー</b><span>実行ボタンを押すまで保存しません</span></div><div class="dih-summary"><div><span>登録候補</span><b>${ready.length}件</b></div><div><span>要確認/除外</span><b>${hold.length}件</b></div><div><span>保存実行</span><b>0件</b></div><div><span>判定</span><b>PREVIEW</b></div></div>${action}<div id="dih-initial-register-status" class="dih-register-status"></div>${hold.length?`<div class="dih-result-scroll"><table class="data-table"><thead><tr><th>判定</th><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>理由</th></tr></thead><tbody>${hold.map(r=>`<tr><td><span class="dih-result-badge is-hold">要確認</span></td><td>${esc(r.file)}</td><td>${esc(r.source)}</td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods?.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.blockReasons.join(' / '))}</td></tr>`).join('')}</tbody></table></div>`:`<div class="dih-empty">要確認ファイルはありません。</div>`}<details class="dih-detail-toggle"><summary>登録候補 ${ready.length}件を確認</summary><div class="dih-detail-body"><div class="dih-result-scroll"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th></tr></thead><tbody>${ready.map(r=>`<tr><td>${esc(r.file)}${previewExtra(r)}</td><td>${esc(r.source)}</td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods?.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td></tr>`).join('')}</tbody></table></div></div></details></section>`;
   }
 
   function initialBatchId(documentType,ym){
@@ -411,7 +429,7 @@
     }catch(e){rows.push({_file:f,file:f.name,source:'ERROR',label:'読取エラー',periods:[],center:'—',confidence:'LOW',status:'要確認',reason:e?.message||String(e)});}}
     supplementCenters(rows);
     const groups=new Map();for(const r of rows){const k=duplicateKey(r);if(k){if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}}for(const g of groups.values())if(g.length>1)g.forEach(r=>{r.status+=(r.status?'・':'')+'重複候補';r.reason+=` / 同一SOURCE・期間・センター ${g.length}件`;});
-    const diag=monthlySetDiagnosis(rows),expanded=expandMonthlyRegistrationCandidates(rows),preview=registrationReadiness(expanded),unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
+    const diag=monthlySetDiagnosis(rows),expanded=expandMonthlyRegistrationCandidates(rows),preview=registrationReadiness(expanded);await enrichDeliveryPreview(preview);const unresolved=rows.filter(r=>['UNKNOWN','ERROR','PENDING_PARSER'].includes(r.source)).length,target=document.getElementById('dih-content-result');if(!target)return;
     initialImportSession={files:arr,rows,expanded,preview,analyzed_at:new Date().toISOString(),center_id:window.CENTER?.id||null,center_name:window.CENTER?.name||null};
     target.innerHTML=`<div class="dih-summary"><div><span>選択</span><b>${rows.length}件</b></div><div><span>自動判別</span><b>${rows.length-unresolved}件</b></div><div><span>要確認/追加解析</span><b>${unresolved}件</b></div><div><span>保存</span><b>0件</b></div></div>${monthlySetHtml(diag)}${registrationPreviewHtml(preview)}<details class="dih-detail-toggle"><summary>全ファイルの技術判定 ${rows.length}件</summary><div class="dih-detail-body"><div class="dih-result-scroll dih-technical-table"><table class="data-table"><thead><tr><th>元ファイル</th><th>SOURCE</th><th>内部期間</th><th>センター</th><th>信頼度</th><th>状態</th><th>判定根拠</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.file)}</td><td><b>${esc(r.source)}</b><small>${esc(r.label)}</small></td><td>${esc(r.fiscalYear?r.fiscalYear+'年度':(r.periods.length?r.periods.map(x=>x.slice(0,4)+'/'+x.slice(4)).join(', '):'—'))}</td><td>${esc(r.center)}${r.centerSupplemented?'（補完）':''}</td><td>${esc(r.confidence)}</td><td>${esc(r.status)}</td><td>${esc(r.reason)}</td></tr>`).join('')}</tbody></table></div></div></details><div class="dih-foot">診断・登録前プレビュー専用です。CURRENT・STATE・Cloudへの保存は行いません。ファイル名は判定根拠に使用していません。センター情報がない月次SOURCEは選択中センターを使用し、ファイル内部に別センターが明示されている場合は不一致として停止します。</div>`;
     const ready=preview.filter(x=>x.ready).length,hold=preview.length-ready;
