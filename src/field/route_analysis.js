@@ -123,58 +123,46 @@
 
   function parsePageRoutes(text,items){
     const base=parsePageText(text,items);
-    const rawItems=(items||[]).map((it,idx)=>({
-      idx,
-      text:String(it?.str||'').normalize('NFKC').replace(/\u0000/g,' ').trim(),
-      x:Number(Array.isArray(it?.transform)?it.transform[4]:0),
-      y:Number(Array.isArray(it?.transform)?it.transform[5]:0)
-    })).filter(x=>x.text);
     const lines=pdfTextLines(items);
 
-    // 実帳票診断では「数字行サンプル」に複数の38系10桁が出る一方、
-    // 視覚行の連結値には日付・原票・金額も混ざる。まずPDF item単位で厳密抽出し、
-    // item内に埋め込まれた場合だけ非数字境界付きで拾う。
-    const candidates=[];
-    for(const it of rawItems){
-      const ms=it.text.match(/(?<!\d)38\d{8}(?!\d)/g)||[];
-      for(const head of ms)candidates.push({head,item:it.idx,y:it.y,x:it.x});
-    }
-    // item境界で 38 + 8桁 が分割される帳票だけ、近接itemを補完。
-    for(let i=0;i<rawItems.length-1;i++){
-      const a=rawItems[i],b=rawItems[i+1];
-      if(Math.abs(a.y-b.y)>3.2)continue;
-      const ad=a.text.replace(/\D/g,''),bd=b.text.replace(/\D/g,'');
-      const joined=ad+bd;
-      if(/^38\d{8}$/.test(joined))candidates.push({head:joined,item:a.idx,y:a.y,x:a.x});
-    }
+    // 配達持出予定リストの実PDFでは、PDF.jsのtext item境界は帳票列境界と一致しない。
+    // 診断で実際に「20260601 3812440015 ... 500026674512」の各列が
+    // 同じ視覚行へ連結されることを確認したため、item単位の番号推測は行わない。
+    // 帳票の明細行構造「配達日8桁 + ヘッド10桁」をアンカーに便を確定する。
+    const routes=new Map();
+    let currentKey='';
+    for(let idx=0;idx<lines.length;idx++){
+      const line=String(lines[idx]||'').normalize('NFKC');
+      const dense=line.replace(/\D/g,'');
+      const anchors=[...dense.matchAll(/(20\d{6})(38\d{8})/g)];
+      if(anchors.length){
+        // 通常は1視覚行1明細。複数アンカーがあっても各便を独立して保持する。
+        for(const m of anchors){
+          const ymd=m[1];
+          const date=`${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
+          const head=m[2];
+          const key=`${date}|${head}`;
+          if(!routes.has(key)){
+            routes.set(key,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'delivery-date+head',anchorLine:idx}});
+          }
+          currentKey=key;
+        }
+      }
 
-    // ページ内では同一ヘッドの明細行が繰り返されるので一便へ集約。
-    const unique=[];
-    const seen=new Set();
-    for(const c of candidates){
-      if(seen.has(c.head))continue;
-      seen.add(c.head);unique.push(c);
-    }
-    if(!unique.length)return base.headNumber&&base.date?[base]:[];
-
-    // 原票番号は診断で 500026674512 等の12桁を確認済み。
-    const slips=[];
-    for(const it of rawItems){
-      for(const slip of (it.text.match(/(?<!\d)5\d{11}(?!\d)/g)||[])){
-        slips.push({slip,item:it.idx,y:it.y,x:it.x});
+      // 原票番号も同じ実PDF診断で 500026674512 の12桁を確認。
+      // 明細行にアンカーがある場合はその便へ、継続行なら直前の便へ所属させる。
+      const slipMatches=[...new Set(dense.match(/5\d{11}/g)||[])];
+      if(slipMatches.length&&currentKey&&routes.has(currentKey)){
+        const r=routes.get(currentKey);
+        r.slips=[...new Set([...(r.slips||[]),...slipMatches])];
       }
     }
 
-    const out=unique.map(h=>({...base,headNumber:h.head,slips:[],_debug:{...(base._debug||{}),multiHeadCount:unique.length,headItem:h.item}}));
-    // 原票はPDF内部順で直前に現れたヘッドへ所属させる。
-    for(const sp of slips){
-      let target=0;
-      for(let i=0;i<unique.length;i++){
-        if(unique[i].item<=sp.item)target=i;else break;
-      }
-      if(out[target]&&!out[target].slips.includes(sp.slip))out[target].slips.push(sp.slip);
-    }
-    return out;
+    if(routes.size)return [...routes.values()];
+
+    // 帳票構造アンカーが1件も取れないPDFだけ従来のページ単位結果へ退避する。
+    // ここで無理に38系数字を便と推測しない。
+    return base.headNumber&&base.date?[base]:[];
   }
 
   async function operatorTextFallback(page, lib){
