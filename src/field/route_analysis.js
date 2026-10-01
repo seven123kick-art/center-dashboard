@@ -762,6 +762,14 @@
       else if(ledger.source==='LEGACY_FALLBACK') notices.push(`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${esc(ledger.fallbackReason||'正規化SOURCE未登録')}</div>`);
       if(missing.length) notices.push(`<div class="msg msg-warn">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`);
       else notices.push(`<div class="msg msg-info">完全連動 <strong>${fmt(diag.fullyLinkedRoutes||0)}便</strong>　配達ヘッド ${fmt(diag.headLinkedRoutes||0)}便　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`);
+      if((diag.unmatchedSalesDetails||[]).length) {
+        const items=diag.unmatchedSalesDetails;
+        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>売上未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>`${esc(x.date)} / ヘッド ${esc(x.headNumber)} / ${esc(x.status)} / 原票 ${(x.slipNos||[]).map(esc).join('、')||'取得なし'}`).join('<br>')}</div></details>`);
+      }
+      if((diag.unmatchedPaymentDetails||[]).length) {
+        const items=diag.unmatchedPaymentDetails;
+        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>傭車料未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>`${esc(x.date)} / ヘッド ${esc(x.headNumber)} / ${esc(x.status)}`).join('<br>')}</div></details>`);
+      }
       if((diag.unregisteredWorkers||[]).length) {
         const n = diag.unregisteredWorkers.length;
         notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>要確認データ：マスタ未登録の作業者 ${fmt(n)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${diag.unregisteredWorkers.map(esc).join('、')}<br><span style="font-weight:700">マスタ管理から所属会社を登録してください。</span></div></details>`);
