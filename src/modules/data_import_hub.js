@@ -212,6 +212,22 @@
         item.previewRouteCount=records.length;
         item.previewSlipCount=new Set(records.flatMap(r=>r.slip_numbers||r.slips||[]).filter(Boolean)).size;
         item.previewFileCount=item._files?.length||item.files?.length||1;
+        const firstPdf=(item._files?.length?item._files:[item._file]).filter(Boolean)[0];
+        if(firstPdf&&window.ROUTE_ANALYSIS_UI?.parseDeliveryPdf){
+          const diagnosticRoutes=await ROUTE_ANALYSIS_UI.parseDeliveryPdf(firstPdf);
+          const pages=diagnosticRoutes?._diagnostics||[];
+          item.previewDiagnostic={
+            file:firstPdf.name,pages:pages.length,
+            items:pages.reduce((a,x)=>a+Number(x.items||0),0),
+            textChars:pages.reduce((a,x)=>a+Number(x.textChars||0),0),
+            heads:[...new Set(pages.flatMap(x=>String(x.head||'').split(',')).filter(Boolean))],
+            slipCount:pages.reduce((a,x)=>a+Number(x.slipCount||0),0),
+            source:[...new Set(pages.map(x=>x.source).filter(Boolean))].join(', '),
+            engine:[...new Set(pages.map(x=>x.engine).filter(Boolean))].join(', '),
+            sample:pages.map(x=>x.textSample||'').find(Boolean)||'',
+            digits:pages.flatMap(x=>x.digitSamples||[]).slice(0,20)
+          };
+        }
       }catch(e){item.previewError=e?.message||String(e);}
     }
     return items;
@@ -219,7 +235,9 @@
   function previewExtra(r){
     if(r.source!=='DELIVERY_LIST')return '';
     if(r.previewError)return `<br><small>事前集計エラー: ${esc(r.previewError)}</small>`;
-    return `<br><small>${fmt(r.previewFileCount||0)}ファイル / 解析便数 ${fmt(r.previewRouteCount||0)}便 / 原票数 ${fmt(r.previewSlipCount||0)}件</small>`;
+    const d=r.previewDiagnostic;
+    const diag=d?`<details style="margin-top:6px"><summary>PDF解析診断（先頭1ファイル）</summary><div style="margin-top:6px;white-space:normal;word-break:break-all">ファイル: ${esc(d.file)}<br>ページ診断: ${fmt(d.pages)} / text items: ${fmt(d.items)} / 取得文字数: ${fmt(d.textChars)}<br>engine: ${esc(d.engine||'—')} / source: ${esc(d.source||'—')}<br>検出ヘッド: ${esc((d.heads||[]).join(', ')||'なし')} / 原票候補: ${fmt(d.slipCount)}<br>数字行サンプル: ${esc((d.digits||[]).join(' | ')||'なし')}<br>文字列サンプル: ${esc(d.sample||'なし')}</div></details>`:'';
+    return `<br><small>${fmt(r.previewFileCount||0)}ファイル / 解析便数 ${fmt(r.previewRouteCount||0)}便 / 原票数 ${fmt(r.previewSlipCount||0)}件</small>${diag}`;
   }
 
   function registrationPreviewHtml(items){
