@@ -720,6 +720,17 @@
     </div>`;
   }
 
+  let pendingWorkerReturn=null;
+  function hasPendingWorkerReturn(){return !!pendingWorkerReturn;}
+  function returnFromWorkerMaster(){
+    if(!pendingWorkerReturn)return;
+    const ym=pendingWorkerReturn.ym;
+    pendingWorkerReturn=null;
+    window.LEDGER?.invalidate?.();
+    window.NAV?.go?.('route-analysis');
+    const sel=document.getElementById('route-ym-select');
+    if(sel&&ym&&[...sel.options].some(o=>o.value===ym)){sel.value=ym;window.ROUTE_ANALYSIS_UI?.render?.();}
+  }
   function registerRouteWorker(routeId){
     const r=currentRows.find(x=>x.routeId===routeId);
     if(!r || !r.worker){window.UI?.toast?.('作業者名が未取得です。元資料を確認してください。','error');return;}
@@ -925,5 +936,5 @@
     setView(viewMode);
   }
 
-  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,closeDetail,registerRouteWorker,exportExcel,printView};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,closeDetail,registerRouteWorker,hasPendingWorkerReturn,returnFromWorkerMaster,exportExcel,printView};
 })();
