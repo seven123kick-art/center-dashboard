@@ -39,7 +39,6 @@ const { chromium } = require('playwright');
   });
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
   await page.waitForFunction(()=>document.querySelector('#route-ym-select')?.value==='202606');
-  const financialBefore=await page.locator('#route-detail-modal').count();
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.registerRouteWorker('SMOKE-ROUTE'));
   if(await page.locator('#worker-master-table tr[data-worker-row] .wm-name').last().inputValue()!=='SMOKE WORKER')
     throw Error('Route worker name was not prefilled');
