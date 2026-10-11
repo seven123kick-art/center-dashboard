@@ -718,7 +718,8 @@
   async function verifyDeliveryCurrent(){
     const p=period(document.getElementById('data-import-hub-month')?.value);
     const panel=document.getElementById('dih-delivery-verification');
-    if(!panel||!/^\\d{6}$/.test(p))return;
+    if(!panel)return;
+    if(!/^\d{6}$/.test(p)){panel.textContent='対象年月を選択してください。';return;}
     panel.textContent='保存済みCURRENTを読み込んでいます…';
     try{
       const result=await Repository.NormalizedSource.loadCurrent('DELIVERY_LIST',p);
