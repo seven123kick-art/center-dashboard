@@ -8,6 +8,7 @@ on:
       - 'src/modules/data_import_hub.js'
       - '.github/workflows/route-analysis-check.yml'
       - 'tests/worker-master-browser-smoke.cjs'
+      - 'tests/canonical-allocation-audit-smoke.cjs'
   workflow_dispatch:
 jobs:
   syntax:
@@ -24,6 +25,8 @@ jobs:
           node --check src/core/workers.js
           node --check src/modules/data_import_hub.js
           node --check tests/worker-master-browser-smoke.cjs
+          node --check tests/canonical-allocation-audit-smoke.cjs
+          node tests/canonical-allocation-audit-smoke.cjs
   browser-smoke:
     runs-on: ubuntu-latest
     steps:
