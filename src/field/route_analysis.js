@@ -725,10 +725,9 @@
     if(!pendingWorkerReturn)return;
     const ym=pendingWorkerReturn.ym;
     pendingWorkerReturn=null;
+    if(ym)STATE.selYM=ym;
     window.LEDGER?.invalidate?.();
     window.NAV?.go?.('route-analysis');
-    const sel=document.getElementById('route-ym-select');
-    if(sel&&ym&&[...sel.options].some(o=>o.value===ym)){sel.value=ym;window.ROUTE_ANALYSIS_UI?.render?.();}
   }
   function registerRouteWorker(routeId){
     const r=currentRows.find(x=>x.routeId===routeId);
