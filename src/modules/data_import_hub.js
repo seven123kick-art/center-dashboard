@@ -209,8 +209,8 @@
       if(item.source!=='DELIVERY_LIST'||!item.ready)continue;
       try{
         const records=await buildInitialRecords(item);
-        item.previewRouteCount=records.length;
-        item.previewSlipCount=new Set(records.flatMap(r=>r.slip_numbers||r.slips||[]).filter(Boolean)).size;
+        item.previewRouteCount=new Set(records.map(r=>`${r.delivery_date||''}|${r.head_no||''}`).filter(x=>!x.endsWith('|'))).size;
+        item.previewSlipCount=records.filter(r=>r.slip_no).length;
         item.previewFileCount=item._files?.length||item.files?.length||1;
         const firstPdf=(item._files?.length?item._files:[item._file]).filter(Boolean)[0];
         if(firstPdf&&window.ROUTE_ANALYSIS_UI?.parseDeliveryPdf){
@@ -288,13 +288,11 @@
         const routes=await ROUTE_ANALYSIS_UI.parseDeliveryPdf(pdf);
         const normalized=SOURCE_NORMALIZER.normalizeDeliveryListRoutes(routes,{file_name:pdf.name,center_id:centerId});
         for(const rec of normalized){
-          const key=`${rec.delivery_date||''}|${rec.head_number||rec.headNumber||''}`;
+          // SOURCE_NORMALIZER returns one record per slip (slip_no), not one per head.
+          // Preserve all head/slip pairs; deduplicate only identical pairs across PDFs.
+          const key=`${rec.delivery_date||''}|${rec.head_no||''}|${rec.slip_no||'__HEAD__'}`;
+          if(!rec.delivery_date||!rec.head_no)throw new Error('DELIVERY_LISTの正規化データに配達日またはヘッド番号がありません。');
           if(!merged.has(key))merged.set(key,rec);
-          else{
-            const prev=merged.get(key);
-            const slips=[...new Set([...(prev.slip_numbers||prev.slips||[]),...(rec.slip_numbers||rec.slips||[])])];
-            merged.set(key,{...prev,...rec,slip_numbers:slips});
-          }
         }
       }
       records=[...merged.values()];
