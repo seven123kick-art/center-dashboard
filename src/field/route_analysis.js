@@ -138,48 +138,38 @@
         dt.getUTCFullYear()!==yyyy||dt.getUTCMonth()!==mm-1||dt.getUTCDate()!==dd)return '';
       return `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
     };
-    const dateLine=lines.find(v=>/配達日/.test(v))||'';
-    const headLine=lines.find(v=>/ヘッド番号/.test(v))||dateLine;
-    // 視覚行はPDFの列結合で空白が失われる場合がある。ラベルと値を
-    // ページ全体のテキストでも照合し、ヘッダーの値だけを採用する。
-    const headerText=[dateLine,headLine,String(text||'')].join(' ').normalize('NFKC');
-    const dateMatch=headerText.match(/配達日\s*[:：]?\s*(20\d{2})[\\/\-年]\s*(\d{1,2})[\\/\-月]\s*(\d{1,2})日?/);
+    const headerLines=lines.slice(0,16).map(v=>String(v||'').normalize('NFKC'));
+    const headerText=headerLines.join(' ');
+    const dateMatch=headerText.match(/配達日\s*[:：]?\s*(20\d{2})[\/\-年]\s*(\d{1,2})[\/\-月]\s*(\d{1,2})日?/);
     const headMatch=headerText.match(/ヘッド番号\s*[:：]?\s*(38\d{8})/);
-    let date='';
-    if(dateMatch){
-      const ymd=`${dateMatch[1]}${String(dateMatch[2]).padStart(2,'0')}${String(dateMatch[3]).padStart(2,'0')}`;
-      date=validYmd(ymd);
-    }
-    const head=headMatch?.[1]||'';
-    if(date&&head){
-      const key=`${date}|${head}`;
-      routes.set(key,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'delivery-header-labels'}});
-    }
-
-    if(!routes.size){
-      for(let idx=0;idx<lines.length;idx++){
-        const dense=String(lines[idx]||'').normalize('NFKC').replace(/\D/g,'');
-        for(const m of dense.matchAll(/(20\d{6})(38\d{8})/g)){
-          const parsedDate=validYmd(m[1]); if(!parsedDate)continue;
-          const key=`${parsedDate}|${m[2]}`;
-          routes.set(key,{...base,date:parsedDate,headNumber:m[2],slips:[],_debug:{...(base._debug||{}),anchor:'same-line-date+head',anchorLine:idx}});
-        }
+    let date=dateMatch?validYmd(dateMatch[1]+dateMatch[2].padStart(2,'0')+dateMatch[3].padStart(2,'0')):'';
+    let head=headMatch?.[1]||'';
+    // PDF内部でヘッダーのラベルと値が逆順でも、視覚行の数字から復元する。
+    for(const line of headerLines){
+      const digits=line.replace(/\D/g,'');
+      const pair=digits.match(/(20\d{6})(38\d{8})/);
+      if(pair){
+        const verified=validYmd(pair[1]);
+        if(verified){date=verified;head=pair[2];break;}
       }
     }
-
-    // 明細の先頭は順番(10,20,...), 荷主名, 荷主伝票番号, 原票番号。
-    // PDF.jsで空白が落ちても、荷主伝票番号の直後にある原票12桁を
-    // 数字境界で取り出す。リサイクル券番号・小計・ヘッダーは対象外。
+    if(!date){
+      const candidate=headerText.match(/20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}/);
+      if(candidate){const m=candidate[0].match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);if(m)date=validYmd(m[1]+m[2].padStart(2,'0')+m[3].padStart(2,'0'));}
+    }
+    if(!head){
+      const candidates=headerLines.flatMap(line=>[...line.matchAll(/38\d{8}/g)].map(m=>m[0]));
+      head=candidates[0]||'';
+    }
+    if(date&&head){
+      routes.set(date+'|'+head,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'visual-header'}});
+    }
+    // 明細行から原票番号を取得。荷主伝票番号は桁数が異なるため固定しない。
     const slips=[...new Set(lines.flatMap(line=>{
       const normalized=String(line||'').normalize('NFKC');
-      // 明細行は「行番号 + 荷主名 + 荷主伝票番号 + 原票番号」。
-      // PDFの文字分割により空白が消える場合もあるので、原票の直前の
-      // 荷主伝票番号（7～15桁）を確認し、12桁の原票を抽出する。
-      // 単独の数字行や帳票ヘッダーから原票を推測しない。
-      if(!/^\\s*\\d{1,3}(?:\\s+|(?=[^\\d]))/.test(normalized))return [];
-      const numbers=[...normalized.matchAll(/\\d{7,15}/g)].map(m=>m[0]);
-      const found=numbers.filter((n,i)=>i>0&&/^[59]\\d{11}$/.test(n));
-      return found.slice(0,1);
+      if(!/^\s*\d{1,3}\s+\S/.test(normalized))return [];
+      const match=normalized.match(/(?:^|\D)([59]\d{11})(?!\d)/);
+      return match?[match[1]]:[];
     }))];
     for(const r of routes.values())r.slips=slips;
 
