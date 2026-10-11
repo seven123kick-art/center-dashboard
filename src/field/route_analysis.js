@@ -170,14 +170,11 @@
     // PDF上の各視覚行で、注文番号に続く独立した12桁を優先する。
     const slips=[...new Set(lines.flatMap(line=>{
       const normalized=String(line||'').normalize('NFKC');
+      // 明細は「順番 店名 注文番号 原票番号 時間帯」の順。
+      // 12桁の原票番号だけを抽出し、ページ番号や注文番号を混ぜない。
       const matches=[];
-      for(const m of normalized.matchAll(/(?:^|\\s)([59]\\d{11})(?=\\s|$)/g))matches.push(m[1]);
-      // フォント分割によって空白が混入する場合のみ、注文番号と原票番号の
-      // 2列が確認できる明細行から復元する。
-      if(!matches.length && /^\\s*\\d{1,3}\\s+/.test(normalized)){
-        const digits=normalized.match(/(?:^|\\s)([59](?:\\s*\\d){11})(?=\\s|$)/g)||[];
-        for(const v of digits){const n=v.replace(/\\D/g,'');if(n.length===12)matches.push(n);}
-      }
+      const re=/(?:^|\s)([59]\d{11})(?=\s|$)/g;
+      for(const m of normalized.matchAll(re))matches.push(m[1]);
       return matches;
     }))];
     for(const r of routes.values())r.slips=slips;
