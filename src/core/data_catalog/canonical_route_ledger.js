@@ -171,7 +171,8 @@
     // 北埼玉の「でんきち」センター台帳は現場ヘッドへの振分前に登録される。
     // 原票の同日・別ヘッド重複だけを検出する（他荷主や傭車料には適用しない）。
     // 荷主コードの確定までは自動除外せず、監査用の分類にとどめる。
-    const shipperCodesBySlipNo=new Map(slips.map(x=>[clean(x.slip_no),clean(x.shipper_source_code)]));
+    const shipperCodesBySlipNo=new Map();
+    slips.forEach(x=>{const no=clean(x.slip_no),code=clean(x.shipper_source_code);if(no&&!shipperCodesBySlipNo.has(no))shipperCodesBySlipNo.set(no,code);else if(no&&code&&shipperCodesBySlipNo.get(no)!==code)shipperCodesBySlipNo.set(no,'');});
     const deliveryHeadIndex=new Map();
     rows.forEach(row=>{
       if(!['北さいたまセンター','北埼玉センター'].includes(clean(row.worker)))return;
