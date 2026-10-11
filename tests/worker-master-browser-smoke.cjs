@@ -56,6 +56,14 @@ const { chromium } = require('playwright');
   if(result.destination!=='route-analysis'||result.month!=='202606'||result.pending||!result.saved)
     throw Error('Route return flow failed: '+JSON.stringify(result));
   console.log('PASS: route -> prefilled worker -> in-memory save -> return to selected month');
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.waitForFunction(()=>document.querySelector('#route-ym-select')?.value==='202606');
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ROUTE'));
+  const diagnostic=await page.locator('#route-detail-modal').innerText();
+  if(diagnostic.includes('作業者マスタで登録・確認'))
+    throw Error('Worker remains unregistered after in-memory save');
+  console.log('PASS: saved worker no longer appears as unregistered in route detail');
+
   await page.evaluate(()=>{
     const o=window.__smokeOriginal;
     window.CANONICAL_ROUTE_LEDGER=o.canonical;
