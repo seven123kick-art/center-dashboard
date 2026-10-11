@@ -725,7 +725,7 @@
     if(!pendingWorkerReturn)return;
     const ym=pendingWorkerReturn.ym;
     pendingWorkerReturn=null;
-    if(ym)STATE.selYM=ym;
+    if(ym){STATE.selYM=ym;const sel=document.getElementById('route-ym-select');if(sel)sel.value=ym;}
     window.LEDGER?.invalidate?.();
     window.NAV?.go?.('route-analysis');
   }
