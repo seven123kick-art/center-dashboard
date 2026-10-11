@@ -195,7 +195,7 @@
       for(const no of row.slips||[]){
         const currentIds=row.slipIds||[];
         const id=currentIds.find(slipId=>slipNoById.get(slipId)===no);
-        const others=rows.filter(x=>x.routeId!==row.routeId&&x.date===row.date&&!!clean(x.worker)&&!centerWorkerNames.has(clean(x.worker))&&id&&(x.slipIds||[]).includes(id));
+        const others=id?(fieldRoutesByDateSlip.get(row.date+'|'+id)||[]).filter(x=>x.routeId!==row.routeId):[];
         if(others.length)assigned.push(no);else unassigned.push(no);
         slipAudit.push({slipNo:no,shipperCode:shipperCodesBySlipNo.get(no)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))]});
       }
