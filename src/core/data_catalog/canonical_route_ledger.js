@@ -178,6 +178,15 @@
     ambiguousShipperSlips.forEach(no=>shipperCodesBySlipNo.set(no,''));
     const allocationAudit=[];
     const centerWorkerNames=new Set(['北さいたまセンター','北埼玉センター']);
+    const fieldRoutesByDateSlip=new Map();
+    rows.forEach(row=>{
+      if(!clean(row.worker)||centerWorkerNames.has(clean(row.worker)))return;
+      for(const id of row.slipIds||[]){
+        const key=row.date+'|'+id;
+        if(!fieldRoutesByDateSlip.has(key))fieldRoutesByDateSlip.set(key,[]);
+        fieldRoutesByDateSlip.get(key).push(row);
+      }
+    });
     rows.forEach(row=>{
       if(!centerWorkerNames.has(clean(row.worker)))return;
       const assigned=[];
