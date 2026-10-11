@@ -140,6 +140,7 @@
         workerRegistered:!!master,
 
         // 配送件数はDELIVERY_LISTに載っている原票件数。売上照合の成否で0件にしない。
+        slipIds:slipIds,
         slips:slipNos,
         slipRows:[],
         count:slipIds.length,
