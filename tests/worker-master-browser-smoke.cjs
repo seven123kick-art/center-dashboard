@@ -89,6 +89,18 @@ const { chromium } = require('playwright');
     throw Error('Future-effective worker incorrectly matched to June route');
   console.log('PASS: worker validity period respected');
 
+  // A registration ending before the delivery date must also be rejected.
+  await page.evaluate(()=>{
+    window.__smokeWorkers=window.__smokeWorkers.map(r=>r.workerName==='SMOKE WORKER'?{...r,validFrom:'',validTo:'2026-05-31'}:r);
+  });
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ROUTE'));
+  const endedDiagnostic=await page.locator('#route-detail-modal').innerText();
+  if(!endedDiagnostic.includes('作業者マスタ：未登録・照合不可'))
+    throw Error('Expired worker incorrectly matched to June route');
+  console.log('PASS: expired worker registration rejected');
+
+
 
   await page.evaluate(()=>{
     const o=window.__smokeOriginal;
