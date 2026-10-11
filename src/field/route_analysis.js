@@ -179,7 +179,8 @@
     for(const r of routes.values())r.slips=slips;
 
     if(routes.size)return [...routes.values()];
-    return base.headNumber&&base.date?[base]:[];
+    // ヘッダー未確定のページを推測で1便として登録しない。
+    return [];
   }
 
   async function operatorTextFallback(page, lib){
