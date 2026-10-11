@@ -645,7 +645,6 @@
 
   function enrichRouteRows(rows){
     return (Array.isArray(rows)?rows:[]).map(r=>{
-      if(r?.companyName && r?.operationType) return r;
       const master=resolveWorkerMaster(r?.worker,r?.date);
       if(!master) return r;
       return {
