@@ -67,6 +67,18 @@ const { chromium } = require('playwright');
   if(!diagnostic.includes('売上・利益：未確定・要照合'))
     throw Error('Worker registration must not falsely confirm revenue or profit');
   console.log('PASS: saved worker no longer appears as unregistered in route detail');
+  // A registration starting after the delivery date must not count as registered.
+  await page.evaluate(()=>{
+    window.__smokeWorkers=window.__smokeWorkers.map(r=>r.workerName==='SMOKE WORKER'?{...r,validFrom:'2026-07-01'}:r);
+    window.ROUTE_ANALYSIS_UI.closeDetail();
+  });
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ROUTE'));
+  const expiredDiagnostic=await page.locator('#route-detail-modal').innerText();
+  if(!expiredDiagnostic.includes('作業者マスタ：未登録・照合不可'))
+    throw Error('Future-effective worker incorrectly matched to June route');
+  console.log('PASS: worker validity period respected');
+
 
   await page.evaluate(()=>{
     const o=window.__smokeOriginal;
