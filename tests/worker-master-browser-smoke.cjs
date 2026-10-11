@@ -92,6 +92,14 @@ const { chromium } = require('playwright');
     throw Error('Future-effective worker incorrectly matched to June route');
   console.log('PASS: worker validity period respected');
 
+  const rowsBeforeDuplicate=await page.locator('#worker-master-table tr[data-worker-row]').count();
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.registerRouteWorker('SMOKE-ROUTE'));
+  const rowsAfterDuplicate=await page.locator('#worker-master-table tr[data-worker-row]').count();
+  if(rowsAfterDuplicate!==rowsBeforeDuplicate)
+    throw Error('Existing worker outside validity period was duplicated');
+  console.log('PASS: existing worker outside validity period is not duplicated');
+
+
   // A registration ending before the delivery date must also be rejected.
   await page.evaluate(()=>{
     window.__smokeWorkers=window.__smokeWorkers.map(r=>r.workerName==='SMOKE WORKER'?{...r,validFrom:'',validTo:'2026-05-31'}:r);
