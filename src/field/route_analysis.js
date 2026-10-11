@@ -696,6 +696,18 @@
             <div class="route-detail-kpi"><span>傭車支払</span><strong>${paymentText(r)}</strong></div>
             <div class="route-detail-kpi"><span>一次利益 / 利益率</span><strong class="${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${isProfitConfirmed(r)?`${fmt(r.margin)}円 / ${rate.toFixed(1)}%`:'― / ―'}</strong></div>
           </div>
+          <div class="saas-content-card" style="box-shadow:none;padding:16px;margin-bottom:12px">
+            <strong>連動・登録状況</strong>
+            <div style="font-size:12px;line-height:1.9;margin-top:8px">
+              作業者：${esc(r.worker||'未取得')}<br>
+              作業者マスタ：${r.workerRegistered?'登録済み':'未登録・照合不可'}<br>
+              原票明細：${slips.length?fmt(slips.length)+'件':'紐付く明細なし'}<br>
+              売上・利益：${isProfitConfirmed(r)?'連動確定':'未確定・要照合'}<br>
+              傭車料：${paymentText(r)}<br>
+              判定理由：${esc(r.status||r.linkLevel||'未照合')}
+            </div>
+            ${!r.workerRegistered?'<p style="font-size:12px;margin-top:8px">作業者名がある場合はマスタ管理で同名・所属会社・適用日を確認してください。名前が未取得の場合は元資料を確認してください。</p>':''}
+          </div>
           <div class="saas-content-card" style="box-shadow:none">
             <div class="saas-content-head"><div><strong>原票明細</strong><span>${fmt(slips.length)}件</span></div><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span></div>
             <div class="scroll-x"><table class="tbl saas-table"><thead><tr><th>原票番号</th><th>荷主</th><th>商品・カテゴリ</th><th>エリア</th><th class="r">売上</th><th>照合</th></tr></thead><tbody>
