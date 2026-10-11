@@ -929,6 +929,7 @@
       const notices=[];
       const allocationAudits=diag.allocationAudit||[];
       if(allocationAudits.length) notices.push('<div class="msg msg-info">センター台帳の割当監査：'+fmt(allocationAudits.length)+'ヘッド（集計未変更）</div>');
+      if(allocationAudits.length) notices.push('<details class="msg msg-info"><summary>割当監査の原票明細を表示</summary>'+allocationAudits.map(a=>esc(a.date)+' / '+esc(a.headNumber)+'：'+(a.slipAudit||[]).map(x=>esc(x.slipNo)+'［'+esc(x.shipperCode||'荷主未取得')+'］'+(x.otherHeadNumbers||[]).map(esc).join(',')).join('、')).join('<hr>')+'</details>');
       if(ledger.source==='CANONICAL') notices.push('<div class="msg msg-info">データ経路：Canonical（確認済みCURRENT SOURCEから再構築）</div>');
       else if(ledger.source==='LEGACY_FALLBACK') notices.push(`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${esc(ledger.fallbackReason||'正規化SOURCE未登録')}</div>`);
       if(missing.length) notices.push(`<div class="msg msg-warn">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`);
