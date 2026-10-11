@@ -176,14 +176,6 @@
     const ambiguousShipperSlips=new Set();
     slips.forEach(x=>{const no=clean(x.slip_no),code=clean(x.shipper_source_code);if(!no)return;if(!shipperCodesBySlipNo.has(no)){shipperCodesBySlipNo.set(no,code);return;}const prior=shipperCodesBySlipNo.get(no);if(prior&&code&&prior!==code)ambiguousShipperSlips.add(no);if(!prior&&code)shipperCodesBySlipNo.set(no,code);});
     ambiguousShipperSlips.forEach(no=>shipperCodesBySlipNo.set(no,''));
-    const deliveryHeadIndex=new Map();
-    rows.forEach(row=>{
-      if(!['北さいたまセンター','北埼玉センター'].includes(clean(row.worker)))return;
-      for(const no of row.slips||[]){
-        if(!deliveryHeadIndex.has(no))deliveryHeadIndex.set(no,[]);
-        deliveryHeadIndex.get(no).push(row);
-      }
-    });
     const allocationAudit=[];
     rows.forEach(row=>{
       if(!['北さいたまセンター','北埼玉センター'].includes(clean(row.worker)))return;
