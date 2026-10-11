@@ -190,6 +190,24 @@ const { chromium } = require('playwright');
     throw Error('Conflicting profit flag must not override unresolved payment source');
   console.log('PASS: unresolved payment overrides contradictory profit confirmation');
 
+  // Route identifiers containing apostrophes must open from the actual table click.
+  await page.evaluate(()=>{
+    window.CANONICAL_ROUTE_LEDGER.buildMonth=async()=>({routes:[{
+      routeId:"SMOKE-'QUOTE",date:'2026-06-01',headNumber:'SMOKE-QUOTE',
+      worker:'SMOKE WORKER',workerRegistered:true,companyName:'',
+      operationType:'',count:1,sales:12500,payment:7400,margin:5100,
+      profitabilityConfirmed:true,paymentStatus:'KNOWN',
+      slipRows:[],linkLevel:'完全連動'
+    }]});
+  });
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.locator('#route-profit-table tbody tr').first().click();
+  const quoteDetail=await page.locator('#route-detail-modal').innerText();
+  if(!quoteDetail.includes('SMOKE-QUOTE'))
+    throw Error('Quoted route identifier failed to open from table');
+  console.log('PASS: apostrophe in route identifier opens detail safely');
+
+
 
 
 
