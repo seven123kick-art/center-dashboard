@@ -203,7 +203,6 @@
       const unassigned=[];
       const slipAudit=[];
       for(const no of row.slips||[]){
-        const currentIds=row.slipIds||[];
         const id=centerSlipIdByNo.get(row.routeId)?.get(no);
         const others=id?(fieldRoutesByDateSlip.get(row.date+'|'+id)||[]).filter(x=>x.routeId!==row.routeId):[];
         if(others.length)assigned.push(no);else unassigned.push(no);
