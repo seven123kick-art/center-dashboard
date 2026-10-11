@@ -168,6 +168,32 @@
       };
     });
 
+    // 北埼玉の「でんきち」センター台帳は現場ヘッドへの振分前に登録される。
+    // 原票の同日・別ヘッド重複だけを検出する（他荷主や傭車料には適用しない）。
+    // 荷主コードの確定までは自動除外せず、監査用の分類にとどめる。
+    const deliveryHeadIndex=new Map();
+    rows.forEach(row=>{
+      if(clean(row.worker)!=='北さいたまセンター')return;
+      for(const no of row.slips||[]){
+        if(!deliveryHeadIndex.has(no))deliveryHeadIndex.set(no,[]);
+        deliveryHeadIndex.get(no).push(row);
+      }
+    });
+    const allocationAudit=[];
+    rows.forEach(row=>{
+      if(clean(row.worker)!=='北さいたまセンター')return;
+      const assigned=[];
+      const unassigned=[];
+      for(const no of row.slips||[]){
+        const others=rows.filter(x=>x.routeId!==row.routeId&&x.date===row.date&&(x.slips||[]).includes(no));
+        if(others.length)assigned.push(no);else unassigned.push(no);
+      }
+      if(assigned.length||unassigned.length){
+        row.allocationAudit={status:'REVIEW_REQUIRED',assignedSlipNos:assigned,unassignedSlipNos:unassigned};
+        allocationAudit.push({date:row.date,headNumber:row.headNumber,worker:row.worker,assignedCount:assigned.length,unassignedCount:unassigned.length,unassignedSlipNos:unassigned});
+      }
+    });
+
     const sourceStatus={
       routePdf:hasDeliveryList,
       headPayment:hasPaymentBatch,
@@ -188,6 +214,7 @@
       source:'CANONICAL',
       diagnostics:{
         ym:period,
+        allocationAudit,
         sourceStatus,
         routeCount:rows.length,
         routeSlipTotal,
