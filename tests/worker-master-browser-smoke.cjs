@@ -207,6 +207,40 @@ const { chromium } = require('playwright');
     throw Error('Quoted route identifier failed to open from table');
   console.log('PASS: apostrophe in route identifier opens detail safely');
 
+  await page.evaluate(()=>{
+    window.ROUTE_ANALYSIS_UI.closeDetail();
+    window.CANONICAL_ROUTE_LEDGER.buildMonth=async()=>({
+      routes:[{
+        routeId:'SMOKE-DIAG',date:'2026-06-06',headNumber:'3812456303',
+        worker:'SMOKE WORKER',workerRegistered:true,companyName:'',
+        operationType:'',count:1,sales:12500,payment:0,margin:12500,
+        profitabilityConfirmed:false,paymentStatus:'NO_RECORD',
+        slipRows:[],linkLevel:'未照合'
+      }],
+      diagnostics:{
+        sourceStatus:{deliveryPdf:true,workerCsv:true,productCsv:true,headPayment:true},
+        unmatchedSalesDetails:[{date:'2026-06-06',headNumber:'3812456303',status:'PARTIAL_MATCH',slipNos:['500026659650']}],
+        unmatchedPaymentDetails:[{date:'2026-06-06',headNumber:'3812456303',status:'NO_RECORD'}],
+        unregisteredWorkers:[],unmatchedRouteSlipCount:1,routesWithoutPayment:1
+      }
+    });
+  });
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  const diagnosticButtons=page.locator('#route-diagnostic button');
+  if(await diagnosticButtons.count()!==2)
+    throw Error('Expected separate sales and payment diagnostic route buttons');
+  await diagnosticButtons.first().evaluate(el=>el.click());
+  const diagnosticDetail=await page.locator('#route-detail-modal').innerText();
+  if(!diagnosticDetail.includes('3812456303'))
+    throw Error('Sales diagnostic button failed to open matching route');
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.closeDetail());
+  await diagnosticButtons.last().evaluate(el=>el.click());
+  const paymentDetail=await page.locator('#route-detail-modal').innerText();
+  if(!paymentDetail.includes('傭車料資料に該当なし'))
+    throw Error('Payment diagnostic button failed to open route details');
+  console.log('PASS: sales and payment diagnostic entries open matching route details');
+
+
 
 
 
