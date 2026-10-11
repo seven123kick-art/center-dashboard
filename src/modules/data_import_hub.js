@@ -328,7 +328,42 @@
     if(!window.Repository?.NormalizedSource?.loadManifest||!window.Repository?.NormalizedSource?.saveBatch)throw new Error('Normalized Source Repositoryを読み込めません。');
     const records=await buildInitialRecords(item);
     const before=await Repository.NormalizedSource.loadManifest(repoType,ym);
-    if(before?.manifest?.current_batch_id)return {ok:false,skipped:true,error:'CURRENT_ALREADY_EXISTS',current_batch_id:before.manifest.current_batch_id};
+    if(before?.manifest?.current_batch_id){
+      if(item.source!=='DELIVERY_LIST')return {ok:false,skipped:true,error:'CURRENT_ALREADY_EXISTS',current_batch_id:before.manifest.current_batch_id};
+      // DELIVERY_LISTだけは既存の月次CURRENTを保全し、未登録の便・原票を追加する。
+      // 既存と同一キーの内容が異なる場合は自動上書きせず停止する。
+      const current=await Repository.NormalizedSource.loadCurrent(repoType,ym);
+      if(!current?.ok||!Array.isArray(current.records))throw new Error('既存DELIVERY_LISTを安全に読み込めないため登録を中止しました。');
+      const keyOf=rec=>`${rec.delivery_date||''}|${rec.head_no||''}|${rec.slip_no||'__HEAD__'}`;
+      const semantic=rec=>{
+        const obj={...rec};
+        for(const key of ['source_file_id','source_record_id','source_row_index','source_page_number'])delete obj[key];
+        return JSON.stringify(Object.keys(obj).sort().map(k=>[k,obj[k]??null]));
+      };
+      const existing=new Map();
+      for(const rec of current.records){
+        const key=keyOf(rec);
+        if(existing.has(key)&&semantic(existing.get(key))!==semantic(rec))throw new Error('既存DELIVERY_LIST内に同一キーの不整合があります: '+key);
+        existing.set(key,rec);
+      }
+      const added=[];
+      for(const rec of records){
+        const key=keyOf(rec);
+        if(existing.has(key)){
+          if(semantic(existing.get(key))!==semantic(rec))throw new Error('既存DELIVERY_LISTと内容が異なるため自動上書きを停止しました: '+key);
+          continue;
+        }
+        existing.set(key,rec);added.push(rec);
+      }
+      if(!added.length)return {ok:false,skipped:true,error:'CURRENT_ALREADY_EXISTS',current_batch_id:before.manifest.current_batch_id,already_registered:true};
+      return Repository.NormalizedSource.saveBatch({
+        document_type:repoType,period:ym,batch_id:initialBatchId(repoType,ym),
+        supersedes_batch_id:before.manifest.current_batch_id,
+        source_file_id:null,source_file_name:'DELIVERY_LIST_MONTHLY_MERGED',
+        records:[...current.records,...added],
+        meta:{source_file_names:item.files?.length?item.files:[item.file],imported_at:new Date().toISOString(),usage:'INITIAL_HISTORY_APPEND',previous_record_count:current.records.length,added_record_count:added.length}
+      });
+    }
     if(item.source==='PL_CONFIRMED'){
       if(!window.ACCOUNTING_IMPORT_BRIDGE?.persistRecords)throw new Error('月次収支の保存基盤を読み込めません。');
       return ACCOUNTING_IMPORT_BRIDGE.persistRecords(records,{period:ym,document_state:'CONFIRMED',source_file_names:[item.file]});
