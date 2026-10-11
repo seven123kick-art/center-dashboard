@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'src/field/route_analysis.js'
+      - 'src/core/data_catalog/canonical_route_ledger.js'
       - 'src/core/workers.js'
       - 'src/modules/data_import_hub.js'
       - '.github/workflows/route-analysis-check.yml'
