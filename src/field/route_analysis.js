@@ -734,6 +734,7 @@
   function registerRouteWorker(routeId){
     const r=currentRows.find(x=>x.routeId===routeId);
     if(!r || !r.worker){window.UI?.toast?.('作業者名が未取得です。元資料を確認してください。','error');return;}
+    pendingWorkerReturn={ym:document.getElementById('route-ym-select')?.value||''};
     closeDetail();
     window.DATA_MANAGEMENT_NAV?.go?.('worker-master');
     window.WORKER_MASTER_UI?.showTab?.('worker');
