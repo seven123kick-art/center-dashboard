@@ -190,7 +190,7 @@
         if(others.length)assigned.push(no);else unassigned.push(no);
       }
       if(assigned.length||unassigned.length){
-        row.allocationAudit={status:'REVIEW_REQUIRED',assignedSlipNos:assigned,unassignedSlipNos:unassigned};
+        row.allocationAudit={status:'REVIEW_REQUIRED',assignedSlipNos:assigned,unassignedSlipNos:unassigned,shipperCodes:[...new Set(row.slips.map(no=>shipperCodesBySlipNo.get(no)).filter(Boolean))],unknownShipperCount:row.slips.filter(no=>!shipperCodesBySlipNo.get(no)).length};
         allocationAudit.push({date:row.date,headNumber:row.headNumber,worker:row.worker,assignedCount:assigned.length,unassignedCount:unassigned.length,unassignedSlipNos:unassigned});
       }
     });
