@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
       buildMonth:async()=>({routes:[{
         routeId:'SMOKE-ROUTE',date:'2026-06-01',headNumber:'SMOKE-HEAD',
         worker:'SMOKE WORKER',workerRegistered:false,companyName:'',
-        operationType:'',count:1,sales:0,payment:0,slipRows:[],linkLevel:'未照合'
+        operationType:'',count:1,sales:12500,payment:7400,margin:5100,slipRows:[],linkLevel:'未照合'
       }]})
     };
     window.DATA_MANAGEMENT_NAV.go=(name)=>{
@@ -39,6 +39,9 @@ const { chromium } = require('playwright');
   });
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
   await page.waitForFunction(()=>document.querySelector('#route-ym-select')?.value==='202606');
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ROUTE'));
+  const beforeMoney=await page.locator('#route-detail-modal').innerText();
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.closeDetail());
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.registerRouteWorker('SMOKE-ROUTE'));
   if(await page.locator('#worker-master-table tr[data-worker-row] .wm-name').last().inputValue()!=='SMOKE WORKER')
     throw Error('Route worker name was not prefilled');
@@ -60,6 +63,10 @@ const { chromium } = require('playwright');
   await page.waitForFunction(()=>document.querySelector('#route-ym-select')?.value==='202606');
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ROUTE'));
   const diagnostic=await page.locator('#route-detail-modal').innerText();
+  for(const amount of ['12,500','7,400']){
+    if(!beforeMoney.includes(amount)||!diagnostic.includes(amount))
+      throw Error('Financial amount changed or disappeared after worker registration: '+amount);
+  }
   if(!diagnostic.includes('作業者マスタ：登録済み') || diagnostic.includes('作業者マスタで登録・確認'))
     throw Error('Worker was not positively confirmed as registered after save');
   if(!diagnostic.includes('傭車支払') || !diagnostic.includes('売上'))
