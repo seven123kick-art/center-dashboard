@@ -431,6 +431,22 @@
         else if(r?.kind==='skipped'){skipped++;results.push({item,status:'スキップ',detail:'実行時点で既存CURRENTを確認'});}
         else{failed++;results.push({item,status:'失敗',detail:r?.error?.message||String(r?.error||'保存結果を確認できません')});}
       });
+      // 保存APIの成功だけでは不十分。CURRENTを読み直し、今回の原票キーが
+      // 全件存在することを確認する（同一原票の既存登録も正常と扱う）。
+      const readbackResults=[];
+      for(const item of items.filter(x=>x.source==='DELIVERY_LIST')){
+        const ym=item.periods?.[0];
+        try{
+          const expected=await buildInitialRecords(item);
+          const loaded=await Repository.NormalizedSource.loadCurrent('DELIVERY_LIST',ym);
+          if(!loaded?.ok||!Array.isArray(loaded.records))throw new Error('保存済みCURRENTを読み出せません');
+          const key=r=>[r.delivery_date||'',r.head_no||'',r.slip_no||'__HEAD__'].join('|');
+          const stored=new Set(loaded.records.map(key));
+          const missing=expected.filter(r=>!stored.has(key(r)));
+          const routeKeys=new Set(loaded.records.map(r=>[r.delivery_date,r.head_no].join('|')));
+          readbackResults.push({ym,ok:!missing.length,detail:`CURRENT再読込：${routeKeys.size}便 / ${loaded.records.filter(r=>r.slip_no).length}原票（今回PDF ${new Set(expected.map(key)).size}行、未反映 ${missing.length}行）`});
+        }catch(e){readbackResults.push({ym,ok:false,detail:'CURRENT再読込検証エラー：'+(e?.message||String(e))});}
+      }
       const materializeErrors=[];
       if(window.CANONICAL_MATERIALIZER?.materialize){
         for(const ym of [...affected].sort()){
@@ -440,8 +456,9 @@
       }else if(affected.size){
         materializeErrors.push('Canonical再構築基盤を読み込めません。SOURCE保存済みデータはデータ確認画面で再構築してください。');
       }
+      const readbackHtml=readbackResults.map(x=>`<div class="dih-register-result"><strong>${x.ok?'保存データ照合OK':'保存データ要確認'}</strong><span>${esc(x.ym)}：${esc(x.detail)}</span></div>`).join('');
       const resultHtml=`<div class="dih-register-result"><strong>初期履歴登録結果</strong><span>保存 ${saved}件 / スキップ ${skipped}件 / 失敗 ${failed}件${materializeErrors.length?` / 再構築エラー ${materializeErrors.length}か月`:''}</span></div>${(failed||skipped||materializeErrors.length)?`<details class="dih-detail-toggle" open><summary>登録結果の詳細</summary><div class="dih-detail-body"><div class="dih-result-scroll"><table class="data-table"><thead><tr><th>結果</th><th>年月</th><th>SOURCE</th><th>ファイル</th><th>詳細</th></tr></thead><tbody>${results.filter(x=>x.status!=='保存済').map(x=>`<tr><td>${esc(x.status)}</td><td>${esc(x.item.periods?.[0]||'')}</td><td>${esc(x.item.source)}</td><td>${esc(x.item.file)}</td><td>${esc(x.detail)}</td></tr>`).join('')}${materializeErrors.map(x=>`<tr><td>再構築</td><td colspan="4">${esc(x)}</td></tr>`).join('')}</tbody></table></div></div></details>`:''}`;
-      setInitialRegisterStatus(resultHtml,failed?'is-error':'is-ok');
+      setInitialRegisterStatus(resultHtml+readbackHtml,(failed||readbackResults.some(x=>!x.ok))?'is-error':'is-ok');
       const savedMonths=[...new Set(results.filter(x=>x.status==='保存済').map(x=>x.item?.periods?.[0]).filter(Boolean))].sort();
       const skippedMonths=[...new Set(results.filter(x=>x.status==='スキップ').map(x=>x.item?.periods?.[0]).filter(Boolean))].sort();
       const monthText=a=>a.map(x=>`${x.slice(0,4)}/${x.slice(4)}`).join('、');
