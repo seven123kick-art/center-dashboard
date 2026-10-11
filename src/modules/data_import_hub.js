@@ -218,6 +218,8 @@
           const pages=diagnosticRoutes?._diagnostics||[];
           item.previewDiagnostic={
             file:firstPdf.name,pages:pages.length,
+            parsedRoutes:diagnosticRoutes.map(x=>({date:x.date,head:x.headNumber,slips:(x.slips||[]).length})),
+            pageParsed:pages.filter(x=>x.items>0).map(x=>({page:x.page,head:x.head,date:x.date,routes:x.routeCount,slips:x.slipCount})),
             items:pages.reduce((a,x)=>a+Number(x.items||0),0),
             textChars:pages.reduce((a,x)=>a+Number(x.textChars||0),0),
             heads:[...new Set(pages.flatMap(x=>String(x.head||'').split(',')).filter(Boolean))],
@@ -237,7 +239,7 @@
     if(r.source!=='DELIVERY_LIST')return '';
     if(r.previewError)return `<br><small>事前集計エラー: ${esc(r.previewError)}</small>`;
     const d=r.previewDiagnostic;
-    const diag=d?`<details style="margin-top:6px"><summary>PDF解析診断（先頭1ファイル）</summary><div style="margin-top:6px;white-space:normal;word-break:break-all">ファイル: ${esc(d.file)}<br>ページ診断: ${fmt(d.pages)} / text items: ${fmt(d.items)} / 取得文字数: ${fmt(d.textChars)}<br>engine: ${esc(d.engine||'—')} / source: ${esc(d.source||'—')}<br>検出ヘッド: ${esc((d.heads||[]).join(', ')||'なし')} / 原票候補: ${fmt(d.slipCount)}<br>数字行サンプル: ${esc((d.digits||[]).join(' | ')||'なし')}<br>便・原票候補行:<br>${esc((d.evidence||[]).map(v=>`p${v.page} L${v.line}: ${v.text}`).join('\n')||'なし').replace(/\n/g,'<br>')}<br>文字列サンプル: ${esc(d.sample||'なし')}</div></details>`:'';
+    const diag=d?`<details style="margin-top:6px"><summary>PDF解析診断（先頭1ファイル）</summary><div style="margin-top:6px;white-space:normal;word-break:break-all">ファイル: ${esc(d.file)}<br>ページ診断: ${fmt(d.pages)} / text items: ${fmt(d.items)} / 取得文字数: ${fmt(d.textChars)}<br>engine: ${esc(d.engine||'—')} / source: ${esc(d.source||'—')}<br>検出ヘッド: ${esc((d.heads||[]).join(', ')||'なし')} / 原票候補: ${fmt(d.slipCount)}<br>パーサー戻り値: ${esc((d.parsedRoutes||[]).map(x=>`${x.date}/${x.head}=${x.slips}件`).join(' | ')||'なし')}<br>ページ別確定: ${esc((d.pageParsed||[]).map(x=>`p${x.page}:${x.date}/${x.head||'未検出'} ${x.routes}便 ${x.slips}件`).join(' | ')||'なし')}<br>数字行サンプル: ${esc((d.digits||[]).join(' | ')||'なし')}<br>便・原票候補行:<br>${esc((d.evidence||[]).map(v=>`p${v.page} L${v.line}: ${v.text}`).join('\n')||'なし').replace(/\n/g,'<br>')}<br>文字列サンプル: ${esc(d.sample||'なし')}</div></details>`:'';
     return `<br><small>${fmt(r.previewFileCount||0)}ファイル / 解析便数 ${fmt(r.previewRouteCount||0)}便 / 原票数 ${fmt(r.previewSlipCount||0)}件</small>${diag}`;
   }
 
