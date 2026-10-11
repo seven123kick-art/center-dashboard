@@ -21,6 +21,7 @@ jobs:
           node --check src/field/route_analysis.js
           node --check src/core/workers.js
           node --check src/modules/data_import_hub.js
+          node --check tests/worker-master-browser-smoke.cjs
   browser-smoke:
     runs-on: ubuntu-latest
     steps:
