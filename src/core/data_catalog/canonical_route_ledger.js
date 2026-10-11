@@ -181,6 +181,15 @@
     const fieldRoutesByDateSlip=new Map();
     const centerSlipIdByNo=new Map();
     rows.forEach(row=>{
+      if(!centerWorkerNames.has(clean(row.worker)))return;
+      const ids=new Map();
+      for(const id of row.slipIds||[]){
+        const no=slipNoById.get(id);
+        if(no)ids.set(no,id);
+      }
+      centerSlipIdByNo.set(row.routeId,ids);
+    });
+    rows.forEach(row=>{
       if(!clean(row.worker)||centerWorkerNames.has(clean(row.worker)))return;
       for(const id of row.slipIds||[]){
         const key=row.date+'|'+id;
