@@ -41,6 +41,7 @@ const { chromium } = require('playwright');
   await page.waitForFunction(()=>document.querySelector('#route-ym-select')?.value==='202606');
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ROUTE'));
   const beforeMoney=await page.locator('#route-detail-modal').innerText();
+  const beforeKpis=await page.locator('#route-detail-modal .route-detail-kpis').innerText();
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.closeDetail());
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.registerRouteWorker('SMOKE-ROUTE'));
   if(await page.locator('#worker-master-table tr[data-worker-row] .wm-name').last().inputValue()!=='SMOKE WORKER')
@@ -63,6 +64,8 @@ const { chromium } = require('playwright');
   await page.waitForFunction(()=>document.querySelector('#route-ym-select')?.value==='202606');
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ROUTE'));
   const diagnostic=await page.locator('#route-detail-modal').innerText();
+  const afterKpis=await page.locator('#route-detail-modal .route-detail-kpis').innerText();
+  if(afterKpis!==beforeKpis) throw Error('Route financial KPIs changed after worker registration: '+JSON.stringify({beforeKpis,afterKpis}));
   for(const amount of ['12,500','7,400']){
     if(!beforeMoney.includes(amount)||!diagnostic.includes(amount))
       throw Error('Financial amount changed or disappeared after worker registration: '+amount);
