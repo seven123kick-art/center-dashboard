@@ -685,6 +685,18 @@
     if(cards) cards.style.display=viewMode==='card'?'grid':'none';
   }
 
+  function openDiagnosticRoute(date, headNumber){
+    const matches=currentRows.filter(r=>String(r.date||'')===String(date||'')&&String(r.headNumber||'')===String(headNumber||''));
+    if(matches.length===1){openDetail(matches[0].routeId);return;}
+    window.UI?.toast?.(matches.length?'同じ日付・ヘッドの便が複数あります。一覧から対象便を選択してください。':'該当便が現在の一覧にありません。絞り込み条件を解除して確認してください。','error');
+  }
+
+  function diagnosticRouteButton(x, suffix){
+    const date=encodeURIComponent(String(x.date||'')).replace(/'/g,'%27');
+    const head=encodeURIComponent(String(x.headNumber||'')).replace(/'/g,'%27');
+    return `<button type="button" class="btn btn-ghost" style="display:block;text-align:left;white-space:normal;margin:3px 0;padding:5px 8px;height:auto" onclick="ROUTE_ANALYSIS_UI.openDiagnosticRoute(decodeURIComponent('${date}'),decodeURIComponent('${head}'))">${esc(x.date)} / ヘッド ${esc(x.headNumber)} / ${esc(x.status)}${suffix||''}　<span style="text-decoration:underline">便詳細を見る</span></button>`;
+  }
+
   function openDetail(routeId){
     const r=currentRows.find(x=>x.routeId===routeId);
     const root=document.getElementById('route-detail-modal');
@@ -919,11 +931,11 @@
       else notices.push(`<div class="msg msg-info">完全連動 <strong>${fmt(diag.fullyLinkedRoutes||0)}便</strong>　配達ヘッド ${fmt(diag.headLinkedRoutes||0)}便　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`);
       if((diag.unmatchedSalesDetails||[]).length) {
         const items=diag.unmatchedSalesDetails;
-        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>売上未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>`${esc(x.date)} / ヘッド ${esc(x.headNumber)} / ${esc(x.status)} / 原票 ${(x.slipNos||[]).map(esc).join('、')||'取得なし'}`).join('<br>')}</div></details>`);
+        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>売上未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>diagnosticRouteButton(x,` / 原票 ${(x.slipNos||[]).map(esc).join('、')||'取得なし'}`)).join('')}</div></details>`);
       }
       if((diag.unmatchedPaymentDetails||[]).length) {
         const items=diag.unmatchedPaymentDetails;
-        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>傭車料未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>`${esc(x.date)} / ヘッド ${esc(x.headNumber)} / ${esc(x.status)}`).join('<br>')}</div></details>`);
+        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>傭車料未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>diagnosticRouteButton(x,'')).join('')}</div></details>`);
       }
       if((diag.unregisteredWorkers||[]).length) {
         const n = diag.unregisteredWorkers.length;
