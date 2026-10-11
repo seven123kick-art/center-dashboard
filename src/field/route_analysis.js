@@ -839,6 +839,7 @@
 
     const totalCount=rows.reduce((s,r)=>s+r.count,0);
     const confirmedRows=rows.filter(isProfitConfirmed);
+    const unconfirmedSalesCount=rows.length-confirmedRows.length;
     const totalSales=confirmedRows.reduce((s,r)=>s+(Number(r.sales)||0),0);
     // D4-35: 未確定の傭車料（NO_RECORD/SOURCE_NOT_REGISTERED/UNKNOWN_AMOUNT）を
     // 0円扱いで合算しない。金額が確定している便（KNOWN/ZERO_PAYMENT、または
@@ -851,9 +852,9 @@
     const kpi=document.getElementById('route-kpi');
     if(kpi) kpi.innerHTML=`
       <div class="kpi-card"><div class="kpi-label">対象便数</div><div class="kpi-value">${fmt(rows.length)}<small style="font-size:11px;margin-left:4px">便</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">配送 ${fmt(totalCount)}件</div></div>
-      <div class="kpi-card"><div class="kpi-label">売上</div><div class="kpi-value">${confirmedRows.length?`${fmt(totalSales)}<small style="font-size:11px;margin-left:4px">円</small>`:'未連動'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">完全連動 ${fmt(confirmedRows.length)}便${confirmedRows.length&&confirmedCount?` / 1件平均 ${fmt(totalSales/confirmedCount)}円`:''}</div></div>
-      <div class="kpi-card"><div class="kpi-label">傭車支払</div><div class="kpi-value">${fmt(totalPay)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">金額確定 ${fmt(paymentConfirmedRows.length)}便の支払合計${unconfirmedPaymentCount?`（未確定 ${fmt(unconfirmedPaymentCount)}便を除く）`:''}</div></div>
-      <div class="kpi-card"><div class="kpi-label">一次利益</div><div class="kpi-value ${confirmedRows.length?(confirmedMargin>=0?'profit-positive':'profit-negative'):''}">${confirmedRows.length?`${fmt(confirmedMargin)}<small style="font-size:11px;margin-left:4px">円</small>`:'未確定'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">${confirmedRows.length?`完全連動 ${fmt(confirmedRows.length)}便のみの集計${totalSales?`（利益率 ${(confirmedMargin/totalSales*100).toFixed(1)}%）`:''}`:'売上・傭車料が連動した便が確定後に表示'}</div></div>`;
+      <div class="kpi-card"><div class="kpi-label">連動確定売上（部分集計）</div><div class="kpi-value">${confirmedRows.length?`${fmt(totalSales)}<small style="font-size:11px;margin-left:4px">円</small>`:'未連動'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">完全連動 ${fmt(confirmedRows.length)}便${unconfirmedSalesCount?` / 未確定 ${fmt(unconfirmedSalesCount)}便は含まない`:''}${confirmedRows.length&&confirmedCount?` / 1件平均 ${fmt(totalSales/confirmedCount)}円`:''}</div></div>
+      <div class="kpi-card"><div class="kpi-label">金額確認済み傭車支払（部分集計）</div><div class="kpi-value">${fmt(totalPay)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">金額確定 ${fmt(paymentConfirmedRows.length)}便の支払合計${unconfirmedPaymentCount?`（未確定 ${fmt(unconfirmedPaymentCount)}便を除く）`:''}</div></div>
+      <div class="kpi-card"><div class="kpi-label">連動確定便の一次利益（部分集計）</div><div class="kpi-value ${confirmedRows.length?(confirmedMargin>=0?'profit-positive':'profit-negative'):''}">${confirmedRows.length?`${fmt(confirmedMargin)}<small style="font-size:11px;margin-left:4px">円</small>`:'未確定'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">${confirmedRows.length?`完全連動 ${fmt(confirmedRows.length)}便のみの集計${totalSales?`（利益率 ${(confirmedMargin/totalSales*100).toFixed(1)}%）`:''}`:'売上・傭車料が連動した便が確定後に表示'}</div></div>`;
 
     const diagnostic=document.getElementById('route-diagnostic');
     if(diagnostic && diag){
