@@ -19,5 +19,5 @@ const audit=result.diagnostics.allocationAudit[0];
 assert.equal(audit.assignedCount,1);
 assert.equal(audit.unassignedCount,1);
 assert.equal(audit.slipAudit.find(x=>x.slipNo==='100').shipperCode,'D');
-assert.equal(result.rows.find(x=>x.routeId==='center').count,2);
+assert.equal(result.routes.find(x=>x.routeId==='center').count,2);
 console.log('Canonical allocation audit passed');
