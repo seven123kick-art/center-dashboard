@@ -636,11 +636,19 @@
   function resolveWorkerMaster(workerName, date=''){
     const name=String(workerName||'');
     if(!name) return null;
+    const day=String(date||'').replace(/\\D/g,'').slice(0,8);
+    const validOnDate=r=>{
+      if(!r) return false;
+      if(!day) return true;
+      const from=String(r.validFrom||'').replace(/\\D/g,'').slice(0,8);
+      const to=String(r.validTo||'').replace(/\\D/g,'').slice(0,8);
+      return (!from||from<=day)&&(!to||day<=to);
+    };
     const direct=window.WORKERS?.find ? WORKERS.find(name,date) : null;
-    if(direct) return direct;
+    if(direct&&validOnDate(direct)) return direct;
     const key=norm(name);
     if(!key || !window.WORKERS?.all) return null;
-    return WORKERS.all().find(r=>norm(r?.workerName)===key) || null;
+    return WORKERS.all().find(r=>norm(r?.workerName)===key&&validOnDate(r)) || null;
   }
 
   function enrichRouteRows(rows){
