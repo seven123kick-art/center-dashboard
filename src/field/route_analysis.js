@@ -140,8 +140,11 @@
     };
     const dateLine=lines.find(v=>/配達日/.test(v))||'';
     const headLine=lines.find(v=>/ヘッド番号/.test(v))||dateLine;
-    const dateMatch=dateLine.match(/配達日\s*[:：]?\s*(20\d{2})[\/\-年]\s*(\d{1,2})[\/\-月]\s*(\d{1,2})日?/);
-    const headMatch=headLine.match(/ヘッド番号\s*[:：]?\s*(38\d{8})/);
+    // 視覚行はPDFの列結合で空白が失われる場合がある。ラベルと値を
+    // ページ全体のテキストでも照合し、ヘッダーの値だけを採用する。
+    const headerText=[dateLine,headLine,String(text||'')].join(' ').normalize('NFKC');
+    const dateMatch=headerText.match(/配達日\s*[:：]?\s*(20\d{2})[\\/\-年]\s*(\d{1,2})[\\/\-月]\s*(\d{1,2})日?/);
+    const headMatch=headerText.match(/ヘッド番号\s*[:：]?\s*(38\d{8})/);
     let date='';
     if(dateMatch){
       const ymd=`${dateMatch[1]}${String(dateMatch[2]).padStart(2,'0')}${String(dateMatch[3]).padStart(2,'0')}`;
@@ -153,7 +156,6 @@
       routes.set(key,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'delivery-header-labels'}});
     }
 
-    // ヘッダーが特殊配置のPDFだけ、同一視覚行の厳格アンカーへ退避する。
     if(!routes.size){
       for(let idx=0;idx<lines.length;idx++){
         const dense=String(lines[idx]||'').normalize('NFKC').replace(/\D/g,'');
@@ -165,17 +167,14 @@
       }
     }
 
-    // 明細行の原票番号を列境界から抽出する。行全体の数字を連結すると
-    // 順番・注文番号・原票番号が一体化し、12桁の境界を失う。
-    // PDF上の各視覚行で、注文番号に続く独立した12桁を優先する。
+    // 明細の先頭は順番(10,20,...), 荷主名, 荷主伝票番号, 原票番号。
+    // PDF.jsで空白が落ちても、荷主伝票番号の直後にある原票12桁を
+    // 数字境界で取り出す。リサイクル券番号・小計・ヘッダーは対象外。
     const slips=[...new Set(lines.flatMap(line=>{
       const normalized=String(line||'').normalize('NFKC');
-      // 明細は「順番 店名 注文番号 原票番号 時間帯」の順。
-      // 12桁の原票番号だけを抽出し、ページ番号や注文番号を混ぜない。
-      const matches=[];
-      const re=/(?:^|\s)([59]\d{11})(?=\s|$)/g;
-      for(const m of normalized.matchAll(re))matches.push(m[1]);
-      return matches;
+      if(!/^\s*\d{1,4}\s+/.test(normalized))return [];
+      const found=[...normalized.matchAll(/(?:^|\D)([59]\d{11})(?!\d)/g)].map(m=>m[1]);
+      return found.slice(0,1);
     }))];
     for(const r of routes.values())r.slips=slips;
 
