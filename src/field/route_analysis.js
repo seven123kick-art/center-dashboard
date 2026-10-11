@@ -570,6 +570,7 @@
 
   let viewMode = 'table';
   let currentRows = [];
+  let currentAllRows = [];
 
   function statusClass(status){
     return status === '完全連動' ? 'ok' : 'warn';
@@ -686,7 +687,7 @@
   }
 
   function openDiagnosticRoute(date, headNumber){
-    const matches=currentRows.filter(r=>String(r.date||'')===String(date||'')&&String(r.headNumber||'')===String(headNumber||''));
+    const matches=currentAllRows.filter(r=>String(r.date||'')===String(date||'')&&String(r.headNumber||'')===String(headNumber||''));
     if(matches.length===1){openDetail(matches[0].routeId);return;}
     window.UI?.toast?.(matches.length?'同じ日付・ヘッドの便が複数あります。一覧から対象便を選択してください。':'該当便が現在の一覧にありません。絞り込み条件を解除して確認してください。','error');
   }
@@ -896,6 +897,7 @@
     const type=typeSel?.value||'';
     const q=String(document.getElementById('route-search')?.value||'').trim().toLowerCase();
     const rows=allRows.filter(r=>(!company||r.companyName===company)&&(!type||r.operationType===type)&&(!q||`${r.worker} ${r.headNumber} ${r.companyName}`.toLowerCase().includes(q)));
+    currentAllRows=allRows;
     currentRows=rows;
 
     const totalCount=rows.reduce((s,r)=>s+r.count,0);
