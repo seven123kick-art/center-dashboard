@@ -576,6 +576,7 @@
   }
 
   function isProfitConfirmed(r){
+    if(r?.paymentStatus !== undefined && !['KNOWN','ZERO_PAYMENT'].includes(r.paymentStatus)) return false;
     return r?.profitabilityConfirmed === true || r?.linkLevel === '完全連動';
   }
 
