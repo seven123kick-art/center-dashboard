@@ -173,6 +173,24 @@ const { chromium } = require('playwright');
     throw Error('Missing payment source must not be treated as zero or confirmed profit');
   console.log('PASS: missing subcontractor payment source remains unconfirmed');
 
+  // Contradictory flags must fail closed: profit cannot be confirmed without payment evidence.
+  await page.evaluate(()=>{
+    window.CANONICAL_ROUTE_LEDGER.buildMonth=async()=>({routes:[{
+      routeId:'SMOKE-CONFLICT',date:'2026-06-01',headNumber:'SMOKE-CONFLICT',
+      worker:'SMOKE WORKER',workerRegistered:true,companyName:'',
+      operationType:'',count:1,sales:12500,payment:0,margin:12500,
+      profitabilityConfirmed:true,paymentStatus:'SOURCE_NOT_REGISTERED',
+      slipRows:[],linkLevel:'完全連動'
+    }]});
+  });
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-CONFLICT'));
+  const conflict=await page.locator('#route-detail-modal').innerText();
+  if(!conflict.includes('売上・利益：未確定・要照合')||!conflict.includes('― / ―'))
+    throw Error('Conflicting profit flag must not override unresolved payment source');
+  console.log('PASS: unresolved payment overrides contradictory profit confirmation');
+
+
 
 
 
