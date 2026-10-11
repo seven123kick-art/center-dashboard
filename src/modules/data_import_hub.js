@@ -754,7 +754,7 @@
         '<details style="margin-top:8px"><summary>月初以外の保存レコードを確認（先頭35行・読み取り専用）</summary>'+
         '<div style="overflow-x:auto"><table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr><th>配達日</th><th>ヘッド番号</th><th>原票番号</th><th>元ファイル</th></tr></thead><tbody>'+
         previewRows.map(r=>'<tr><td>'+esc(r.delivery_date)+'</td><td>'+esc(r.head_no)+'</td><td>'+esc(r.slip_no||'—')+'</td><td>'+esc(r.source_file||r.file_name||'—')+'</td></tr>').join('')+
-        '</tbody></table></div></details>'+
+        '</tbody></table></div><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.6;user-select:text">'+esc(previewRows.map(r=>[r.delivery_date,r.head_no,r.slip_no||'—',r.source_file||r.file_name||'—'].join(' / ')).join('\\n'))+'</pre></details>'+
         '<small>保存済みデータの読み取りのみ。登録・変更は行いません。1便1件の偏りは異常の確定ではありません。</small>';
     }catch(e){panel.textContent='照合できません：'+(e?.message||String(e));}
   }
