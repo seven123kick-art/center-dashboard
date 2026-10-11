@@ -179,7 +179,7 @@
     const allocationAudit=[];
     const centerWorkerNames=new Set(['北さいたまセンター','北埼玉センター']);
     rows.forEach(row=>{
-      if(!['北さいたまセンター','北埼玉センター'].includes(clean(row.worker)))return;
+      if(!centerWorkerNames.has(clean(row.worker)))return;
       const assigned=[];
       const unassigned=[];
       const slipAudit=[];
