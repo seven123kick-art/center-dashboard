@@ -100,6 +100,18 @@ const { chromium } = require('playwright');
     throw Error('Expired worker incorrectly matched to June route');
   console.log('PASS: expired worker registration rejected');
 
+  // Boundary date: a worker whose registration starts on the delivery day is valid.
+  await page.evaluate(()=>{
+    window.__smokeWorkers=window.__smokeWorkers.map(r=>r.workerName==='SMOKE WORKER'?{...r,validFrom:'2026-06-01',validTo:'2026-06-01'}:r);
+  });
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ROUTE'));
+  const boundaryDiagnostic=await page.locator('#route-detail-modal').innerText();
+  if(!boundaryDiagnostic.includes('作業者マスタ：登録済み'))
+    throw Error('Worker registration boundaries should be inclusive');
+  console.log('PASS: worker validity boundary dates inclusive');
+
+
 
 
   await page.evaluate(()=>{
