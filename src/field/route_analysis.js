@@ -279,11 +279,16 @@
     // v7: 旧4.4系で文字レイヤーが空になる帳票は、最新安定版PDF.jsへ自動フォールバック。
     // 抽出ルールや保存形式は変えず、PDF解釈エンジンだけを二段構えにする。
     const attempts=[];
+    let firstRoutes=[];
     try{
       const lib=await pdfjs();
       const r=await parsePdfWithEngine(file,lib,'pdfjs-4.4.168','https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/');
+      firstRoutes=r;
       attempts.push(...(r._diagnostics||[]));
-      if(r.length) return r;
+      // A non-empty route array is not proof of a valid extraction: older PDF.js can
+      // return one header-only route per file while dropping all detail slips.
+      // Retry with the second engine whenever detail extraction is empty.
+      if(r.length && r.some(route=>(route.slips||[]).length>0)) return r;
     }catch(e){
       attempts.push({page:0,head:'',date:'',items:0,fallbackChars:0,engine:'pdfjs-4.4.168',source:`engine-error:${e?.name||'Error'}`});
     }
@@ -291,10 +296,15 @@
       const lib=await latestPdfjs();
       const r=await parsePdfWithEngine(file,lib,'pdfjs-6.2.108','https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/');
       r._diagnostics=[...attempts,...(r._diagnostics||[])];
+      if(firstRoutes.length && firstRoutes.reduce((n,x)=>n+(x.slips||[]).length,0)>r.reduce((n,x)=>n+(x.slips||[]).length,0)){
+        firstRoutes._diagnostics=r._diagnostics;
+        return firstRoutes;
+      }
       return r;
     }catch(e){
       const routes=[];
       routes._diagnostics=[...attempts,{page:0,head:'',date:'',items:0,fallbackChars:0,engine:'pdfjs-6.2.108',source:`engine-error:${e?.name||'Error'}`}];
+      if(firstRoutes.length){firstRoutes._diagnostics=routes._diagnostics;return firstRoutes;}
       return routes;
     }
   }
