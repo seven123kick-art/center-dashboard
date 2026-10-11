@@ -179,7 +179,6 @@
     const allocationAudit=[];
     const centerWorkerNames=new Set(['北さいたまセンター','北埼玉センター']);
     const fieldRoutesByDateSlip=new Map();
-    const slipIdByNo=new Map(slips.map(x=>[clean(x.slip_no),x.slip_id]));
     rows.forEach(row=>{
       if(!clean(row.worker)||centerWorkerNames.has(clean(row.worker)))return;
       for(const id of row.slipIds||[]){
