@@ -172,8 +172,13 @@
     // 数字境界で取り出す。リサイクル券番号・小計・ヘッダーは対象外。
     const slips=[...new Set(lines.flatMap(line=>{
       const normalized=String(line||'').normalize('NFKC');
-      if(!/^\s*\d{1,4}\s+/.test(normalized))return [];
-      const found=[...normalized.matchAll(/(?:^|\D)([59]\d{11})(?!\d)/g)].map(m=>m[1]);
+      // 明細行は「行番号 + 荷主名 + 荷主伝票番号 + 原票番号」。
+      // PDFの文字分割により空白が消える場合もあるので、原票の直前の
+      // 荷主伝票番号（7～15桁）を確認し、12桁の原票を抽出する。
+      // 単独の数字行や帳票ヘッダーから原票を推測しない。
+      if(!/^\\s*\\d{1,3}(?:\\s+|(?=[^\\d]))/.test(normalized))return [];
+      const numbers=[...normalized.matchAll(/\\d{7,15}/g)].map(m=>m[0]);
+      const found=numbers.filter((n,i)=>i>0&&/^[59]\\d{11}$/.test(n));
       return found.slice(0,1);
     }))];
     for(const r of routes.values())r.slips=slips;
