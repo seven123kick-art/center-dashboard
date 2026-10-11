@@ -173,7 +173,7 @@
     // 荷主コードの確定までは自動除外せず、監査用の分類にとどめる。
     const deliveryHeadIndex=new Map();
     rows.forEach(row=>{
-      if(clean(row.worker)!=='北さいたまセンター')return;
+      if(!['北さいたまセンター','北埼玉センター'].includes(clean(row.worker)))return;
       for(const no of row.slips||[]){
         if(!deliveryHeadIndex.has(no))deliveryHeadIndex.set(no,[]);
         deliveryHeadIndex.get(no).push(row);
