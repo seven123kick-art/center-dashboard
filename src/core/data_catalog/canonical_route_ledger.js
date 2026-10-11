@@ -206,7 +206,7 @@
         const id=centerSlipIdByNo.get(row.routeId)?.get(no);
         const others=id?(fieldRoutesByDateSlip.get(JSON.stringify([row.date,id]))||[]).filter(x=>x.routeId!==row.routeId):[];
         if(others.length)assigned.push(no);else unassigned.push(no);
-        slipAudit.push({slipNo:no,shipperCode:shipperCodesBySlipNo.get(no)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))]});
+        slipAudit.push({slipNo:no,shipperCode:shipperCodesBySlipNo.get(id)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))]});
       }
       if(assigned.length||unassigned.length){
         row.allocationAudit={status:'REVIEW_REQUIRED',slipAudit,assignedSlipNos:assigned,unassignedSlipNos:unassigned,shipperCodes:[...new Set(row.slips.map(no=>shipperCodesBySlipNo.get(no)).filter(Boolean))],unknownShipperCount:row.slips.filter(no=>!shipperCodesBySlipNo.get(no)).length};
