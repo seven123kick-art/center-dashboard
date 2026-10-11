@@ -440,7 +440,7 @@
       const savedMonths=[...new Set(results.filter(x=>x.status==='保存済').map(x=>x.item?.periods?.[0]).filter(Boolean))].sort();
       const skippedMonths=[...new Set(results.filter(x=>x.status==='スキップ').map(x=>x.item?.periods?.[0]).filter(Boolean))].sort();
       const monthText=a=>a.map(x=>`${x.slice(0,4)}/${x.slice(4)}`).join('、');
-      if(failed)finishImportProgress(false,`一括取込：保存 ${saved}月SOURCE / 既存CURRENTスキップ ${skipped}件 / 失敗 ${failed}件。詳細は画面内の登録結果を確認してください。`);
+      if(failed){const failureDetails=results.filter(x=>x.status==='失敗').slice(0,3).map(x=>`${x.item?.source||'SOURCE'} ${x.item?.periods?.[0]||''}: ${x.detail}`).join(' / ');finishImportProgress(false,`一括取込：保存 ${saved}月SOURCE / 既存CURRENTスキップ ${skipped}件 / 失敗 ${failed}件。原因: ${failureDetails}`);}
       else finishImportProgress(true,`一括取込完了：保存 ${saved}月SOURCE${savedMonths.length?`（${monthText(savedMonths)}）`:''} / 既存CURRENTスキップ ${skipped}件${skippedMonths.length?`（${monthText(skippedMonths)}）`:''} / 失敗 0件`);
       await refresh();
     }catch(e){
