@@ -701,7 +701,7 @@
             <div class="route-detail-kpi"><span>配送件数</span><strong>${fmt(r.count)}件</strong></div>
             <div class="route-detail-kpi"><span>売上</span><strong>${salesText(r)}</strong></div>
             <div class="route-detail-kpi"><span>傭車支払</span><strong>${paymentText(r)}</strong></div>
-            <div class="route-detail-kpi"><span>一次利益 / 利益率</span><strong class="${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${isProfitConfirmed(r)?`${fmt(r.margin)}円 / ${rate.toFixed(1)}%`:'― / ―'}</strong></div>
+            <div class="route-detail-kpi"><span>一次利益 / 利益率</span><strong class="${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${isProfitConfirmed(r)?`${fmt(r.margin)}円 / ${rate===null?'―':rate.toFixed(1)+'%'}`:'― / ―'}</strong></div>
           </div>
           <div class="saas-content-card" style="box-shadow:none;padding:16px;margin-bottom:12px">
             <strong>連動・登録状況</strong>
