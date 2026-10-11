@@ -172,7 +172,9 @@
     // 原票の同日・別ヘッド重複だけを検出する（他荷主や傭車料には適用しない）。
     // 荷主コードの確定までは自動除外せず、監査用の分類にとどめる。
     const shipperCodesBySlipNo=new Map();
-    slips.forEach(x=>{const no=clean(x.slip_no),code=clean(x.shipper_source_code);if(no&&!shipperCodesBySlipNo.has(no))shipperCodesBySlipNo.set(no,code);else if(no&&code&&shipperCodesBySlipNo.get(no)!==code)shipperCodesBySlipNo.set(no,'');});
+    const ambiguousShipperSlips=new Set();
+    slips.forEach(x=>{const no=clean(x.slip_no),code=clean(x.shipper_source_code);if(!no)return;if(!shipperCodesBySlipNo.has(no)){shipperCodesBySlipNo.set(no,code);return;}const prior=shipperCodesBySlipNo.get(no);if(prior&&code&&prior!==code)ambiguousShipperSlips.add(no);if(!prior&&code)shipperCodesBySlipNo.set(no,code);});
+    ambiguousShipperSlips.forEach(no=>shipperCodesBySlipNo.set(no,''));
     const deliveryHeadIndex=new Map();
     rows.forEach(row=>{
       if(!['北さいたまセンター','北埼玉センター'].includes(clean(row.worker)))return;
