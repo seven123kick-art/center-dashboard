@@ -138,40 +138,51 @@
         dt.getUTCFullYear()!==yyyy||dt.getUTCMonth()!==mm-1||dt.getUTCDate()!==dd)return '';
       return `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
     };
+    // 文字アイテムの順序と視覚行の両方を利用し、印刷日時を配達日と誤認しない。
     const headerLines=lines.slice(0,16).map(v=>String(v||'').normalize('NFKC'));
     const headerText=headerLines.join(' ');
-    const dateMatch=headerText.match(/配達日\s*[:：]?\s*(20\d{2})[\/\-年]\s*(\d{1,2})[\/\-月]\s*(\d{1,2})日?/);
-    const headMatch=headerText.match(/ヘッド番号\s*[:：]?\s*(38\d{8})/);
-    let date=dateMatch?validYmd(dateMatch[1]+dateMatch[2].padStart(2,'0')+dateMatch[3].padStart(2,'0')):'';
-    let head=headMatch?.[1]||'';
-    // PDF内部でヘッダーのラベルと値が逆順でも、視覚行の数字から復元する。
-    for(const line of headerLines){
-      const digits=line.replace(/\D/g,'');
-      const pair=digits.match(/(20\d{6})(38\d{8})/);
-      if(pair){
-        const verified=validYmd(pair[1]);
-        if(verified){date=verified;head=pair[2];break;}
+    const rawHeader=String(text||'').normalize('NFKC');
+    const parseDate=source=>{
+      const m=source.match(/配達日\s*[:：]?\s*(20\d{2})\s*[\/\-年]\s*(\d{1,2})\s*[\/\-月]\s*(\d{1,2})日?/);
+      return m?validYmd(m[1]+m[2].padStart(2,'0')+m[3].padStart(2,'0')):'';
+    };
+    let date=parseDate(headerText)||parseDate(rawHeader);
+    let head=(headerText.match(/ヘッド番号\s*[:：]?\s*(38\d{8})/)||rawHeader.match(/ヘッド番号\s*[:：]?\s*(38\d{8})/))?.[1]||'';
+    // 実帳票では「202606013812440015」と連続した数字列として取得される。
+    // 印刷日時ではなく、妥当な配達日8桁＋ヘッド10桁の組を優先する。
+    const headerDigits=headerLines.map(line=>line.replace(/\D/g,''));
+    const candidates=[...headerDigits,rawHeader.replace(/\D/g,'')];
+    for(const digits of candidates){
+      for(const m of digits.matchAll(/(20\d{6})(38\d{8})/g)){
+        const verified=validYmd(m[1]);
+        if(verified){date=verified;head=m[2];break;}
       }
+      if(date&&head)break;
     }
+    // ラベルと値が別アイテムでも、各ページのヘッダー内から検出する。
+    if(!head)head=(headerText.match(/38\d{8}/)||rawHeader.match(/38\d{8}/))?.[0]||'';
     if(!date){
-      const candidate=headerText.match(/20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}/);
-      if(candidate){const m=candidate[0].match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);if(m)date=validYmd(m[1]+m[2].padStart(2,'0')+m[3].padStart(2,'0'));}
-    }
-    if(!head){
-      const candidates=headerLines.flatMap(line=>[...line.matchAll(/38\d{8}/g)].map(m=>m[0]));
-      head=candidates[0]||'';
+      const labelIndex=headerText.indexOf('配達日');
+      const near=labelIndex>=0?headerText.slice(labelIndex,labelIndex+140):'';
+      const m=near.match(/20\d{6}/);
+      if(m)date=validYmd(m[0]);
     }
     if(date&&head){
-      routes.set(date+'|'+head,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'visual-header'}});
+      routes.set(date+'|'+head,{...base,date,headNumber:head,slips:[],_debug:{...(base._debug||{}),anchor:'page-header'}});
     }
-    // 明細行から原票番号を取得。荷主伝票番号は桁数が異なるため固定しない。
-    const slips=[...new Set(lines.flatMap(line=>{
-      const normalized=String(line||'').normalize('NFKC');
-      if(!/^\s*\d{1,3}\s+\S/.test(normalized))return [];
-      const match=normalized.match(/(?:^|\D)([59]\d{11})(?!\d)/);
-      return match?[match[1]]:[];
-    }))];
-    for(const r of routes.values())r.slips=slips;
+    // 伝票行は行番号（10,20,...）と原票番号12桁で判定する。
+    // 荷主側伝票番号は7～14桁など変動するため桁数で除外しない。
+    // 余白・PDF文字分割に対応し、行の最後に現れる原票番号を採用する。
+    const slips=[];
+    for(const line of lines){
+      const normalized=String(line||'').normalize('NFKC').trim();
+      if(!/^\d{1,4}\s+\S/.test(normalized))continue;
+      if(/^\d{1,4}\s+(?:小計|合計|件数)/.test(normalized))continue;
+      const beforeStatus=normalized.split(/(?:\s(?:OK|NG|留守電|伝票)\b|伝票[:：])/)[0];
+      const matches=[...beforeStatus.matchAll(/(?:^|[^\d])([59]\d{11})(?!\d)/g)];
+      if(matches.length)slips.push(matches[matches.length-1][1]);
+    }
+    for(const r of routes.values())r.slips=[...new Set(slips)];
 
     if(routes.size)return [...routes.values()];
     // ヘッダー未確定のページを推測で1便として登録しない。
