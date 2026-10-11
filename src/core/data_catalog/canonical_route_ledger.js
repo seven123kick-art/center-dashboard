@@ -185,6 +185,7 @@
       if(!['北さいたまセンター','北埼玉センター'].includes(clean(row.worker)))return;
       const assigned=[];
       const unassigned=[];
+      const slipAudit=[];
       for(const no of row.slips||[]){
         const others=rows.filter(x=>x.routeId!==row.routeId&&x.date===row.date&&(x.slips||[]).includes(no));
         if(others.length)assigned.push(no);else unassigned.push(no);
