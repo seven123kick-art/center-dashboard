@@ -130,6 +130,23 @@ const { chromium } = require('playwright');
     throw Error('Explicitly confirmed profit must remain visible with correct margin rate');
   console.log('PASS: confirmed profit and margin rate displayed only when confirmed');
 
+  // A confirmed zero-sales route must open without a null margin-rate crash.
+  await page.evaluate(()=>{
+    window.CANONICAL_ROUTE_LEDGER.buildMonth=async()=>({routes:[{
+      routeId:'SMOKE-ZERO-SALES',date:'2026-06-01',headNumber:'SMOKE-ZERO',
+      worker:'SMOKE WORKER',workerRegistered:true,companyName:'',
+      operationType:'',count:1,sales:0,payment:0,margin:0,
+      profitabilityConfirmed:true,paymentStatus:'ZERO_PAYMENT',slipRows:[],linkLevel:'未照合'
+    }]});
+  });
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ZERO-SALES'));
+  const zeroSalesKpis=await page.locator('#route-detail-modal .route-detail-kpis').innerText();
+  if(!zeroSalesKpis.includes('0円 / ―'))
+    throw Error('Zero-sales route should show undefined margin rate, not crash');
+  console.log('PASS: confirmed zero-sales route detail renders safely');
+
+
 
 
 
