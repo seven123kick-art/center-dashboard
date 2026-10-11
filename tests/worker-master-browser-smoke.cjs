@@ -201,7 +201,7 @@ const { chromium } = require('playwright');
     }]});
   });
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
-  await page.locator('#route-tbody tr').first().click();
+  await page.locator('#route-tbody tr').first().evaluate(el=>el.click());
   const quoteDetail=await page.locator('#route-detail-modal').innerText();
   if(!quoteDetail.includes('SMOKE-QUOTE'))
     throw Error('Quoted route identifier failed to open from table');
