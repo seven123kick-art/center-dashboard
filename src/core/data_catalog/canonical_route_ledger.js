@@ -182,7 +182,7 @@
     });
     const allocationAudit=[];
     rows.forEach(row=>{
-      if(clean(row.worker)!=='北さいたまセンター')return;
+      if(!['北さいたまセンター','北埼玉センター'].includes(clean(row.worker)))return;
       const assigned=[];
       const unassigned=[];
       for(const no of row.slips||[]){
