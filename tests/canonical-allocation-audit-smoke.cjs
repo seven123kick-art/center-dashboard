@@ -18,6 +18,8 @@ const result=win.CANONICAL_ROUTE_LEDGER._internal.build(snapshot,'202606');
 const audit=result.diagnostics.allocationAudit[0];
 assert.equal(audit.assignedCount,1);
 assert.equal(audit.unassignedCount,1);
+assert.equal(result.diagnostics.allocationAudit.length,2);
+assert.equal(result.diagnostics.allocationAudit.find(x=>x.headNumber==='H5').assignedCount,0);
 assert.equal(audit.slipAudit.find(x=>x.slipNo==='100').shipperCode,'D');
 assert.equal(result.routes.find(x=>x.routeId==='center').count,2);
 assert.equal(result.routes.find(x=>x.routeId==='center').sales,null);
