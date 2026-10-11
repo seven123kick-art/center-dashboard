@@ -165,11 +165,20 @@
       }
     }
 
-    // 原票は明細行の12桁原票番号。ヘッダー確定後はページ内の全明細をその便へ所属させる。
-    // 5始まりだけでなく、実帳票で確認できる9始まりも対象にする。
+    // 明細行の原票番号を列境界から抽出する。行全体の数字を連結すると
+    // 順番・注文番号・原票番号が一体化し、12桁の境界を失う。
+    // PDF上の各視覚行で、注文番号に続く独立した12桁を優先する。
     const slips=[...new Set(lines.flatMap(line=>{
-      const dense=String(line||'').normalize('NFKC').replace(/\D/g,'');
-      return dense.match(/[59]\d{11}/g)||[];
+      const normalized=String(line||'').normalize('NFKC');
+      const matches=[];
+      for(const m of normalized.matchAll(/(?:^|\\s)([59]\\d{11})(?=\\s|$)/g))matches.push(m[1]);
+      // フォント分割によって空白が混入する場合のみ、注文番号と原票番号の
+      // 2列が確認できる明細行から復元する。
+      if(!matches.length && /^\\s*\\d{1,3}\\s+/.test(normalized)){
+        const digits=normalized.match(/(?:^|\\s)([59](?:\\s*\\d){11})(?=\\s|$)/g)||[];
+        for(const v of digits){const n=v.replace(/\\D/g,'');if(n.length===12)matches.push(n);}
+      }
+      return matches;
     }))];
     for(const r of routes.values())r.slips=slips;
 
@@ -296,7 +305,10 @@
       const lib=await latestPdfjs();
       const r=await parsePdfWithEngine(file,lib,'pdfjs-6.2.108','https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/');
       r._diagnostics=[...attempts,...(r._diagnostics||[])];
-      if(firstRoutes.length && firstRoutes.reduce((n,x)=>n+(x.slips||[]).length,0)>r.reduce((n,x)=>n+(x.slips||[]).length,0)){
+      const quality=rows=>({routes:rows.length,slips:rows.reduce((n,x)=>n+(x.slips||[]).length,0)});
+      const firstQuality=quality(firstRoutes),retryQuality=quality(r);
+      if(firstRoutes.length && (firstQuality.slips>retryQuality.slips ||
+        (firstQuality.slips===retryQuality.slips && firstQuality.routes>retryQuality.routes))){
         firstRoutes._diagnostics=r._diagnostics;
         return firstRoutes;
       }
