@@ -154,6 +154,26 @@ const { chromium } = require('playwright');
     throw Error('Zero-sales route should show undefined margin rate, not crash');
   console.log('PASS: confirmed zero-sales route detail renders safely');
 
+  // Missing subcontractor source must remain explicitly unconfirmed, not a numeric zero.
+  await page.evaluate(()=>{
+    window.CANONICAL_ROUTE_LEDGER.buildMonth=async()=>({routes:[{
+      routeId:'SMOKE-NO-PAYMENT-SOURCE',date:'2026-06-01',headNumber:'SMOKE-NO-SOURCE',
+      worker:'SMOKE WORKER',workerRegistered:true,companyName:'',
+      operationType:'',count:1,sales:12500,payment:0,margin:12500,
+      profitabilityConfirmed:false,paymentStatus:'SOURCE_NOT_REGISTERED',
+      slipRows:[],linkLevel:'未照合'
+    }]});
+  });
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-NO-PAYMENT-SOURCE'));
+  const noPaymentSource=await page.locator('#route-detail-modal').innerText();
+  if(!noPaymentSource.includes('傭車料SOURCE未登録')||
+     !noPaymentSource.includes('売上・利益：未確定・要照合')||
+     !noPaymentSource.includes('― / ―'))
+    throw Error('Missing payment source must not be treated as zero or confirmed profit');
+  console.log('PASS: missing subcontractor payment source remains unconfirmed');
+
+
 
 
 
