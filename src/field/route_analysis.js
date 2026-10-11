@@ -708,6 +708,7 @@
             </div>
             ${!r.workerRegistered?'<p style="font-size:12px;margin-top:8px">作業者名がある場合はマスタ管理で同名・所属会社・適用日を確認してください。名前が未取得の場合は元資料を確認してください。</p>':''}
           </div>
+            ${!r.workerRegistered&&r.worker?'<button class="btn btn-primary" type="button" onclick="ROUTE_ANALYSIS_UI.registerRouteWorker(&quot;'+esc(r.routeId)+'&quot;)">作業者マスタで登録・確認</button>':''}
           <div class="saas-content-card" style="box-shadow:none">
             <div class="saas-content-head"><div><strong>原票明細</strong><span>${fmt(slips.length)}件</span></div><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span></div>
             <div class="scroll-x"><table class="tbl saas-table"><thead><tr><th>原票番号</th><th>荷主</th><th>商品・カテゴリ</th><th>エリア</th><th class="r">売上</th><th>照合</th></tr></thead><tbody>
@@ -717,6 +718,22 @@
         </div>
       </section>
     </div>`;
+  }
+
+  function registerRouteWorker(routeId){
+    const r=currentRows.find(x=>x.routeId===routeId);
+    if(!r || !r.worker){window.UI?.toast?.('作業者名が未取得です。元資料を確認してください。','error');return;}
+    closeDetail();
+    window.DATA_MANAGEMENT_NAV?.go?.('worker-master');
+    window.WORKER_MASTER_UI?.showTab?.('worker');
+    const table=document.querySelector('#worker-master-table tbody');
+    if(!table){window.UI?.toast?.('マスタ管理画面を開いてください。','error');return;}
+    if(window.WORKERS?.find?.(r.worker,r.date)){window.UI?.toast?.('同名の登録があります。所属会社・適用期間を確認してください。');return;}
+    window.WORKER_MASTER_UI.addRow({workerName:r.worker,analysisTarget:true});
+    const last=table.querySelector('tr[data-worker-row]:last-child');
+    last?.scrollIntoView?.({block:'center'});
+    last?.querySelector('.wm-code')?.focus();
+    window.UI?.toast?.('作業者名を入力しました。コード・所属会社・有効期間を確認して保存してください。');
   }
 
   function closeDetail(){
@@ -908,5 +925,5 @@
     setView(viewMode);
   }
 
-  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,closeDetail,exportExcel,printView};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,closeDetail,registerRouteWorker,exportExcel,printView};
 })();
