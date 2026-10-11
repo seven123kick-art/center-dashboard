@@ -927,6 +927,7 @@
       if(!diag.sourceStatus.productCsv) missing.push('荷主別CSV');
       if(!diag.sourceStatus.headPayment) missing.push('配達ヘッド傭車料（ROUTE_PAYMENT）');
       const notices=[];
+      const allocationAudits=diag.allocationAudit||[];
       if(ledger.source==='CANONICAL') notices.push('<div class="msg msg-info">データ経路：Canonical（確認済みCURRENT SOURCEから再構築）</div>');
       else if(ledger.source==='LEGACY_FALLBACK') notices.push(`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${esc(ledger.fallbackReason||'正規化SOURCE未登録')}</div>`);
       if(missing.length) notices.push(`<div class="msg msg-warn">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`);
