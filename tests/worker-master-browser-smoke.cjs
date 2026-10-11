@@ -11,26 +11,59 @@ const { chromium } = require('playwright');
   if(!await page.locator('#view-worker-master.active').count())throw Error('Worker master view did not activate');
   if(!await page.locator('#worker-master-table tr[data-worker-row]').count())throw Error('Worker master rows not rendered');
   console.log('PASS: navigation to worker master and rows rendered');
-  // Exercise route -> worker master -> save -> route return with isolated browser storage.
-  await page.evaluate(() => {
-    const ui=window.ROUTE_ANALYSIS_UI;
-    window.__smoke_originalWorkerSave=window.WORKERS.save;
-    window.WORKERS.save=()=>{}; // Never write master data in this smoke test.
-    window.__smoke_originalNavGo=window.NAV.go;
-    window.NAV.go=(name)=>{window.__smoke_returnDestination=name;};
-    window.__smoke_originalDataNavGo=window.DATA_MANAGEMENT_NAV.go;
-    window.DATA_MANAGEMENT_NAV.go=(name)=>{window.__smoke_workerDestination=name;window.WORKER_MASTER_UI.render();};
-    const routeSource=ui.registerRouteWorker.toString();
-    if(!routeSource.includes('pendingWorkerReturn'))throw Error('Route registration callback missing');
-  });
-  // The return state is only set by selecting an actual route; do not simulate success here.
+  // Use an isolated fake route ledger and in-memory worker save.
   await page.evaluate(()=>{
-    window.WORKERS.save=window.__smoke_originalWorkerSave;
-    window.NAV.go=window.__smoke_originalNavGo;
-    window.DATA_MANAGEMENT_NAV.go=window.__smoke_originalDataNavGo;
+    window.__smokeOriginal={
+      canonical:window.CANONICAL_ROUTE_LEDGER,
+      save:window.WORKERS.save,
+      all:window.WORKERS.all,
+      dataGo:window.DATA_MANAGEMENT_NAV.go,
+      navGo:window.NAV.go
+    };
+    window.__smokeWorkers=[];
+    window.WORKERS.all=()=>window.__smokeWorkers;
+    window.WORKERS.save=(rows)=>{window.__smokeWorkers=rows;};
+    window.CANONICAL_ROUTE_LEDGER={
+      availableMonths:async()=>['202606'],
+      buildMonth:async()=>({routes:[{
+        routeId:'SMOKE-ROUTE',date:'2026-06-01',headNumber:'SMOKE-HEAD',
+        worker:'SMOKE WORKER',workerRegistered:false,companyName:'',
+        operationType:'',count:1,sales:0,payment:0,slipRows:[],linkLevel:'未照合'
+      }]})
+    };
+    window.DATA_MANAGEMENT_NAV.go=(name)=>{
+      window.__smokeWorkerDestination=name;
+      window.WORKER_MASTER_UI.render();
+    };
+    window.NAV.go=(name)=>{window.__smokeReturnDestination=name;};
   });
-  console.log('PASS: route-worker callback available; no persistent data modified');
-
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.waitForFunction(()=>document.querySelector('#route-ym-select')?.value==='202606');
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.registerRouteWorker('SMOKE-ROUTE'));
+  if(await page.locator('#worker-master-table tr[data-worker-row] .wm-name').last().inputValue()!=='SMOKE WORKER')
+    throw Error('Route worker name was not prefilled');
+  await page.locator('#worker-master-table tr[data-worker-row]').last().locator('.wm-code').fill('SMOKE001');
+  await page.evaluate(()=>window.WORKER_MASTER_UI.save());
+  if(!await page.getByText('配送分析に戻って再照合').count())
+    throw Error('Return to route analysis action missing after save');
+  await page.getByText('配送分析に戻って再照合').click();
+  const result=await page.evaluate(()=>({
+    destination:window.__smokeReturnDestination,
+    month:window.STATE.selYM,
+    pending:window.ROUTE_ANALYSIS_UI.hasPendingWorkerReturn(),
+    saved:window.__smokeWorkers.some(x=>x.workerName==='SMOKE WORKER')
+  }));
+  if(result.destination!=='route-analysis'||result.month!=='202606'||result.pending||!result.saved)
+    throw Error('Route return flow failed: '+JSON.stringify(result));
+  console.log('PASS: route -> prefilled worker -> in-memory save -> return to selected month');
+  await page.evaluate(()=>{
+    const o=window.__smokeOriginal;
+    window.CANONICAL_ROUTE_LEDGER=o.canonical;
+    window.WORKERS.save=o.save;
+    window.WORKERS.all=o.all;
+    window.DATA_MANAGEMENT_NAV.go=o.dataGo;
+    window.NAV.go=o.navGo;
+  });
   if(errors.length)console.log('Non-blocking page errors:',errors.slice(0,5));
   await browser.close();
 })().catch(e=>{console.error(e);process.exit(1);});
