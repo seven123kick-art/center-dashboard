@@ -192,7 +192,7 @@
     rows.forEach(row=>{
       if(!clean(row.worker)||centerWorkerNames.has(clean(row.worker)))return;
       for(const id of row.slipIds||[]){
-        const key=row.date+'|'+id;
+        const key=JSON.stringify([row.date,id]);
         if(!fieldRoutesByDateSlip.has(key))fieldRoutesByDateSlip.set(key,[]);
         fieldRoutesByDateSlip.get(key).push(row);
       }
