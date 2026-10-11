@@ -40,6 +40,9 @@ const { chromium } = require('playwright');
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
   await page.waitForFunction(()=>document.querySelector('#route-ym-select')?.value==='202606');
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-ROUTE'));
+  const unconfirmedKpis=await page.locator('#route-detail-modal .route-detail-kpis').innerText();
+  if(!unconfirmedKpis.includes('― / ―'))
+    throw Error('Unconfirmed route must not display calculated profit');
   const beforeMoney=await page.locator('#route-detail-modal').innerText();
   const beforeKpis=await page.locator('#route-detail-modal .route-detail-kpis').innerText();
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.closeDetail());
@@ -110,6 +113,23 @@ const { chromium } = require('playwright');
   if(!boundaryDiagnostic.includes('作業者マスタ：登録済み'))
     throw Error('Worker registration boundaries should be inclusive');
   console.log('PASS: worker validity boundary dates inclusive');
+  // Confirmed profitability is shown only when the source explicitly marks it confirmed.
+  await page.evaluate(()=>{
+    window.CANONICAL_ROUTE_LEDGER.buildMonth=async()=>({routes:[{
+      routeId:'SMOKE-CONFIRMED',date:'2026-06-01',headNumber:'SMOKE-CONFIRMED-HEAD',
+      worker:'SMOKE WORKER',workerRegistered:false,companyName:'',
+      operationType:'',count:1,sales:12500,payment:7400,margin:5100,
+      profitabilityConfirmed:true,paymentStatus:'KNOWN',slipRows:[],linkLevel:'未照合'
+    }]});
+  });
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
+  await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.openDetail('SMOKE-CONFIRMED'));
+  const confirmedDiagnostic=await page.locator('#route-detail-modal').innerText();
+  if(!confirmedDiagnostic.includes('5,100円')||!confirmedDiagnostic.includes('40.8%')||
+     !confirmedDiagnostic.includes('売上・利益：連動確定'))
+    throw Error('Explicitly confirmed profit must remain visible with correct margin rate');
+  console.log('PASS: confirmed profit and margin rate displayed only when confirmed');
+
 
 
 
