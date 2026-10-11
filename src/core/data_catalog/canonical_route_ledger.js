@@ -209,7 +209,7 @@
         slipAudit.push({slipNo:no,shipperCode:shipperCodesBySlipNo.get(id)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))]});
       }
       if(assigned.length||unassigned.length){
-        row.allocationAudit={status:'REVIEW_REQUIRED',slipAudit,assignedSlipNos:assigned,unassignedSlipNos:unassigned,shipperCodes:[...new Set(row.slips.map(no=>shipperCodesBySlipNo.get(no)).filter(Boolean))],unknownShipperCount:row.slips.filter(no=>!shipperCodesBySlipNo.get(no)).length};
+        row.allocationAudit={status:'REVIEW_REQUIRED',slipAudit,assignedSlipNos:assigned,unassignedSlipNos:unassigned,shipperCodes:[...new Set(row.slipIds.map(id=>shipperCodesBySlipNo.get(id)).filter(Boolean))],unknownShipperCount:row.slips.filter(no=>!shipperCodesBySlipNo.get(no)).length};
         allocationAudit.push({date:row.date,headNumber:row.headNumber,worker:row.worker,slipAudit,assignedCount:assigned.length,unassignedCount:unassigned.length,unassignedSlipNos:unassigned,shipperCodes:row.allocationAudit.shipperCodes,unknownShipperCount:row.allocationAudit.unknownShipperCount});
       }
     });
