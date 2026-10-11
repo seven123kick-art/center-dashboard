@@ -6,6 +6,7 @@ on:
       - 'src/core/workers.js'
       - 'src/modules/data_import_hub.js'
       - '.github/workflows/route-analysis-check.yml'
+      - 'tests/worker-master-browser-smoke.cjs'
   workflow_dispatch:
 jobs:
   syntax:
@@ -20,3 +21,18 @@ jobs:
           node --check src/field/route_analysis.js
           node --check src/core/workers.js
           node --check src/modules/data_import_hub.js
+  browser-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Test worker master navigation
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/dashboard-http.log 2>&1 &
+          node tests/worker-master-browser-smoke.cjs
