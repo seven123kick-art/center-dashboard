@@ -713,10 +713,34 @@
   }
   async function refresh(){const host=document.getElementById('data-import-hub-root');if(!host)return;const p=period(document.getElementById('data-import-hub-month')?.value);if(!/^\d{6}$/.test(p)){host.innerHTML='<div class="dih-empty">対象年月を選択してください。</div>';return;}syncLegacy(p);host.innerHTML='<div class="dih-empty">登録状態を確認中…</div>';const rows=[];for(const d of DOCS){try{rows.push([d,await statusFor(d,p)])}catch(e){rows.push([d,{status:'ERROR',text:'確認エラー',detail:e?.message||String(e)}])}}
     const missing=rows.filter(([,s])=>s.status==='MISSING').length,errors=rows.filter(([,s])=>s.status==='ERROR').length;
-    host.innerHTML=contentDiagnosticHtml()+`<div class="dih-summary"><div><span>対象</span><b>${esc(p.slice(0,4))}年${esc(String(+p.slice(4)))}月</b><small>${esc(fyOf(p))}年度</small></div><div><span>主要SOURCE</span><b>${DOCS.length}</b></div><div><span>未登録</span><b>${missing}</b></div><div><span>確認エラー</span><b>${errors}</b></div></div><div class="dih-grid">${rows.map(([d,s])=>`<article class="dih-source"><div class="dih-source-top"><div><small>${esc(d.code)}</small><h3>${esc(d.label)}</h3></div><span class="dih-status is-${esc(s.status.toLowerCase())}">${esc(s.text)}</span></div><div class="dih-meta"><span>単位：${esc(d.scope)}</span><span>${esc(s.detail||'')}</span>${s.revisions!=null?`<span>Revision ${esc(s.revisions)}</span>`:''}</div><div class="dih-actions"><button type="button" class="btn" onclick="DATA_IMPORT_HUB.choose('${esc(d.action)}')">${d.action==='plan'?(s.status==='MISSING'?'コピー＆ペーストで登録':'コピー＆ペーストで差替'):(s.status==='MISSING'?'ファイルを選択':'差替・改訂を取込')}</button>${s.revisions>1?`<button type="button" class="btn dih-history-btn" onclick="DATA_IMPORT_HUB.showHistory('${esc(d.repo||d.id)}')">履歴</button>`:''}</div><div class="dih-history-panel" data-history-type="${esc(d.repo||d.id)}" hidden></div></article>`).join('')}</div><div class="dih-foot">CURRENT・RevisionはNormalized Source Repositoryだけを正本として表示します。旧集計データが残っていてもNormalized CURRENTがない月はSOURCE未登録です。元CSVを投入すると正式SOURCEとして登録します。年度は4月始まり（4月～翌3月）です。SKDL0001は着地予測用の日次SOURCE、SKDL0003は後日確定する月次正本として別管理します。</div>`;
+    host.innerHTML=contentDiagnosticHtml()+`<div class="dih-summary"><div><span>対象</span><b>${esc(p.slice(0,4))}年${esc(String(+p.slice(4)))}月</b><small>${esc(fyOf(p))}年度</small></div><div><span>主要SOURCE</span><b>${DOCS.length}</b></div><div><span>未登録</span><b>${missing}</b></div><div><span>確認エラー</span><b>${errors}</b></div></div><div class="dih-grid">${rows.map(([d,s])=>`<article class="dih-source"><div class="dih-source-top"><div><small>${esc(d.code)}</small><h3>${esc(d.label)}</h3></div><span class="dih-status is-${esc(s.status.toLowerCase())}">${esc(s.text)}</span></div><div class="dih-meta"><span>単位：${esc(d.scope)}</span><span>${esc(s.detail||'')}</span>${s.revisions!=null?`<span>Revision ${esc(s.revisions)}</span>`:''}</div><div class="dih-actions"><button type="button" class="btn" onclick="DATA_IMPORT_HUB.choose('${esc(d.action)}')">${d.action==='plan'?(s.status==='MISSING'?'コピー＆ペーストで登録':'コピー＆ペーストで差替'):(s.status==='MISSING'?'ファイルを選択':'差替・改訂を取込')}</button>${s.revisions>1?`<button type="button" class="btn dih-history-btn" onclick="DATA_IMPORT_HUB.showHistory('${esc(d.repo||d.id)}')">履歴</button>`:''}</div><div class="dih-history-panel" data-history-type="${esc(d.repo||d.id)}" hidden></div></article>`).join('')}</div><div style="margin-top:12px"><button type="button" class="btn" onclick="DATA_IMPORT_HUB.verifyDeliveryCurrent()">DELIVERY_LIST 保存済み件数を確認</button><div id="dih-delivery-verification" role="status" style="margin-top:8px"></div></div><div class="dih-foot">CURRENT・RevisionはNormalized Source Repositoryだけを正本として表示します。旧集計データが残っていてもNormalized CURRENTがない月はSOURCE未登録です。元CSVを投入すると正式SOURCEとして登録します。年度は4月始まり（4月～翌3月）です。SKDL0001は着地予測用の日次SOURCE、SKDL0003は後日確定する月次正本として別管理します。</div>`;
+  }
+  async function verifyDeliveryCurrent(){
+    const p=period(document.getElementById('data-import-hub-month')?.value);
+    const panel=document.getElementById('dih-delivery-verification');
+    if(!panel||!/^\\d{6}$/.test(p))return;
+    panel.textContent='保存済みCURRENTを読み込んでいます…';
+    try{
+      const result=await Repository.NormalizedSource.loadCurrent('DELIVERY_LIST',p);
+      if(!result?.ok||!Array.isArray(result.records))throw new Error('CURRENTの読み込みに失敗しました');
+      const records=result.records;
+      const valid=records.filter(r=>r.delivery_date&&r.head_no);
+      const routes=new Set(valid.map(r=>r.delivery_date+'|'+r.head_no));
+      const slips=valid.filter(r=>r.slip_no);
+      const unique=new Set(slips.map(r=>r.delivery_date+'|'+r.head_no+'|'+r.slip_no));
+      const invalid=records.length-valid.length;
+      const duplicate=slips.length-unique.size;
+      const byDate=new Map();
+      for(const r of valid){const d=r.delivery_date;const x=byDate.get(d)||{routes:new Set(),slips:0};x.routes.add(r.head_no);if(r.slip_no)x.slips++;byDate.set(d,x);}
+      const dates=[...byDate].sort((a,b)=>a[0].localeCompare(b[0]));
+      panel.innerHTML='<strong>保存済みCURRENT照合：'+esc(p.slice(0,4)+'/'+p.slice(4))+'</strong>'+
+        '<div>総レコード '+records.length+'行 / '+routes.size+'便 / 原票 '+slips.length+'件 / 原票キー重複 '+duplicate+'件 / 必須項目欠落 '+invalid+'行</div>'+
+        '<div>'+dates.map(([d,x])=>esc(d)+'：'+x.routes.size+'便・'+x.slips+'件').join(' / ')+'</div>'+
+        '<small>保存済みデータの読み取りのみ。登録・変更は行いません。PDFの期待値との一致は対象日付の内訳で確認してください。</small>';
+    }catch(e){panel.textContent='照合できません：'+(e?.message||String(e));}
   }
   async function showHistory(type){const p=period(document.getElementById('data-import-hub-month')?.value),panel=document.querySelector(`[data-history-type="${CSS.escape(type)}"]`);if(!panel||!/^\d{6}$/.test(p))return;panel.hidden=!panel.hidden;if(panel.hidden)return;if(type==='PLAN_BUDGET'){panel.innerHTML='<div class="dih-history-empty">予算は現在の年度計画を表示しています。</div>';return;}try{const r=await Repository.NormalizedSource.loadManifest(type,p),bs=Array.isArray(r?.manifest?.batches)?r.manifest.batches.slice().reverse():[];panel.innerHTML=bs.length?bs.map(b=>`<div><b>${esc(b.revision_status||'—')}</b><span>${esc(b.record_count??'—')}行</span><span>${esc(b.saved_at||'')}</span></div>`).join(''):'<div class="dih-history-empty">履歴はありません。</div>';}catch(e){panel.innerHTML=`<div class="dih-history-empty">${esc(e?.message||String(e))}</div>`;}}
   function init(){const m=document.getElementById('data-import-hub-month');if(m&&!m.value){const now=new Date(),y=now.getFullYear(),mm=String(now.getMonth()+1).padStart(2,'0');m.value=`${y}-${mm}`;}m?.addEventListener('change',refresh);refresh();window.addEventListener('normalized-source-updated',()=>{if(!initialImportSaving)refresh();});}
   document.addEventListener('DOMContentLoaded',init);
-  window.DATA_IMPORT_HUB=Object.freeze({refresh,choose,showHistory,chooseInitialFiles,analyzeInitialFiles,registerInitialReady,showProgress:showImportProgress,finishProgress:finishImportProgress,updateProgress:updateImportProgress});
+  window.DATA_IMPORT_HUB=Object.freeze({refresh,choose,showHistory,verifyDeliveryCurrent,chooseInitialFiles,analyzeInitialFiles,registerInitialReady,showProgress:showImportProgress,finishProgress:finishImportProgress,updateProgress:updateImportProgress});
 })();
