@@ -733,7 +733,7 @@
     const last=table.querySelector('tr[data-worker-row]:last-child');
     last?.scrollIntoView?.({block:'center'});
     last?.querySelector('.wm-code')?.focus();
-    window.UI?.toast?.('作業者名を入力しました。コード・所属会社・有効期間を確認して保存してください。');
+    window.UI?.toast?.('作業者名を仮入力しました。コード・所属会社・有効期間を確認して保存後、配送分析へ戻ってください。');
   }
 
   function closeDetail(){
