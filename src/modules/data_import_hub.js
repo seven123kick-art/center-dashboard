@@ -335,11 +335,16 @@
       const current=await Repository.NormalizedSource.loadCurrent(repoType,ym);
       if(!current?.ok||!Array.isArray(current.records))throw new Error('既存DELIVERY_LISTを安全に読み込めないため登録を中止しました。');
       const keyOf=rec=>`${rec.delivery_date||''}|${rec.head_no||''}|${rec.slip_no||'__HEAD__'}`;
-      const semantic=rec=>{
-        const obj={...rec};
-        for(const key of ['source_file_id','source_record_id','source_row_index','source_page_number'])delete obj[key];
-        return JSON.stringify(Object.keys(obj).sort().map(k=>[k,obj[k]??null]));
-      };
+      // 同一原票の照合は業務キーで行う。作業者ラベルや出所メタ情報は
+      // 帳票再発行・異なるPDFで変化するため、衝突判定の対象にしない。
+      const semantic=rec=>JSON.stringify([
+        rec.document_type||'DELIVERY_LIST',
+        rec.year_month||'',
+        rec.center_id||'',
+        rec.delivery_date||'',
+        rec.head_no||'',
+        rec.slip_no||null
+      ]);
       const existing=new Map();
       for(const rec of current.records){
         const key=keyOf(rec);
