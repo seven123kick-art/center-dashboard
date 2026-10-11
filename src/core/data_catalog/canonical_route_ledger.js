@@ -191,7 +191,9 @@
       const unassigned=[];
       const slipAudit=[];
       for(const no of row.slips||[]){
-        const others=rows.filter(x=>x.routeId!==row.routeId&&x.date===row.date&&(x.slips||[]).includes(no));
+        const currentIds=row.slipIds||[];
+        const id=currentIds[(row.slips||[]).indexOf(no)];
+        const others=rows.filter(x=>x.routeId!==row.routeId&&x.date===row.date&&id&&(x.slipIds||[]).includes(id));
         if(others.length)assigned.push(no);else unassigned.push(no);
         slipAudit.push({slipNo:no,shipperCode:shipperCodesBySlipNo.get(no)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))]});
       }
