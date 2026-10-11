@@ -9,7 +9,7 @@ const route=(id,date,head)=>({route_id:id,delivery_date:date,head_no:head});
 const attempt=(id,no)=>({route_id:id,slip_id:'S'+no});
 const snapshot={materialization:{current_batches:{DELIVERY_LIST:true}},entities:{
  DELIVERY_ROUTE:[route('center','2026-06-06','H1'),route('driver','2026-06-06','H2'),route('otherday','2026-06-07','H3'),route('unknown','2026-06-06','H4'),route('center2','2026-06-06','H5')],
- ROUTE_WORKER:[{route_id:'center',source_worker_name:'北埼玉センター'},{route_id:'driver',source_worker_name:'作業者A'},{route_id:'otherday',source_worker_name:'作業者B'}],
+ ROUTE_WORKER:[{route_id:'center',source_worker_name:'北埼玉センター'},{route_id:'driver',source_worker_name:'作業者A'},{route_id:'otherday',source_worker_name:'作業者B'},{route_id:'center2',source_worker_name:'北さいたまセンター'}],
  DELIVERY_ATTEMPT:[attempt('center','100'),attempt('center','200'),attempt('driver','100'),attempt('otherday','200'),attempt('unknown','200')],
  BUSINESS_SLIP:[{slip_id:'S100',slip_no:'100',shipper_source_code:'D'},{slip_id:'S200',slip_no:'200',shipper_source_code:'OTHER'}],
  SALES_DETAIL:[],ROUTE_PAYMENT:[]
