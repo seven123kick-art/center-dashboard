@@ -39,6 +39,7 @@ const { chromium } = require('playwright');
   });
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.render());
   await page.waitForFunction(()=>document.querySelector('#route-ym-select')?.value==='202606');
+  const financialBefore=await page.locator('#route-detail-modal').count();
   await page.evaluate(()=>window.ROUTE_ANALYSIS_UI.registerRouteWorker('SMOKE-ROUTE'));
   if(await page.locator('#worker-master-table tr[data-worker-row] .wm-name').last().inputValue()!=='SMOKE WORKER')
     throw Error('Route worker name was not prefilled');
@@ -62,6 +63,8 @@ const { chromium } = require('playwright');
   const diagnostic=await page.locator('#route-detail-modal').innerText();
   if(!diagnostic.includes('作業者マスタ：登録済み') || diagnostic.includes('作業者マスタで登録・確認'))
     throw Error('Worker was not positively confirmed as registered after save');
+  if(!diagnostic.includes('傭車支払') || !diagnostic.includes('売上'))
+    throw Error('Route financial fields disappeared after worker registration');
   if(!diagnostic.includes('売上・利益：未確定・要照合'))
     throw Error('Worker registration must not falsely confirm revenue or profit');
   console.log('PASS: saved worker no longer appears as unregistered in route detail');
