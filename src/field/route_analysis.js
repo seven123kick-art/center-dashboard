@@ -957,5 +957,5 @@
     setView(viewMode);
   }
 
-  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,closeDetail,registerRouteWorker,hasPendingWorkerReturn,returnFromWorkerMaster,exportExcel,printView};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,openDiagnosticRoute,closeDetail,registerRouteWorker,hasPendingWorkerReturn,returnFromWorkerMaster,exportExcel,printView};
 })();
