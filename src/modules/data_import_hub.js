@@ -734,10 +734,28 @@
       const byDate=new Map();
       for(const r of valid){const d=r.delivery_date;const x=byDate.get(d)||{routes:new Set(),slips:0};x.routes.add(r.head_no);if(r.slip_no)x.slips++;byDate.set(d,x);}
       const dates=[...byDate].sort((a,b)=>a[0].localeCompare(b[0]));
+      const dayOne=p.slice(0,4)+'-'+p.slice(4)+'-01';
+      const firstDay=valid.filter(r=>r.delivery_date===dayOne);
+      const firstDayHeads=[...new Set(firstDay.map(r=>r.head_no))].sort();
+      const otherDays=valid.filter(r=>r.delivery_date!==dayOne);
+      const otherHeadGroups=new Map();
+      for(const r of otherDays){
+        const k=r.delivery_date+'|'+r.head_no;
+        if(!otherHeadGroups.has(k))otherHeadGroups.set(k,[]);
+        otherHeadGroups.get(k).push(r);
+      }
+      const singleRoutes=[...otherHeadGroups].filter(([,rows])=>rows.length===1);
+      const previewRows=otherDays.slice(0,35);
       panel.innerHTML='<strong>保存済みCURRENT照合：'+esc(p.slice(0,4)+'/'+p.slice(4))+'</strong>'+
         '<div>総レコード '+records.length+'行 / '+routes.size+'便 / 原票 '+slips.length+'件 / 原票キー重複 '+duplicate+'件 / 必須項目欠落 '+invalid+'行</div>'+
         '<div>'+dates.map(([d,x])=>esc(d)+'：'+x.routes.size+'便・'+x.slips+'件').join(' / ')+'</div>'+
-        '<small>保存済みデータの読み取りのみ。登録・変更は行いません。PDFの期待値との一致は対象日付の内訳で確認してください。</small>';
+        '<div style="margin-top:10px"><strong>月初の内訳</strong>：'+esc(dayOne)+' / '+firstDayHeads.length+'便・'+firstDay.filter(r=>r.slip_no).length+'件 / ヘッド '+esc(firstDayHeads.join(', '))+'</div>'+
+        '<div style="margin-top:10px"><strong>月初以外の点検</strong>：'+otherDays.length+'行 / '+otherHeadGroups.size+'便 / 1便1行 '+singleRoutes.length+'便'+(singleRoutes.length>10?'（偏りあり・元PDFとの照合推奨）':'')+'</div>'+
+        '<details style="margin-top:8px"><summary>月初以外の保存レコードを確認（先頭35行・読み取り専用）</summary>'+
+        '<div style="overflow-x:auto"><table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr><th>配達日</th><th>ヘッド番号</th><th>原票番号</th><th>元ファイル</th></tr></thead><tbody>'+
+        previewRows.map(r=>'<tr><td>'+esc(r.delivery_date)+'</td><td>'+esc(r.head_no)+'</td><td>'+esc(r.slip_no||'—')+'</td><td>'+esc(r.source_file||r.file_name||'—')+'</td></tr>').join('')+
+        '</tbody></table></div></details>'+
+        '<small>保存済みデータの読み取りのみ。登録・変更は行いません。1便1件の偏りは異常の確定ではありません。</small>';
     }catch(e){panel.textContent='照合できません：'+(e?.message||String(e));}
   }
   async function showHistory(type){const p=period(document.getElementById('data-import-hub-month')?.value),panel=document.querySelector(`[data-history-type="${CSS.escape(type)}"]`);if(!panel||!/^\d{6}$/.test(p))return;panel.hidden=!panel.hidden;if(panel.hidden)return;if(type==='PLAN_BUDGET'){panel.innerHTML='<div class="dih-history-empty">予算は現在の年度計画を表示しています。</div>';return;}try{const r=await Repository.NormalizedSource.loadManifest(type,p),bs=Array.isArray(r?.manifest?.batches)?r.manifest.batches.slice().reverse():[];panel.innerHTML=bs.length?bs.map(b=>`<div><b>${esc(b.revision_status||'—')}</b><span>${esc(b.record_count??'—')}行</span><span>${esc(b.saved_at||'')}</span></div>`).join(''):'<div class="dih-history-empty">履歴はありません。</div>';}catch(e){panel.innerHTML=`<div class="dih-history-empty">${esc(e?.message||String(e))}</div>`;}}
