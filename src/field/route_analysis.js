@@ -746,7 +746,8 @@
     window.WORKER_MASTER_UI?.showTab?.('worker');
     const table=document.querySelector('#worker-master-table tbody');
     if(!table){window.UI?.toast?.('マスタ管理画面を開いてください。','error');return;}
-    if(resolveWorkerMaster(r.worker,r.date)){window.UI?.toast?.('同名または表記ゆれの登録があります。既存の作業者コード・所属会社・適用期間を確認してください。');return;}
+    const existingName=window.WORKERS?.all?.().some(w=>norm(w?.workerName)===norm(r.worker));
+    if(existingName){window.UI?.toast?.('同名または表記ゆれの登録があります。新規追加せず、既存の作業者コード・所属会社・適用期間を確認してください。');return;}
     window.WORKER_MASTER_UI.addRow({workerName:r.worker,analysisTarget:true});
     const last=table.querySelector('tr[data-worker-row]:last-child');
     last?.scrollIntoView?.({block:'center'});
