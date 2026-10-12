@@ -187,6 +187,17 @@
         fieldRoutesByDateSlip.get(key).push(row);
       }
     });
+    const fieldRoutesByDateNumber=new Map();
+    rows.forEach(row=>{
+      if(!clean(row.worker)||centerWorkerNames.has(clean(row.worker)))return;
+      for(const id of row.slipIds||[]){
+        const no=slipNoById.get(id);
+        if(!no)continue;
+        const key=JSON.stringify([row.date,no]);
+        if(!fieldRoutesByDateNumber.has(key))fieldRoutesByDateNumber.set(key,[]);
+        fieldRoutesByDateNumber.get(key).push({route:row,slipId:id});
+      }
+    });
     rows.forEach(row=>{
       if(!centerWorkerNames.has(clean(row.worker)))return;
       const assigned=[];
