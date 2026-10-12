@@ -206,6 +206,7 @@
       for(const id of row.slipIds||[]){
         const no=slipNoById.get(id)||'';
         const others=id?(fieldRoutesByDateSlip.get(JSON.stringify([row.date,id]))||[]).filter(x=>x.routeId!==row.routeId):[];
+        const numberMatches=no?(fieldRoutesByDateNumber.get(JSON.stringify([row.date,no]))||[]).filter(x=>x.route.routeId!==row.routeId&&x.slipId!==id):[];
         if(others.length)assigned.push(no);else unassigned.push(no);
         slipAudit.push({slipNo:no,slipId:id,shipperCode:shipperCodesBySlipNo.get(id)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))]});
       }
