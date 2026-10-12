@@ -31,6 +31,7 @@ assert.equal(result.routes.find(x=>x.routeId==='center').sales,null);
 assert.equal(result.routes.find(x=>x.routeId==='center').payment,null);
 assert.equal(audit.slipAudit.find(x=>x.slipNo==='200').allocationStatus,'NOT_FOUND_ON_OTHER_HEAD');
 assert.equal(audit.slipAudit.find(x=>x.slipNo==='200').otherHeadNumbers.length,0);
+assert.equal(audit.slipAudit.find(x=>x.slipNo==='200').numberOnlyHeadNumbers.includes('H7'),true);
 const repeated=JSON.parse(JSON.stringify(snapshot));
 repeated.entities.BUSINESS_SLIP.push({slip_id:'S500',slip_no:'100',shipper_source_code:'ANOTHER'});
 repeated.entities.DELIVERY_ATTEMPT.push({route_id:'center',slip_id:'S500'});
