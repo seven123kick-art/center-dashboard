@@ -17,6 +17,7 @@ const snapshot={materialization:{current_batches:{DELIVERY_LIST:true}},entities:
 const result=win.CANONICAL_ROUTE_LEDGER._internal.build(snapshot,'202606');
 const audit=result.diagnostics.allocationAudit[0];
 assert.equal(audit.assignedCount,1);
+assert.equal(audit.slipAudit.find(x=>x.slipNo==='100').slipId,'S100');
 assert.equal(audit.slipAudit.find(x=>x.slipNo==='100').otherHeadNumbers.length,2);
 assert.equal(audit.unassignedCount,1);
 assert.equal(result.diagnostics.allocationAudit.length,3);
