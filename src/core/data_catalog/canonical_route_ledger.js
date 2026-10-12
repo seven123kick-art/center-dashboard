@@ -202,8 +202,8 @@
       const assigned=[];
       const unassigned=[];
       const slipAudit=[];
-      for(const no of row.slips||[]){
-        const id=centerSlipIdByNo.get(row.routeId)?.get(no);
+      for(const id of row.slipIds||[]){
+        const no=slipNoById.get(id)||'';
         const others=id?(fieldRoutesByDateSlip.get(JSON.stringify([row.date,id]))||[]).filter(x=>x.routeId!==row.routeId):[];
         if(others.length)assigned.push(no);else unassigned.push(no);
         slipAudit.push({slipNo:no,shipperCode:shipperCodesBySlipNo.get(id)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))]});
