@@ -857,6 +857,27 @@
     });
   }
 
+  function exportAllocationAuditCsv(){
+    if(!latestAllocationAudit.length)return;
+    const safe=v=>{
+      let value=String(v??'');
+      if(/^[\\s\\u0000-\\u001f]*[=+@-]/.test(value))value="'"+value;
+      return '"'+value.replace(/"/g,'""')+'"';
+    };
+    const rows=[['配達日','センターヘッド','原票番号','原票ID','荷主コード','判定','ID一致ヘッド','番号のみ一致ヘッド']];
+    latestAllocationAudit.forEach(a=>(a.slipAudit||[]).forEach(x=>rows.push([
+      a.date,a.headNumber,x.slipNo,x.slipId,x.shipperCode,
+      x.allocationStatus==='ASSIGNED_TO_OTHER_HEAD'?'原票ID一致':(x.numberOnlyHeadNumbers||[]).length?'番号のみ一致（要確認）':'割当先未確認',
+      (x.otherHeadNumbers||[]).join(' / '),(x.numberOnlyHeadNumbers||[]).join(' / ')
+    ])));
+    const blob=new Blob(['\\uFEFF'+rows.map(row=>row.map(safe).join(',')).join('\\r\\n')],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');
+    link.href=url;link.download='allocation_audit_'+latestAllocationMonth+'.csv';
+    document.body.appendChild(link);link.click();link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   let latestAllocationAudit=[];
   let latestAllocationMonth='';
   let renderToken=0;
