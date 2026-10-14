@@ -56,4 +56,12 @@ vm.runInNewContext(auditUi,{window:uiWindow,document:mockDocument,URL:mockUrl,Bl
 assert.equal(typeof uiWindow.ROUTE_ANALYSIS_UI.exportAllocationAuditCsv,'function');
 uiWindow.ROUTE_ANALYSIS_UI.exportAllocationAuditCsv();
 assert.equal(exported.length,0);
+const csv=uiWindow.ROUTE_ANALYSIS_UI._internal.buildAllocationAuditCsv(result.diagnostics.allocationAudit);
+assert.ok(csv.startsWith('\uFEFF'));
+assert.ok(csv.includes('"原票番号","原票ID"'));
+assert.ok(csv.includes('"100","S100"'));
+assert.ok(csv.includes('"番号のみ一致（要確認）"'));
+assert.ok(csv.includes('"原票ID一致"'));
+assert.ok(csv.includes('\r\n'));
+
 console.log('Canonical allocation audit passed');
