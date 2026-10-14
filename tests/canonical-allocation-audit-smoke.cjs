@@ -20,6 +20,8 @@ assert.equal(audit.assignedCount,1);
 assert.equal(audit.slipAudit.find(x=>x.slipNo==='100').slipId,'S100');
 assert.equal(audit.slipAudit.find(x=>x.slipNo==='100').otherHeadNumbers.length,2);
 assert.equal(audit.unassignedCount,1);
+assert.equal(audit.numberOnlyCount,1);
+assert.equal(result.diagnostics.allocationAudit.find(x=>x.headNumber==='H8').numberOnlyCount,0);
 assert.equal(result.diagnostics.allocationAudit.length,3);
 assert.equal(result.diagnostics.allocationAudit.find(x=>x.headNumber==='H8').slipAudit[0].shipperCode,'OTHER_SHIPPER');
 assert.equal(result.diagnostics.allocationAudit.find(x=>x.headNumber==='H5').assignedCount,0);
