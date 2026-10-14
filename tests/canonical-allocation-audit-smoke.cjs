@@ -45,4 +45,6 @@ assert.equal(repeatedAudit.unassignedCount,2);
 const auditUi=fs.readFileSync('src/field/route_analysis.js','utf8');
 assert.match(auditUi,/割当監査の日別集計を表示/);
 assert.match(auditUi,/allocationByDate/);
+assert.match(auditUi,/exportAllocationAuditCsv/);
+assert.match(auditUi,/割当監査CSVを出力/);
 console.log('Canonical allocation audit passed');
