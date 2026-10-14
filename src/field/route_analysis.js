@@ -857,8 +857,7 @@
     });
   }
 
-  function exportAllocationAuditCsv(){
-    if(!latestAllocationAudit.length)return;
+  function buildAllocationAuditCsv(audits){
     const safe=v=>{
       let value=String(v??'');
       if(/^[\s\u0000-\u001f]*[=+@-]/.test(value))value="'"+value;
