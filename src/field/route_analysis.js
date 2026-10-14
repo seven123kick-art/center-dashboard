@@ -886,6 +886,8 @@
     }
     const allRows=enrichRouteRows(ledger.routes || []);
     const diag=ledger.diagnostics;
+    latestAllocationAudit=ledger.source==='CANONICAL'?(diag?.allocationAudit||[]):[];
+    latestAllocationMonth=ym;
 
     const companySel=document.getElementById('route-company-select');
     const typeSel=document.getElementById('route-type-select');
