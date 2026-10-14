@@ -1,0 +1,44 @@
+name: Route analysis syntax check
+on:
+  pull_request:
+    paths:
+      - 'src/field/route_analysis.js'
+      - 'src/core/data_catalog/canonical_route_ledger.js'
+      - 'src/core/workers.js'
+      - 'src/modules/data_import_hub.js'
+      - '.github/workflows/route-analysis-check.yml'
+      - 'tests/worker-master-browser-smoke.cjs'
+      - 'tests/canonical-allocation-audit-smoke.cjs'
+  workflow_dispatch:
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          node --check src/field/route_analysis.js
+          node --check src/core/data_catalog/canonical_route_ledger.js
+          node --check src/core/workers.js
+          node --check src/modules/data_import_hub.js
+          node --check tests/worker-master-browser-smoke.cjs
+          node --check tests/canonical-allocation-audit-smoke.cjs
+          node tests/canonical-allocation-audit-smoke.cjs
+  browser-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Test worker master navigation
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/dashboard-http.log 2>&1 &
+          node tests/worker-master-browser-smoke.cjs
