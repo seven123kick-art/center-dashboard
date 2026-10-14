@@ -864,7 +864,7 @@
       return '"'+value.replace(/"/g,'""')+'"';
     };
     const rows=[['配達日','センターヘッド','原票番号','原票ID','荷主コード','判定','ID一致ヘッド','番号のみ一致ヘッド']];
-    latestAllocationAudit.forEach(a=>(a.slipAudit||[]).forEach(x=>rows.push([
+    audits.forEach(a=>(a.slipAudit||[]).forEach(x=>rows.push([
       a.date,a.headNumber,x.slipNo,x.slipId,x.shipperCode,
       x.allocationStatus==='ASSIGNED_TO_OTHER_HEAD'?'原票ID一致':(x.numberOnlyHeadNumbers||[]).length?'番号のみ一致（要確認）':'割当先未確認',
       (x.otherHeadNumbers||[]).join(' / '),(x.numberOnlyHeadNumbers||[]).join(' / ')
