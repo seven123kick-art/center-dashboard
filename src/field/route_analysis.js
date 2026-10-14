@@ -1004,5 +1004,5 @@
     setView(viewMode);
   }
 
-  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,openDiagnosticRoute,closeDetail,registerRouteWorker,hasPendingWorkerReturn,returnFromWorkerMaster,exportExcel,exportAllocationAuditCsv,printView};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,openDiagnosticRoute,closeDetail,registerRouteWorker,hasPendingWorkerReturn,returnFromWorkerMaster,exportExcel,exportAllocationAuditCsv,printView,_internal:{buildAllocationAuditCsv}};
 })();
