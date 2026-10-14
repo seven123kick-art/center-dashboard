@@ -857,6 +857,8 @@
     });
   }
 
+  let latestAllocationAudit=[];
+  let latestAllocationMonth='';
   let renderToken=0;
   async function render(){
     const token=++renderToken;
