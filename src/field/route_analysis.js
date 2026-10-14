@@ -932,7 +932,7 @@
       const allocationUnassigned=allocationAudits.reduce((sum,a)=>sum+(a.unassignedCount||0),0);
       const allocationUnknownShipper=allocationAudits.reduce((sum,a)=>sum+(a.unknownShipperCount||0),0);
       const allocationNumberOnly=allocationAudits.reduce((sum,a)=>sum+(a.numberOnlyCount||0),0);
-      if(allocationAudits.length) notices.push('<div class="msg msg-info">センター台帳の割当監査：'+fmt(allocationAudits.length)+'ヘッド / 現場割当候補 '+fmt(allocationAssigned)+'件 / 割当先未確認 '+fmt(allocationUnassigned)+'件 / 荷主未取得 '+fmt(allocationUnknownShipper)+'件（集計未変更）</div>');
+      if(allocationAudits.length) notices.push('<div class="msg msg-info">センター台帳の割当監査：'+fmt(allocationAudits.length)+'ヘッド / 現場割当候補 '+fmt(allocationAssigned)+'件 / ID不一致・番号一致 '+fmt(allocationNumberOnly)+'件 / ID一致なし '+fmt(allocationUnassigned)+'件 / 荷主未取得 '+fmt(allocationUnknownShipper)+'件（集計未変更）</div>');
       if(allocationAudits.length) notices.push('<details class="msg msg-info"><summary>割当監査の原票明細を表示</summary>'+allocationAudits.map(a=>esc(a.date)+' / '+esc(a.headNumber)+'：'+(a.slipAudit||[]).map(x=>esc(x.slipNo)+'［ID '+esc(x.slipId||'不明')+' / '+esc(x.shipperCode||'荷主未取得')+'］'+(x.allocationStatus==='ASSIGNED_TO_OTHER_HEAD'?'→ 割当候補ヘッド '+(x.otherHeadNumbers||[]).map(esc).join(','):((x.numberOnlyHeadNumbers||[]).length?'→ 番号一致・ID相違（要確認） '+(x.numberOnlyHeadNumbers||[]).map(esc).join(','):'→ 割当先未確認'))).join('、')).join('<hr>')+'</details>');
       if(ledger.source==='CANONICAL') notices.push('<div class="msg msg-info">データ経路：Canonical（確認済みCURRENT SOURCEから再構築）</div>');
       else if(ledger.source==='LEGACY_FALLBACK') notices.push(`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${esc(ledger.fallbackReason||'正規化SOURCE未登録')}</div>`);
