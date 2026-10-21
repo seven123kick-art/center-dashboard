@@ -210,7 +210,10 @@
         const centerShipper=shipperCodesBySlipNo.get(id)||'';
         const numberOnlyMatches=numberMatches.filter(x=>!centerShipper||!shipperCodesBySlipNo.get(x.slipId)||shipperCodesBySlipNo.get(x.slipId)===centerShipper);
         const differentShipperMatches=numberMatches.filter(x=>centerShipper&&shipperCodesBySlipNo.get(x.slipId)&&shipperCodesBySlipNo.get(x.slipId)!==centerShipper);
-        const numberOnlyHeads=others.length?[]:[...new Set(numberOnlyMatches.map(x=>x.route.headNumber))];
+        const confirmedNumberMatches=numberOnlyMatches.filter(x=>centerShipper&&shipperCodesBySlipNo.get(x.slipId)===centerShipper);
+        const unknownShipperMatches=numberOnlyMatches.filter(x=>!centerShipper||!shipperCodesBySlipNo.get(x.slipId));
+        const numberOnlyHeads=others.length?[]:[...new Set(confirmedNumberMatches.map(x=>x.route.headNumber))];
+        const unknownShipperHeads=others.length?[]:[...new Set(unknownShipperMatches.map(x=>x.route.headNumber))];
         if(others.length)assigned.push(no);else unassigned.push(no);
         slipAudit.push({slipNo:no,slipId:id,shipperCode:shipperCodesBySlipNo.get(id)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))],numberOnlyHeadNumbers:numberOnlyHeads,differentShipperHeadNumbers:[...new Set(differentShipperMatches.map(x=>x.route.headNumber))]});
       }
