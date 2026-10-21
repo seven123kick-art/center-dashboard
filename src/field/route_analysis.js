@@ -962,6 +962,7 @@
       const allocationUnknownShipper=allocationAudits.reduce((sum,a)=>sum+(a.unknownShipperCount||0),0);
       const allocationNumberOnly=allocationAudits.reduce((sum,a)=>sum+(a.numberOnlyCount||0),0);
       const allocationDifferentShipper=allocationAudits.reduce((sum,a)=>sum+(a.differentShipperCount||0),0);
+      const allocationUnknownShipperMatches=allocationAudits.reduce((sum,a)=>sum+(a.unknownShipperMatchCount||0),0);
       const allocationByDate=new Map();
       allocationAudits.forEach(a=>{
         const d=String(a.date||'日付不明');
