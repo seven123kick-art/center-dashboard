@@ -62,6 +62,7 @@ assert.ok(csv.startsWith('\uFEFF'));
 assert.ok(csv.includes('"原票番号","原票ID"'));
 assert.ok(csv.includes('"100","S100"'));
 assert.ok(csv.includes('"番号のみ一致（要確認）"'));
+assert.ok(csv.includes('"荷主相違（重複候補外）"'));
 assert.ok(csv.includes('"原票ID一致"'));
 assert.ok(csv.includes('\r\n'));
 
