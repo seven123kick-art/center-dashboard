@@ -867,7 +867,8 @@
     audits.forEach(a=>(a.slipAudit||[]).forEach(x=>rows.push([
       a.date,a.headNumber,x.slipNo,x.slipId,x.shipperCode,
       x.allocationStatus==='ASSIGNED_TO_OTHER_HEAD'?'原票ID一致':(x.numberOnlyHeadNumbers||[]).length?'番号のみ一致（要確認）':(x.differentShipperHeadNumbers||[]).length?'荷主相違（重複候補外）':(x.unknownShipperHeadNumbers||[]).length?'荷主未確認・番号一致（要確認）':'割当先未確認',
-      (x.otherHeadNumbers||[]).join(' / '),(x.numberOnlyHeadNumbers||[]).join(' / ')
+      (x.otherHeadNumbers||[]).join(' / '),(x.numberOnlyHeadNumbers||[]).join(' / '),
+      (x.unknownShipperHeadNumbers||[]).join(' / '),(x.differentShipperHeadNumbers||[]).join(' / ')
     ])));
     return '\uFEFF'+rows.map(row=>row.map(safe).join(',')).join('\r\n');
   }
