@@ -212,7 +212,7 @@
         const differentShipperMatches=numberMatches.filter(x=>centerShipper&&shipperCodesBySlipNo.get(x.slipId)&&shipperCodesBySlipNo.get(x.slipId)!==centerShipper);
         const numberOnlyHeads=others.length?[]:[...new Set(numberOnlyMatches.map(x=>x.route.headNumber))];
         if(others.length)assigned.push(no);else unassigned.push(no);
-        slipAudit.push({slipNo:no,slipId:id,shipperCode:shipperCodesBySlipNo.get(id)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))],numberOnlyHeadNumbers:numberOnlyHeads});
+        slipAudit.push({slipNo:no,slipId:id,shipperCode:shipperCodesBySlipNo.get(id)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))],numberOnlyHeadNumbers:numberOnlyHeads,differentShipperHeadNumbers:[...new Set(differentShipperMatches.map(x=>x.route.headNumber))]});
       }
       if(assigned.length||unassigned.length){
         row.allocationAudit={status:'REVIEW_REQUIRED',slipAudit,assignedSlipNos:assigned,unassignedSlipNos:unassigned,shipperCodes:[...new Set(row.slipIds.map(id=>shipperCodesBySlipNo.get(id)).filter(Boolean))],unknownShipperCount:row.slipIds.filter(id=>!shipperCodesBySlipNo.get(id)).length,numberOnlyCount:slipAudit.filter(x=>x.numberOnlyHeadNumbers.length).length};
