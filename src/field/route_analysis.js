@@ -570,12 +570,14 @@
 
   let viewMode = 'table';
   let currentRows = [];
+  let currentAllRows = [];
 
   function statusClass(status){
     return status === '完全連動' ? 'ok' : 'warn';
   }
 
   function isProfitConfirmed(r){
+    if(r?.paymentStatus !== undefined && !['KNOWN','ZERO_PAYMENT'].includes(r.paymentStatus)) return false;
     return r?.profitabilityConfirmed === true || r?.linkLevel === '完全連動';
   }
 
@@ -636,16 +638,23 @@
   function resolveWorkerMaster(workerName, date=''){
     const name=String(workerName||'');
     if(!name) return null;
+    const day=String(date||'').replace(/\D/g,'').slice(0,8);
+    const validOnDate=r=>{
+      if(!r) return false;
+      if(!day) return true;
+      const from=String(r.validFrom||'').replace(/\D/g,'').slice(0,8);
+      const to=String(r.validTo||'').replace(/\D/g,'').slice(0,8);
+      return (!from||from<=day)&&(!to||day<=to);
+    };
     const direct=window.WORKERS?.find ? WORKERS.find(name,date) : null;
-    if(direct) return direct;
+    if(direct&&validOnDate(direct)) return direct;
     const key=norm(name);
     if(!key || !window.WORKERS?.all) return null;
-    return WORKERS.all().find(r=>norm(r?.workerName)===key) || null;
+    return WORKERS.all().find(r=>norm(r?.workerName)===key&&validOnDate(r)) || null;
   }
 
   function enrichRouteRows(rows){
     return (Array.isArray(rows)?rows:[]).map(r=>{
-      if(r?.companyName && r?.operationType) return r;
       const master=resolveWorkerMaster(r?.worker,r?.date);
       if(!master) return r;
       return {
@@ -677,6 +686,18 @@
     if(cards) cards.style.display=viewMode==='card'?'grid':'none';
   }
 
+  function openDiagnosticRoute(date, headNumber){
+    const matches=currentAllRows.filter(r=>String(r.date||'')===String(date||'')&&String(r.headNumber||'')===String(headNumber||''));
+    if(matches.length===1){openDetail(matches[0].routeId);return;}
+    window.UI?.toast?.(matches.length?'同じ日付・ヘッドの便が複数あります。一覧から対象便を選択してください。':'該当便が現在の一覧にありません。絞り込み条件を解除して確認してください。','error');
+  }
+
+  function diagnosticRouteButton(x, suffix){
+    const date=encodeURIComponent(String(x.date||'')).replace(/'/g,'%27');
+    const head=encodeURIComponent(String(x.headNumber||'')).replace(/'/g,'%27');
+    return `<button type="button" class="btn btn-ghost" style="display:block;text-align:left;white-space:normal;margin:3px 0;padding:5px 8px;height:auto" onclick="ROUTE_ANALYSIS_UI.openDiagnosticRoute(decodeURIComponent('${date}'),decodeURIComponent('${head}'))">${esc(x.date)} / ヘッド ${esc(x.headNumber)} / ${esc(x.status)}${suffix||''}　<span style="text-decoration:underline">便詳細を見る</span></button>`;
+  }
+
   function openDetail(routeId){
     const r=currentRows.find(x=>x.routeId===routeId);
     const root=document.getElementById('route-detail-modal');
@@ -694,8 +715,21 @@
             <div class="route-detail-kpi"><span>配送件数</span><strong>${fmt(r.count)}件</strong></div>
             <div class="route-detail-kpi"><span>売上</span><strong>${salesText(r)}</strong></div>
             <div class="route-detail-kpi"><span>傭車支払</span><strong>${paymentText(r)}</strong></div>
-            <div class="route-detail-kpi"><span>一次利益 / 利益率</span><strong class="${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${isProfitConfirmed(r)?`${fmt(r.margin)}円 / ${rate.toFixed(1)}%`:'― / ―'}</strong></div>
+            <div class="route-detail-kpi"><span>一次利益 / 利益率</span><strong class="${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${isProfitConfirmed(r)?`${fmt(r.margin)}円 / ${rate===null?'―':rate.toFixed(1)+'%'}`:'― / ―'}</strong></div>
           </div>
+          <div class="saas-content-card" style="box-shadow:none;padding:16px;margin-bottom:12px">
+            <strong>連動・登録状況</strong>
+            <div style="font-size:12px;line-height:1.9;margin-top:8px">
+              作業者：${esc(r.worker||'未取得')}<br>
+              作業者マスタ：${r.workerRegistered?'登録済み':'未登録・照合不可'}<br>
+              原票明細：${slips.length?fmt(slips.length)+'件':'紐付く明細なし'}<br>
+              売上・利益：${isProfitConfirmed(r)?'連動確定':'未確定・要照合'}<br>
+              傭車料：${paymentText(r)}<br>
+              判定理由：${esc(r.status||r.linkLevel||'未照合')}
+            </div>
+            ${!r.workerRegistered?'<p style="font-size:12px;margin-top:8px">作業者名がある場合はマスタ管理で同名・所属会社・適用日を確認してください。名前が未取得の場合は元資料を確認してください。</p>':''}
+          </div>
+            ${!r.workerRegistered&&r.worker?'<button class="btn btn-primary" type="button" onclick="ROUTE_ANALYSIS_UI.registerRouteWorker('+esc(JSON.stringify(r.routeId))+')">作業者マスタで登録・確認</button>':''}
           <div class="saas-content-card" style="box-shadow:none">
             <div class="saas-content-head"><div><strong>原票明細</strong><span>${fmt(slips.length)}件</span></div><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span></div>
             <div class="scroll-x"><table class="tbl saas-table"><thead><tr><th>原票番号</th><th>荷主</th><th>商品・カテゴリ</th><th>エリア</th><th class="r">売上</th><th>照合</th></tr></thead><tbody>
@@ -705,6 +739,34 @@
         </div>
       </section>
     </div>`;
+  }
+
+  let pendingWorkerReturn=null;
+  function hasPendingWorkerReturn(){return !!pendingWorkerReturn;}
+  function returnFromWorkerMaster(){
+    if(!pendingWorkerReturn)return;
+    const ym=pendingWorkerReturn.ym;
+    pendingWorkerReturn=null;
+    if(ym){STATE.selYM=ym;const sel=document.getElementById('route-ym-select');if(sel)sel.value=ym;}
+    window.LEDGER?.invalidate?.();
+    window.NAV?.go?.('route-analysis');
+  }
+  function registerRouteWorker(routeId){
+    const r=currentRows.find(x=>x.routeId===routeId);
+    if(!r || !String(r.worker||'').trim()){window.UI?.toast?.('作業者名が未取得です。元資料を確認してください。','error');return;}
+    pendingWorkerReturn={ym:document.getElementById('route-ym-select')?.value||''};
+    closeDetail();
+    window.DATA_MANAGEMENT_NAV?.go?.('worker-master');
+    window.WORKER_MASTER_UI?.showTab?.('worker');
+    const table=document.querySelector('#worker-master-table tbody');
+    if(!table){window.UI?.toast?.('マスタ管理画面を開いてください。','error');return;}
+    const existingName=window.WORKERS?.all?.().some(w=>norm(w?.workerName)===norm(r.worker));
+    if(existingName){window.UI?.toast?.('同名または表記ゆれの登録があります。新規追加せず、既存の作業者コード・所属会社・適用期間を確認してください。');return;}
+    window.WORKER_MASTER_UI.addRow({workerName:r.worker,analysisTarget:true});
+    const last=table.querySelector('tr[data-worker-row]:last-child');
+    last?.scrollIntoView?.({block:'center'});
+    last?.querySelector('.wm-code')?.focus();
+    window.UI?.toast?.('作業者名を仮入力しました。コード・所属会社・有効期間を確認して保存後、配送分析へ戻ってください。');
   }
 
   function closeDetail(){
@@ -795,6 +857,34 @@
     });
   }
 
+  function buildAllocationAuditCsv(audits){
+    const safe=v=>{
+      let value=String(v??'');
+      if(/^[\s\u0000-\u001f]*[=+@-]/.test(value))value="'"+value;
+      return '"'+value.replace(/"/g,'""')+'"';
+    };
+    const rows=[['配達日','センターヘッド','原票番号','原票ID','荷主コード','判定','ID一致ヘッド','番号のみ一致ヘッド','荷主未確認ヘッド','荷主相違ヘッド']];
+    audits.forEach(a=>(a.slipAudit||[]).forEach(x=>rows.push([
+      a.date,a.headNumber,x.slipNo,x.slipId,x.shipperCode,
+      x.allocationStatus==='ASSIGNED_TO_OTHER_HEAD'?'原票ID一致':(x.numberOnlyHeadNumbers||[]).length?'番号のみ一致（要確認）':(x.differentShipperHeadNumbers||[]).length?'荷主相違（重複候補外）':(x.unknownShipperHeadNumbers||[]).length?'荷主未確認・番号一致（要確認）':'割当先未確認',
+      (x.otherHeadNumbers||[]).join(' / '),(x.numberOnlyHeadNumbers||[]).join(' / '),
+      (x.unknownShipperHeadNumbers||[]).join(' / '),(x.differentShipperHeadNumbers||[]).join(' / ')
+    ])));
+    return '\uFEFF'+rows.map(row=>row.map(safe).join(',')).join('\r\n');
+  }
+
+  function exportAllocationAuditCsv(){
+    if(!latestAllocationAudit.length)return;
+    const blob=new Blob([buildAllocationAuditCsv(latestAllocationAudit)],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');
+    link.href=url;link.download='allocation_audit_'+latestAllocationMonth+'.csv';
+    document.body.appendChild(link);link.click();link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  let latestAllocationAudit=[];
+  let latestAllocationMonth='';
   let renderToken=0;
   async function render(){
     const token=++renderToken;
@@ -822,6 +912,8 @@
     }
     const allRows=enrichRouteRows(ledger.routes || []);
     const diag=ledger.diagnostics;
+    latestAllocationAudit=ledger.source==='CANONICAL'?(diag?.allocationAudit||[]):[];
+    latestAllocationMonth=ym;
 
     const companySel=document.getElementById('route-company-select');
     const typeSel=document.getElementById('route-type-select');
@@ -835,10 +927,12 @@
     const type=typeSel?.value||'';
     const q=String(document.getElementById('route-search')?.value||'').trim().toLowerCase();
     const rows=allRows.filter(r=>(!company||r.companyName===company)&&(!type||r.operationType===type)&&(!q||`${r.worker} ${r.headNumber} ${r.companyName}`.toLowerCase().includes(q)));
+    currentAllRows=allRows;
     currentRows=rows;
 
     const totalCount=rows.reduce((s,r)=>s+r.count,0);
     const confirmedRows=rows.filter(isProfitConfirmed);
+    const unconfirmedSalesCount=rows.length-confirmedRows.length;
     const totalSales=confirmedRows.reduce((s,r)=>s+(Number(r.sales)||0),0);
     // D4-35: 未確定の傭車料（NO_RECORD/SOURCE_NOT_REGISTERED/UNKNOWN_AMOUNT）を
     // 0円扱いで合算しない。金額が確定している便（KNOWN/ZERO_PAYMENT、または
@@ -851,9 +945,9 @@
     const kpi=document.getElementById('route-kpi');
     if(kpi) kpi.innerHTML=`
       <div class="kpi-card"><div class="kpi-label">対象便数</div><div class="kpi-value">${fmt(rows.length)}<small style="font-size:11px;margin-left:4px">便</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">配送 ${fmt(totalCount)}件</div></div>
-      <div class="kpi-card"><div class="kpi-label">売上</div><div class="kpi-value">${confirmedRows.length?`${fmt(totalSales)}<small style="font-size:11px;margin-left:4px">円</small>`:'未連動'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">完全連動 ${fmt(confirmedRows.length)}便${confirmedRows.length&&confirmedCount?` / 1件平均 ${fmt(totalSales/confirmedCount)}円`:''}</div></div>
-      <div class="kpi-card"><div class="kpi-label">傭車支払</div><div class="kpi-value">${fmt(totalPay)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">金額確定 ${fmt(paymentConfirmedRows.length)}便の支払合計${unconfirmedPaymentCount?`（未確定 ${fmt(unconfirmedPaymentCount)}便を除く）`:''}</div></div>
-      <div class="kpi-card"><div class="kpi-label">一次利益</div><div class="kpi-value ${confirmedRows.length?(confirmedMargin>=0?'profit-positive':'profit-negative'):''}">${confirmedRows.length?`${fmt(confirmedMargin)}<small style="font-size:11px;margin-left:4px">円</small>`:'未確定'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">${confirmedRows.length?`完全連動 ${fmt(confirmedRows.length)}便のみの集計${totalSales?`（利益率 ${(confirmedMargin/totalSales*100).toFixed(1)}%）`:''}`:'売上・傭車料が連動した便が確定後に表示'}</div></div>`;
+      <div class="kpi-card"><div class="kpi-label">連動確定売上（部分集計）</div><div class="kpi-value">${confirmedRows.length?`${fmt(totalSales)}<small style="font-size:11px;margin-left:4px">円</small>`:'未連動'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">完全連動 ${fmt(confirmedRows.length)}便${unconfirmedSalesCount?` / 未確定 ${fmt(unconfirmedSalesCount)}便は含まない`:''}${confirmedRows.length&&confirmedCount?` / 1件平均 ${fmt(totalSales/confirmedCount)}円`:''}</div></div>
+      <div class="kpi-card"><div class="kpi-label">金額確認済み傭車支払（部分集計）</div><div class="kpi-value">${fmt(totalPay)}<small style="font-size:11px;margin-left:4px">円</small></div><div style="font-size:10px;color:var(--text3);margin-top:7px">金額確定 ${fmt(paymentConfirmedRows.length)}便の支払合計${unconfirmedPaymentCount?`（未確定 ${fmt(unconfirmedPaymentCount)}便を除く）`:''}</div></div>
+      <div class="kpi-card"><div class="kpi-label">連動確定便の一次利益（部分集計）</div><div class="kpi-value ${confirmedRows.length?(confirmedMargin>=0?'profit-positive':'profit-negative'):''}">${confirmedRows.length?`${fmt(confirmedMargin)}<small style="font-size:11px;margin-left:4px">円</small>`:'未確定'}</div><div style="font-size:10px;color:var(--text3);margin-top:7px">${confirmedRows.length?`完全連動 ${fmt(confirmedRows.length)}便のみの集計${totalSales?`（利益率 ${(confirmedMargin/totalSales*100).toFixed(1)}%）`:''}`:'売上・傭車料が連動した便が確定後に表示'}</div></div>`;
 
     const diagnostic=document.getElementById('route-diagnostic');
     if(diagnostic && diag){
@@ -863,17 +957,35 @@
       if(!diag.sourceStatus.productCsv) missing.push('荷主別CSV');
       if(!diag.sourceStatus.headPayment) missing.push('配達ヘッド傭車料（ROUTE_PAYMENT）');
       const notices=[];
+      const allocationAudits=diag.allocationAudit||[];
+      const allocationAssigned=allocationAudits.reduce((sum,a)=>sum+(a.assignedCount||0),0);
+      const allocationUnassigned=allocationAudits.reduce((sum,a)=>sum+(a.unassignedCount||0),0);
+      const allocationUnknownShipper=allocationAudits.reduce((sum,a)=>sum+(a.unknownShipperCount||0),0);
+      const allocationNumberOnly=allocationAudits.reduce((sum,a)=>sum+(a.numberOnlyCount||0),0);
+      const allocationDifferentShipper=allocationAudits.reduce((sum,a)=>sum+(a.differentShipperCount||0),0);
+      const allocationUnknownShipperMatches=allocationAudits.reduce((sum,a)=>sum+(a.unknownShipperMatchCount||0),0);
+      const allocationByDate=new Map();
+      allocationAudits.forEach(a=>{
+        const d=String(a.date||'日付不明');
+        if(!allocationByDate.has(d))allocationByDate.set(d,{heads:0,assigned:0,numberOnly:0,unmatched:0});
+        const x=allocationByDate.get(d);
+        x.heads++;x.assigned+=a.assignedCount||0;x.numberOnly+=a.numberOnlyCount||0;x.unmatched+=a.unassignedCount||0;
+      });
+      if(allocationAudits.length) notices.push('<div class="msg msg-info">センター台帳の割当監査：'+fmt(allocationAudits.length)+'ヘッド / 現場割当候補 '+fmt(allocationAssigned)+'件 / ID不一致・番号一致 '+fmt(allocationNumberOnly)+'件 / 荷主未確認の番号一致 '+fmt(allocationUnknownShipperMatches)+'件 / 荷主相違 '+fmt(allocationDifferentShipper)+'件 / ID一致なし '+fmt(allocationUnassigned)+'件 / 荷主未取得 '+fmt(allocationUnknownShipper)+'件（集計未変更）</div>');
+      if(allocationAudits.length) notices.push('<div class="msg msg-info"><button type="button" onclick="ROUTE_ANALYSIS_UI.exportAllocationAuditCsv()">割当監査CSVを出力</button>（原票番号・ID・荷主・候補ヘッド）</div>');
+      if(allocationAudits.length) notices.push('<details class="msg msg-info"><summary>割当監査の日別集計を表示</summary>'+[...allocationByDate].sort((a,b)=>a[0].localeCompare(b[0])).map(([d,x])=>esc(d)+'：'+fmt(x.heads)+'ヘッド / ID一致 '+fmt(x.assigned)+'件 / 番号のみ一致 '+fmt(x.numberOnly)+'件 / ID一致なし '+fmt(x.unmatched)+'件').join('<hr>')+'</details>');
+      if(allocationAudits.length) notices.push('<details class="msg msg-info"><summary>割当監査の原票明細を表示</summary>'+allocationAudits.map(a=>esc(a.date)+' / '+esc(a.headNumber)+'：'+(a.slipAudit||[]).map(x=>esc(x.slipNo)+'［ID '+esc(x.slipId||'不明')+' / '+esc(x.shipperCode||'荷主未取得')+'］'+(x.allocationStatus==='ASSIGNED_TO_OTHER_HEAD'?'→ 割当候補ヘッド '+(x.otherHeadNumbers||[]).map(esc).join(','):((x.numberOnlyHeadNumbers||[]).length?'→ 番号一致・ID相違（要確認） '+(x.numberOnlyHeadNumbers||[]).map(esc).join(','):((x.differentShipperHeadNumbers||[]).length?'→ 荷主相違（重複候補外） '+(x.differentShipperHeadNumbers||[]).map(esc).join(','):((x.unknownShipperHeadNumbers||[]).length?'→ 荷主未確認・番号一致（要確認） '+(x.unknownShipperHeadNumbers||[]).map(esc).join(','):'→ 割当先未確認'))))).join('、')).join('<hr>')+'</details>');
       if(ledger.source==='CANONICAL') notices.push('<div class="msg msg-info">データ経路：Canonical（確認済みCURRENT SOURCEから再構築）</div>');
       else if(ledger.source==='LEGACY_FALLBACK') notices.push(`<div class="msg msg-warn">データ経路：旧データ互換表示。Canonicalへ移行できない理由：${esc(ledger.fallbackReason||'正規化SOURCE未登録')}</div>`);
       if(missing.length) notices.push(`<div class="msg msg-warn">不足データ：${missing.map(esc).join('、')}。データ管理から取り込んでください。</div>`);
       else notices.push(`<div class="msg msg-info">完全連動 <strong>${fmt(diag.fullyLinkedRoutes||0)}便</strong>　配達ヘッド ${fmt(diag.headLinkedRoutes||0)}便　未一致原票 ${fmt(diag.unmatchedRouteSlipCount)}件　傭車費未一致便 ${fmt(diag.routesWithoutPayment)}便</div>`);
       if((diag.unmatchedSalesDetails||[]).length) {
         const items=diag.unmatchedSalesDetails;
-        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>売上未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>`${esc(x.date)} / ヘッド ${esc(x.headNumber)} / ${esc(x.status)} / 原票 ${(x.slipNos||[]).map(esc).join('、')||'取得なし'}`).join('<br>')}</div></details>`);
+        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>売上未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>diagnosticRouteButton(x,` / 原票 ${(x.slipNos||[]).map(esc).join('、')||'取得なし'}`)).join('')}</div></details>`);
       }
       if((diag.unmatchedPaymentDetails||[]).length) {
         const items=diag.unmatchedPaymentDetails;
-        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>傭車料未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>`${esc(x.date)} / ヘッド ${esc(x.headNumber)} / ${esc(x.status)}`).join('<br>')}</div></details>`);
+        notices.push(`<details class="msg msg-warn" style="cursor:pointer"><summary>傭車料未一致の便 ${fmt(items.length)}件（クリックで詳細）</summary><div style="margin-top:8px;font-weight:400">${items.map(x=>diagnosticRouteButton(x,'')).join('')}</div></details>`);
       }
       if((diag.unregisteredWorkers||[]).length) {
         const n = diag.unregisteredWorkers.length;
@@ -885,15 +997,15 @@
     const count=document.getElementById('route-result-count');
     if(count) count.textContent=`${fmt(rows.length)}件`;
     const body=document.getElementById('route-tbody');
-    if(body) body.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<tr onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')">
+    if(body) body.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<tr onclick="ROUTE_ANALYSIS_UI.openDetail(decodeURIComponent('${encodeURIComponent(String(r.routeId||'')).replace(/'/g,'%27')}'))">
       <td>${esc(r.date)}</td><td><strong>${esc(r.headNumber)}</strong></td><td>${esc(r.worker||'未取得')}</td><td>${r.workerRegistered?`${esc(r.companyName||'未設定')}<div style="font-size:10px;color:var(--text3);margin-top:2px">${esc(r.operationType||'')}</div>`:'<span class="route-status warn">未登録</span>'}</td>
       <td class="r">${fmt(r.count)}件</td><td class="r">${salesText(r)}</td><td class="r">${paymentText(r)}</td><td class="r"><strong class="${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${marginText(r)}</strong></td><td class="r">${isProfitConfirmed(r)&&rate!==null?rate.toFixed(1)+'%':'—'}</td><td><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span><div style="font-size:10px;color:var(--text3);margin-top:3px">${esc(r.status||'')}</div></td>
     </tr>`}).join(''):`<tr><td colspan="10" style="padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</td></tr>`;
 
     const cards=document.getElementById('route-card-grid');
-    if(cards) cards.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<article class="route-profit-card" onclick="ROUTE_ANALYSIS_UI.openDetail('${esc(r.routeId)}')"><div class="route-card-top"><div><div class="route-card-date">${esc(r.date)}</div><div class="route-card-title">${esc(r.headNumber)}</div><div class="route-card-worker">${esc(r.companyName||'未設定')} / ${esc(r.worker||'未取得')}</div></div><div><div class="route-card-profit-label">一次利益</div><div class="route-card-profit ${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${marginText(r)}</div><div style="text-align:right;margin-top:5px"><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span></div></div></div><div class="route-card-metrics"><div>売上<strong>${salesText(r)}</strong></div><div>傭車支払<strong>${paymentText(r)}</strong></div><div>利益率<strong>${isProfitConfirmed(r)&&rate!==null?rate.toFixed(1)+'%':'—'}</strong></div></div></article>`}).join(''):`<div style="grid-column:1/-1;padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</div>`;
+    if(cards) cards.innerHTML=rows.length?rows.map(r=>{const rate=marginRate(r);return `<article class="route-profit-card" onclick="ROUTE_ANALYSIS_UI.openDetail(decodeURIComponent('${encodeURIComponent(String(r.routeId||'')).replace(/'/g,'%27')}'))"><div class="route-card-top"><div><div class="route-card-date">${esc(r.date)}</div><div class="route-card-title">${esc(r.headNumber)}</div><div class="route-card-worker">${esc(r.companyName||'未設定')} / ${esc(r.worker||'未取得')}</div></div><div><div class="route-card-profit-label">一次利益</div><div class="route-card-profit ${isProfitConfirmed(r)?(r.margin>=0?'profit-positive':'profit-negative'):''}">${marginText(r)}</div><div style="text-align:right;margin-top:5px"><span class="route-status ${statusClass(r.linkLevel)}">${esc(r.linkLevel||'未照合')}</span></div></div></div><div class="route-card-metrics"><div>売上<strong>${salesText(r)}</strong></div><div>傭車支払<strong>${paymentText(r)}</strong></div><div>利益率<strong>${isProfitConfirmed(r)&&rate!==null?rate.toFixed(1)+'%':'—'}</strong></div></div></article>`}).join(''):`<div style="grid-column:1/-1;padding:38px;text-align:center;color:var(--text3)">条件に一致する便がありません。</div>`;
     setView(viewMode);
   }
 
-  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,closeDetail,exportExcel,printView};
+  window.ROUTE_ANALYSIS_UI={render,setup,importFiles,importHeadPaymentFiles,parseDeliveryPdf:parsePdf,joinedRows,setView,openDetail,openDiagnosticRoute,closeDetail,registerRouteWorker,hasPendingWorkerReturn,returnFromWorkerMaster,exportExcel,exportAllocationAuditCsv,printView,_internal:{buildAllocationAuditCsv}};
 })();

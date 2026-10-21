@@ -731,6 +731,8 @@
       const unique=new Set(slips.map(r=>r.delivery_date+'|'+r.head_no+'|'+r.slip_no));
       const invalid=records.length-valid.length;
       const duplicate=slips.length-unique.size;
+      const missingSlip=valid.filter(r=>!r.slip_no).length;
+      const missingSourceFile=records.filter(r=>!r.source_file&&!r.file_name).length;
       const byDate=new Map();
       for(const r of valid){const d=r.delivery_date;const x=byDate.get(d)||{routes:new Set(),slips:0};x.routes.add(r.head_no);if(r.slip_no)x.slips++;byDate.set(d,x);}
       const dates=[...byDate].sort((a,b)=>a[0].localeCompare(b[0]));
@@ -747,7 +749,7 @@
       const singleRoutes=[...otherHeadGroups].filter(([,rows])=>rows.length===1);
       const previewRows=otherDays.slice(0,35);
       panel.innerHTML='<strong>保存済みCURRENT照合：'+esc(p.slice(0,4)+'/'+p.slice(4))+'</strong>'+
-        '<div>総レコード '+records.length+'行 / '+routes.size+'便 / 原票 '+slips.length+'件 / 原票キー重複 '+duplicate+'件 / 必須項目欠落 '+invalid+'行</div>'+
+        '<div>総レコード '+records.length+'行 / '+routes.size+'便 / 原票 '+slips.length+'件 / 原票キー重複 '+duplicate+'件 / 配達日・ヘッド番号欠落 '+invalid+'行 / 原票番号欠落 '+missingSlip+'行 / 元ファイル名欠落 '+missingSourceFile+'行</div>'+
         '<div>'+dates.map(([d,x])=>esc(d)+'：'+x.routes.size+'便・'+x.slips+'件').join(' / ')+'</div>'+
         '<div style="margin-top:10px"><strong>月初の内訳</strong>：'+esc(dayOne)+' / '+firstDayHeads.length+'便・'+firstDay.filter(r=>r.slip_no).length+'件 / ヘッド '+esc(firstDayHeads.join(', '))+'</div>'+
         '<div style="margin-top:10px"><strong>月初以外の点検</strong>：'+otherDays.length+'行 / '+otherHeadGroups.size+'便 / 1便1行 '+singleRoutes.length+'便'+(singleRoutes.length>10?'（偏りあり・元PDFとの照合推奨）':'')+'</div>'+

@@ -140,6 +140,7 @@
         workerRegistered:!!master,
 
         // 配送件数はDELIVERY_LISTに載っている原票件数。売上照合の成否で0件にしない。
+        slipIds:slipIds,
         slips:slipNos,
         slipRows:[],
         count:slipIds.length,
@@ -168,6 +169,60 @@
       };
     });
 
+    // 北埼玉の「でんきち」センター台帳は現場ヘッドへの振分前に登録される。
+    // 原票の同日・別ヘッド重複だけを検出する（他荷主や傭車料には適用しない）。
+    // 荷主コードの確定までは自動除外せず、監査用の分類にとどめる。
+    const shipperCodesBySlipNo=new Map();
+    const ambiguousShipperSlips=new Set();
+    slips.forEach(x=>{const no=clean(x.slip_id),code=clean(x.shipper_source_code),quality=clean(x.quality_status);if(quality==='CONFLICT')ambiguousShipperSlips.add(no);if(!no)return;if(!shipperCodesBySlipNo.has(no)){shipperCodesBySlipNo.set(no,code);return;}const prior=shipperCodesBySlipNo.get(no);if(prior&&code&&prior!==code)ambiguousShipperSlips.add(no);if(!prior&&code)shipperCodesBySlipNo.set(no,code);});
+    ambiguousShipperSlips.forEach(no=>shipperCodesBySlipNo.set(no,''));
+    const allocationAudit=[];
+    const centerWorkerNames=new Set(['北さいたまセンター','北埼玉センター']);
+    const fieldRoutesByDateSlip=new Map();
+    rows.forEach(row=>{
+      if(!clean(row.worker)||centerWorkerNames.has(clean(row.worker)))return;
+      for(const id of row.slipIds||[]){
+        const key=JSON.stringify([row.date,id]);
+        if(!fieldRoutesByDateSlip.has(key))fieldRoutesByDateSlip.set(key,[]);
+        fieldRoutesByDateSlip.get(key).push(row);
+      }
+    });
+    const fieldRoutesByDateNumber=new Map();
+    rows.forEach(row=>{
+      if(!clean(row.worker)||centerWorkerNames.has(clean(row.worker)))return;
+      for(const id of row.slipIds||[]){
+        const no=slipNoById.get(id);
+        if(!no)continue;
+        const key=JSON.stringify([row.date,no]);
+        if(!fieldRoutesByDateNumber.has(key))fieldRoutesByDateNumber.set(key,[]);
+        fieldRoutesByDateNumber.get(key).push({route:row,slipId:id});
+      }
+    });
+    rows.forEach(row=>{
+      if(!centerWorkerNames.has(clean(row.worker)))return;
+      const assigned=[];
+      const unassigned=[];
+      const slipAudit=[];
+      for(const id of row.slipIds||[]){
+        const no=slipNoById.get(id)||'';
+        const others=id?(fieldRoutesByDateSlip.get(JSON.stringify([row.date,id]))||[]).filter(x=>x.routeId!==row.routeId):[];
+        const numberMatches=no?(fieldRoutesByDateNumber.get(JSON.stringify([row.date,no]))||[]).filter(x=>x.route.routeId!==row.routeId&&x.slipId!==id):[];
+        const centerShipper=shipperCodesBySlipNo.get(id)||'';
+        const numberOnlyMatches=numberMatches.filter(x=>!centerShipper||!shipperCodesBySlipNo.get(x.slipId)||shipperCodesBySlipNo.get(x.slipId)===centerShipper);
+        const differentShipperMatches=numberMatches.filter(x=>centerShipper&&shipperCodesBySlipNo.get(x.slipId)&&shipperCodesBySlipNo.get(x.slipId)!==centerShipper);
+        const confirmedNumberMatches=numberOnlyMatches.filter(x=>centerShipper&&shipperCodesBySlipNo.get(x.slipId)===centerShipper);
+        const unknownShipperMatches=numberOnlyMatches.filter(x=>!centerShipper||!shipperCodesBySlipNo.get(x.slipId));
+        const numberOnlyHeads=others.length?[]:[...new Set(confirmedNumberMatches.map(x=>x.route.headNumber))];
+        const unknownShipperHeads=others.length?[]:[...new Set(unknownShipperMatches.map(x=>x.route.headNumber))];
+        if(others.length)assigned.push(no);else unassigned.push(no);
+        slipAudit.push({slipNo:no,slipId:id,shipperCode:shipperCodesBySlipNo.get(id)||'',allocationStatus:others.length?'ASSIGNED_TO_OTHER_HEAD':'NOT_FOUND_ON_OTHER_HEAD',otherHeadNumbers:[...new Set(others.map(x=>x.headNumber))],numberOnlyHeadNumbers:numberOnlyHeads,unknownShipperHeadNumbers:unknownShipperHeads,differentShipperHeadNumbers:[...new Set(differentShipperMatches.map(x=>x.route.headNumber))]});
+      }
+      if(assigned.length||unassigned.length){
+        row.allocationAudit={status:'REVIEW_REQUIRED',slipAudit,assignedSlipNos:assigned,unassignedSlipNos:unassigned,shipperCodes:[...new Set(row.slipIds.map(id=>shipperCodesBySlipNo.get(id)).filter(Boolean))],unknownShipperCount:row.slipIds.filter(id=>!shipperCodesBySlipNo.get(id)).length,numberOnlyCount:slipAudit.filter(x=>x.numberOnlyHeadNumbers.length).length,unknownShipperMatchCount:slipAudit.filter(x=>x.unknownShipperHeadNumbers.length).length,differentShipperCount:slipAudit.filter(x=>x.differentShipperHeadNumbers.length).length};
+        allocationAudit.push({date:row.date,headNumber:row.headNumber,worker:row.worker,slipAudit,assignedCount:assigned.length,unassignedCount:unassigned.length,unassignedSlipNos:unassigned,shipperCodes:row.allocationAudit.shipperCodes,unknownShipperCount:row.allocationAudit.unknownShipperCount,numberOnlyCount:row.allocationAudit.numberOnlyCount,unknownShipperMatchCount:row.allocationAudit.unknownShipperMatchCount,differentShipperCount:row.allocationAudit.differentShipperCount});
+      }
+    });
+
     const sourceStatus={
       routePdf:hasDeliveryList,
       headPayment:hasPaymentBatch,
@@ -188,6 +243,7 @@
       source:'CANONICAL',
       diagnostics:{
         ym:period,
+        allocationAudit,
         sourceStatus,
         routeCount:rows.length,
         routeSlipTotal,
