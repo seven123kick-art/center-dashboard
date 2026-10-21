@@ -174,7 +174,7 @@
     // 荷主コードの確定までは自動除外せず、監査用の分類にとどめる。
     const shipperCodesBySlipNo=new Map();
     const ambiguousShipperSlips=new Set();
-    slips.forEach(x=>{const no=clean(x.slip_id),code=clean(x.shipper_source_code);if(!no)return;if(!shipperCodesBySlipNo.has(no)){shipperCodesBySlipNo.set(no,code);return;}const prior=shipperCodesBySlipNo.get(no);if(prior&&code&&prior!==code)ambiguousShipperSlips.add(no);if(!prior&&code)shipperCodesBySlipNo.set(no,code);});
+    slips.forEach(x=>{const no=clean(x.slip_id),code=clean(x.shipper_source_code),quality=clean(x.quality_status);if(quality==='CONFLICT')ambiguousShipperSlips.add(no);if(!no)return;if(!shipperCodesBySlipNo.has(no)){shipperCodesBySlipNo.set(no,code);return;}const prior=shipperCodesBySlipNo.get(no);if(prior&&code&&prior!==code)ambiguousShipperSlips.add(no);if(!prior&&code)shipperCodesBySlipNo.set(no,code);});
     ambiguousShipperSlips.forEach(no=>shipperCodesBySlipNo.set(no,''));
     const allocationAudit=[];
     const centerWorkerNames=new Set(['北さいたまセンター','北埼玉センター']);
